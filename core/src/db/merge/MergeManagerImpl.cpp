@@ -10,31 +10,42 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
+<<<<<<< HEAD
+#include "db/merge/MergeLayerStrategy.h"
+=======
 #include "db/merge/MergeAdaptiveStrategy.h"
 #include "db/merge/MergeLayeredStrategy.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include "db/merge/MergeSimpleStrategy.h"
-#include "db/merge/MergeStrategy.h"
 #include "db/merge/MergeTask.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+
+#include <map>
+#include <utility>
 
 namespace milvus {
 namespace engine {
 
+<<<<<<< HEAD
+MergeManagerImpl::MergeManagerImpl(const DBOptions& options) : options_(options) {
+=======
 MergeManagerImpl::MergeManagerImpl(const meta::MetaPtr& meta_ptr, const DBOptions& options, MergeStrategyType type)
     : meta_ptr_(meta_ptr), options_(options), strategy_type_(type) {
     UseStrategy(type);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status
-MergeManagerImpl::UseStrategy(MergeStrategyType type) {
+MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strategy) {
     switch (type) {
         case MergeStrategyType::SIMPLE: {
-            strategy_ = std::make_shared<MergeSimpleStrategy>();
+            strategy = std::make_shared<MergeSimpleStrategy>();
             break;
         }
         case MergeStrategyType::LAYERED: {
-            strategy_ = std::make_shared<MergeLayeredStrategy>();
+            strategy = std::make_shared<MergeLayerStrategy>();
             break;
         }
         case MergeStrategyType::ADAPTIVE: {
@@ -42,9 +53,9 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
             break;
         }
         default: {
-            std::string msg = "Unsupported merge strategy type: " + std::to_string((int32_t)type);
+            std::string msg = "Unsupported merge strategy type: " + std::to_string(static_cast<int32_t>(type));
             LOG_ENGINE_ERROR_ << msg;
-            throw Exception(DB_ERROR, msg);
+            return Status(DB_ERROR, msg);
         }
     }
     strategy_type_ = type;
@@ -53,42 +64,65 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
 }
 
 Status
-MergeManagerImpl::MergeFiles(const std::string& collection_id) {
-    if (strategy_ == nullptr) {
-        std::string msg = "No merge strategy specified";
-        LOG_ENGINE_ERROR_ << msg;
-        return Status(DB_ERROR, msg);
-    }
-
-    meta::FilesHolder files_holder;
-    auto status = meta_ptr_->FilesToMerge(collection_id, files_holder);
+MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
+    MergeStrategyPtr strategy;
+    auto status = CreateStrategy(type, strategy);
     if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to get merge files for collection: " << collection_id;
         return status;
     }
 
-    if (files_holder.HoldFiles().size() < 2) {
-        return Status::OK();
+    while (true) {
+        snapshot::ScopedSnapshotT latest_ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
+
+        // collect all segments
+        Partition2SegmentsMap part2seg;
+        auto& segments = latest_ss->GetResources<snapshot::Segment>();
+        for (auto& kv : segments) {
+            snapshot::ID_TYPE segment_id = kv.second->GetID();
+            auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(segment_id);
+            if (segment_commit == nullptr) {
+                continue;  // maybe stale
+            }
+
+            SegmentInfo info(segment_id, segment_commit->GetRowCount(), segment_commit->GetCreatedTime());
+            part2seg[kv.second->GetPartitionId()].emplace_back(info);
+        }
+
+        if (part2seg.empty()) {
+            break;  // nothing to merge
+        }
+
+        // get row count per segment
+        auto collection = latest_ss->GetCollection();
+        int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
+        const json params = collection->GetParams();
+        if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
+            row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
+        }
+
+        // distribute segments to groups by some strategy
+        SegmentGroups segment_groups;
+        auto status = strategy->RegroupSegments(part2seg, row_count_per_segment, segment_groups);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Failed to regroup segments for collection: " << latest_ss->GetName()
+                              << ", continue to merge all files into one";
+            return status;
+        }
+
+        // no segment to merge, exit
+        if (segment_groups.empty()) {
+            break;
+        }
+
+        // do merge
+        for (auto& segments : segment_groups) {
+            MergeTask task(options_, latest_ss, segments);
+            task.Execute();
+        }
     }
 
-    MergeFilesGroups files_groups;
-    status = strategy_->RegroupFiles(files_holder, files_groups);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << "Failed to regroup files for: " << collection_id
-                          << ", continue to merge all files into one";
-
-        MergeTask task(meta_ptr_, options_, files_holder.HoldFiles());
-        return task.Execute();
-    }
-
-    for (auto& group : files_groups) {
-        MergeTask task(meta_ptr_, options_, group);
-        status = task.Execute();
-
-        files_holder.UnmarkFiles(group);
-    }
-
-    return status;
+    return Status::OK();
 }
 
 }  // namespace engine

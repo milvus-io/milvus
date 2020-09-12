@@ -14,29 +14,28 @@
 #include "server/web_impl/dto/Dto.h"
 #include "server/web_impl/dto/StatusDto.hpp"
 
-namespace milvus {
-namespace server {
-namespace web {
+namespace milvus::server::web {
 
 #include OATPP_CODEGEN_BEGIN(DTO)
 
-class PartitionRequestDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(PartitionRequestDto, Object)
+class PartitionRequestDto : public ODTO {
+ DTO_INIT(PartitionRequestDto, DTO)
 
     DTO_FIELD(String, partition_tag);
 };
 
 using PartitionFieldsDto = PartitionRequestDto;
 
-class PartitionListDto : public oatpp::data::mapping::type::Object {
- DTO_INIT(PartitionListDto, Object)
+class PartitionListDto : public ODTO {
+ DTO_INIT(PartitionListDto, DTO)
 
-    DTO_FIELD(List<PartitionFieldsDto::ObjectWrapper>::ObjectWrapper, partitions);
+    DTO_FIELD(List<Object<PartitionFieldsDto>>, partitions);
     DTO_FIELD(Int64, count) = 0L;
 };
 
 #include OATPP_CODEGEN_END(DTO)
 
-} // namespace web
-} // namespace server
-} // namespace milvus
+using PartitionRequestDtoT = oatpp::Object<PartitionRequestDto>;
+using PartitionListDtoT = oatpp::Object<PartitionListDto>;
+
+} // namespace milvus::server::web

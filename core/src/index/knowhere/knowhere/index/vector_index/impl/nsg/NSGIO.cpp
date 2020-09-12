@@ -23,11 +23,11 @@ write_index(NsgIndex* index, MemoryIOWriter& writer) {
     writer(&index->ntotal, sizeof(index->ntotal), 1);
     writer(&index->dimension, sizeof(index->dimension), 1);
     writer(&index->navigation_point, sizeof(index->navigation_point), 1);
-    writer(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
+    // writer(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
     writer(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     for (unsigned i = 0; i < index->ntotal; ++i) {
-        auto neighbor_num = (node_t)index->nsg[i].size();
+        auto neighbor_num = static_cast<node_t>(index->nsg[i].size());
         writer(&neighbor_num, sizeof(node_t), 1);
         writer(index->nsg[i].data(), neighbor_num * sizeof(node_t), 1);
     }
@@ -41,12 +41,16 @@ read_index(MemoryIOReader& reader) {
     reader(&metric, sizeof(int32_t), 1);
     reader(&ntotal, sizeof(size_t), 1);
     reader(&dimension, sizeof(size_t), 1);
+<<<<<<< HEAD
+    auto index = new NsgIndex(dimension, ntotal, static_cast<NsgIndex::Metric_Type>(metric));
+=======
     auto index = new NsgIndex(dimension, ntotal, (impl::NsgIndex::Metric_Type)metric);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     reader(&index->navigation_point, sizeof(index->navigation_point), 1);
 
-    index->ori_data_ = new float[index->ntotal * index->dimension];
+    // index->ori_data_ = new float[index->ntotal * index->dimension];
     index->ids_ = new int64_t[index->ntotal];
-    reader(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
+    // reader(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
     reader(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     index->nsg.reserve(index->ntotal);

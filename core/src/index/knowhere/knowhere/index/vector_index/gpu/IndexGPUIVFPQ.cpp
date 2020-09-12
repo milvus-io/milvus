@@ -27,7 +27,7 @@ namespace knowhere {
 
 void
 GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
@@ -37,7 +37,11 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
             new faiss::gpu::GpuIndexIVFPQ(gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(),
                                           config[IndexParams::m], config[IndexParams::nbits],
                                           GetMetricType(config[Metric::TYPE].get<std::string>()));  // IP not support
+<<<<<<< HEAD
+        device_index->train(rows, reinterpret_cast<const float*>(p_data));
+=======
         device_index->train(rows, (float*)p_data);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         index_.reset(device_index);
         res_ = gpu_res;

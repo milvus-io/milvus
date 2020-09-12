@@ -16,6 +16,10 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuCloner.h>
 #endif
+<<<<<<< HEAD
+#include <faiss/IndexFlat.h>
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
@@ -34,14 +38,29 @@ namespace knowhere {
 
 void
 IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
+<<<<<<< HEAD
+    // std::stringstream index_type;
+    // index_type << "IVF" << config[IndexParams::nlist] << ","
+    //           << "SQ" << config[IndexParams::nbits];
+    // index_ = std::shared_ptr<faiss::Index>(
+    //    faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
+
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFScalarQuantizer(
+        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type));
+
+    index_->train(rows, reinterpret_cast<const float*>(p_data));
+=======
     std::stringstream index_type;
     index_type << "IVF" << config[IndexParams::nlist] << ","
                << "SQ" << config[IndexParams::nbits];
     index_ = std::shared_ptr<faiss::Index>(
         faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
     index_->train(rows, (float*)p_data);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 VecIndexPtr

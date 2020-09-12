@@ -11,93 +11,44 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include <faiss/utils/ConcurrentBitset.h>
-
+#include "db/Types.h"
 #include "query/GeneralQuery.h"
-#include "utils/Json.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
 
-// TODO(linxj): replace with VecIndex::IndexType
-enum class EngineType {
-    INVALID = 0,
-    FAISS_IDMAP = 1,
-    FAISS_IVFFLAT,
-    FAISS_IVFSQ8,
-    NSG_MIX,
-    FAISS_IVFSQ8H,
-    FAISS_PQ,
-    SPTAG_KDT,
-    SPTAG_BKT,
-    FAISS_BIN_IDMAP,
-    FAISS_BIN_IVFFLAT,
-    HNSW,
-    ANNOY,
-    MAX_VALUE = ANNOY,
+using TargetFields = std::set<std::string>;
+
+struct ExecutionEngineContext {
+    query::QueryPtr query_ptr_;
+    QueryResultPtr query_result_;
+    TargetFields target_fields_;  // for build index task, which field should be build
 };
-
-enum class MetricType {
-    L2 = 1,              // Euclidean Distance
-    IP = 2,              // Cosine Similarity
-    HAMMING = 3,         // Hamming Distance
-    JACCARD = 4,         // Jaccard Distance
-    TANIMOTO = 5,        // Tanimoto Distance
-    SUBSTRUCTURE = 6,    // Substructure Distance
-    SUPERSTRUCTURE = 7,  // Superstructure Distance
-    MAX_VALUE = SUPERSTRUCTURE
-};
-
-enum class DataType {
-    INT8 = 1,
-    INT16 = 2,
-    INT32 = 3,
-    INT64 = 4,
-
-    STRING = 20,
-
-    BOOL = 30,
-
-    FLOAT = 40,
-    DOUBLE = 41,
-
-    VECTOR = 100,
-    UNKNOWN = 9999,
-};
+using ExecutionEngineContextPtr = std::shared_ptr<ExecutionEngineContext>;
 
 class ExecutionEngine {
  public:
     virtual Status
-    AddWithIds(int64_t n, const float* xdata, const int64_t* xids) = 0;
+    Load(ExecutionEngineContext& context) = 0;
 
     virtual Status
-    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) = 0;
-
-    virtual size_t
-    Count() const = 0;
-
-    virtual size_t
-    Dimension() const = 0;
-
-    virtual size_t
-    Size() const = 0;
+    CopyToGpu(uint64_t device_id) = 0;
 
     virtual Status
-    Serialize() = 0;
+    Search(ExecutionEngineContext& context) = 0;
 
     virtual Status
-    Load(bool to_cache = true) = 0;
-
-    virtual Status
-    CopyToGpu(uint64_t device_id, bool hybrid) = 0;
-
-    virtual Status
+<<<<<<< HEAD
+    BuildIndex() = 0;
+=======
     CopyToIndexFileToGpu(uint64_t device_id) = 0;
 
     virtual Status
@@ -147,6 +98,7 @@ class ExecutionEngine {
 
     virtual std::string
     GetLocation() const = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;

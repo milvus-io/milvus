@@ -20,16 +20,16 @@ namespace storage {
 class IOWriter {
  public:
     virtual bool
-    open(const std::string& name) = 0;
+    Open(const std::string& name) = 0;
 
     virtual void
-    write(void* ptr, int64_t size) = 0;
+    Write(const void* ptr, int64_t size) = 0;
 
     virtual int64_t
-    length() = 0;
+    Length() = 0;
 
     virtual void
-    close() = 0;
+    Close() = 0;
 };
 
 using IOWriterPtr = std::shared_ptr<IOWriter>;

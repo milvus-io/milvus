@@ -10,12 +10,23 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/SearchJob.h"
-
+#include "scheduler/task/SearchTask.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
 
+<<<<<<< HEAD
+SearchJob::SearchJob(const server::ContextPtr& context, const engine::snapshot::ScopedSnapshotT& snapshot,
+                     engine::DBOptions options, const query::QueryPtr& query_ptr,
+                     const engine::snapshot::IDS_TYPE& segment_ids)
+    : Job(JobType::SEARCH),
+      context_(context),
+      snapshot_(snapshot),
+      options_(options),
+      query_ptr_(query_ptr),
+      segment_ids_(segment_ids) {
+=======
 SearchJob::SearchJob(const std::shared_ptr<server::Context>& context, uint64_t topk, const milvus::json& extra_params,
                      const engine::VectorsData& vectors)
     : Job(JobType::SEARCH), context_(context), topk_(topk), extra_params_(extra_params), vectors_(vectors) {
@@ -45,49 +56,26 @@ SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return index_files_.empty(); });
     LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld all done", "search", 0, id());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 void
-SearchJob::SearchDone(size_t index_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    index_files_.erase(index_id);
-    if (index_files_.empty()) {
-        cv_.notify_all();
+SearchJob::OnCreateTasks(JobTasks& tasks) {
+    for (auto& id : segment_ids_) {
+        auto task = std::make_shared<SearchTask>(context_, snapshot_, options_, query_ptr_, id, nullptr);
+        task->job_ = this;
+        tasks.emplace_back(task);
     }
-
-    LOG_SERVER_DEBUG_ << LogOut("[%s][%ld] SearchJob %ld finish index file: %ld", "search", 0, id(), index_id);
-}
-
-ResultIds&
-SearchJob::GetResultIds() {
-    return result_ids_;
-}
-
-ResultDistances&
-SearchJob::GetResultDistances() {
-    return result_distances_;
-}
-
-Status&
-SearchJob::GetStatus() {
-    return status_;
 }
 
 json
 SearchJob::Dump() const {
     json ret{
-        {"topk", topk_},
-        {"nq", vectors_.vector_count_},
-        {"extra_params", extra_params_.dump()},
+        {"number_of_search_segment", segment_ids_.size()},
     };
     auto base = Job::Dump();
     ret.insert(base.begin(), base.end());
     return ret;
-}
-
-const std::shared_ptr<server::Context>&
-SearchJob::GetContext() const {
-    return context_;
 }
 
 }  // namespace scheduler

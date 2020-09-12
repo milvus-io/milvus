@@ -17,11 +17,12 @@
 #include <string>
 
 namespace milvus {
-namespace server {
 
 class CommonUtil {
  public:
     static bool
+<<<<<<< HEAD
+=======
     GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem);
     static bool
     GetSysCgroupMemLimit(int64_t& limit_in_bytes);
@@ -29,6 +30,7 @@ class CommonUtil {
     GetSystemAvailableThreads(int64_t& thread_count);
 
     static bool
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     IsFileExist(const std::string& path);
     static uint64_t
     GetFileSize(const std::string& path);
@@ -49,6 +51,9 @@ class CommonUtil {
                   const std::string& format = "%d-%d-%d %d:%d:%d");
 
     static void
+    GetCurrentTimeStr(std::string& time_str);
+
+    static void
     ConvertTime(time_t time_integer, tm& time_struct);
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
@@ -57,10 +62,6 @@ class CommonUtil {
     static std::string
     GetCurrentTimeStr();
 #endif
-
-    static void
-    EraseFromCache(const std::string& item_key);
 };
 
-}  // namespace server
 }  // namespace milvus

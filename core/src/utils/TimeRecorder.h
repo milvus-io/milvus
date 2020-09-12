@@ -16,6 +16,7 @@
 #include "utils/Log.h"
 
 namespace milvus {
+
 inline void
 print_timestamp(const std::string& message) {
     std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
@@ -31,9 +32,9 @@ class TimeRecorder {
     using stdclock = std::chrono::high_resolution_clock;
 
  public:
-    explicit TimeRecorder(const std::string& header, int64_t log_level = 1);
-
-    virtual ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
+    // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
+    explicit TimeRecorder(std::string hdr, int64_t log_level = 1);
+    virtual ~TimeRecorder() = default;
 
     double
     RecordSection(const std::string& msg);
@@ -57,8 +58,7 @@ class TimeRecorder {
 
 class TimeRecorderAuto : public TimeRecorder {
  public:
-    explicit TimeRecorderAuto(const std::string& header, int64_t log_level = 1);
-
+    explicit TimeRecorderAuto(std::string hdr, int64_t log_level = 1);
     ~TimeRecorderAuto() override;
 };
 

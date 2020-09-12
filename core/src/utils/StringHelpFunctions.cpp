@@ -11,15 +11,12 @@
 
 #include "utils/StringHelpFunctions.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <algorithm>
 #include <regex>
 #include <string>
 
-#include "utils/ValidationUtil.h"
-
 namespace milvus {
-namespace server {
 
 void
 StringHelpFunctions::TrimStringBlank(std::string& string) {
@@ -45,9 +42,9 @@ StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::s
         return;
     }
 
-    size_t prev = 0, pos = 0;
+    size_t prev = 0;
     while (true) {
-        pos = str.find_first_of(delimeter, prev);
+        size_t pos = str.find_first_of(delimeter, prev);
         if (pos == std::string::npos) {
             result.emplace_back(str.substr(prev));
             break;
@@ -156,11 +153,6 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
 
 Status
 StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
-    auto status = ValidationUtil::ValidateStringIsBool(str);
-    if (!status.ok()) {
-        return status;
-    }
-
     std::string s = str;
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     value = s == "true" || s == "on" || s == "yes" || s == "1";
@@ -168,5 +160,4 @@ StringHelpFunctions::ConvertToBoolean(const std::string& str, bool& value) {
     return Status::OK();
 }
 
-}  // namespace server
 }  // namespace milvus

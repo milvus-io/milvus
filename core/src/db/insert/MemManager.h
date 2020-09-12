@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db/Types.h"
+#include "segment/Segment.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -26,6 +27,15 @@ namespace engine {
 class MemManager {
  public:
     virtual Status
+<<<<<<< HEAD
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) = 0;
+
+    virtual Status
+    DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) = 0;
+
+    virtual Status
+    Flush(int64_t collection_id) = 0;
+=======
     InsertVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, int64_t dim,
                   const float* vectors, uint64_t lsn) = 0;
 
@@ -38,14 +48,18 @@ class MemManager {
                    const float* vectors, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
                    const std::unordered_map<std::string, uint64_t>& attr_size,
                    const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, uint64_t lsn) = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     virtual Status
-    DeleteVector(const std::string& collection_id, IDNumber vector_id, uint64_t lsn) = 0;
+    Flush(std::set<int64_t>& collection_ids) = 0;
 
     virtual Status
-    DeleteVectors(const std::string& collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+    EraseMem(int64_t collection_id) = 0;
 
     virtual Status
+<<<<<<< HEAD
+    EraseMem(int64_t collection_id, int64_t partition_id) = 0;
+=======
     Flush(const std::string& collection_id) = 0;
 
     virtual Status
@@ -57,6 +71,7 @@ class MemManager {
 
     virtual Status
     EraseMemVector(const std::string& collection_id) = 0;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     virtual size_t
     GetCurrentMutableMem() = 0;
@@ -66,7 +81,7 @@ class MemManager {
 
     virtual size_t
     GetCurrentMem() = 0;
-};  // MemManagerAbstract
+};
 
 using MemManagerPtr = std::shared_ptr<MemManager>;
 

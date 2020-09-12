@@ -12,6 +12,7 @@
 #pragma once
 
 #include "ExecutionEngine.h"
+#include "db/snapshot/Snapshots.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -23,16 +24,7 @@ namespace engine {
 class EngineFactory {
  public:
     static ExecutionEnginePtr
-    Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-          const milvus::json& index_params);
-
-    //    static ExecutionEnginePtr
-    //    Build(uint16_t dimension,
-    //          const std::string& location,
-    //          EngineType index_type,
-    //          MetricType metric_type,
-    //          std::unordered_map<std::string, DataType>& attr_type,
-    //          const milvus::json& index_params);
+    Build(const engine::snapshot::ScopedSnapshotT& snapshot, const std::string& dir_root, int64_t segment_id);
 };
 
 }  // namespace engine

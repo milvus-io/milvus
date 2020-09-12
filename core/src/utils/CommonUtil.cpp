@@ -10,40 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/CommonUtil.h"
-#include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
+#include <fiu/fiu-local.h>
 #include <pwd.h>
-#include <string.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
-#include <time.h>
 #include <unistd.h>
+#include <boost/filesystem.hpp>
 #include <iostream>
-#include <thread>
 #include <vector>
 
-#include "boost/filesystem.hpp"
-
-#if defined(__x86_64__)
-#define THREAD_MULTIPLY_CPU 1
-#elif defined(__powerpc64__)
-#define THREAD_MULTIPLY_CPU 4
-#else
-#define THREAD_MULTIPLY_CPU 1
-#endif
-
-#include <fiu-local.h>
-
 namespace milvus {
-namespace server {
 
 namespace fs = boost::filesystem;
 
 bool
+<<<<<<< HEAD
+=======
 CommonUtil::GetSystemMemInfo(int64_t& total_mem, int64_t& free_mem) {
     struct sysinfo info;
     int ret = sysinfo(&info);
@@ -81,6 +65,7 @@ CommonUtil::GetSystemAvailableThreads(int64_t& thread_count) {
 }
 
 bool
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 CommonUtil::IsDirectoryExist(const std::string& path) {
     DIR* dp = nullptr;
     if ((dp = opendir(path.c_str())) == nullptr) {
@@ -129,17 +114,17 @@ namespace {
 void
 RemoveDirectory(const std::string& path) {
     DIR* dir = nullptr;
-    struct dirent* dmsg;
     const int32_t buf_size = 256;
     char file_name[buf_size];
 
     std::string folder_name = path + "/%s";
     if ((dir = opendir(path.c_str())) != nullptr) {
+        struct dirent* dmsg;
         while ((dmsg = readdir(dir)) != nullptr) {
             if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);
                 std::string tmp = file_name;
-                if (tmp.find(".") == std::string::npos) {
+                if (tmp.find('.') == std::string::npos) {
                     RemoveDirectory(file_name);
                 }
                 remove(file_name);
@@ -232,6 +217,26 @@ CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm&
 }
 
 void
+CommonUtil::GetCurrentTimeStr(std::string& time_str) {
+    auto t = std::time(nullptr);
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+
+    time_str = "";
+    time_str += std::to_string(ltm.tm_year + 1900);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mon + 1);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mday);
+    time_str += "_";
+    time_str += std::to_string(ltm.tm_hour);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_min);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_sec);
+}
+
+void
 CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
     localtime_r(&time_integer, &time_struct);
 }
@@ -257,24 +262,4 @@ CommonUtil::GetCurrentTimeStr() {
 }
 #endif
 
-void
-CommonUtil::EraseFromCache(const std::string& item_key) {
-    if (item_key.empty()) {
-        LOG_SERVER_ERROR_ << "Empty key cannot be erased from cache";
-        return;
-    }
-
-    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
-
-#ifdef MILVUS_GPU_VERSION
-    server::Config& config = server::Config::GetInstance();
-    std::vector<int64_t> gpus;
-    config.GetGpuResourceConfigSearchResources(gpus);
-    for (auto& gpu : gpus) {
-        cache::GpuCacheMgr::GetInstance(gpu)->EraseItem(item_key);
-    }
-#endif
-}
-
-}  // namespace server
 }  // namespace milvus

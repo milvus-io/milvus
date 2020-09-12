@@ -22,7 +22,8 @@
 #include "CircleQueue.h"
 #include "event/Event.h"
 #include "interface/interfaces.h"
-#include "task/SearchTask.h"
+#include "scheduler/Definition.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
@@ -93,6 +94,10 @@ struct TaskTableItem : public interface::dumpable {
 
     json
     Dump() const override;
+
+ public:
+    void
+    SetFinished(const TaskPtr& t);
 };
 
 class TaskTable : public interface::dumpable {

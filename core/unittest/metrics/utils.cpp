@@ -14,35 +14,10 @@
 #include <string>
 #include <thread>
 
-#include "db/DBFactory.h"
 #include "metrics/utils.h"
+#include "utils/Log.h"
 
 INITIALIZE_EASYLOGGINGPP
-
-namespace {
-
-class DBTestEnvironment : public ::testing::Environment {
- public:
-    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
-    }
-
-    std::string
-    getURI() const {
-        return uri_;
-    }
-
-    void
-    SetUp() override {
-        getURI();
-    }
-
- private:
-    std::string uri_;
-};
-
-DBTestEnvironment* test_env = nullptr;
-
-}  // namespace
 
 void
 MetricTest::InitLog() {
@@ -52,37 +27,19 @@ MetricTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-milvus::engine::DBOptions
-MetricTest::GetOptions() {
-    auto options = milvus::engine::DBFactory::BuildOption();
-    options.meta_.path_ = "/tmp/milvus_test";
-    options.meta_.backend_uri_ = "sqlite://:@:/";
-    return options;
-}
-
 void
 MetricTest::SetUp() {
     boost::filesystem::remove_all("/tmp/milvus_test");
     InitLog();
-    auto options = GetOptions();
-    db_ = milvus::engine::DBFactory::Build(options);
 }
 
 void
 MetricTest::TearDown() {
-    db_->Stop();
     boost::filesystem::remove_all("/tmp/milvus_test");
 }
 
 int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
-
-    std::string uri;
-    if (argc > 1) {
-        uri = argv[1];
-    }
-    test_env = new DBTestEnvironment(uri);
-    ::testing::AddGlobalTestEnvironment(test_env);
     return RUN_ALL_TESTS();
 }

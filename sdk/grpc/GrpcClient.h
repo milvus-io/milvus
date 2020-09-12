@@ -36,7 +36,7 @@ class GrpcClient {
     virtual ~GrpcClient();
 
     Status
-    CreateCollection(const grpc::CollectionSchema& collection_schema);
+    CreateCollection(const grpc::Mapping& collection_schema);
 
     bool
     HasCollection(const grpc::CollectionName& collection_name, Status& status);
@@ -48,19 +48,23 @@ class GrpcClient {
     CreateIndex(const grpc::IndexParam& index_param);
 
     Status
-    Insert(const grpc::InsertParam& insert_param, grpc::VectorIds& vector_ids);
+    Insert(const grpc::InsertParam& insert_param, grpc::EntityIds& entity_ids);
 
     Status
-    GetEntityByID(const grpc::VectorsIdentity& vectors_identity, ::milvus::grpc::VectorsData& vectors_data);
+    GetEntityByID(const grpc::EntityIdentity& enrtity_identity, ::milvus::grpc::Entities& entities);
 
     Status
-    ListIDInSegment(const grpc::GetVectorIDsParam& param, grpc::VectorIds& vector_ids);
+    ListIDInSegment(const grpc::GetEntityIDsParam& param, grpc::EntityIds& entity_ids);
 
     Status
-    Search(const grpc::SearchParam& search_param, ::milvus::grpc::TopKQueryResult& topk_query_result);
+    Search(const grpc::SearchParam& search_param, ::milvus::grpc::QueryResult& topk_query_result);
 
     Status
+<<<<<<< HEAD
+    GetCollectionInfo(const std::string& collection_name, grpc::Mapping& grpc_schema);
+=======
     GetCollectionInfo(const std::string& collection_name, grpc::CollectionSchema& grpc_schema);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     int64_t
     CountEntities(grpc::CollectionName& collection_name, Status& status);
@@ -84,7 +88,7 @@ class GrpcClient {
     GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);
 
     Status
-    DropIndex(grpc::CollectionName& collection_name);
+    DropIndex(grpc::IndexParam& index_param);
 
     Status
     CreatePartition(const grpc::PartitionParam& partition_param);
@@ -108,14 +112,9 @@ class GrpcClient {
     Disconnect();
 
     /*******************************New Interface**********************************/
-    Status
-    CreateHybridCollection(milvus::grpc::Mapping& mapping);
 
     Status
-    InsertEntities(milvus::grpc::HInsertParam& entities, milvus::grpc::HEntityIDs& ids);
-
-    Status
-    HybridSearch(milvus::grpc::HSearchParam& search_param, milvus::grpc::TopKQueryResult& result);
+    SearchPB(milvus::grpc::SearchParamPB& search_param, milvus::grpc::QueryResult& result);
 
  private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;

@@ -10,9 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/web_impl/utils/Util.h"
+<<<<<<< HEAD
+#include <fiu/fiu-local.h>
+#include "utils/ConfigUtils.h"
+=======
 #include <fiu-local.h>
 
 #include "utils/ValidationUtil.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 namespace milvus {
 namespace server {
@@ -24,7 +29,7 @@ ParseQueryInteger(const OQueryParams& query_params, const std::string& key, int6
     fiu_do_on("WebUtils.ParseQueryInteger.null_query_get", query = "");
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsNumber(value_str).ok()) {
+        if (!ValidateStringIsNumber(value_str).ok()) {
             return Status(ILLEGAL_QUERY_PARAM,
                           "Query param \'offset\' is illegal, only non-negative integer supported");
         }
@@ -56,7 +61,7 @@ ParseQueryBool(const OQueryParams& query_params, const std::string& key, bool& v
     fiu_do_on("WebUtils.ParseQueryBool.null_query_get", query = "");
     if (nullptr != query.get() && query->getSize() > 0) {
         std::string value_str = query->std_str();
-        if (!ValidationUtil::ValidateStringIsBool(value_str).ok()) {
+        if (!ValidateStringIsBool(value_str).ok()) {
             return Status(ILLEGAL_QUERY_PARAM, "Query param \'all_required\' must be a bool");
         }
         value = value_str == "True" || value_str == "true";

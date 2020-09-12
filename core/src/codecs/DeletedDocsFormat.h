@@ -18,23 +18,40 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "segment/DeletedDocs.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
 
 class DeletedDocsFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs) = 0;
+    DeletedDocsFormat() = default;
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) = 0;
+    static std::string
+    FilePostfix();
 
-    virtual void
-    readSize(const storage::FSHandlerPtr& fs_ptr, size_t& size) = 0;
+    Status
+    Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, segment::DeletedDocsPtr& deleted_docs);
+
+    Status
+    Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+          const segment::DeletedDocsPtr& deleted_docs);
+
+    Status
+    ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, size_t& size);
+
+    // No copy and move
+    DeletedDocsFormat(const DeletedDocsFormat&) = delete;
+    DeletedDocsFormat(DeletedDocsFormat&&) = delete;
+
+    DeletedDocsFormat&
+    operator=(const DeletedDocsFormat&) = delete;
+    DeletedDocsFormat&
+    operator=(DeletedDocsFormat&&) = delete;
 };
 
 using DeletedDocsFormatPtr = std::shared_ptr<DeletedDocsFormat>;

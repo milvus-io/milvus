@@ -17,46 +17,57 @@
 
 #pragma once
 
-#include "AttrsFormat.h"
-#include "AttrsIndexFormat.h"
-#include "DeletedDocsFormat.h"
-#include "IdBloomFilterFormat.h"
-#include "IdIndexFormat.h"
-#include "VectorIndexFormat.h"
-#include "VectorsFormat.h"
+#include <set>
+#include <string>
+
+#include "codecs/BlockFormat.h"
+#include "codecs/DeletedDocsFormat.h"
+#include "codecs/IdBloomFilterFormat.h"
+#include "codecs/StructuredIndexFormat.h"
+#include "codecs/VectorCompressFormat.h"
+#include "codecs/VectorIndexFormat.h"
 
 namespace milvus {
 namespace codec {
 
 class Codec {
  public:
-    virtual VectorsFormatPtr
-    GetVectorsFormat() = 0;
+    static Codec&
+    instance();
 
-    virtual AttrsFormatPtr
-    GetAttrsFormat() = 0;
+    BlockFormatPtr
+    GetBlockFormat();
 
-    virtual VectorIndexFormatPtr
-    GetVectorIndexFormat() = 0;
+    VectorIndexFormatPtr
+    GetVectorIndexFormat();
 
-    virtual DeletedDocsFormatPtr
-    GetDeletedDocsFormat() = 0;
+    StructuredIndexFormatPtr
+    GetStructuredIndexFormat();
 
-    virtual IdBloomFilterFormatPtr
-    GetIdBloomFilterFormat() = 0;
+    DeletedDocsFormatPtr
+    GetDeletedDocsFormat();
 
-    // TODO(zhiru)
-    /*
-    virtual AttrsFormat
-    GetAttrsFormat() = 0;
+    IdBloomFilterFormatPtr
+    GetIdBloomFilterFormat();
 
-    virtual AttrsIndexFormat
-    GetAttrsIndexFormat() = 0;
+    VectorCompressFormatPtr
+    GetVectorCompressFormat();
 
-    virtual IdIndexFormat
-    GetIdIndexFormat() = 0;
+    const std::set<std::string>&
+    GetSuffixSet() const;
 
-    */
+ private:
+    Codec();
+
+ private:
+    BlockFormatPtr block_format_ptr_;
+    StructuredIndexFormatPtr structured_index_format_ptr_;
+    VectorIndexFormatPtr vector_index_format_ptr_;
+    DeletedDocsFormatPtr deleted_docs_format_ptr_;
+    IdBloomFilterFormatPtr id_bloom_filter_format_ptr_;
+    VectorCompressFormatPtr vector_compress_format_ptr_;
+
+    std::set<std::string> suffix_set_;
 };
 
 }  // namespace codec

@@ -1,15 +1,21 @@
-import socket 
 import pdb
 import logging
-
+import socket
 import pytest
 from utils import gen_unique_str
-from milvus import Milvus, IndexType, MetricType
+from milvus import Milvus, DataType
 from utils import *
 
+<<<<<<< HEAD
+timeout = 60
+dimension = 128
+delete_timeout = 60
+
+=======
 index_file_size = 10
 timeout = 60
 delete_timeout = 60
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
@@ -17,6 +23,33 @@ def pytest_addoption(parser):
     parser.addoption("--port", action="store", default=19530)
     parser.addoption("--http-port", action="store", default=19121)
     parser.addoption("--handler", action="store", default="GRPC")
+    parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
+    parser.addoption('--dry-run', action='store_true', default=False)
+
+
+def pytest_configure(config):
+    # register an additional marker
+    config.addinivalue_line(
+        "markers", "tag(name): mark test to run only matching the tag"
+    )
+
+
+def pytest_runtest_setup(item):
+    tags = list()
+    for marker in item.iter_markers(name="tag"):
+        for tag in marker.args:
+            tags.append(tag)
+    if tags:
+        cmd_tag = item.config.getoption("--tag")
+        if cmd_tag != "all" and cmd_tag not in tags:
+            pytest.skip("test requires tag in {!r}".format(tags))
+
+
+def pytest_runtestloop(session):
+    if session.config.getoption('--dry-run'):
+        for item in session.items:
+            print(item.nodeid)
+        return True
 
 
 def check_server_connection(request):
@@ -99,6 +132,13 @@ def milvus(request):
 def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
+<<<<<<< HEAD
+    try:
+        default_fields = gen_default_fields()
+        connect.create_collection(collection_name, default_fields)
+    except Exception as e:
+        pytest.exit(str(e))
+=======
     dim = getattr(request.module, "dim", "128")
     param = {'collection_name': collection_name,
              'dimension': dim,
@@ -138,43 +178,46 @@ def ip_collection(request, connect):
     if not status.OK():
         pytest.exit("collection can not be created, exit pytest ...")
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
+<<<<<<< HEAD
+=======
         # connect.drop_collection(collection_name)
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     request.addfinalizer(teardown)
-
+    assert connect.has_collection(collection_name)
     return collection_name
 
 
+# customised id
 @pytest.fixture(scope="function")
-def jac_collection(request, connect):
+def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.JACCARD}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    try:
+        fields = gen_default_fields(auto_id=False)
+        connect.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
+<<<<<<< HEAD
+=======
         # connect.drop_collection(collection_name)
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     request.addfinalizer(teardown)
-
+    assert connect.has_collection(collection_name)
     return collection_name
 
+<<<<<<< HEAD
+=======
 @pytest.fixture(scope="function")
 def ham_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
@@ -200,32 +243,32 @@ def ham_collection(request, connect):
     request.addfinalizer(teardown)
 
     return collection_name
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 @pytest.fixture(scope="function")
-def tanimoto_collection(request, connect):
+def binary_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.TANIMOTO}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    try:
+        fields = gen_binary_default_fields()
+        connect.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
+<<<<<<< HEAD
+=======
         # connect.drop_collection(collection_name)
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name
 
+<<<<<<< HEAD
+=======
 @pytest.fixture(scope="function")
 def substructure_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
@@ -250,28 +293,27 @@ def substructure_collection(request, connect):
 
     request.addfinalizer(teardown)
     return collection_name
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
+# customised id
 @pytest.fixture(scope="function")
-def superstructure_collection(request, connect):
+def binary_id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    dim = getattr(request.module, "dim", "128")
-    param = {'collection_name': collection_name,
-             'dimension': dim,
-             'index_file_size': index_file_size,
-             'metric_type': MetricType.SUPERSTRUCTURE}
-    result = connect.create_collection(param, timeout=timeout)
-    status = result
-    if isinstance(result, tuple):
-        status = result[0]
-    if not status.OK():
-        pytest.exit("collection can not be created, exit pytest ...")
-
+    try:
+        fields = gen_binary_default_fields(auto_id=False)
+        connect.create_collection(collection_name, fields)
+    except Exception as e:
+        pytest.exit(str(e))
     def teardown():
-        status, collection_names = connect.list_collections()
+        collection_names = connect.list_collections()
         for collection_name in collection_names:
             connect.drop_collection(collection_name, timeout=delete_timeout)
+<<<<<<< HEAD
+=======
         # connect.drop_collection(collection_name)
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     request.addfinalizer(teardown)
+    assert connect.has_collection(collection_name)
     return collection_name

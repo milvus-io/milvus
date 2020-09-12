@@ -11,8 +11,9 @@
 
 #include "scheduler/task/SearchTask.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
+#include <src/index/thirdparty/faiss/IndexFlat.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -21,85 +22,32 @@
 #include <utility>
 
 #include "db/Utils.h"
-#include "db/engine/EngineFactory.h"
-#include "metrics/Metrics.h"
+#include "db/engine/ExecutionEngineImpl.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/job/SearchJob.h"
-#include "segment/SegmentReader.h"
-#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "utils/ValidationUtil.h"
 
 namespace milvus {
 namespace scheduler {
 
-static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
-static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
-
-// TODO(wxyu): remove unused code
-// bool
-// NeedParallelReduce(uint64_t nq, uint64_t topk) {
-//    server::ServerConfig &config = server::ServerConfig::GetInstance();
-//    server::ConfigNode &db_config = config.GetConfig(server::CONFIG_DB);
-//    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, false);
-//    if (!need_parallel) {
-//        return false;
-//    }
-//
-//    return nq * topk >= PARALLEL_REDUCE_THRESHOLD;
-//}
-//
-// void
-// ParallelReduce(std::function<void(size_t, size_t)> &reduce_function, size_t max_index) {
-//    size_t reduce_batch = PARALLEL_REDUCE_BATCH;
-//
-//    auto thread_count = std::thread::hardware_concurrency() - 1; //not all core do this work
-//    if (thread_count > 0) {
-//        reduce_batch = max_index / thread_count + 1;
-//    }
-//    LOG_ENGINE_DEBUG_ << "use " << thread_count <<
-//                     " thread parallelly do reduce, each thread process " << reduce_batch << " vectors";
-//
-//    std::vector<std::shared_ptr<std::thread> > thread_array;
-//    size_t from_index = 0;
-//    while (from_index < max_index) {
-//        size_t to_index = from_index + reduce_batch;
-//        if (to_index > max_index) {
-//            to_index = max_index;
-//        }
-//
-//        auto reduce_thread = std::make_shared<std::thread>(reduce_function, from_index, to_index);
-//        thread_array.push_back(reduce_thread);
-//
-//        from_index = to_index;
-//    }
-//
-//    for (auto &thread_ptr : thread_array) {
-//        thread_ptr->join();
-//    }
-//}
-
-void
-CollectFileMetrics(int file_type, size_t file_size) {
-    server::MetricsBase& inst = server::Metrics::GetInstance();
-    switch (file_type) {
-        case SegmentSchema::RAW:
-        case SegmentSchema::TO_INDEX: {
-            inst.RawFileSizeHistogramObserve(file_size);
-            inst.RawFileSizeTotalIncrement(file_size);
-            inst.RawFileSizeGaugeSet(file_size);
-            break;
-        }
-        default: {
-            inst.IndexFileSizeHistogramObserve(file_size);
-            inst.IndexFileSizeTotalIncrement(file_size);
-            inst.IndexFileSizeGaugeSet(file_size);
-            break;
-        }
-    }
+SearchTask::SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
+                       const engine::DBOptions& options, const query::QueryPtr& query_ptr,
+                       engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)),
+      context_(context),
+      snapshot_(snapshot),
+      options_(options),
+      query_ptr_(query_ptr),
+      segment_id_(segment_id) {
+    CreateExecEngine();
 }
 
+<<<<<<< HEAD
+void
+SearchTask::CreateExecEngine() {
+    if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
+        execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
+=======
 XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::SearchTask, std::move(label)), context_(context), file_(file) {
     if (file_) {
@@ -140,32 +88,28 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         //        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
                                              (MetricType)file_->metric_type_, json_params);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 }
 
-void
-XSearchTask::Load(LoadType type, uint8_t device_id) {
-    milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
-
-    TimeRecorder rc(LogOut("[%s][%ld]", "search", 0));
+Status
+SearchTask::OnLoad(LoadType type, uint8_t device_id) {
+    TimeRecorder rc("SearchTask::OnLoad " + std::to_string(segment_id_));
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
 
     try {
-        fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
-            stat = index_engine_->Load();
+            engine::ExecutionEngineContext context;
+            context.query_ptr_ = query_ptr_;
+            stat = execution_engine_->Load(context);
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-            bool hybrid = false;
-            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
-                hybrid = true;
-            }
-            stat = index_engine_->CopyToGpu(device_id, hybrid);
+            stat = execution_engine_->CopyToGpu(device_id);
             type_str = "CPU2GPU" + std::to_string(device_id);
         } else if (type == LoadType::GPU2CPU) {
-            stat = index_engine_->CopyToCpu();
+            // stat = engine_->CopyToCpu();
             type_str = "GPU2CPU";
         } else {
             error_msg = "Wrong load type";
@@ -174,10 +118,9 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     } catch (std::exception& ex) {
         // typical error: out of disk space or permition denied
         error_msg = "Failed to load index file: " + std::string(ex.what());
-        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Encounter execption: %s", "search", 0, error_msg.c_str());
+        LOG_ENGINE_ERROR_ << LogOut("Search task encounter exception: %s", error_msg.c_str());
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
-    fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
 
     if (!stat.ok()) {
         Status s;
@@ -189,30 +132,60 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        if (auto job = job_.lock()) {
-            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
-            search_job->SearchDone(file_->id_);
-            search_job->GetStatus() = s;
-        }
-
-        return;
+        job_->status() = s;
+        return Status::OK();
     }
 
-    size_t file_size = index_engine_->Size();
-
-    std::string info = "Search task load file id:" + std::to_string(file_->id_) + " " + type_str +
-                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
-                       " bytes from location: " + file_->location_ + " totally cost";
+    std::string info = "Search task load segment id: " + std::to_string(segment_id_) + " " + type_str + " totally cost";
     rc.ElapseFromBegin(info);
 
-    CollectFileMetrics(file_->file_type_, file_size);
-
-    // step 2: return search task for later execution
-    index_id_ = file_->id_;
-    index_type_ = file_->file_type_;
-    //    search_contexts_.swap(search_contexts_);
+    return Status::OK();
 }
 
+<<<<<<< HEAD
+Status
+SearchTask::OnExecute() {
+    milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(segment_id_));
+    TimeRecorder rc(LogOut("[%s][%ld] DoSearch file id:%ld", "search", 0, segment_id_));
+
+    if (execution_engine_ == nullptr) {
+        return Status(DB_ERROR, "execution engine is null");
+    }
+
+    //    auto search_job = std::static_pointer_cast<scheduler::SearchJob>(std::shared_ptr<scheduler::Job>(job_));
+    auto search_job = static_cast<scheduler::SearchJob*>(job_);
+    try {
+        /* step 2: search */
+        engine::ExecutionEngineContext context;
+        context.query_ptr_ = query_ptr_;
+        context.query_result_ = std::make_shared<engine::QueryResult>();
+        STATUS_CHECK(execution_engine_->Search(context));
+
+        rc.RecordSection("search done");
+
+        /* step 3: pick up topk result */
+        // TODO(yukun): Remove hardcode here
+        auto vector_param = context.query_ptr_->vectors.begin()->second;
+        auto topk = vector_param->topk;
+        auto segment_ptr = snapshot_->GetSegmentCommitBySegmentId(segment_id_);
+        auto spec_k = segment_ptr->GetRowCount() < topk ? segment_ptr->GetRowCount() : topk;
+        int64_t nq = vector_param->nq;
+        if (spec_k == 0) {
+            LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
+                                          segment_ptr->GetID());
+        } else {
+            //            std::unique_lock<std::mutex> lock(search_job->mutex());
+            if (!search_job->query_result()) {
+                search_job->query_result() = std::make_shared<engine::QueryResult>();
+                search_job->query_result()->row_num_ = nq;
+            }
+            if (vector_param->metric_type == "IP") {
+                ascending_reduce_ = false;
+            }
+            SearchTask::MergeTopkToResultSet(context.query_result_->result_ids_,
+                                             context.query_result_->result_distances_, spec_k, nq, topk,
+                                             ascending_reduce_, search_job->query_result());
+=======
 void
 XSearchTask::Execute() {
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Execute " + std::to_string(index_id_));
@@ -334,33 +307,32 @@ XSearchTask::Execute() {
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
             search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         }
 
-        // step 4: notify to send result to client
-        search_job->SearchDone(index_id_);
+        rc.RecordSection("reduce topk done");
+    } catch (std::exception& ex) {
+        LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     rc.ElapseFromBegin("totally cost");
-
-    // release index in resource
-    index_engine_ = nullptr;
+    return Status::OK();
 }
 
 void
-XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
-                                  size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
-                                  scheduler::ResultDistances& tar_distances) {
+SearchTask::MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances,
+                                 size_t src_k, size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result) {
     if (src_ids.empty()) {
         LOG_ENGINE_DEBUG_ << LogOut("[%s][%d] Search result is empty.", "search", 0);
         return;
     }
 
-    size_t tar_k = tar_ids.size() / nq;
+    size_t tar_k = result->result_ids_.size() / nq;
     size_t buf_k = std::min(topk, src_k + tar_k);
 
-    scheduler::ResultIds buf_ids(nq * buf_k, -1);
-    scheduler::ResultDistances buf_distances(nq * buf_k, 0.0);
-
+    engine::ResultIds buf_ids(nq * buf_k, -1);
+    engine::ResultDistances buf_distances(nq * buf_k, 0.0);
     for (uint64_t i = 0; i < nq; i++) {
         size_t buf_k_j = 0, src_k_j = 0, tar_k_j = 0;
         size_t buf_idx, src_idx, tar_idx;
@@ -374,15 +346,15 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
             tar_idx = tar_k_multi_i + tar_k_j;
             buf_idx = buf_k_multi_i + buf_k_j;
 
-            if ((tar_ids[tar_idx] == -1) ||  // initialized value
-                (ascending && src_distances[src_idx] < tar_distances[tar_idx]) ||
-                (!ascending && src_distances[src_idx] > tar_distances[tar_idx])) {
+            if ((result->result_ids_[tar_idx] == -1) ||  // initialized value
+                (ascending && src_distances[src_idx] < result->result_distances_[tar_idx]) ||
+                (!ascending && src_distances[src_idx] > result->result_distances_[tar_idx])) {
                 buf_ids[buf_idx] = src_ids[src_idx];
                 buf_distances[buf_idx] = src_distances[src_idx];
                 src_k_j++;
             } else {
-                buf_ids[buf_idx] = tar_ids[tar_idx];
-                buf_distances[buf_idx] = tar_distances[tar_idx];
+                buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                buf_distances[buf_idx] = result->result_distances_[tar_idx];
                 tar_k_j++;
             }
             buf_k_j++;
@@ -402,93 +374,83 @@ XSearchTask::MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const sch
                 while (buf_k_j < buf_k && tar_k_j < tar_k) {
                     buf_idx = buf_k_multi_i + buf_k_j;
                     tar_idx = tar_k_multi_i + tar_k_j;
-                    buf_ids[buf_idx] = tar_ids[tar_idx];
-                    buf_distances[buf_idx] = tar_distances[tar_idx];
+                    buf_ids[buf_idx] = result->result_ids_[tar_idx];
+                    buf_distances[buf_idx] = result->result_distances_[tar_idx];
                     tar_k_j++;
                     buf_k_j++;
                 }
             }
         }
     }
-    tar_ids.swap(buf_ids);
-    tar_distances.swap(buf_distances);
+    result->result_ids_.swap(buf_ids);
+    result->result_distances_.swap(buf_distances);
 }
 
-const std::string&
-XSearchTask::GetLocation() const {
-    return file_->location_;
+int64_t
+SearchTask::nq() {
+    if (query_ptr_) {
+        auto vector_query = query_ptr_->vectors.begin();
+        if (vector_query != query_ptr_->vectors.end()) {
+            if (vector_query->second) {
+                auto vector_param = vector_query->second;
+                auto field_visitor = snapshot_->GetField(vector_query->second->field_name);
+                if (field_visitor) {
+                    if (field_visitor->GetParams().contains(engine::PARAM_DIMENSION)) {
+                        int64_t dim = field_visitor->GetParams()[engine::PARAM_DIMENSION];
+                        if (!vector_param->query_vector.float_data.empty()) {
+                            return vector_param->query_vector.float_data.size() / dim;
+                        } else if (!vector_param->query_vector.binary_data.empty()) {
+                            return vector_param->query_vector.binary_data.size() * 8 / dim;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0;
 }
 
-size_t
-XSearchTask::GetIndexId() const {
-    return file_->id_;
+milvus::json
+SearchTask::ExtraParam() {
+    milvus::json param;
+    if (query_ptr_) {
+        auto vector_query = query_ptr_->vectors.begin();
+        if (vector_query != query_ptr_->vectors.end()) {
+            if (vector_query->second) {
+                return vector_query->second->extra_params;
+            }
+        }
+    }
+    return param;
 }
 
-// void
-// XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& tar_distance, uint64_t& tar_input_k,
-//                            const std::vector<int64_t>& src_ids, const std::vector<float>& src_distance,
-//                            uint64_t src_input_k, uint64_t nq, uint64_t topk, bool ascending) {
-//    if (src_ids.empty() || src_distance.empty()) {
-//        return;
-//    }
-//
-//    uint64_t output_k = std::min(topk, tar_input_k + src_input_k);
-//    std::vector<int64_t> id_buf(nq * output_k, -1);
-//    std::vector<float> dist_buf(nq * output_k, 0.0);
-//
-//    uint64_t buf_k, src_k, tar_k;
-//    uint64_t src_idx, tar_idx, buf_idx;
-//    uint64_t src_input_k_multi_i, tar_input_k_multi_i, buf_k_multi_i;
-//
-//    for (uint64_t i = 0; i < nq; i++) {
-//        src_input_k_multi_i = src_input_k * i;
-//        tar_input_k_multi_i = tar_input_k * i;
-//        buf_k_multi_i = output_k * i;
-//        buf_k = src_k = tar_k = 0;
-//        while (buf_k < output_k && src_k < src_input_k && tar_k < tar_input_k) {
-//            src_idx = src_input_k_multi_i + src_k;
-//            tar_idx = tar_input_k_multi_i + tar_k;
-//            buf_idx = buf_k_multi_i + buf_k;
-//            if ((ascending && src_distance[src_idx] < tar_distance[tar_idx]) ||
-//                (!ascending && src_distance[src_idx] > tar_distance[tar_idx])) {
-//                id_buf[buf_idx] = src_ids[src_idx];
-//                dist_buf[buf_idx] = src_distance[src_idx];
-//                src_k++;
-//            } else {
-//                id_buf[buf_idx] = tar_ids[tar_idx];
-//                dist_buf[buf_idx] = tar_distance[tar_idx];
-//                tar_k++;
-//            }
-//            buf_k++;
-//        }
-//
-//        if (buf_k < output_k) {
-//            if (src_k < src_input_k) {
-//                while (buf_k < output_k && src_k < src_input_k) {
-//                    src_idx = src_input_k_multi_i + src_k;
-//                    buf_idx = buf_k_multi_i + buf_k;
-//                    id_buf[buf_idx] = src_ids[src_idx];
-//                    dist_buf[buf_idx] = src_distance[src_idx];
-//                    src_k++;
-//                    buf_k++;
-//                }
-//            } else {
-//                while (buf_k < output_k && tar_k < tar_input_k) {
-//                    tar_idx = tar_input_k_multi_i + tar_k;
-//                    buf_idx = buf_k_multi_i + buf_k;
-//                    id_buf[buf_idx] = tar_ids[tar_idx];
-//                    dist_buf[buf_idx] = tar_distance[tar_idx];
-//                    tar_k++;
-//                    buf_k++;
-//                }
-//            }
-//        }
-//    }
-//
-//    tar_ids.swap(id_buf);
-//    tar_distance.swap(dist_buf);
-//    tar_input_k = output_k;
-//}
+std::string
+SearchTask::IndexType() {
+    if (!index_type_.empty()) {
+        return index_type_;
+    }
+    auto seg_visitor = engine::SegmentVisitor::Build(snapshot_, segment_id_);
+    index_type_ = "FLAT";
+
+    if (seg_visitor) {
+        for (const auto& name : query_ptr_->index_fields) {
+            auto field_visitor = seg_visitor->GetFieldVisitor(name);
+            auto type = field_visitor->GetField()->GetFtype();
+            if (!field_visitor) {
+                continue;
+            }
+            if (type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY) {
+                auto fe_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+                if (fe_visitor) {
+                    auto element = fe_visitor->GetElement();
+                    index_type_ = element->GetTypeName();
+                }
+                return index_type_;
+            }
+        }
+    }
+    return index_type_;
+}
 
 }  // namespace scheduler
 }  // namespace milvus

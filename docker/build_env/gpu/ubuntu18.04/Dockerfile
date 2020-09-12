@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && \
     apt-get update && apt-get install -y --no-install-recommends \
     git flex bison gfortran lsb-core \
     curl libtool automake libboost-all-dev libssl-dev pkg-config libcurl4-openssl-dev python3-pip \
-    clang-format-6.0 clang-tidy-6.0 \
+    clang-format-7 clang-tidy-7 \
     lcov mysql-client libmysqlclient-dev intel-mkl-gnu-2019.5-281 intel-mkl-core-2019.5-281 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
@@ -42,9 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
-WORKDIR /root
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
 
-ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
-CMD [ "start" ]
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]

@@ -36,6 +36,7 @@
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
+#include <faiss/IndexRHNSW.h>
 #include <faiss/IndexLattice.h>
 
 #include <faiss/OnDiskInvertedLists.h>
@@ -286,6 +287,63 @@ void write_InvertedLists (const InvertedLists *ils, IOWriter *f) {
     }
 }
 
+// write inverted lists for offset-only index
+void write_InvertedLists_nm (const InvertedLists *ils, IOWriter *f) {
+    if (ils == nullptr) {
+        uint32_t h = fourcc ("il00");
+        WRITE1 (h);
+    } else if (const auto & ails =
+               dynamic_cast<const ArrayInvertedLists *>(ils)) {
+        uint32_t h = fourcc ("ilar");
+        WRITE1 (h);
+        WRITE1 (ails->nlist);
+        WRITE1 (ails->code_size);
+        // here we store either as a full or a sparse data buffer
+        size_t n_non0 = 0;
+        for (size_t i = 0; i < ails->nlist; i++) {
+            if (ails->ids[i].size() > 0)
+                n_non0++;
+        }
+        if (n_non0 > ails->nlist / 2) {
+            uint32_t list_type = fourcc("full");
+            WRITE1 (list_type);
+            std::vector<size_t> sizes;
+            for (size_t i = 0; i < ails->nlist; i++) {
+                sizes.push_back (ails->ids[i].size());
+            }
+            WRITEVECTOR (sizes);
+        } else {
+            int list_type = fourcc("sprs"); // sparse
+            WRITE1 (list_type);
+            std::vector<size_t> sizes;
+            for (size_t i = 0; i < ails->nlist; i++) {
+                size_t n = ails->ids[i].size();
+                if (n > 0) {
+                    sizes.push_back (i);
+                    sizes.push_back (n);
+                }
+            }
+            WRITEVECTOR (sizes);
+        }
+        // make a single contiguous data buffer (useful for mmapping)
+        for (size_t i = 0; i < ails->nlist; i++) {
+            size_t n = ails->ids[i].size();
+            if (n > 0) {
+                // WRITEANDCHECK (ails->codes[i].data(), n * ails->code_size);
+                WRITEANDCHECK (ails->ids[i].data(), n);
+            }
+        }
+    } else if (const auto & oa =
+            dynamic_cast<const ReadOnlyArrayInvertedLists *>(ils)) {
+        // not going to happen
+    } else {
+        fprintf(stderr, "WARN! write_InvertedLists: unsupported invlist type, "
+                "saving null invlist\n");
+        uint32_t h = fourcc ("il00");
+        WRITE1 (h);
+    }
+}
+
 
 void write_ProductQuantizer (const ProductQuantizer*pq, const char *fname) {
     FileIOWriter writer(fname);
@@ -307,6 +365,27 @@ static void write_HNSW (const HNSW *hnsw, IOWriter *f) {
     WRITE1 (hnsw->upper_beam);
 }
 
+<<<<<<< HEAD
+static void write_RHNSW (const RHNSW *rhnsw, IOWriter *f) {
+    WRITE1 (rhnsw->entry_point);
+    WRITE1 (rhnsw->max_level);
+    WRITE1 (rhnsw->M);
+    WRITE1 (rhnsw->level0_link_size);
+    WRITE1 (rhnsw->link_size);
+    WRITE1 (rhnsw->level_constant);
+    WRITE1 (rhnsw->efConstruction);
+    WRITE1 (rhnsw->efSearch);
+
+    WRITEVECTOR (rhnsw->levels);
+    WRITEANDCHECK (rhnsw->level0_links, rhnsw->level0_link_size * rhnsw->levels.size());
+    for (auto i = 0; i < rhnsw->levels.size(); ++ i) {
+        if (rhnsw->levels[i])
+            WRITEANDCHECK (rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+    }
+}
+
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 static void write_direct_map (const DirectMap *dm, IOWriter *f) {
     char maintain_direct_map = (char)dm->type; // for backwards compatibility with bool
     WRITE1 (maintain_direct_map);
@@ -503,6 +582,18 @@ void write_index (const Index *idx, IOWriter *f) {
         write_index_header (idxhnsw, f);
         write_HNSW (&idxhnsw->hnsw, f);
         write_index (idxhnsw->storage, f);
+    } else if (const IndexRHNSW * idxrhnsw =
+            dynamic_cast<const IndexRHNSW *>(idx)) {
+        uint32_t h =
+                dynamic_cast<const IndexRHNSWFlat*>(idx)   ? fourcc("IRHf") :
+                dynamic_cast<const IndexRHNSWPQ*>(idx)     ? fourcc("IRHp") :
+                dynamic_cast<const IndexRHNSWSQ*>(idx)     ? fourcc("IRHs") :
+                dynamic_cast<const IndexRHNSW2Level*>(idx) ? fourcc("IRH2") :
+                0;
+        FAISS_THROW_IF_NOT (h != 0);
+        WRITE1 (h);
+        write_index_header (idxrhnsw, f);
+        write_RHNSW (&idxrhnsw->hnsw, f);
     } else {
       FAISS_THROW_MSG ("don't know how to serialize this type of index");
     }
@@ -516,6 +607,47 @@ void write_index (const Index *idx, FILE *f) {
 void write_index (const Index *idx, const char *fname) {
     FileIOWriter writer(fname);
     write_index (idx, &writer);
+}
+
+// write index for offset-only index
+void write_index_nm (const Index *idx, IOWriter *f) {
+    if(const IndexIVFFlat * ivfl =
+              dynamic_cast<const IndexIVFFlat *> (idx)) {
+        uint32_t h = fourcc ("IwFl");
+        WRITE1 (h);
+        write_ivf_header (ivfl, f);
+        write_InvertedLists_nm (ivfl->invlists, f);
+    } else if(const IndexIVFScalarQuantizer * ivsc =
+              dynamic_cast<const IndexIVFScalarQuantizer *> (idx)) {
+        uint32_t h = fourcc ("IwSq");
+        WRITE1 (h);
+        write_ivf_header (ivsc, f);
+        write_ScalarQuantizer (&ivsc->sq, f);
+        WRITE1 (ivsc->code_size);
+        WRITE1 (ivsc->by_residual);
+        write_InvertedLists_nm (ivsc->invlists, f);
+    } else if(const IndexIVFSQHybrid *ivfsqhbyrid =
+            dynamic_cast<const IndexIVFSQHybrid*>(idx)) {
+        uint32_t h = fourcc ("ISqH");
+        WRITE1 (h);
+        write_ivf_header (ivfsqhbyrid, f);
+        write_ScalarQuantizer (&ivfsqhbyrid->sq, f);
+        WRITE1 (ivfsqhbyrid->code_size);
+        WRITE1 (ivfsqhbyrid->by_residual);
+        write_InvertedLists_nm (ivfsqhbyrid->invlists, f);
+    } else {
+      FAISS_THROW_MSG ("don't know how to serialize this type of index");
+    }
+}
+
+void write_index_nm (const Index *idx, FILE *f) {
+    FileIOWriter writer(f);
+    write_index_nm (idx, &writer);
+}
+
+void write_index_nm (const Index *idx, const char *fname) {
+    FileIOWriter writer(fname);
+    write_index_nm (idx, &writer);
 }
 
 void write_VectorTransform (const VectorTransform *vt, const char *fname) {

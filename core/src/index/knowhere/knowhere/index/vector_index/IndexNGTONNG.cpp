@@ -16,6 +16,10 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
+<<<<<<< HEAD
+=======
+#include <cstddef>
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 #include <memory>
 
 namespace milvus {
@@ -23,16 +27,27 @@ namespace knowhere {
 
 void
 IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
+<<<<<<< HEAD
     GETTENSOR(dataset_ptr);
+=======
+    GET_TENSOR_DATA_DIM(dataset_ptr);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     NGT::Property prop;
     prop.setDefaultForCreateIndex();
     prop.dimension = dim;
+<<<<<<< HEAD
     prop.edgeSizeForCreation = 20;
+=======
+
+    auto edge_size = config[IndexParams::edge_size].get<int64_t>();
+    prop.edgeSizeForCreation = edge_size;
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
     prop.insertionRadiusCoefficient = 1.0;
 
     MetricType metric_type = config[Metric::TYPE];
 
+<<<<<<< HEAD
     if (metric_type == Metric::L2)
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
     else if (metric_type == Metric::HAMMING)
@@ -41,12 +56,25 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
     else
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
+=======
+    if (metric_type == Metric::L2) {
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
+    } else if (metric_type == Metric::HAMMING) {
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
+    } else if (metric_type == Metric::JACCARD) {
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
+    } else {
+        KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
+    }
+
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
     index_ =
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 
     // reconstruct graph
     NGT::GraphOptimizer graphOptimizer(true);
 
+<<<<<<< HEAD
     size_t number_of_outgoing_edges = 5;
     size_t number_of_incoming_edges = 30;
     size_t number_of_queries = 1000;
@@ -54,12 +82,23 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     graphOptimizer.shortcutReduction = true;
     graphOptimizer.searchParameterOptimization = true;
+=======
+    auto number_of_outgoing_edges = config[IndexParams::outgoing_edge_size].get<size_t>();
+    auto number_of_incoming_edges = config[IndexParams::incoming_edge_size].get<size_t>();
+
+    graphOptimizer.shortcutReduction = true;
+    graphOptimizer.searchParameterOptimization = false;
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
     graphOptimizer.prefetchParameterOptimization = false;
     graphOptimizer.accuracyTableGeneration = false;
     graphOptimizer.margin = 0.2;
     graphOptimizer.gtEpsilon = 0.1;
 
+<<<<<<< HEAD
     graphOptimizer.set(number_of_outgoing_edges, number_of_incoming_edges, number_of_queries, number_of_res);
+=======
+    graphOptimizer.set(number_of_outgoing_edges, number_of_incoming_edges, 1000, 20);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     graphOptimizer.execute(*index_);
 }

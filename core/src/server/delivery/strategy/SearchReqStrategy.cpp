@@ -10,9 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/strategy/SearchReqStrategy.h"
+<<<<<<< HEAD
+#include "config/ServerConfig.h"
+=======
 #include "config/Config.h"
 #include "server/delivery/request/SearchCombineRequest.h"
 #include "server/delivery/request/SearchRequest.h"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
@@ -25,18 +29,29 @@ namespace milvus {
 namespace server {
 
 SearchReqStrategy::SearchReqStrategy() {
+<<<<<<< HEAD
+    ConfigMgr::GetInstance().Attach("engine.search_combine_nq", this);
+}
+
+SearchReqStrategy::~SearchReqStrategy() {
+    ConfigMgr::GetInstance().Detach("engine.search_combine_nq", this);
+=======
     SetIdentity("SearchReqStrategy");
     AddSearchCombineMaxNqListener();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 Status
-SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<BaseRequestPtr>& queue) {
-    if (request->GetRequestType() != BaseRequest::kSearch) {
+SearchReqStrategy::ReScheduleQueue(const BaseReqPtr& req, std::queue<BaseReqPtr>& queue) {
+    if (req->type() != ReqType::kSearch) {
         std::string msg = "search strategy can only handle search request";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
 
+<<<<<<< HEAD
+    queue.push(req);
+=======
     // if config set to 0, neve combine
     if (search_combine_nq_ <= 0) {
         queue.push(request);
@@ -75,8 +90,14 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_UNSUPPORTED_ERROR, msg);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     return Status::OK();
+}
+
+void
+SearchReqStrategy::ConfigUpdate(const std::string& name) {
+    search_combine_nq_ = config.engine.search_combine_nq();
 }
 
 }  // namespace server

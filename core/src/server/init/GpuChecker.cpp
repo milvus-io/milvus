@@ -16,9 +16,9 @@
 #include <set>
 #include <vector>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -92,33 +92,14 @@ Status
 GpuChecker::CheckGpuEnvironment() {
     std::string err_msg;
 
-    auto& config = Config::GetInstance();
-    bool gpu_enable = true;
-    auto status = config.GetGpuResourceConfigEnable(gpu_enable);
-    if (!status.ok()) {
-        err_msg = "Cannot check if GPUs are enable from configuration. " + status.message();
-        LOG_SERVER_FATAL_ << err_msg;
-        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
-    }
+    bool gpu_enable = config.gpu.enable();
+
     if (!gpu_enable) {
         return Status::OK();
     }
 
-    std::vector<int64_t> build_gpus;
-    status = config.GetGpuResourceConfigBuildIndexResources(build_gpus);
-    if (!status.ok()) {
-        err_msg = "Get GPU resources of building index failed. " + status.message();
-        LOG_SERVER_FATAL_ << err_msg;
-        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
-    }
-
-    std::vector<int64_t> search_gpus;
-    status = config.GetGpuResourceConfigSearchResources(search_gpus);
-    if (!status.ok()) {
-        err_msg = "Get GPU resources of search failed. " + status.message();
-        LOG_SERVER_FATAL_ << err_msg;
-        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
-    }
+    std::vector<int64_t> build_gpus = ParseGPUDevices(config.gpu.build_index_devices());
+    std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
 
     std::set<int64_t> gpu_sets(build_gpus.begin(), build_gpus.end());
     gpu_sets.insert(search_gpus.begin(), search_gpus.end());
@@ -134,7 +115,7 @@ GpuChecker::CheckGpuEnvironment() {
 
     /* Check nvidia driver version */
     std::string nvidia_version;
-    status = GetGpuNvidiaDriverVersion(nvidia_version);
+    auto status = GetGpuNvidiaDriverVersion(nvidia_version);
     fiu_do_on("GpuChecker.CheckGpuEnvironment.get_nvidia_driver_fail", status = Status(SERVER_UNEXPECTED_ERROR, ""));
     if (!status.ok()) {
         err_msg = " Check nvidia driver failed. " + status.message();

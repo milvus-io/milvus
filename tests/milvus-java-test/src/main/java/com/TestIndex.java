@@ -1,50 +1,35 @@
 package com;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.logging.Logger;
 
 public class TestIndex {
-    int dimension = 128;
-    int n_list = 1024;
-    int default_n_list = 16384;
-    int nb = 100000;
-    IndexType indexType = IndexType.IVF_SQ8;
-    IndexType defaultIndexType = IndexType.FLAT;
-    String indexParam = Utils.setIndexParam(n_list);
-
-    List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
-    List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+    public void testCreateIndex(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+<<<<<<< HEAD
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+                    Assert.assertEquals(file.get("index_type"), Constants.indexType));
+        }
     }
 
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_binary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-        Response res_create = client.createIndex(index);
-        assert(res_create.ok());
-    }
-
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_repeatably(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-        Response res_create = client.createIndex(index);
-        assert(res_create.ok());
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testCreateIndexBinary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
+=======
         GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
@@ -87,101 +72,141 @@ public class TestIndex {
     public void test_create_index_IVFSQ8(MilvusClient client, String collectionName) {
         IndexType indexType = IndexType.IVF_SQ8;
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(Constants.binaryIndexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+<<<<<<< HEAD
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+                    Assert.assertEquals(file.get("index_type"), Constants.defaultBinaryIndexType));
+        }
+=======
         GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_IVFSQ8H(MilvusClient client, String collectionName) {
-        IndexType indexType = IndexType.IVF_SQ8_H;
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+    public void testCreateIndexRepeatably(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+<<<<<<< HEAD
+        Response res_create_2 = client.createIndex(index);
+        assert(res_create_2.ok());
+=======
         GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), indexType);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_with_no_vector(MilvusClient client, String collectionName) {
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+    public void testCreateIndexWithNoVector(MilvusClient client, String collectionName) {
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_table_not_existed(MilvusClient client, String collectionName) {
-        String collectionNameNew = collectionName + "_";
-        Index index = new Index.Builder(collectionNameNew, indexType).withParamsInJson(indexParam).build();
+    public void testCreateIndexTableNotExisted(MilvusClient client, String collectionName) {
+        String collectionNameNew = Utils.genUniqueStr(collectionName);
+        Index index = new Index.Builder(collectionNameNew, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_create_index_without_connect(MilvusClient client, String collectionName) {
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+    public void testCreateIndexWithoutConnect(MilvusClient client, String collectionName) {
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_create_index_invalid_n_list(MilvusClient client, String collectionName) {
+    public void testCreateIndexInvalidNList(MilvusClient client, String collectionName) {
         int n_list = 0;
-        String indexParamNew = Utils.setIndexParam(n_list);
-        Index createIndexParam = new Index.Builder(collectionName, indexType).withParamsInJson(indexParamNew).build();
-        Response res_create = client.createIndex(createIndexParam);
+        String indexParamNew = Utils.setIndexParam(Constants.indexType, "L2", n_list);
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(indexParamNew).build();
+        Response res_create = client.createIndex(index);
         assert(!res_create.ok());
     }
 
+    // # 3407
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void test_create_index_invalid_n_list_binary(MilvusClient client, String collectionName) {
-        int n_list = 0;
-        String indexParamNew = Utils.setIndexParam(n_list);
-        Index createIndexParam = new Index.Builder(collectionName, indexType).withParamsInJson(indexParamNew).build();
+    public void testCreateIndexInvalidMetricTypeBinary(MilvusClient client, String collectionName) {
+        String metric_type = "L2";
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
+        client.insert(insertParam);
+        String indexParamNew = Utils.setIndexParam(Constants.defaultBinaryIndexType, metric_type, Constants.n_list);
+        Index createIndexParam = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(indexParamNew).build();
         Response res_create = client.createIndex(createIndexParam);
-        assert(!res_create.ok());
+        assert (!res_create.ok());
     }
 
+    // #3408
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_describe_index(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+    public void testDropIndex(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
         client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Index index = new Index.Builder(collectionName, Constants.floatFieldName).withParamsInJson(Constants.indexParam).build();
         Response res_create = client.createIndex(index);
         assert(res_create.ok());
+<<<<<<< HEAD
+        Response res_drop = client.dropIndex(collectionName, Constants.floatFieldName);
+        assert(res_drop.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item -> (JSONObject) item).forEach(file->{
+                assert (!file.containsKey("index_type"));
+            });
+        }
+=======
         GetIndexInfoResponse res = client.getIndexInfo(collectionName);
         assert(res.getResponse().ok());
         Index index1 = res.getIndex().get();
         Assert.assertEquals(Utils.getIndexParamValue(index1.getParamsInJson(), "nlist"), n_list);
         Assert.assertEquals(index1.getIndexType(), indexType);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void test_describe_index_binary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+    public void testDropIndexBinary(MilvusClient client, String collectionName) {
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
         client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+        Index index = new Index.Builder(collectionName, Constants.binaryFieldName).withParamsInJson(Constants.binaryIndexParam).build();
         Response res_create = client.createIndex(index);
-        assert(!res_create.ok());
+        assert(res_create.ok());
+<<<<<<< HEAD
+        Response res_drop = client.dropIndex(collectionName, Constants.binaryFieldName);
+        assert(res_drop.ok());
+        Response statsResponse = client.getCollectionStats(collectionName);
+        // TODO: should check getCollectionStats
+        if(statsResponse.ok()) {
+            JSONArray filesJsonArray = Utils.parseJsonArray(statsResponse.getMessage(), "files");
+            filesJsonArray.stream().map(item -> (JSONObject) item).forEach(file->{
+                assert (!file.containsKey("index_type"));
+            });
+        }
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void test_after_index(MilvusClient client, String collectionName) {
-        int n_list = 1025;
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
-        client.insert(insertParam);
-        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
-        Response res_create = client.createIndex(index);
-        assert(res_create.ok());
+    public void testDropIndexTableNotExisted(MilvusClient client, String collectionName) {
+        String collectionNameNew = Utils.genUniqueStr(collectionName);
+        Response res_drop = client.dropIndex(collectionNameNew, Constants.floatFieldName);
+=======
         // Create another index
         IndexType indexTypeNew = IndexType.IVFLAT;
         String indexParam = Utils.setIndexParam(n_list);
@@ -260,15 +285,18 @@ public class TestIndex {
     public void test_drop_index_table_not_existed(MilvusClient client, String collectionName) {
         String collectionNameNew = collectionName + "_";
         Response res_drop = client.dropIndex(collectionNameNew);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         assert(!res_drop.ok());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_drop_index_without_connect(MilvusClient client, String collectionName) {
-        Response res_drop = client.dropIndex(collectionName);
+    public void testDropIndexWithoutConnect(MilvusClient client, String collectionName) {
+        Response res_drop = client.dropIndex(collectionName, Constants.floatFieldName);
         assert(!res_drop.ok());
     }
 
+<<<<<<< HEAD
+=======
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_drop_index_no_index_created(MilvusClient client, String collectionName) {
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
@@ -292,4 +320,5 @@ public class TestIndex {
         Index index1 = res.getIndex().get();
         Assert.assertEquals(index1.getIndexType(), defaultIndexType);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }

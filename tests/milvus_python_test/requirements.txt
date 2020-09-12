@@ -8,5 +8,10 @@ pytest-print==0.1.2
 pytest-level==0.1.1
 pytest-xdist==1.23.2
 scikit-learn>=0.19.1
+<<<<<<< HEAD
+kubernetes==10.0.1
+pymilvus-test>=0.4.5
+=======
 pymilvus-test>=0.3.0,<0.4.0
 kubernetes==10.0.1
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda

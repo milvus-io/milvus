@@ -11,7 +11,7 @@
 
 #include "metrics/prometheus/PrometheusMetrics.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "metrics/SystemInfo.h"
 #include "utils/Log.h"
 
@@ -25,17 +25,22 @@ namespace server {
 Status
 PrometheusMetrics::Init() {
     try {
-        Config& config = Config::GetInstance();
-        STATUS_CHECK(config.GetMetricConfigEnableMonitor(startup_));
+        startup_ = config.metric.enable();
         if (!startup_) {
             return Status::OK();
         }
 
         // Following should be read from config file.
+<<<<<<< HEAD
+        int64_t server_port = config.network.bind.port();
+        int64_t push_port = config.metric.port();
+        std::string push_address = config.metric.address();
+=======
         std::string server_port, push_port, push_address;
         STATUS_CHECK(config.GetNetworkConfigBindPort(server_port));
         STATUS_CHECK(config.GetMetricConfigPort(push_port));
         STATUS_CHECK(config.GetMetricConfigAddress(push_address));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
         const std::string uri = std::string("/metrics");
         // const std::size_t num_threads = 2;
@@ -43,7 +48,7 @@ PrometheusMetrics::Init() {
         std::string hostportstr;
         char hostname[1024];
         if (gethostname(hostname, sizeof(hostname)) == 0) {
-            hostportstr = std::string(hostname) + ":" + server_port;
+            hostportstr = std::string(hostname) + ":" + std::to_string(server_port);
         } else {
             hostportstr = "pushgateway";
         }
@@ -51,7 +56,8 @@ PrometheusMetrics::Init() {
         auto labels = prometheus::Gateway::GetInstanceLabel(hostportstr);
 
         // Init pushgateway
-        gateway_ = std::make_shared<prometheus::Gateway>(push_address, push_port, "milvus_metrics", labels);
+        gateway_ =
+            std::make_shared<prometheus::Gateway>(push_address, std::to_string(push_port), "milvus_metrics", labels);
 
         // Init Exposer
         // exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
@@ -98,7 +104,7 @@ PrometheusMetrics::GPUPercentGaugeSet() {
 
     for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge& GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
-        double percent = (double)used_memory[i] / (double)used_total[i];
+        double percent = static_cast<double>(used_memory[i]) / static_cast<double>(used_total[i]);
         GPU_percent.Set(percent * 100);
     }
 }
@@ -233,8 +239,13 @@ PrometheusMetrics::CPUTemperature() {
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
     float avg_cpu_temp = 0;
+<<<<<<< HEAD
+    for (float CPU_temperature : CPU_temperatures) {
+        avg_cpu_temp += CPU_temperature;
+=======
     for (size_t i = 0; i < CPU_temperatures.size(); ++i) {
         avg_cpu_temp += CPU_temperatures[i];
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     avg_cpu_temp /= CPU_temperatures.size();
 

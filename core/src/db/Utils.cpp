@@ -11,17 +11,29 @@
 
 #include "db/Utils.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <regex>
+#include <utility>
 #include <vector>
 
-#include "config/Config.h"
+#include "cache/CpuCacheMgr.h"
+#include "db/Types.h"
+
+#ifdef MILVUS_GPU_VERSION
+
+#include "cache/GpuCacheMgr.h"
+
+#endif
+
+#include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
@@ -31,48 +43,6 @@ namespace milvus {
 namespace engine {
 namespace utils {
 
-namespace {
-
-const char* TABLES_FOLDER = "/tables/";
-
-uint64_t index_file_counter = 0;
-std::mutex index_file_counter_mutex;
-
-static std::string
-ConstructParentFolder(const std::string& db_path, const meta::SegmentSchema& table_file) {
-    std::string table_path = db_path + TABLES_FOLDER + table_file.collection_id_;
-    std::string partition_path = table_path + "/" + table_file.segment_id_;
-    return partition_path;
-}
-
-static std::string
-GetCollectionFileParentFolder(const DBMetaOptions& options, const meta::SegmentSchema& table_file) {
-    uint64_t path_count = options.slave_paths_.size() + 1;
-    std::string target_path = options.path_;
-    uint64_t index = 0;
-
-    if (meta::SegmentSchema::NEW_INDEX == table_file.file_type_) {
-        // index file is large file and to be persisted permanently
-        // we need to distribute index files to each db_path averagely
-        // round robin according to a file counter
-        std::lock_guard<std::mutex> lock(index_file_counter_mutex);
-        index = index_file_counter % path_count;
-        ++index_file_counter;
-    } else {
-        // for other type files, they could be merged or deleted
-        // so we round robin according to their file id
-        index = table_file.id_ % path_count;
-    }
-
-    if (index > 0) {
-        target_path = options.slave_paths_[index - 1];
-    }
-
-    return ConstructParentFolder(target_path, table_file);
-}
-
-}  // namespace
-
 int64_t
 GetMicroSecTimeStamp() {
     auto now = std::chrono::system_clock::now();
@@ -81,159 +51,20 @@ GetMicroSecTimeStamp() {
     return micros;
 }
 
-Status
-CreateCollectionPath(const DBMetaOptions& options, const std::string& collection_id) {
-    std::string db_path = options.path_;
-    std::string table_path = db_path + TABLES_FOLDER + collection_id;
-    auto status = server::CommonUtil::CreateDirectory(table_path);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    for (auto& path : options.slave_paths_) {
-        table_path = path + TABLES_FOLDER + collection_id;
-        status = server::CommonUtil::CreateDirectory(table_path);
-        fiu_do_on("CreateCollectionPath.creat_slave_path", status = Status(DB_INVALID_PATH, ""));
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << status.message();
-            return status;
-        }
-    }
-
-    return Status::OK();
-}
-
-Status
-DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection_id, bool force) {
-    std::vector<std::string> paths = options.slave_paths_;
-    paths.push_back(options.path_);
-
-    for (auto& path : paths) {
-        std::string table_path = path + TABLES_FOLDER + collection_id;
-        if (force) {
-            boost::filesystem::remove_all(table_path);
-            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-        } else if (boost::filesystem::exists(table_path) && boost::filesystem::is_empty(table_path)) {
-            boost::filesystem::remove_all(table_path);
-            LOG_ENGINE_DEBUG_ << "Remove collection folder: " << table_path;
-        }
-    }
-
-    // bool s3_enable = false;
-    // server::Config& config = server::Config::GetInstance();
-    // config.GetStorageConfigS3Enable(s3_enable);
-
-    // if (s3_enable) {
-    //     std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
-
-    //     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    //     Status stat = storage_inst.DeleteObjects(table_path);
-    //     if (!stat.ok()) {
-    //         return stat;
-    //     }
-    // }
-
-    return Status::OK();
-}
-
-Status
-CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = GetCollectionFileParentFolder(options, table_file);
-
-    auto status = server::CommonUtil::CreateDirectory(parent_path);
-    fiu_do_on("CreateCollectionFilePath.fail_create", status = Status(DB_INVALID_PATH, ""));
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    table_file.location_ = parent_path + "/" + table_file.file_id_;
-
-    return Status::OK();
-}
-
-Status
-GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    std::string parent_path = ConstructParentFolder(options.path_, table_file);
-    std::string file_path = parent_path + "/" + table_file.file_id_;
-
-    // bool s3_enable = false;
-    // server::Config& config = server::Config::GetInstance();
-    // config.GetStorageConfigS3Enable(s3_enable);
-    // fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
-    // if (s3_enable) {
-    //     /* need not check file existence */
-    //     table_file.location_ = file_path;
-    //     return Status::OK();
-    // }
-
-    if (boost::filesystem::exists(parent_path)) {
-        table_file.location_ = file_path;
-        return Status::OK();
-    }
-
-    for (auto& path : options.slave_paths_) {
-        parent_path = ConstructParentFolder(path, table_file);
-        file_path = parent_path + "/" + table_file.file_id_;
-        if (boost::filesystem::exists(parent_path)) {
-            table_file.location_ = file_path;
-            return Status::OK();
-        }
-    }
-
-    std::string msg = "Collection file doesn't exist: " + file_path;
-    if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        LOG_ENGINE_ERROR_ << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
-    }
-
-    return Status(DB_ERROR, msg);
-}
-
-Status
-DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetCollectionFilePath(options, table_file);
-    boost::filesystem::remove(table_file.location_);
-    return Status::OK();
-}
-
-Status
-DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
-    utils::GetCollectionFilePath(options, table_file);
-    std::string segment_dir;
-    GetParentPath(table_file.location_, segment_dir);
-    boost::filesystem::remove_all(segment_dir);
-    return Status::OK();
-}
-
-Status
-GetParentPath(const std::string& path, std::string& parent_path) {
-    boost::filesystem::path p(path);
-    parent_path = p.parent_path().string();
-    return Status::OK();
-}
-
 bool
 IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2) {
-    return index1.engine_type_ == index2.engine_type_ && index1.extra_params_ == index2.extra_params_ &&
-           index1.metric_type_ == index2.metric_type_;
+    return index1.index_type_ == index2.index_type_ && index1.extra_params_ == index2.extra_params_ &&
+           index1.metric_name_ == index2.metric_name_;
 }
 
 bool
-IsRawIndexType(int32_t type) {
-    return (type == (int32_t)EngineType::FAISS_IDMAP) || (type == (int32_t)EngineType::FAISS_BIN_IDMAP);
+IsBinaryMetricType(const std::string& metric_type) {
+    return (metric_type == knowhere::Metric::HAMMING) || (metric_type == knowhere::Metric::JACCARD) ||
+           (metric_type == knowhere::Metric::SUBSTRUCTURE) || (metric_type == knowhere::Metric::SUPERSTRUCTURE) ||
+           (metric_type == knowhere::Metric::TANIMOTO);
 }
 
-bool
-IsBinaryMetricType(int32_t metric_type) {
-    return (metric_type == (int32_t)engine::MetricType::HAMMING) ||
-           (metric_type == (int32_t)engine::MetricType::JACCARD) ||
-           (metric_type == (int32_t)engine::MetricType::SUBSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::SUPERSTRUCTURE) ||
-           (metric_type == (int32_t)engine::MetricType::TANIMOTO);
-}
-
-meta::DateT
+engine::date_t
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
     localtime_r(&t, &ltm);
@@ -253,12 +84,12 @@ GetDate(const std::time_t& t, int day_delta) {
     return ltm.tm_year * 10000 + ltm.tm_mon * 100 + ltm.tm_mday;
 }
 
-meta::DateT
+engine::date_t
 GetDateWithDelta(int day_delta) {
     return GetDate(std::time(nullptr), day_delta);
 }
 
-meta::DateT
+engine::date_t
 GetDate() {
     return GetDate(std::time(nullptr), 0);
 }
@@ -272,8 +103,8 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
     std::string host_regex = "(.*)";
     std::string port_regex = "(.*)";
     std::string db_name_regex = "(.*)";
-    std::string uri_regex_str = dialect_regex + "\\:\\/\\/" + username_tegex + "\\:" + password_regex + "\\@" +
-                                host_regex + "\\:" + port_regex + "\\/" + db_name_regex;
+    std::string uri_regex_str = dialect_regex + R"(\:\/\/)" + username_tegex + R"(\:)" + password_regex + R"(\@)" +
+                                host_regex + R"(\:)" + port_regex + R"(\/)" + db_name_regex;
 
     std::regex uri_regex(uri_regex_str);
     std::smatch pieces_match;
@@ -294,6 +125,8 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
     return Status::OK();
 }
 
+<<<<<<< HEAD
+=======
 std::string
 GetIndexName(int32_t index_type) {
     static std::map<int32_t, std::string> index_type_name = {
@@ -317,6 +150,7 @@ GetIndexName(int32_t index_type) {
     return index_type_name[index_type];
 }
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 void
 SendExitSignal() {
     LOG_SERVER_INFO_ << "Send SIGUSR2 signal to exit";
@@ -325,10 +159,133 @@ SendExitSignal() {
 }
 
 void
-ExitOnWriteError(Status& status) {
-    if (status.code() == SERVER_WRITE_ERROR) {
-        utils::SendExitSignal();
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids) {
+    ids.clear();
+    if (chunk == nullptr) {
+        return;
     }
+
+    auto pair = chunk->fixed_fields_.find(engine::FIELD_UID);
+    if (pair == chunk->fixed_fields_.end() || pair->second == nullptr) {
+        return;
+    }
+
+    if (!pair->second->data_.empty()) {
+        ids.resize(pair->second->data_.size() / sizeof(engine::idx_t));
+        memcpy(ids.data(), pair->second->data_.data(), pair->second->data_.size());
+    }
+}
+
+int64_t
+GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
+    if (chunk == nullptr) {
+        return 0;
+    }
+
+    int64_t total_size = 0;
+    for (auto& pair : chunk->fixed_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+        total_size += pair.second->Size();
+    }
+    for (auto& pair : chunk->variable_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+        total_size += pair.second->Size();
+    }
+
+    return total_size;
+}
+
+Status
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks) {
+    if (chunk == nullptr || segment_row_count <= 0) {
+        return Status::OK();
+    }
+
+    // no need to split chunk if chunk row count less than segment_row_count
+    // if user specify a tiny segment_row_count(such as 1) , also no need to split,
+    // use build_index_threshold(default is 4096) to avoid tiny segment_row_count
+    if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold.value) {
+        chunks.push_back(chunk);
+        return Status::OK();
+    }
+
+    int64_t chunk_count = chunk->count_;
+
+    // split chunk accordding to segment row count
+    // firstly validate each field size
+    FIELD_WIDTH_MAP fields_width;
+    for (auto& pair : chunk->fixed_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        if (pair.second->data_.size() % chunk_count != 0) {
+            return Status(DB_ERROR, "Invalid chunk fixed field size");
+        }
+
+        fields_width.insert(std::make_pair(pair.first, pair.second->data_.size() / chunk_count));
+    }
+
+    for (auto& pair : chunk->variable_fields_) {
+        if (pair.second == nullptr) {
+            continue;
+        }
+
+        if (pair.second->offset_.size() != chunk_count) {
+            return Status(DB_ERROR, "Invalid chunk variable field size");
+        }
+    }
+
+    // secondly, copy new chunk
+    int64_t copied_count = 0;
+    while (copied_count < chunk_count) {
+        int64_t count_to_copy = segment_row_count;
+        if (chunk_count - copied_count < segment_row_count) {
+            count_to_copy = chunk_count - copied_count;
+        }
+        DataChunkPtr new_chunk = std::make_shared<DataChunk>();
+        for (auto& pair : chunk->fixed_fields_) {
+            if (pair.second == nullptr) {
+                continue;
+            }
+
+            int64_t field_width = fields_width[pair.first];
+            BinaryDataPtr data = std::make_shared<BinaryData>();
+            int64_t data_length = field_width * count_to_copy;
+            int64_t offset = field_width * copied_count;
+            data->data_.resize(data_length);
+            memcpy(data->data_.data(), pair.second->data_.data() + offset, data_length);
+            new_chunk->fixed_fields_.insert(std::make_pair(pair.first, data));
+        }
+
+        // TODO: copy variable data
+        for (auto& pair : chunk->variable_fields_) {
+            if (pair.second == nullptr) {
+                continue;
+            }
+        }
+
+        new_chunk->count_ = count_to_copy;
+        copied_count += count_to_copy;
+        chunks.emplace_back(new_chunk);
+    }
+
+    return Status::OK();
+}
+
+bool
+RequireRawFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
+           index_type == knowhere::IndexEnum::INDEX_HNSW;
+}
+
+bool
+RequireCompressFile(const std::string& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ || index_type == knowhere::IndexEnum::INDEX_RHNSWPQ;
 }
 
 }  // namespace utils

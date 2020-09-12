@@ -15,13 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 
+<<<<<<< HEAD
+#include <fiu/fiu-local.h>
+
+#include "log/Log.h"
+=======
 #include <fiu-local.h>
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #include "storage/disk/DiskOperation.h"
 #include "utils/Exception.h"
-#include "utils/Log.h"
 
 namespace milvus {
 namespace storage {
@@ -31,15 +36,21 @@ DiskOperation::DiskOperation(const std::string& dir_path) : dir_path_(dir_path) 
 
 void
 DiskOperation::CreateDirectory() {
+<<<<<<< HEAD
+    bool is_dir = std::experimental::filesystem::is_directory(dir_path_);
+    fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
+    if (!is_dir) {
+        /* create directories recursively */
+        auto ret = std::experimental::filesystem::create_directories(dir_path_);
+=======
     bool is_dir = boost::filesystem::is_directory(dir_path_);
     fiu_do_on("DiskOperation.CreateDirectory.is_directory", is_dir = false);
     if (!is_dir) {
         auto ret = boost::filesystem::create_directory(dir_path_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         fiu_do_on("DiskOperation.CreateDirectory.create_directory", ret = false);
         if (!ret) {
-            std::string err_msg = "Failed to create directory: " + dir_path_;
-            LOG_ENGINE_ERROR_ << err_msg;
-            throw Exception(SERVER_CANNOT_CREATE_FOLDER, err_msg);
+            THROW_ERROR(SERVER_CANNOT_CREATE_FOLDER, "Failed to create directory: " + dir_path_);
         }
     }
 }
@@ -51,11 +62,11 @@ DiskOperation::GetDirectory() const {
 
 void
 DiskOperation::ListDirectory(std::vector<std::string>& file_paths) {
-    boost::filesystem::path target_path(dir_path_);
-    typedef boost::filesystem::directory_iterator d_it;
+    std::experimental::filesystem::path target_path(dir_path_);
+    using d_it = std::experimental::filesystem::directory_iterator;
     d_it it_end;
     d_it it(target_path);
-    if (boost::filesystem::is_directory(dir_path_)) {
+    if (std::experimental::filesystem::is_directory(dir_path_)) {
         for (; it != it_end; ++it) {
             file_paths.emplace_back(it->path().c_str());
         }
@@ -64,7 +75,7 @@ DiskOperation::ListDirectory(std::vector<std::string>& file_paths) {
 
 bool
 DiskOperation::DeleteFile(const std::string& file_path) {
-    return boost::filesystem::remove(file_path);
+    return std::experimental::filesystem::remove(file_path);
 }
 
 }  // namespace storage

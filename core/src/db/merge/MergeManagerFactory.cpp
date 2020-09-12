@@ -18,8 +18,8 @@ namespace milvus {
 namespace engine {
 
 MergeManagerPtr
-MergeManagerFactory::Build(const meta::MetaPtr& meta_ptr, const DBOptions& options) {
-    return std::make_shared<MergeManagerImpl>(meta_ptr, options, MergeStrategyType::LAYERED);
+MergeManagerFactory::SSBuild(const DBOptions& options) {
+    return std::make_shared<MergeManagerImpl>(options);
 }
 
 }  // namespace engine

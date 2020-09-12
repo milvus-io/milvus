@@ -9,17 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
+#include "config/ConfigMgr.h"
 #include "metrics/prometheus/PrometheusMetrics.h"
 
 #include <gtest/gtest.h>
 #include <iostream>
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 TEST(PrometheusTest, PROMETHEUS_TEST) {
     fiu_init(0);
-    milvus::server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
+    // milvus::server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
+    milvus::ConfigMgr::GetInstance().Set("metric.enable", "true");
 
     milvus::server::PrometheusMetrics instance = milvus::server::PrometheusMetrics::GetInstance();
     instance.Init();
@@ -97,7 +99,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST) {
     instance.CPUTemperature();
     fiu_disable("SystemInfo.CPUTemperature.openfile");
 
-    milvus::server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
+    milvus::ConfigMgr::GetInstance().Set("metric.enable", "false");
     instance.Init();
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();

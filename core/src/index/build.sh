@@ -5,7 +5,6 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX=$(pwd)/cmake_build
 MAKE_CLEAN="OFF"
 PROFILING="OFF"
-FAISS_WITH_MKL="OFF"
 
 while getopts "p:d:t:uhrcgm" arg
 do
@@ -29,9 +28,6 @@ do
              g)
                 PROFILING="ON"
                 ;;
-             m)
-                FAISS_WITH_MKL="ON"
-                ;;
              h) # help
                 echo "
 
@@ -41,10 +37,9 @@ parameter:
 -p: install prefix(default: $(pwd)/knowhere)
 -r: remove previous build directory(default: OFF)
 -g: profiling(default: OFF)
--m: build faiss with MKL(default: OFF)
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c]
                 "
                 exit 0
                 ;;
@@ -70,7 +65,6 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
-    -DFAISS_WITH_MKL=${FAISS_WITH_MKL} \
     ../"
     echo ${CMAKE_CMD}
 

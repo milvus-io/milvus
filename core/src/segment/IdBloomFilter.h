@@ -20,15 +20,15 @@
 #include <memory>
 #include <mutex>
 
+#include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
+#include "db/Types.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace segment {
 
-using doc_id_t = int64_t;
-
-class IdBloomFilter {
+class IdBloomFilter : public cache::DataObj {
  public:
     explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
 
@@ -38,16 +38,16 @@ class IdBloomFilter {
     GetBloomFilter();
 
     bool
-    Check(doc_id_t uid);
+    Check(engine::idx_t uid);
 
     Status
-    Add(doc_id_t uid);
+    Add(engine::idx_t uid);
 
     Status
-    Remove(doc_id_t uid);
+    Remove(engine::idx_t uid);
 
-    size_t
-    Size();
+    int64_t
+    Size() override;
 
     //    const std::string&
     //    GetName() const;

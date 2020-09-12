@@ -58,6 +58,7 @@ IndexNGT::Serialize(const Config& config) {
 void
 IndexNGT::Load(const BinarySet& index_binary) {
     auto obj_data = index_binary.GetByName("ngt_obj_data");
+<<<<<<< HEAD
     std::string obj_str((char*)(obj_data->data.get()), obj_data->size);
 
     auto grp_data = index_binary.GetByName("ngt_grp_data");
@@ -68,6 +69,18 @@ IndexNGT::Load(const BinarySet& index_binary) {
 
     auto tre_data = index_binary.GetByName("ngt_tre_data");
     std::string tre_str((char*)(tre_data->data.get()), tre_data->size);
+=======
+    std::string obj_str(reinterpret_cast<char*>(obj_data->data.get()), obj_data->size);
+
+    auto grp_data = index_binary.GetByName("ngt_grp_data");
+    std::string grp_str(reinterpret_cast<char*>(grp_data->data.get()), grp_data->size);
+
+    auto prf_data = index_binary.GetByName("ngt_prf_data");
+    std::string prf_str(reinterpret_cast<char*>(prf_data->data.get()), prf_data->size);
+
+    auto tre_data = index_binary.GetByName("ngt_tre_data");
+    std::string tre_str(reinterpret_cast<char*>(tre_data->data.get()), tre_data->size);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     std::stringstream obj(obj_str);
     std::stringstream grp(grp_str);
@@ -122,13 +135,22 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
+<<<<<<< HEAD
     GETTENSOR(dataset_ptr);
+=======
+    GET_TENSOR_DATA(dataset_ptr);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     size_t k = config[meta::TOPK].get<int64_t>();
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
+<<<<<<< HEAD
     auto p_id = (int64_t*)malloc(id_size * rows);
     auto p_dist = (float*)malloc(dist_size * rows);
+=======
+    auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
+    auto p_dist = static_cast<float*>(malloc(dist_size * rows));
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     NGT::Command::SearchParameter sp;
     sp.size = k;
@@ -137,7 +159,11 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
+<<<<<<< HEAD
         const float* single_query = (float*)p_data + i * Dim();
+=======
+        const float* single_query = reinterpret_cast<float*>(const_cast<void*>(p_data)) + i * Dim();
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
         NGT::Object* object = index_->allocateObject(single_query, Dim());
         NGT::SearchContainer sc(*object);

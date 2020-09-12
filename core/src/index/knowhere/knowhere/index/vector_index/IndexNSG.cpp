@@ -9,15 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/impl/nsg/NSG.h"
 #include "knowhere/index/vector_index/impl/nsg/NSGIO.h"
@@ -78,7 +78,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
 
     try {
         auto elems = rows * config[meta::TOPK].get<int64_t>();
@@ -94,8 +94,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.k = config[meta::TOPK];
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params,
-                           blacklist);
+            index_->Search((float*)p_data, nullptr, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id,
+                           s_params, blacklist);
         }
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -114,9 +114,9 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     idmap->AddWithoutIds(dataset_ptr, config);
     impl::Graph knng;
     const float* raw_data = idmap->GetRawVectors();
-    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     const int64_t k = config[IndexParams::knng].get<int64_t>();
 #ifdef MILVUS_GPU_VERSION
+    const int64_t device_id = config[knowhere::meta::DEVICEID].get<int64_t>();
     if (device_id == -1) {
         auto preprocess_index = std::make_shared<IVF>();
         preprocess_index->Train(dataset_ptr, config);
@@ -139,6 +139,20 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
+<<<<<<< HEAD
+    GET_TENSOR(dataset_ptr)
+
+    impl::NsgIndex::Metric_Type metric;
+    auto metric_str = config[Metric::TYPE].get<std::string>();
+    if (metric_str == knowhere::Metric::IP) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_IP;
+    } else if (metric_str == knowhere::Metric::L2) {
+        metric = impl::NsgIndex::Metric_Type::Metric_Type_L2;
+    } else {
+        KNOWHERE_THROW_MSG("Metric is not supported");
+    }
+
+=======
     GETTENSORWITHIDS(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
@@ -151,6 +165,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Metric is not supported");
     }
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);

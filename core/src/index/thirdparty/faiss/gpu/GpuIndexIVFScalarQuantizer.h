@@ -52,9 +52,13 @@ class GpuIndexIVFScalarQuantizer : public GpuIndexIVF {
   /// all data in ourselves
   void copyFrom(const faiss::IndexIVFScalarQuantizer* index);
 
+  void copyFromWithoutCodes(const faiss::IndexIVFScalarQuantizer* index, const uint8_t* arranged_data);
+
   /// Copy ourselves to the given CPU index; will overwrite all data
   /// in the index instance
   void copyTo(faiss::IndexIVFScalarQuantizer* index) const;
+
+  void copyToWithoutCodes(faiss::IndexIVFScalarQuantizer* index) const;
 
   /// After adding vectors, one can call this to reclaim device memory
   /// to exactly the amount needed. Returns space reclaimed in bytes

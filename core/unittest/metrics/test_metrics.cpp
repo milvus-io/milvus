@@ -15,31 +15,12 @@
 #include <string>
 #include <thread>
 #include <gtest/gtest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
-#include "cache/CpuCacheMgr.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "metrics/utils.h"
-#include "db/DB.h"
-#include "db/meta/SqliteMetaImpl.h"
 #include "metrics/Metrics.h"
-
-namespace {
-static constexpr int64_t COLLECTION_DIM = 256;
-
-void
-BuildVectors(uint64_t n, milvus::engine::VectorsData& vectors) {
-    vectors.vector_count_ = n;
-    vectors.float_data_.clear();
-    vectors.float_data_.resize(n * COLLECTION_DIM);
-    float* data = vectors.float_data_.data();
-    for (uint64_t i = 0; i < n; i++) {
-        for (int64_t j = 0; j < COLLECTION_DIM; j++) data[COLLECTION_DIM * i + j] = drand48();
-        data[COLLECTION_DIM * i] += i / 2000.;
-    }
-}
-} // namespace
 
 TEST_F(MetricTest, METRIC_TEST) {
     fiu_init(0);
@@ -61,6 +42,8 @@ TEST_F(MetricTest, METRIC_TEST) {
 
     std::string system_info;
     milvus::server::SystemInfo::GetInstance().GetSysInfoJsonStr(system_info);
+<<<<<<< HEAD
+=======
 
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
     std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
@@ -135,6 +118,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     }
 
     search.join();
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
 TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
@@ -154,14 +138,6 @@ TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
     milvus::server::CollectSerializeMetrics serialize_metrics(10);
 
     milvus::server::CollectAddMetrics add_metrics(10, 128);
-
-    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
-    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
-    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
-
-    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::SegmentSchema::RAW);
-    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::SegmentSchema::TO_INDEX);
-    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::SegmentSchema::TO_DELETE);
 
     milvus::server::MetricCollector metric_collector();
 }

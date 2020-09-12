@@ -12,7 +12,7 @@
 #include <chrono>
 #include <oatpp/network/server/Server.hpp>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
 
@@ -22,10 +22,14 @@ namespace web {
 
 void
 WebServer::Start() {
+<<<<<<< HEAD
+    if (config.network.http.enable() && nullptr == thread_ptr_) {
+=======
     auto& config = Config::GetInstance();
     bool enable = true;
     config.GetNetworkConfigHTTPEnable(enable);
     if (enable && nullptr == thread_ptr_) {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         thread_ptr_ = std::make_shared<std::thread>(&WebServer::StartService, this);
     }
 }
@@ -45,12 +49,15 @@ WebServer::StartService() {
     SetThreadName("webserv_thread");
     oatpp::base::Environment::init();
 
+<<<<<<< HEAD
+=======
     Config& config = Config::GetInstance();
     std::string port;
     STATUS_CHECK(config.GetNetworkConfigHTTPPort(port));
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     {
-        AppComponent components = AppComponent(std::stoi(port));
+        AppComponent components = AppComponent(config.network.http.port());
 
         /* create ApiControllers and add endpoints to router */
         auto user_controller = WebController::createShared();
@@ -72,13 +79,10 @@ WebServer::StartService() {
             }
 
             server.stop();
-            OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
-            client_provider->getConnection();
         });
 
         // start synchronously
         server.run();
-        connection_handler->stop();
         stop_thread.join();
     }
     oatpp::base::Environment::destroy();

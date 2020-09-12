@@ -46,7 +46,11 @@ NGT::Index::Index(NGT::Property &prop, const string &database) {
     NGTThrowException("Index::Index. Dimension is not specified.");
   }
   Index* idx = 0;
+<<<<<<< HEAD
   mmkdir(database);
+=======
+  mkdir(database);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
   if (prop.indexType == NGT::Index::Property::GraphAndTree) {
     idx = new NGT::GraphAndTreeIndex(database, prop);
   } else if (prop.indexType == NGT::Index::Property::Graph) {
@@ -175,7 +179,11 @@ NGT::Index::createGraphAndTree(const string &database, NGT::Property &prop, cons
   prop.indexType = NGT::Index::Property::IndexType::GraphAndTree;
   Index *idx = 0;
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
+<<<<<<< HEAD
   mmkdir(database);
+=======
+  mkdir(database);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
   idx = new NGT::GraphAndTreeIndex(database, prop);
 #else
   idx = new NGT::GraphAndTreeIndex(prop);
@@ -228,7 +236,11 @@ NGT::Index::createGraph(const string &database, NGT::Property &prop, const strin
   prop.indexType = NGT::Index::Property::IndexType::Graph;
   Index *idx = 0;
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
+<<<<<<< HEAD
   mmkdir(database);
+=======
+  mkdir(database);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
   idx = new NGT::GraphIndex(database, prop);
 #else
   idx = new NGT::GraphIndex(prop);
@@ -388,7 +400,11 @@ NGT::Index::importIndex(const string &database, const string &file) {
   timer.start();
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
   property.databaseType = NGT::Index::Property::DatabaseType::MemoryMappedFile;
+<<<<<<< HEAD
   mmkdir(database);
+=======
+  mkdir(database);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 #else
   property.databaseType = NGT::Index::Property::DatabaseType::Memory;
 #endif

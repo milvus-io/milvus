@@ -1,3 +1,12 @@
 core/src/index/thirdparty/**
-sdk/build-support/**
 core/build-support/**
+core/src/grpc/gen-milvus/**
+core/src/grpc/gen-status/**
+core/thirdparty/**
+sdk/build-support/**
+sdk/thirdparty/**
+sdk/grpc-gen/**
+ci/**
+docker/**
+docs/**
+tests/**

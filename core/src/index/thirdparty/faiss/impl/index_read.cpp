@@ -36,6 +36,7 @@
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/IndexHNSW.h>
+#include <faiss/IndexRHNSW.h>
 #include <faiss/IndexLattice.h>
 
 #include <faiss/OnDiskInvertedLists.h>
@@ -343,6 +344,89 @@ static void read_InvertedLists (
     ivf->own_invlists = true;
 }
 
+InvertedLists *read_InvertedLists_nm (IOReader *f, int io_flags) {
+    uint32_t h;
+    READ1 (h);
+    if (h == fourcc ("il00")) {
+        fprintf(stderr, "read_InvertedLists:"
+                " WARN! inverted lists not stored with IVF object\n");
+        return nullptr;
+    } else if (h == fourcc ("iloa") && !(io_flags & IO_FLAG_MMAP)) {
+        // not going to happen
+        return nullptr;
+    } else if (h == fourcc ("ilar") && !(io_flags & IO_FLAG_MMAP)) {
+        auto ails = new ArrayInvertedLists (0, 0);
+        READ1 (ails->nlist);
+        READ1 (ails->code_size);
+        ails->ids.resize (ails->nlist);
+        std::vector<size_t> sizes (ails->nlist);
+        read_ArrayInvertedLists_sizes (f, sizes);
+        for (size_t i = 0; i < ails->nlist; i++) {
+            ails->ids[i].resize (sizes[i]);
+        }
+        for (size_t i = 0; i < ails->nlist; i++) {
+            size_t n = ails->ids[i].size();
+            if (n > 0) {
+                READANDCHECK (ails->ids[i].data(), n);
+            }
+        }
+        return ails;
+    } else if (h == fourcc ("ilar") && (io_flags & IO_FLAG_MMAP)) {
+        // then we load it as an OnDiskInvertedLists
+        FileIOReader *reader = dynamic_cast<FileIOReader*>(f);
+        FAISS_THROW_IF_NOT_MSG(reader, "mmap only supported for File objects");
+        FILE *fdesc = reader->f;
+
+        auto ails = new OnDiskInvertedLists ();
+        READ1 (ails->nlist);
+        READ1 (ails->code_size);
+        ails->read_only = true;
+        ails->lists.resize (ails->nlist);
+        std::vector<size_t> sizes (ails->nlist);
+        read_ArrayInvertedLists_sizes (f, sizes);
+        size_t o0 = ftell(fdesc), o = o0;
+        { // do the mmap
+            struct stat buf;
+            int ret = fstat (fileno(fdesc), &buf);
+            FAISS_THROW_IF_NOT_FMT (ret == 0,
+                                    "fstat failed: %s", strerror(errno));
+            ails->totsize = buf.st_size;
+            ails->ptr = (uint8_t*)mmap (nullptr, ails->totsize,
+                                        PROT_READ, MAP_SHARED,
+                                        fileno(fdesc), 0);
+            FAISS_THROW_IF_NOT_FMT (ails->ptr != MAP_FAILED,
+                            "could not mmap: %s",
+                            strerror(errno));
+        }
+
+        for (size_t i = 0; i < ails->nlist; i++) {
+            OnDiskInvertedLists::List & l = ails->lists[i];
+            l.size = l.capacity = sizes[i];
+            l.offset = o;
+            o += l.size * (sizeof(OnDiskInvertedLists::idx_t) +
+                           ails->code_size);
+        }
+        FAISS_THROW_IF_NOT(o <= ails->totsize);
+        // resume normal reading of file
+        fseek (fdesc, o, SEEK_SET);
+        return ails;
+    } else if (h == fourcc ("ilod")) {
+        // not going to happen
+        return nullptr;
+    } else {
+        FAISS_THROW_MSG ("read_InvertedLists: unsupported invlist type");
+    }
+}
+
+static void read_InvertedLists_nm (
+        IndexIVF *ivf, IOReader *f, int io_flags) {
+    InvertedLists *ils = read_InvertedLists_nm (f, io_flags);
+    FAISS_THROW_IF_NOT (!ils || (ils->nlist == ivf->nlist &&
+                                 ils->code_size == ivf->code_size));
+    ivf->invlists = ils;
+    ivf->own_invlists = true;
+}
+
 static void read_ProductQuantizer (ProductQuantizer *pq, IOReader *f) {
     READ1 (pq->d);
     READ1 (pq->M);
@@ -373,6 +457,29 @@ static void read_HNSW (HNSW *hnsw, IOReader *f) {
     READ1 (hnsw->efConstruction);
     READ1 (hnsw->efSearch);
     READ1 (hnsw->upper_beam);
+}
+
+static void read_RHNSW (RHNSW *rhnsw, IOReader *f) {
+    READ1 (rhnsw->entry_point);
+    READ1 (rhnsw->max_level);
+    READ1 (rhnsw->M);
+    READ1 (rhnsw->level0_link_size);
+    READ1 (rhnsw->link_size);
+    READ1 (rhnsw->level_constant);
+    READ1 (rhnsw->efConstruction);
+    READ1 (rhnsw->efSearch);
+
+    READVECTOR (rhnsw->levels);
+    auto ntotal = rhnsw->levels.size();
+    rhnsw->level0_links = (char*) malloc(ntotal * rhnsw->level0_link_size);
+    READANDCHECK( rhnsw->level0_links, ntotal * rhnsw->level0_link_size);
+    rhnsw->linkLists = (char**) malloc(ntotal * sizeof(void*));
+    for (auto i = 0; i < ntotal; ++ i) {
+        if (rhnsw->levels[i]) {
+            rhnsw->linkLists[i] = (char*)malloc(rhnsw->link_size * rhnsw->levels[i] + 1);
+            READANDCHECK( rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+        }
+    }
 }
 
 ProductQuantizer * read_ProductQuantizer (const char*fname) {
@@ -540,6 +647,9 @@ Index *read_index (IOReader *f, int io_flags) {
         // to L2 when the old format is detected
         if (h == fourcc ("IxPQ") || h == fourcc ("IxPo")) {
             idxp->metric_type = METRIC_L2;
+        }
+        if (h == fourcc("IxPq")) {
+            idxp->pq.compute_sdc_table ();
         }
         idx = idxp;
     } else if (h == fourcc ("IvFl") || h == fourcc("IvFL")) { // legacy
@@ -717,6 +827,17 @@ Index *read_index (IOReader *f, int io_flags) {
             dynamic_cast<IndexPQ*>(idxhnsw->storage)->pq.compute_sdc_table ();
         }
         idx = idxhnsw;
+    } else if(h == fourcc("IRHf") || h == fourcc("IRHp") ||
+              h == fourcc("IRHs") || h == fourcc("IRH2")) {
+        IndexRHNSW *idxrhnsw = nullptr;
+        if (h == fourcc("IRHf")) idxrhnsw = new IndexRHNSWFlat ();
+        if (h == fourcc("IRHp")) idxrhnsw = new IndexRHNSWPQ ();
+        if (h == fourcc("IRHs")) idxrhnsw = new IndexRHNSWSQ ();
+        if (h == fourcc("IRH2")) idxrhnsw = new IndexRHNSW2Level ();
+        read_index_header (idxrhnsw, f);
+        read_RHNSW (&idxrhnsw->hnsw, f);
+        idxrhnsw->own_fields = true;
+        idx = idxrhnsw;
     } else {
         FAISS_THROW_FMT("Index type 0x%08x not supported\n", h);
         idx = nullptr;
@@ -733,6 +854,52 @@ Index *read_index (FILE * f, int io_flags) {
 Index *read_index (const char *fname, int io_flags) {
     FileIOReader reader(fname);
     Index *idx = read_index (&reader, io_flags);
+    return idx;
+}
+
+// read offset-only index
+Index *read_index_nm (IOReader *f, int io_flags) {
+    Index * idx = nullptr;
+    uint32_t h;
+    READ1 (h);
+    if (h == fourcc ("IwFl")) {
+        IndexIVFFlat * ivfl = new IndexIVFFlat ();
+        read_ivf_header (ivfl, f);
+        ivfl->code_size = ivfl->d * sizeof(float);
+        read_InvertedLists_nm (ivfl, f, io_flags);
+        idx = ivfl;
+    } else if(h == fourcc ("IwSq")) {
+        IndexIVFScalarQuantizer * ivsc = new IndexIVFScalarQuantizer();
+        read_ivf_header (ivsc, f);
+        read_ScalarQuantizer (&ivsc->sq, f);
+        READ1 (ivsc->code_size);
+        READ1 (ivsc->by_residual);
+        read_InvertedLists_nm (ivsc, f, io_flags);
+        idx = ivsc;
+    } else if (h == fourcc("ISqH")) {
+        IndexIVFSQHybrid *ivfsqhbyrid = new IndexIVFSQHybrid();
+        read_ivf_header(ivfsqhbyrid, f);
+        read_ScalarQuantizer(&ivfsqhbyrid->sq, f);
+        READ1 (ivfsqhbyrid->code_size);
+        READ1 (ivfsqhbyrid->by_residual);
+        read_InvertedLists_nm(ivfsqhbyrid, f, io_flags);
+        idx = ivfsqhbyrid;
+    } else {
+        FAISS_THROW_FMT("Index type 0x%08x not supported\n", h);
+        idx = nullptr;
+    }
+    return idx;
+}
+
+
+Index *read_index_nm (FILE * f, int io_flags) {
+    FileIOReader reader(f);
+    return read_index_nm(&reader, io_flags);
+}
+
+Index *read_index_nm (const char *fname, int io_flags) {
+    FileIOReader reader(fname);
+    Index *idx = read_index_nm (&reader, io_flags);
     return idx;
 }
 
@@ -806,6 +973,7 @@ static void read_binary_hash_invlists (
         FAISS_THROW_IF_NOT (il.ids.size() == ilsz);
         READVECTOR (il.vecs);
     }
+<<<<<<< HEAD
 }
 
 static void read_binary_multi_hash_map(
@@ -833,6 +1001,35 @@ static void read_binary_multi_hash_map(
     }
 }
 
+=======
+}
+
+static void read_binary_multi_hash_map(
+        IndexBinaryMultiHash::Map &map,
+        int b, size_t ntotal,
+        IOReader *f)
+{
+    int id_bits;
+    size_t sz;
+    READ1 (id_bits);
+    READ1 (sz);
+    std::vector<uint8_t> buf;
+    READVECTOR (buf);
+    size_t nbit = (b + id_bits) * sz + ntotal * id_bits;
+    FAISS_THROW_IF_NOT (buf.size() == (nbit + 7) / 8);
+    BitstringReader rd (buf.data(), buf.size());
+    map.reserve (sz);
+    for (size_t i = 0; i < sz; i++) {
+        uint64_t hash = rd.read(b);
+        uint64_t ilsz = rd.read(id_bits);
+        auto & il = map[hash];
+        for (size_t j = 0; j < ilsz; j++) {
+            il.push_back (rd.read (id_bits));
+        }
+    }
+}
+
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 IndexBinary *read_index_binary (IOReader *f, int io_flags) {

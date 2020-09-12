@@ -34,6 +34,12 @@ class NGTONNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::DIM, dim},
             {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+<<<<<<< HEAD
+=======
+            {milvus::knowhere::IndexParams::edge_size, 20},
+            {milvus::knowhere::IndexParams::outgoing_edge_size, 5},
+            {milvus::knowhere::IndexParams::incoming_edge_size, 40},
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
         };
     }
 
@@ -102,7 +108,11 @@ TEST_P(NGTONNGTest, ngtonng_serialize) {
     {
         // serialize index
         index_->BuildAll(base_dataset, conf);
+<<<<<<< HEAD
         auto binaryset = index_->Serialize();
+=======
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
         auto bin_obj_data = binaryset.GetByName("ngt_obj_data");
         std::string filename1 = "/tmp/ngt_obj_data_serialize.bin";

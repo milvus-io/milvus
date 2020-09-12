@@ -24,12 +24,14 @@ FinishedTask::FinishedTask(const TaskPtr& task) : Task(TaskType::SearchTask, nul
     Task::label_ = task->label_;
 }
 
-void
-FinishedTask::Load(LoadType type, uint8_t device_id) {
+Status
+FinishedTask::OnLoad(LoadType type, uint8_t device_id) {
+    return Status::OK();
 }
 
-void
-FinishedTask::Execute() {
+Status
+FinishedTask::OnExecute() {
+    return Status::OK();
 }
 
 }  // namespace milvus::scheduler

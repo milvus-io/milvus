@@ -78,6 +78,7 @@ struct IndexScalarQuantizer: Index {
     void sa_decode (idx_t n, const uint8_t *bytes,
                             float *x) const override;
 
+    size_t cal_size() { return codes.size() * sizeof(uint8_t) + sizeof(size_t) + sq.cal_size(); }
 
 };
 
@@ -107,6 +108,8 @@ struct IndexIVFScalarQuantizer: IndexIVF {
                         bool include_listnos=false) const override;
 
     void add_with_ids(idx_t n, const float* x, const idx_t* xids) override;
+    
+    void add_with_ids_without_codes(idx_t n, const float* x, const idx_t* xids) override;
 
     InvertedListScanner *get_InvertedListScanner (bool store_pairs)
         const override;

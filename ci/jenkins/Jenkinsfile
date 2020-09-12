@@ -1,28 +1,34 @@
 #!/usr/bin/env groovy
+@Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
+<<<<<<< HEAD
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+=======
+<<<<<<< HEAD
+String cron_string = BRANCH_NAME == "master" ? "50 3 * * * " : ""
+=======
+String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
 pipeline {
     agent none
-
     triggers {
         cron """${cron_timezone}
             ${cron_string}"""
     }
-
     options {
         timestamps()
     }
-
     parameters{
         choice choices: ['Release', 'Debug'], description: 'Build Type', name: 'BUILD_TYPE'
+        choice choices: ['False', 'True'], description: 'Is Manual Trigger Or Not', name: 'IS_MANUAL_TRIGGER_TYPE'
         string defaultValue: 'registry.zilliz.com', description: 'DOCKER REGISTRY URL', name: 'DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
         string defaultValue: 'http://192.168.1.201/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
         string defaultValue: '1a527823-d2b7-44fd-834b-9844350baf14', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
     }
-
     environment {
         PROJECT_NAME = "milvus"
         MILVUS_ROOT_PATH="/var/lib"
@@ -30,43 +36,51 @@ pipeline {
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         PIPELINE_NAME = "milvus-ci"
+<<<<<<< HEAD
+        HELM_BRANCH = "0.11.0"
+=======
         HELM_BRANCH = "0.10.1"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-
     stages {
-        stage ('Milvus CI') {
+        stage ('Milvus Build and Unittest') {
             matrix {
-                agent none
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'ubuntu18.04', 'centos7'
+                        values 'centos7'
                     }
-
                     axis {
                         name 'CPU_ARCH'
                         values 'amd64'
                     }
-
                     axis {
                         name 'BINARY_VERSION'
                         values 'gpu', 'cpu'
                     }
                 }
-                when {
-                    not {
-                        expression {return OS_NAME == "ubuntu18.04" && !isTimeTriggeredBuild()}
-                    }
-                }
-
                 environment {
                     PACKAGE_VERSION = VersionNumber([
-                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
                     ]);
-                    DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
                 }
-
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-build-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        customWorkspace '/home/jenkins/agent/workspace'
+                        yamlFile "ci/jenkins/pod/milvus-${BINARY_VERSION}-version-${OS_NAME}-build-env-pod.yaml"
+                    }
+                }
                 stages {
+<<<<<<< HEAD
+                    stage('Build and Unittest') {
+                        steps {
+                            container("milvus-${BINARY_VERSION}-build-env") {
+                                MPLModule('Milvus Build')
+                                MPLModule('Unittest')
+                                MPLModule('Package Build')
+=======
                     stage("Milvus Build and Unittest") {
                         agent {
                             kubernetes {
@@ -128,32 +142,108 @@ pipeline {
                                         }
                                     }
                                 }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                             }
                         }
                     }
-
-                    stage('Publish Docker images') {
-                        agent {
-                            kubernetes {
-                                label "${OS_NAME}-${BINARY_VERSION}-publish-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
-                                defaultContainer 'jnlp'
-                                yamlFile 'ci/jenkins/pod/docker-pod.yaml'
-                            }
-                        }
-
-                        stages {
-                            stage('Publish') {
-                                steps {
-                                    container('publish-images') {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/publishImages.groovy"
-                                        }
-                                    }
-                                }
+                }
+            }
+        }
+        stage ('Publish Docker Images') {
+            matrix {
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'centos7'
+                    }
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
+                    }
+                }
+                environment {
+                    PACKAGE_VERSION = VersionNumber([
+                        versionNumberString : '${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${CPU_ARCH}-${LOWER_BUILD_TYPE}'
+                    ]);
+                    SOURCE_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                    TARGET_REPO = "${params.DOKCER_REGISTRY_URL}/milvus/engine"
+                    SOURCE_TAG = "${CHANGE_TARGET ? CHANGE_TARGET : SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    TARGET_TAG = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    DOCKER_BUILDKIT = 1
+                }
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-publish-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        yamlFile 'ci/jenkins/pod/docker-pod.yaml'
+                    }
+                }
+                stages {
+                    stage('Publish') {
+                        steps {
+                            container('publish-images') {
+                                MPLModule('Publish')
                             }
                         }
                     }
+                }
+            }
+        }
+        stage ('Dev Test') {
+            matrix {
+                axes {
+                    axis {
+                        name 'OS_NAME'
+                        values 'centos7'
+                    }
 
+<<<<<<< HEAD
+                    axis {
+                        name 'CPU_ARCH'
+                        values 'amd64'
+                    }
+
+                    axis {
+                        name 'BINARY_VERSION'
+                        values 'gpu', 'cpu'
+                    }
+                }
+                environment {
+                    DOCKER_VERSION = "${SEMVER}-${BINARY_VERSION}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+                    FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
+                    FORMAT_OS_NAME = "${OS_NAME}".replaceAll("\\.", "-").replaceAll("_", "-")
+                    HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-single-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                    SHARDS_HELM_RELEASE_NAME = "${env.PIPELINE_NAME}-${env.FROMAT_SEMVER}-${env.BUILD_NUMBER}-shards-${FORMAT_OS_NAME}-${BINARY_VERSION}".toLowerCase()
+                    DEV_TEST_ARTIFACTS = "_artifacts/${FORMAT_OS_NAME}/${BINARY_VERSION}"
+                }
+                agent {
+                    kubernetes {
+                        label "${OS_NAME}-${BINARY_VERSION}-dev-test-${SEMVER}-${env.PIPELINE_NAME}-${env.BUILD_NUMBER}"
+                        defaultContainer 'jnlp'
+                        yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
+                    }
+                }
+                stages {
+                    stage('Test') {
+                        steps {
+                            container('milvus-test-env') {
+                                MPLModule('Single Node DevTest')
+                                MPLModule('Mishards DevTest')
+                            }
+                        }
+                    }
+                }
+                post {
+                    cleanup {
+                        container('milvus-test-env') {
+                            archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
+                            MPLModule('Cleanup Single Node DevTest')
+                            MPLModule('Cleanup Mishards DevTest')
+=======
                     stage('Deploy to Development') {
                         environment {
                             FROMAT_SEMVER = "${env.SEMVER}".replaceAll("\\.", "-").replaceAll("_", "-")
@@ -203,6 +293,7 @@ pipeline {
                                     }
                                 }
                             }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
                         }
                     }
                 }
@@ -212,8 +303,7 @@ pipeline {
     post {
         unsuccessful {
             script {
-                boolean isNightlyTest = isTimeTriggeredBuild()
-                if (isNightlyTest) {
+                if (isTimeTriggeredBuild()) {
                     // Send an email only if the build status has changed from green/unstable to red
                     emailext subject: '$DEFAULT_SUBJECT',
                     body: '$DEFAULT_CONTENT',
@@ -229,16 +319,6 @@ pipeline {
     }
 }
 
-boolean isEmptyChangelog() {
-    if (currentBuild.changeSets.size() == 0) {
-        return true
-    }
-    return false
-}
-
 boolean isTimeTriggeredBuild() {
-    if (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) {
-        return true
-    }
-    return false
+    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
 }

@@ -9,6 +9,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM milvusdb/milvus-dev:amd64-ubuntu-18.04-core AS openblas
+
 FROM nvidia/cuda:10.1-devel-ubuntu18.04
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
@@ -16,7 +18,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 RUN rm -rf /etc/apt/sources.list.d/nvidia-ml.list && rm -rf /etc/apt/sources.list.d/cuda.list
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 libopenblas-dev liblapack3 && \
+    gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -25,9 +27,15 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
+COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
+
+<<<<<<< HEAD
 WORKDIR /var/lib/milvus
 
+CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
+=======
 CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/server_config.yaml" ]
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 EXPOSE 19530
 

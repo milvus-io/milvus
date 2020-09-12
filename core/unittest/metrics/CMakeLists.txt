@@ -25,12 +25,17 @@ endif ()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")
 add_executable(test_metrics
         ${common_files}
+        ${log_files}
+        ${config_files}
+        ${metrics_files}
+        ${metrics_prometheus_files}
         ${test_files}
         )
 
 target_link_libraries(test_metrics
         knowhere
         metrics
+        config
         ${unittest_libs})
 
 install(TARGETS test_metrics DESTINATION unittest)

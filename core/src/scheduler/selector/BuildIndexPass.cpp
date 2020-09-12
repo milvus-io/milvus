@@ -8,7 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
@@ -20,22 +20,15 @@ namespace scheduler {
 
 void
 BuildIndexPass::Init() {
-    server::Config& config = server::Config::GetInstance();
-    Status s = config.GetGpuResourceConfigBuildIndexResources(build_gpus_);
-    fiu_do_on("BuildIndexPass.Init.get_config_fail", s = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
-    if (!s.ok()) {
-        throw std::exception();
-    }
-
-    SetIdentity("BuildIndexPass");
-    AddGpuEnableListener();
-    AddGpuBuildResourcesListener();
+    gpu_enable_ = config.gpu.enable();
+    build_gpus_ = ParseGPUDevices(config.gpu.build_index_devices());
 }
 
 bool
 BuildIndexPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::BuildIndexTask)
+    if (task->Type() != TaskType::BuildIndexTask) {
         return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
@@ -56,6 +49,10 @@ BuildIndexPass::Run(const TaskPtr& task) {
     task->label() = label;
 
     return true;
+}
+
+void
+BuildIndexPass::ConfigUpdate(const std::string& name) {
 }
 
 }  // namespace scheduler

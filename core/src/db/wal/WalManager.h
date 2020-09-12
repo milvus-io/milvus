@@ -11,25 +11,73 @@
 
 #pragma once
 
-#include <atomic>
-#include <map>
+#include "config/ServerConfig.h"
+#include "db/DB.h"
+#include "db/IDGenerator.h"
+#include "db/Types.h"
+#include "db/wal/WalFile.h"
+#include "db/wal/WalOperation.h"
+#include "utils/Status.h"
+#include "utils/ThreadPool.h"
+
+#include <list>
+#include <mutex>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
-
-#include "WalBuffer.h"
-#include "WalDefinations.h"
-#include "WalFileHandler.h"
-#include "WalMetaHandler.h"
-#include "utils/Error.h"
 
 namespace milvus {
 namespace engine {
-namespace wal {
+
+extern const char* WAL_MAX_OP_FILE_NAME;
+extern const char* WAL_DEL_FILE_NAME;
 
 class WalManager {
  public:
+<<<<<<< HEAD
+    static WalManager&
+    GetInstance();
+
+    Status
+    Start(const DBOptions& options);
+
+    Status
+    Stop();
+
+    Status
+    DropCollection(const std::string& collection_name);
+
+    Status
+    RecordOperation(const WalOperationPtr& operation, const DBPtr& db);
+
+    Status
+    OperationDone(const std::string& collection_name, idx_t op_id);
+
+    Status
+    Recovery(const DBPtr& db);
+
+ private:
+    WalManager();
+
+    Status
+    Init();
+
+    Status
+    RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db);
+
+    Status
+    RecordDeleteOperation(const DeleteEntityOperationPtr& operation, const DBPtr& db);
+
+    std::string
+    ConstructFilePath(const std::string& collection_name, const std::string& file_name);
+
+    void
+    AddCleanupTask(const std::string& collection_name);
+
+    void
+    TakeCleanupTask(std::string& collection_name);
+
+=======
     explicit WalManager(const MXLogConfiguration& config);
     ~WalManager();
 
@@ -93,9 +141,14 @@ class WalManager {
      * @param collection_id: collection id
      * @retval none
      */
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     void
-    DropCollection(const std::string& collection_id);
+    StartCleanupThread();
 
+<<<<<<< HEAD
+    void
+    WaitCleanupFinish();
+=======
     /*
      * Drop partition
      * @param collection_id: collection id
@@ -183,11 +236,22 @@ class WalManager {
      */
     uint64_t
     Flush(const std::string& collection_id = "");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     void
-    RemoveOldFiles(uint64_t flushed_lsn);
+    CleanupThread();
+
+    Status
+    PerformOperation(const WalOperationPtr& operation, const DBPtr& db);
 
  private:
+<<<<<<< HEAD
+    SafeIDGenerator id_gen_;
+
+    bool enable_ = false;
+    std::string wal_path_;
+    int64_t insert_buffer_size_ = 0;
+=======
     WalManager
     operator=(WalManager&);
 
@@ -220,15 +284,23 @@ class WalManager {
     };
     FlushInfo flush_info_;
 };
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
-extern template bool
-WalManager::Insert<float>(const std::string& collection_id, const std::string& partition_tag,
-                          const IDNumbers& vector_ids, const std::vector<float>& vectors);
+    using WalFileMap = std::unordered_map<std::string, WalFilePtr>;
+    WalFileMap file_map_;  // mapping collection name to file
+    std::mutex file_map_mutex_;
 
-extern template bool
-WalManager::Insert<uint8_t>(const std::string& collection_id, const std::string& partition_tag,
-                            const IDNumbers& vector_ids, const std::vector<uint8_t>& vectors);
+    using MaxOpIdMap = std::unordered_map<std::string, idx_t>;
+    MaxOpIdMap max_op_id_map_;  // mapping collection name to max operation id
+    std::mutex max_op_mutex_;
 
-}  // namespace wal
+    ThreadPool cleanup_thread_pool_;
+    std::mutex cleanup_thread_mutex_;
+    std::list<std::future<void>> cleanup_thread_results_;
+
+    std::list<std::string> cleanup_tasks_;  // cleanup target collections
+    std::mutex cleanup_task_mutex_;
+};
+
 }  // namespace engine
 }  // namespace milvus

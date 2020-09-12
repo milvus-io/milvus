@@ -20,10 +20,13 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {
+
+#define RAW_DATA "RAW_DATA"
+#define QUANTIZATION_DATA "QUANTIZATION_DATA"
 
 class VecIndex : public Index {
  public:

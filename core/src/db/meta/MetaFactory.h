@@ -11,22 +11,20 @@
 
 #pragma once
 
-#include "Meta.h"
-#include "db/Options.h"
+#include "db/Types.h"
+#include "db/meta/MetaAdapter.h"
 
 #include <string>
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 class MetaFactory {
  public:
     static DBMetaOptions
     BuildOption(const std::string& path = "");
 
-    static meta::MetaPtr
-    Build(const DBMetaOptions& meta_options, const int& mode);
+    static meta::MetaAdapterPtr
+    Build(const DBMetaOptions& meta_options);
 };
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine

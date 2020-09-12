@@ -11,77 +11,125 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
+cmake_minimum_required( VERSION 3.14 )
+message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
-cmake_minimum_required(VERSION 3.12)
-message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
+set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
+include( Utils )
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+# **************************** Build time, type and code version ****************************
+get_current_time( BUILD_TIME )
+message( STATUS "Build time = ${BUILD_TIME}" )
 
-# get build time
-MACRO(GET_CURRENT_TIME CURRENT_TIME)
-    execute_process(COMMAND "date" +"%Y-%m-%d %H:%M.%S" OUTPUT_VARIABLE ${CURRENT_TIME})
-ENDMACRO(GET_CURRENT_TIME)
+get_build_type( TARGET  BUILD_TYPE 
+                        DEFAULT "Release" )
+message( STATUS "Build type = ${BUILD_TYPE}" )
 
-GET_CURRENT_TIME(BUILD_TIME)
-string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
-message(STATUS "Build time = ${BUILD_TIME}")
+get_milvus_version( TARGET  MILVUS_VERSION 
+                            DEFAULT "0.11.0" )
+message( STATUS "Build version = ${MILVUS_VERSION}" )
 
-if (NOT DEFINED CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
-endif ()
+get_last_commit_id( LAST_COMMIT_ID )
+message( STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}" )
 
-# get Milvus version via branch name
-set(GIT_BRANCH_NAME_REGEX "[0-9]+\\.[0-9]+\\.[0-9]")
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY )
 
-MACRO(GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
-    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | sed 's/.*(\\(.*\\))/\\1/' | sed 's/.*, //' | sed 's=[a-zA-Z]*\/==g'"
-            OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
-        execute_process(COMMAND "git" rev-parse --abbrev-ref HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    endif ()
-    if (NOT GIT_BRANCH_NAME MATCHES "${GIT_BRANCH_NAME_REGEX}")
-        execute_process(COMMAND "git" symbolic-ref --short -q HEAD HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
-    endif ()
-ENDMACRO(GET_GIT_BRANCH_NAME)
+# unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
+set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
-GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
-message(STATUS "GIT_BRANCH_NAME = ${GIT_BRANCH_NAME}")
-if (NOT GIT_BRANCH_NAME STREQUAL "")
-    string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
-endif ()
+# **************************** Project ****************************
+project( milvus VERSION "${MILVUS_VERSION}" )
 
-set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
-string(REGEX MATCH "${GIT_BRANCH_NAME_REGEX}" MILVUS_VERSION "${MILVUS_VERSION}")
+set( CMAKE_CXX_STANDARD 17 )
+set( CMAKE_CXX_STANDARD_REQUIRED on )
 
-# get last commit id
-MACRO(GET_LAST_COMMIT_ID LAST_COMMIT_ID)
-    execute_process(COMMAND sh "-c" "git log --decorate | head -n 1 | awk '{print $2}'"
-            OUTPUT_VARIABLE ${LAST_COMMIT_ID})
-ENDMACRO(GET_LAST_COMMIT_ID)
+set( MILVUS_SOURCE_DIR      ${PROJECT_SOURCE_DIR} )
+set( MILVUS_BINARY_DIR      ${PROJECT_BINARY_DIR} )
+set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
+set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 
-GET_LAST_COMMIT_ID(LAST_COMMIT_ID)
-message(STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}")
-if (NOT LAST_COMMIT_ID STREQUAL "")
-    string(REGEX REPLACE "\n" "" LAST_COMMIT_ID ${LAST_COMMIT_ID})
-    set(LAST_COMMIT_ID "${LAST_COMMIT_ID}")
+# This will set RPATH to all excutable TARGET
+# self-installed dynamic libraries will be correctly linked by excutable
+set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" )
+set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
+# **************************** Dependencies ****************************
+include( CTest )
+include( BuildUtils )
+include( DefineOptions )
+import_mysql_inc()
+using_ccache_if_defined( MILVUS_USE_CCACHE )
+
+include( ExternalProject )
+
+# **************************** Compiler arguments ****************************
+
+if ( MILVUS_GPU_VERSION )
+    message( STATUS "Building Milvus GPU version" )
+    add_compile_definitions( "MILVUS_GPU_VERSION" )
+    enable_language( CUDA )
+    find_package( CUDA 10 REQUIRED )
+    include_directories( ${CUDA_INCLUDE_DIRS} )
+    link_directories(    ${CUDA_TOOLKIT_ROOT_DIR}/lib64 )
+    set( CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda" )
+    if ( CCACHE_FOUND )
+        set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_FOUND}")
+    endif()
 else ()
-    set(LAST_COMMIT_ID "Unknown")
+    message( STATUS "Building Milvus CPU version" )
 endif ()
 
-# set build type
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(BUILD_TYPE "Release")
+# TODO: remove after all ut set "FIU_ENABLE"
+set(MILVUS_WITH_FIU "ON")
+
+set_milvus_definition( MILVUS_WITH_PROMETHEUS   "MILVUS_WITH_PROMETHEUS" )
+set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )
+set_milvus_definition( MILVUS_WITH_FIU          "FIU_ENABLE" )
+
+if ( CMAKE_BUILD_TYPE STREQUAL "Release" )
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-O3" )
+    append_flags( CUDA_NVCC_FLAGS FLAGS "-O3" )
+elseif ( CMAKE_BUILD_TYPE STREQUAL "Debug" )
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-O0" "-g" )
+    append_flags( CUDA_NVCC_FLAGS FLAGS "-O0" "-g" )
 else ()
-    set(BUILD_TYPE "Debug")
+    message( FATAL_ERROR "Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}" )
 endif ()
-message(STATUS "Build type = ${BUILD_TYPE}")
 
-project(milvus VERSION "${MILVUS_VERSION}")
-project(milvus_engine LANGUAGES CXX)
+append_flags( CMAKE_CXX_FLAGS
+              FLAGS
+                    "-fPIC"
+                    "-DELPP_THREAD_SAFE"
+                    "-fopenmp"
+                    "-Werror"
+                    )
 
-unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# **************************** Coding style check tools ****************************
+find_package( Python COMPONENTS Interpreter Development )
+find_package( ClangTools )
+set( BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support" )
 
+if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
+  # Generate a Clang compile_commands.json "compilation database" file for use
+  # with various development tools, such as Vim's YouCompleteMe plugin.
+  # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
+endif()
+
+#
+# "make lint" target
+#
+if ( NOT MILVUS_VERBOSE_LINT )
+    set( MILVUS_LINT_QUIET "--quiet" )
+endif ()
+
+<<<<<<< HEAD
+if ( NOT LINT_EXCLUSIONS_FILE )
+    # source files matching a glob from a line in this file
+    # will be excluded from linting (cpplint, clang-tidy, clang-format)
+    set( LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt )
+=======
 set(MILVUS_VERSION_MAJOR "${milvus_VERSION_MAJOR}")
 set(MILVUS_VERSION_MINOR "${milvus_VERSION_MINOR}")
 set(MILVUS_VERSION_PATCH "${milvus_VERSION_PATCH}")
@@ -91,131 +139,115 @@ if (MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
     set(MILVUS_VERSION "0.10.2")
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 endif ()
 
-message(STATUS "Build version = ${MILVUS_VERSION}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY)
-
-message(STATUS "Milvus version: "
-        "${MILVUS_VERSION_MAJOR}.${MILVUS_VERSION_MINOR}.${MILVUS_VERSION_PATCH} "
-        "(full: '${MILVUS_VERSION}')")
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED on)
-
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-    message(STATUS "Building milvus_engine on x86 architecture")
-    set(MILVUS_BUILD_ARCH x86_64)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
-    message(STATUS "Building milvus_engine on ppc architecture")
-    set(MILVUS_BUILD_ARCH ppc64le)
-else ()
-    message(WARNING "Unknown processor type")
-    message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
-    set(MILVUS_BUILD_ARCH unknown)
+if ( NOT IGNORE_CHECKS_FILE )
+    set( IGNORE_CHECKS_FILE ${BUILD_SUPPORT_DIR}/ignore_checks.txt )
 endif ()
 
-# Ensure that a default make is set
-if ("${MAKE}" STREQUAL "")
-    if (NOT MSVC)
-        find_program(MAKE make)
-    endif ()
+find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
+message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
+
+#
+# "make lint" targets
+#
+add_custom_target( lint
+    ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_cpplint.py
+                            --cpplint_binary    ${CPPLINT_BIN}
+                            --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                            --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}
+                            ${MILVUS_LINT_QUIET}
+                            )
+
+#
+# "make clang-format" and "make check-clang-format" targets
+#
+if ( ${CLANG_FORMAT_FOUND} )
+    # runs clang format and updates files in place.
+    add_custom_target( clang-format
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                                --clang_format_binary   ${CLANG_FORMAT_BIN}
+                                --exclude_globs         ${LINT_EXCLUSIONS_FILE}
+                                --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                --fix
+                                ${MILVUS_LINT_QUIET} )
+
+    # runs clang format and exits with a non-zero exit code if any files need to be reformatted
+    add_custom_target( check-clang-format
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                                --clang_format_binary   ${CLANG_FORMAT_BIN}
+                                --exclude_globs         ${LINT_EXCLUSIONS_FILE}
+                                --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                ${MILVUS_LINT_QUIET} )
 endif ()
 
-find_path(MYSQL_INCLUDE_DIR
-        NAMES "mysql.h"
-        PATH_SUFFIXES "mysql")
-if (${MYSQL_INCLUDE_DIR} STREQUAL "MYSQL_INCLUDE_DIR-NOTFOUND")
-    message(FATAL_ERROR "Could not found MySQL include directory")
-else ()
-    include_directories(${MYSQL_INCLUDE_DIR})
+#
+# "make clang-tidy" and "make check-clang-tidy" targets
+#
+if ( ${CLANG_TIDY_FOUND} )
+    # runs clang-tidy and attempts to fix any warning automatically
+    add_custom_target( clang-tidy
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                                --clang_tidy_binary ${CLANG_TIDY_BIN}
+                                --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                                --compile_commands  ${CMAKE_BINARY_DIR}/compile_commands.json
+                                --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                --fix
+                                ${MILVUS_LINT_QUIET} )
+
+    # runs clang-tidy and exits with a non-zero exit code if any errors are found.
+    add_custom_target( check-clang-tidy
+        ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                                --clang_tidy_binary ${CLANG_TIDY_BIN}
+                                --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                                --ignore_checks     ${IGNORE_CHECKS_FILE}
+                                --compile_commands  ${CMAKE_BINARY_DIR}/compile_commands.json
+                                --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}/src
+                                ${MILVUS_LINT_QUIET} )
 endif ()
 
-set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
-set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
-set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
-set(MILVUS_THIRDPARTY_SRC ${PROJECT_SOURCE_DIR}/thirdparty)
-
-include(ExternalProject)
-include(DefineOptions)
-include(BuildUtils)
-include(ThirdPartyPackages)
-
-if (MILVUS_USE_CCACHE)
-    find_program(CCACHE_FOUND ccache)
-    if (CCACHE_FOUND)
-        message(STATUS "Using ccache: ${CCACHE_FOUND}")
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
-        # let ccache preserve C++ comments, because some of them may be
-        # meaningful to the compiler
-        set(ENV{CCACHE_COMMENTS} "1")
-    endif (CCACHE_FOUND)
-endif ()
-
-if (MILVUS_GPU_VERSION)
-    message(STATUS "Building Milvus GPU version")
-    add_compile_definitions("MILVUS_GPU_VERSION")
-    enable_language(CUDA)
-    find_package(CUDA 10 REQUIRED)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
-else ()
-    message(STATUS "Building Milvus CPU version")
-endif ()
-
-if (MILVUS_WITH_PROMETHEUS)
-    add_compile_definitions("MILVUS_WITH_PROMETHEUS")
-endif ()
-
-message("ENABLE_CPU_PROFILING = ${ENABLE_CPU_PROFILING}")
-if (ENABLE_CPU_PROFILING STREQUAL "ON")
-    ADD_DEFINITIONS(-DENABLE_CPU_PROFILING)
-endif()
-
-if (MILVUS_WITH_FIU)
-    add_compile_definitions("FIU_ENABLE")
-endif ()
-
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (MILVUS_GPU_VERSION)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
-    endif ()
-else ()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
-    if (MILVUS_GPU_VERSION)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
-    endif ()
-endif ()
+#
+# Validate and print out Milvus configuration options
+#
 
 config_summary()
-add_subdirectory(src)
 
-if (BUILD_UNIT_TEST STREQUAL "ON")
-    if (BUILD_COVERAGE STREQUAL "ON")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+# **************************** Source files ****************************
+
+add_subdirectory( thirdparty )
+add_subdirectory( src )
+
+# Unittest lib
+if ( BUILD_UNIT_TEST STREQUAL "ON" )
+    if ( BUILD_COVERAGE STREQUAL "ON" )
+        append_flags(  CMAKE_CXX_FLAGS
+                       FLAGS
+                            "-fprofile-arcs"
+                            "-ftest-coverage"
+                            )
     endif ()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DELPP_DISABLE_LOGS")
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
+
+    add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/unittest )
 endif ()
 
-add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
-if ("${MILVUS_DB_PATH}" STREQUAL "")
-    set(MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}")
+add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
+
+# **************************** Install ****************************
+
+if ( NOT MILVUS_DB_PATH )
+    set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
 endif ()
 
-if (MILVUS_GPU_VERSION)
-    set(GPU_ENABLE "true")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
-        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
-        @ONLY)
+if ( MILVUS_GPU_VERSION )
+    set( GPU_ENABLE "true" )
 else ()
-    set(GPU_ENABLE "false")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template 
-        ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml
-        @ONLY)
+    set( GPU_ENABLE "false" )
 endif ()
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.yaml @ONLY)
 
 install(DIRECTORY scripts/
         DESTINATION scripts
@@ -229,104 +261,7 @@ install(DIRECTORY scripts/migration
         GROUP_EXECUTE GROUP_READ
         WORLD_EXECUTE WORLD_READ)
 install(FILES
-        conf/server_config.yaml
+        conf/milvus.yaml
         DESTINATION
         conf)
 
-find_package(Python COMPONENTS Interpreter Development)
-find_package(ClangTools)
-set(BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support")
-
-#
-# "make lint" target
-#
-if (NOT MILVUS_VERBOSE_LINT)
-    set(MILVUS_LINT_QUIET "--quiet")
-endif ()
-
-if (NOT LINT_EXCLUSIONS_FILE)
-    # source files matching a glob from a line in this file
-    # will be excluded from linting (cpplint, clang-tidy, clang-format)
-    set(LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt)
-endif ()
-
-find_program(CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR})
-message(STATUS "Found cpplint executable at ${CPPLINT_BIN}")
-
-#
-# "make lint" targets
-#
-add_custom_target(lint
-        ${PYTHON_EXECUTABLE}
-        ${BUILD_SUPPORT_DIR}/run_cpplint.py
-        --cpplint_binary
-        ${CPPLINT_BIN}
-        --exclude_globs
-        ${LINT_EXCLUSIONS_FILE}
-        --source_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${MILVUS_LINT_QUIET})
-
-#
-# "make clang-format" and "make check-clang-format" targets
-#
-if (${CLANG_FORMAT_FOUND})
-    # runs clang format and updates files in place.
-    add_custom_target(clang-format
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_format.py
-            --clang_format_binary
-            ${CLANG_FORMAT_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            --fix
-            ${MILVUS_LINT_QUIET})
-
-    # runs clang format and exits with a non-zero exit code if any files need to be reformatted
-    add_custom_target(check-clang-format
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_format.py
-            --clang_format_binary
-            ${CLANG_FORMAT_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            ${MILVUS_LINT_QUIET})
-endif ()
-
-#
-# "make clang-tidy" and "make check-clang-tidy" targets
-#
-if (${CLANG_TIDY_FOUND})
-    # runs clang-tidy and attempts to fix any warning automatically
-    add_custom_target(clang-tidy
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
-            --clang_tidy_binary
-            ${CLANG_TIDY_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --compile_commands
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            --fix
-            ${MILVUS_LINT_QUIET})
-
-    # runs clang-tidy and exits with a non-zero exit code if any errors are found.
-    add_custom_target(check-clang-tidy
-            ${PYTHON_EXECUTABLE}
-            ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
-            --clang_tidy_binary
-            ${CLANG_TIDY_BIN}
-            --exclude_globs
-            ${LINT_EXCLUSIONS_FILE}
-            --compile_commands
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            --source_dir
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            ${MILVUS_LINT_QUIET})
-endif ()

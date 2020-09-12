@@ -13,21 +13,21 @@
 
 #include <memory>
 
-#include "SearchTask.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
 
-class TestTask : public XSearchTask {
+class TestTask : public Task {
  public:
-    explicit TestTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file, TaskLabelPtr label);
+    explicit TestTask(TaskLabelPtr label = nullptr);
 
  public:
-    void
-    Load(LoadType type, uint8_t device_id) override;
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
 
-    void
-    Execute() override;
+    Status
+    OnExecute() override;
 
     void
     Wait();

@@ -16,13 +16,13 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <utility>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "storage/s3/S3ClientMock.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"

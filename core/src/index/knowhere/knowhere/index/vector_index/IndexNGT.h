@@ -16,7 +16,11 @@
 #include <NGT/lib/NGT/Index.h>
 
 #include <knowhere/common/Exception.h>
+<<<<<<< HEAD
 #include <knowhere/index/vector_index/IndexType.h>
+=======
+#include <knowhere/index/IndexType.h>
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <memory>
 
@@ -30,7 +34,11 @@ class IndexNGT : public VecIndex {
     }
 
     BinarySet
+<<<<<<< HEAD
     Serialize(const Config& config = Config()) override;
+=======
+    Serialize(const Config& config) override;
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
     void
     Load(const BinarySet& index_binary) override;

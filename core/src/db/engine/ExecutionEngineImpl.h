@@ -11,104 +11,102 @@
 
 #pragma once
 
-#include "segment/SegmentReader.h"
-#include "utils/Json.h"
-
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "ExecutionEngine.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "db/SnapshotVisitor.h"
+#include "db/snapshot/CompoundOperations.h"
+#include "segment/SegmentReader.h"
 
 namespace milvus {
 namespace engine {
 
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
-    ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                        const milvus::json& index_params);
-
-    ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
-                        MetricType metric_type, const milvus::json& index_params);
+    ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor);
 
     Status
-    AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
+    Load(ExecutionEngineContext& context) override;
 
     Status
-    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) override;
-
-    size_t
-    Count() const override;
-
-    size_t
-    Dimension() const override;
-
-    size_t
-    Size() const override;
+    CopyToGpu(uint64_t device_id) override;
 
     Status
-    Serialize() override;
+    Search(ExecutionEngineContext& context) override;
 
     Status
-    Load(bool to_cache) override;
+    BuildIndex() override;
+
+ private:
+    Status
+    VecSearch(ExecutionEngineContext& context, const query::VectorQueryPtr& vector_param,
+              knowhere::VecIndexPtr& vec_index, bool hybrid = false);
+
+    knowhere::VecIndexPtr
+    CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode);
 
     Status
-    CopyToGpu(uint64_t device_id, bool hybrid = false) override;
-
-    Status
-    CopyToIndexFileToGpu(uint64_t device_id) override;
-
-    Status
-    CopyToCpu() override;
+    CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
+                          knowhere::IndexPtr& index_ptr);
 
 #if 0
     Status
+<<<<<<< HEAD
+    LoadForSearch(const query::QueryPtr& query_ptr);
+
+    Status
+    Load(const TargetFields& field_names);
+=======
     GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
 
     Status
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
 #endif
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
-    ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
-                    std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
-                    std::vector<float>& distances, std::vector<int64_t>& labels) override;
+    ExecBinaryQuery(const query::GeneralQueryPtr& general_query, faiss::ConcurrentBitsetPtr& bitset,
+                    std::unordered_map<std::string, DataType>& attr_type, std::string& vector_placeholder);
 
     Status
-    Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,
-           bool hybrid = false) override;
+    ProcessTermQuery(faiss::ConcurrentBitsetPtr& bitset, const query::TermQueryPtr& term_query,
+                     std::unordered_map<std::string, DataType>& attr_type);
 
     Status
-    Search(int64_t n, const uint8_t* data, int64_t k, const milvus::json& extra_params, float* distances,
-           int64_t* labels, bool hybrid = false) override;
-
-    ExecutionEnginePtr
-    BuildIndex(const std::string& location, EngineType engine_type) override;
+    IndexedTermQuery(faiss::ConcurrentBitsetPtr& bitset, const std::string& field_name, const DataType& data_type,
+                     milvus::json& term_values_json);
 
     Status
-    Cache() override;
+    ProcessRangeQuery(const std::unordered_map<std::string, DataType>& attr_type, faiss::ConcurrentBitsetPtr& bitset,
+                      const query::RangeQueryPtr& range_query);
 
     Status
-    Init() override;
+    IndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, const DataType& data_type, knowhere::IndexPtr& index_ptr,
+                      milvus::json& range_values_json);
 
-    EngineType
-    IndexEngineType() const override {
-        return index_type_;
-    }
+    using AddSegmentFileOperation = std::shared_ptr<snapshot::ChangeSegmentFileOperation>;
+    Status
+    CreateSnapshotIndexFile(AddSegmentFileOperation& operation, const std::string& field_name,
+                            CollectionIndex& index_info);
 
-    MetricType
-    IndexMetricType() const override {
-        return metric_type_;
-    }
-
-    std::string
-    GetLocation() const override {
-        return location_;
-    }
+    Status
+    BuildKnowhereIndex(const std::string& field_name, const CollectionIndex& index_info,
+                       knowhere::VecIndexPtr& new_index);
 
  private:
+<<<<<<< HEAD
+    segment::SegmentReaderPtr segment_reader_;
+    TargetFields target_fields_;
+    ExecutionEngineContext context_;
+
+    int64_t entity_count_;
+
+    int64_t gpu_num_ = 0;
+    bool gpu_enable_ = false;
+=======
     knowhere::VecIndexPtr
     CreatetVecIndex(EngineType type);
 
@@ -141,6 +139,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     int64_t gpu_num_ = 0;
 
     bool gpu_cache_enable_ = false;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 }  // namespace engine

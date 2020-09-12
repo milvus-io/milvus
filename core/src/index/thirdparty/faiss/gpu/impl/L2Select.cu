@@ -513,6 +513,11 @@ void runL2SelectMin(float* outDis_h,
                         stream);
 }
 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
 void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     Tensor<float, 1, true>& centroidDistances,
@@ -530,4 +535,5 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                         stream);
 }
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 } } // namespace

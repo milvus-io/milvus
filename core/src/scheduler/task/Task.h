@@ -12,7 +12,7 @@
 #pragma once
 
 #include "Path.h"
-#include "scheduler/job/Job.h"
+#include "scheduler/interface/interfaces.h"
 #include "scheduler/tasklabel/TaskLabel.h"
 #include "utils/Status.h"
 
@@ -24,25 +24,21 @@ namespace milvus {
 namespace scheduler {
 
 enum class LoadType {
-    DISK2CPU,
-    CPU2GPU,
-    GPU2CPU,
-    TEST,
+    DISK2CPU = 0,
+    CPU2GPU = 1,
+    GPU2CPU = 2,
+    TEST = 99,
 };
 
 enum class TaskType {
-    SearchTask,
-    DeleteTask,
-    BuildIndexTask,
-    TestTask,
+    SearchTask = 0,
+    BuildIndexTask = 1,
 };
 
-class Task;
-
-using TaskPtr = std::shared_ptr<Task>;
+class Job;
 
 // TODO: re-design
-class Task {
+class Task : public interface::dumpable {
  public:
     explicit Task(TaskType type, TaskLabelPtr label) : type_(type), label_(std::move(label)) {
     }
@@ -53,6 +49,14 @@ class Task {
     inline TaskType
     Type() const {
         return type_;
+    }
+
+    inline json
+    Dump() const override {
+        json ret{
+            {"type", type_},
+        };
+        return ret;
     }
 
     /*
@@ -72,18 +76,27 @@ class Task {
     }
 
  public:
-    virtual void
-    Load(LoadType type, uint8_t device_id) = 0;
+    void
+    Load(LoadType type, uint8_t device_id);
 
-    virtual void
-    Execute() = 0;
+    void
+    Execute();
+
+ protected:
+    virtual Status
+    OnLoad(LoadType type, uint8_t device_id) = 0;
+
+    virtual Status
+    OnExecute() = 0;
 
  public:
     Path task_path_;
-    scheduler::JobWPtr job_;
+    scheduler::Job* job_ = nullptr;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };
+
+using TaskPtr = std::shared_ptr<Task>;
 
 }  // namespace scheduler
 }  // namespace milvus

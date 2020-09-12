@@ -12,7 +12,6 @@
 #pragma once
 
 #include "MergeManager.h"
-#include "db/Options.h"
 
 #include <memory>
 
@@ -22,7 +21,7 @@ namespace engine {
 class MergeManagerFactory {
  public:
     static MergeManagerPtr
-    Build(const meta::MetaPtr& meta_ptr, const DBOptions& options);
+    SSBuild(const DBOptions& options);
 };
 
 }  // namespace engine

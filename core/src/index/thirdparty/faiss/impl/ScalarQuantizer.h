@@ -75,6 +75,7 @@ struct ScalarQuantizer {
         (MetricType mt, const Index *quantizer, bool store_pairs,
          bool by_residual=false) const;
 
+    size_t cal_size() { return sizeof(*this) + trained.size() * sizeof(float); }
 };
 
 template<class DCClass>
@@ -151,6 +152,166 @@ struct IVFSQScannerIP: InvertedListScanner {
     }
 };
 
+template<class DCClass>
+struct IVFSQScannerIP: InvertedListScanner {
+    DCClass dc;
+    bool store_pairs, by_residual;
+
+    size_t code_size;
+
+    idx_t list_no;  /// current list (set to 0 for Flat index
+    float accu0;    /// added to all distances
+
+    IVFSQScannerIP(int d, const std::vector<float> & trained,
+                   size_t code_size, bool store_pairs,
+                   bool by_residual):
+        dc(d, trained), store_pairs(store_pairs),
+        by_residual(by_residual),
+        code_size(code_size), list_no(0), accu0(0)
+    {}
+
+
+    void set_query (const float *query) override {
+        dc.set_query (query);
+    }
+
+    void set_list (idx_t list_no, float coarse_dis) override {
+        this->list_no = list_no;
+        accu0 = by_residual ? coarse_dis : 0;
+    }
+
+    float distance_to_code (const uint8_t *code) const final {
+        return accu0 + dc.query_to_code (code);
+    }
+
+    size_t scan_codes (size_t list_size,
+                       const uint8_t *codes,
+                       const idx_t *ids,
+                       float *simi, idx_t *idxi,
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
+    {
+        size_t nup = 0;
+
+        for (size_t j = 0; j < list_size; j++) {
+            if(!bitset || !bitset->test(ids[j])){
+                float accu = accu0 + dc.query_to_code (codes);
+
+                if (accu > simi [0]) {
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    minheap_swap_top (k, simi, idxi, accu, id);
+                    nup++;
+                }
+            }
+            codes += code_size;
+        }
+        return nup;
+    }
+
+    void scan_codes_range (size_t list_size,
+                           const uint8_t *codes,
+                           const idx_t *ids,
+                           float radius,
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
+    {
+        for (size_t j = 0; j < list_size; j++) {
+            float accu = accu0 + dc.query_to_code (codes);
+            if (accu > radius) {
+                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                res.add (accu, id);
+            }
+            codes += code_size;
+        }
+    }
+};
+
+
+template<class DCClass>
+struct IVFSQScannerL2: InvertedListScanner {
+    DCClass dc;
+
+    bool store_pairs, by_residual;
+    size_t code_size;
+    const Index *quantizer;
+    idx_t list_no;    /// current inverted list
+    const float *x;   /// current query
+
+    std::vector<float> tmp;
+
+    IVFSQScannerL2(int d, const std::vector<float> & trained,
+                   size_t code_size, const Index *quantizer,
+                   bool store_pairs, bool by_residual):
+        dc(d, trained), store_pairs(store_pairs), by_residual(by_residual),
+        code_size(code_size), quantizer(quantizer),
+        list_no (0), x (nullptr), tmp (d)
+    {
+    }
+
+
+    void set_query (const float *query) override {
+        x = query;
+        if (!quantizer) {
+            dc.set_query (query);
+        }
+    }
+
+
+    void set_list (idx_t list_no, float /*coarse_dis*/) override {
+        if (by_residual) {
+            this->list_no = list_no;
+            // shift of x_in wrt centroid
+            quantizer->Index::compute_residual (x, tmp.data(), list_no);
+            dc.set_query (tmp.data ());
+        } else {
+            dc.set_query (x);
+        }
+    }
+
+    float distance_to_code (const uint8_t *code) const final {
+        return dc.query_to_code (code);
+    }
+
+    size_t scan_codes (size_t list_size,
+                       const uint8_t *codes,
+                       const idx_t *ids,
+                       float *simi, idx_t *idxi,
+                       size_t k,
+                       ConcurrentBitsetPtr bitset) const override
+    {
+        size_t nup = 0;
+        for (size_t j = 0; j < list_size; j++) {
+            if(!bitset || !bitset->test(ids[j])){
+                float dis = dc.query_to_code (codes);
+
+                if (dis < simi [0]) {
+                    int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                    maxheap_swap_top (k, simi, idxi, dis, id);
+                    nup++;
+                }
+            }
+            codes += code_size;
+        }
+        return nup;
+    }
+
+    void scan_codes_range (size_t list_size,
+                           const uint8_t *codes,
+                           const idx_t *ids,
+                           float radius,
+                           RangeQueryResult & res,
+                           ConcurrentBitsetPtr bitset = nullptr) const override
+    {
+        for (size_t j = 0; j < list_size; j++) {
+            float dis = dc.query_to_code (codes);
+            if (dis < radius) {
+                int64_t id = store_pairs ? (list_no << 32 | j) : ids[j];
+                res.add (dis, id);
+            }
+            codes += code_size;
+        }
+    }
+};
 
 template<class DCClass>
 struct IVFSQScannerL2: InvertedListScanner {

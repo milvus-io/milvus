@@ -16,10 +16,10 @@
 #include <string>
 #include <vector>
 
-#include <faiss/utils/distances.h>
-
-#include "config/Config.h"
+#include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/DBFactory.h"
+#include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -29,11 +29,22 @@ namespace server {
 
 Status
 DBWrapper::StartService() {
-    Config& config = Config::GetInstance();
     Status s;
 
     // db config
     engine::DBOptions opt;
+<<<<<<< HEAD
+    opt.meta_.backend_uri_ = config.general.meta_uri();
+
+    std::string path = config.storage.path();
+    opt.meta_.path_ = path + engine::DB_FOLDER;
+
+    opt.auto_flush_interval_ = config.storage.auto_flush_interval();
+    opt.metric_enable_ = config.metric.enable();
+    opt.insert_buffer_size_ = config.cache.insert_buffer_size();
+
+    if (not config.cluster.enable()) {
+=======
     s = config.GetGeneralConfigMetaURI(opt.meta_.backend_uri_);
     if (!s.ok()) {
         std::cerr << s.ToString() << std::endl;
@@ -107,12 +118,16 @@ DBWrapper::StartService() {
     }
 
     if (mode == "single") {
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    } else if (mode == "cluster_readonly") {
+    } else if (config.cluster.role() == ClusterRole::RO) {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
-    } else if (mode == "cluster_writable") {
+    } else if (config.cluster.role() == ClusterRole::RW) {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
+<<<<<<< HEAD
+        std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
+=======
         std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
                   << "single, cluster_readonly, and cluster_writable." << std::endl;
         kill(0, SIGUSR1);
@@ -124,10 +139,16 @@ DBWrapper::StartService() {
     if (!s.ok()) {
         std::cerr << "ERROR! Failed to get wal_enable configuration." << std::endl;
         std::cerr << s.ToString() << std::endl;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         kill(0, SIGUSR1);
     }
 
+    // wal
+    opt.wal_enable_ = config.wal.enable();
     if (opt.wal_enable_) {
+<<<<<<< HEAD
+        opt.wal_path_ = config.wal.path();
+=======
         s = config.GetWalConfigRecoveryErrorIgnore(opt.recovery_error_ignore_);
         if (!s.ok()) {
             std::cerr << "ERROR! Failed to get recovery_error_ignore configuration." << std::endl;
@@ -151,82 +172,24 @@ DBWrapper::StartService() {
             std::cerr << s.ToString() << std::endl;
             kill(0, SIGUSR1);
         }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
 
-    // engine config
-    int64_t omp_thread;
-    s = config.GetEngineConfigOmpThreadNum(omp_thread);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
-    if (omp_thread > 0) {
-        omp_set_num_threads(omp_thread);
-        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
-    } else {
-        int64_t sys_thread_cnt = 8;
-        if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
-            omp_set_num_threads(omp_thread);
-        }
-    }
-
-    // init faiss global variable
-    int64_t use_blas_threshold;
-    s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-    faiss::distance_compute_blas_threshold = use_blas_threshold;
-
-    // set archive config
-    engine::ArchiveConf::CriteriaT criterial;
-    int64_t disk, days;
-    s = config.GetDBConfigArchiveDiskThreshold(disk);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
-    if (disk > 0) {
-        criterial[engine::ARCHIVE_CONF_DISK] = disk;
-    }
-
-    s = config.GetDBConfigArchiveDaysThreshold(days);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
-    if (days > 0) {
-        criterial[engine::ARCHIVE_CONF_DAYS] = days;
-    }
-    opt.meta_.archive_conf_.SetCriterias(criterial);
+    // transcript
+    opt.transcript_enable_ = config.transcript.enable();
+    opt.replay_script_path_ = config.transcript.replay();
 
     // create db root folder
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!s.ok()) {
         std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
-                  << std::endl;
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
         kill(0, SIGUSR1);
     }
 
-    for (auto& path : opt.meta_.slave_paths_) {
-        s = CommonUtil::CreateDirectory(path);
-        if (!s.ok()) {
-            std::cerr << "Error: Failed to create database secondary path: " << path
-                      << ". Possible reason: db_config.secondary_path is wrong in server_config.yaml or not available."
-                      << std::endl;
-            kill(0, SIGUSR1);
-        }
-    }
-
-    // create db instance
     try {
-        db_ = engine::DBFactory::Build(opt);
+        db_ = engine::DBFactory::BuildDB(opt);
+        db_->Start();
     } catch (std::exception& ex) {
         std::cerr << "Error: failed to open database: " << ex.what()
                   << ". Possible reason: out of storage, meta schema is damaged "
@@ -234,9 +197,10 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    db_->Start();
-
     // preload collection
+<<<<<<< HEAD
+    std::string preload_collections = config.cache.preload_collection();
+=======
     std::string preload_collections;
     s = config.GetCacheConfigPreloadCollection(preload_collections);
     if (!s.ok()) {
@@ -244,9 +208,10 @@ DBWrapper::StartService() {
         return s;
     }
 
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     s = PreloadCollections(preload_collections);
     if (!s.ok()) {
-        std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
+        std::cerr << "ERROR! Failed to preload collections: " << preload_collections << std::endl;
         std::cerr << s.ToString() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -260,6 +225,8 @@ DBWrapper::StopService() {
         db_->Stop();
     }
 
+    // SS TODO
+    /* engine::snapshot::OperationExecutor::GetInstance().Stop(); */
     return Status::OK();
 }
 
@@ -268,12 +235,21 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
     if (preload_collections.empty()) {
         // do nothing
     } else if (preload_collections == "*") {
-        // load all tables
-        std::vector<engine::meta::CollectionSchema> table_schema_array;
-        db_->AllCollections(table_schema_array);
+        // load all collections
+        std::vector<std::string> names;
+        auto status = db_->ListCollections(names);
+        if (!status.ok()) {
+            return status;
+        }
 
+<<<<<<< HEAD
+        for (auto& name : names) {
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+=======
         for (auto& schema : table_schema_array) {
             auto status = db_->PreloadCollection(nullptr, schema.collection_id_);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             if (!status.ok()) {
                 return status;
             }
@@ -282,7 +258,12 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         std::vector<std::string> collection_names;
         StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
         for (auto& name : collection_names) {
+<<<<<<< HEAD
+            std::vector<std::string> field_names;  // input empty field names will load all fileds
+            auto status = db_->LoadCollection(nullptr, name, field_names);
+=======
             auto status = db_->PreloadCollection(nullptr, name);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
             if (!status.ok()) {
                 return status;
             }

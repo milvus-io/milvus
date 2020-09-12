@@ -62,7 +62,11 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
 
     // null faiss index
     {
+<<<<<<< HEAD
+        ASSERT_ANY_THROW(index_->Serialize(conf));
+=======
         ASSERT_ANY_THROW(index_->Serialize());
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
         ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
@@ -131,7 +135,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         index_->BuildAll(base_dataset, conf);
         //        index_->set_index_model(model);
         //        index_->Add(base_dataset, conf);
-        auto binaryset = index_->Serialize();
+        auto binaryset = index_->Serialize(conf);
         auto bin = binaryset.GetByName("BinaryIVF");
 
         std::string filename = "/tmp/binaryivf_test_serialize.bin";

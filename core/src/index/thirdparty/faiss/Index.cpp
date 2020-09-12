@@ -52,6 +52,18 @@ void Index::add_with_ids(
   FAISS_THROW_MSG ("add_with_ids not implemented for this type of index");
 }
 
+<<<<<<< HEAD
+
+void Index::add_without_codes(idx_t n, const float* x) {
+  FAISS_THROW_MSG ("add_without_codes not implemented for this type of index");
+}
+
+void Index::add_with_ids_without_codes(idx_t n, const float* x, const idx_t* xids) {
+  FAISS_THROW_MSG ("add_with_ids_without_codes not implemented for this type of index");
+}
+
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 #if 0
 void Index::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
   FAISS_THROW_MSG ("get_vector_by_id not implemented for this type of index");

@@ -19,6 +19,11 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     Tensor<int, 2, true>& outIndices,
                     int k,
                     cudaStream_t stream);
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
                     
 void runL2SelectMin(float* outDis_h,
                     int* outInd_h,
@@ -32,5 +37,9 @@ void runL2SelectMin(float* outDis_h,
                     Tensor<int, 2, true>& outIndices,
                     int k,
                     cudaStream_t stream);
+<<<<<<< HEAD
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
 } } // namespace

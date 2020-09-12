@@ -34,6 +34,12 @@ class NGTPANNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::DIM, dim},
             {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+<<<<<<< HEAD
+=======
+            {milvus::knowhere::IndexParams::edge_size, 10},
+            {milvus::knowhere::IndexParams::forcedly_pruned_edge_size, 60},
+            {milvus::knowhere::IndexParams::selectively_pruned_edge_size, 30},
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
         };
     }
 
@@ -63,8 +69,13 @@ TEST_P(NGTPANNGTest, ngtpanng_basic) {
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
+<<<<<<< HEAD
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
+=======
+	auto result = index_->Query(query_dataset, conf);
+	AssertAnns(result, nq, k);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 }
 
 TEST_P(NGTPANNGTest, ngtpanng_delete) {
@@ -84,7 +95,11 @@ TEST_P(NGTPANNGTest, ngtpanng_delete) {
 
     index_->SetBlacklist(bitset);
     auto result2 = index_->Query(query_dataset, conf);
+<<<<<<< HEAD
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+=======
+	AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 }
 
 TEST_P(NGTPANNGTest, ngtpanng_serialize) {
@@ -102,7 +117,11 @@ TEST_P(NGTPANNGTest, ngtpanng_serialize) {
     {
         // serialize index
         index_->BuildAll(base_dataset, conf);
+<<<<<<< HEAD
         auto binaryset = index_->Serialize();
+=======
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
         auto bin_obj_data = binaryset.GetByName("ngt_obj_data");
         std::string filename1 = "/tmp/ngt_obj_data_serialize.bin";

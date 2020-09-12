@@ -18,23 +18,25 @@
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr& file, TaskLabelPtr label)
-    : XSearchTask(context, file, std::move(label)) {
+TestTask::TestTask(TaskLabelPtr label) : Task(TaskType::SearchTask, std::move(label)) {
 }
 
-void
-TestTask::Load(LoadType type, uint8_t device_id) {
+Status
+TestTask::OnLoad(LoadType type, uint8_t device_id) {
     load_count_++;
+    return Status::OK();
 }
 
-void
-TestTask::Execute() {
+Status
+TestTask::OnExecute() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         exec_count_++;
         done_ = true;
     }
     cv_.notify_one();
+
+    return Status::OK();
 }
 
 void

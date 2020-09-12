@@ -9,12 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "wrapper/KnowhereResource.h"
 #include "wrapper/utils.h"
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 TEST_F(KnowhereTest, KNOWHERE_RESOURCE_TEST) {

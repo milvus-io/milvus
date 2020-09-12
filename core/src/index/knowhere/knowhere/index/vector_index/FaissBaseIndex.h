@@ -17,7 +17,7 @@
 #include <faiss/Index.h>
 
 #include "knowhere/common/BinarySet.h"
-#include "knowhere/index/vector_index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus {
 namespace knowhere {
@@ -34,8 +34,7 @@ class FaissBaseIndex {
     LoadImpl(const BinarySet&, const IndexType& type);
 
     virtual void
-    SealImpl() { /* do nothing */
-    }
+    SealImpl();
 
  public:
     std::shared_ptr<faiss::Index> index_ = nullptr;

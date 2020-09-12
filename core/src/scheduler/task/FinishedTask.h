@@ -25,11 +25,19 @@ class FinishedTask : public Task {
  public:
     explicit FinishedTask(const TaskPtr& task);
 
+<<<<<<< HEAD
     void
     Load(LoadType type, uint8_t device_id) override;
 
     void
     Execute() override;
+=======
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
+
+    Status
+    OnExecute() override;
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 };
 
 }  // namespace milvus::scheduler

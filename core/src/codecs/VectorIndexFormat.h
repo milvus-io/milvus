@@ -19,21 +19,53 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "segment/VectorIndex.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "storage/FSHandler.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace codec {
 
 class VectorIndexFormat {
  public:
-    virtual void
-    read(const storage::FSHandlerPtr& fs_ptr, const std::string& location, segment::VectorIndexPtr& vector_index) = 0;
+    VectorIndexFormat() = default;
 
-    virtual void
-    write(const storage::FSHandlerPtr& fs_ptr, const std::string& location,
-          const segment::VectorIndexPtr& vector_index) = 0;
+    static std::string
+    FilePostfix();
+
+    Status
+    ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
+
+    Status
+    ReadIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinarySet& data);
+
+    Status
+    ReadCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, knowhere::BinaryPtr& data);
+
+    Status
+    ConvertRaw(const engine::BinaryDataPtr& raw, knowhere::BinaryPtr& data);
+
+    Status
+    ConstructIndex(const std::string& index_name, knowhere::BinarySet& index_data, knowhere::BinaryPtr& raw_data,
+                   knowhere::BinaryPtr& compress_data, knowhere::VecIndexPtr& index);
+
+    Status
+    WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const knowhere::VecIndexPtr& index);
+
+    Status
+    WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
+                  const knowhere::VecIndexPtr& index);
+
+    // No copy and move
+    VectorIndexFormat(const VectorIndexFormat&) = delete;
+    VectorIndexFormat(VectorIndexFormat&&) = delete;
+
+    VectorIndexFormat&
+    operator=(const VectorIndexFormat&) = delete;
+    VectorIndexFormat&
+    operator=(VectorIndexFormat&&) = delete;
 };
 
 using VectorIndexFormatPtr = std::shared_ptr<VectorIndexFormat>;

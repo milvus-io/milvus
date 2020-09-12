@@ -4,31 +4,31 @@
 
 -   [Build from source](#build-from-source)
 
-  - [Requirements](#requirements)
+    - [Requirements](#requirements)
 
-  - [Compilation](#compilation)
+    - [Compilation](#compilation)
 
-  - [Launch Milvus server](#launch-milvus-server)
+    - [Launch Milvus server](#launch-milvus-server)
 
--   [Compile Milvus on Docker](#compile-milvus-on-docker)
+-   [Compile Milvus on Docker](#compile-milvus-on-docker)  
 
-  - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
+    - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
 
-  - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
+    - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
 
-  - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
+    - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
 
-  - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
+    - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
 
 -   [Troubleshooting](#troubleshooting)
 
-  - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
+    - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
 
-  - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
+    - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
 
-  - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
+    - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
 
-  - [CMake version is not supported](#cmake-version-is-not-supported)
+    - [CMake version is not supported](#cmake-version-is-not-supported)
 
 <!-- /TOC -->
 
@@ -42,7 +42,7 @@
 
   - CentOS 7
 
-  > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
+    > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
 -   GCC 7.0 or higher to support C++ 17
 
@@ -52,54 +52,41 @@
 
 For GPU-enabled version, you will also need:
 
--   CUDA 10.0 or higher
+-   CUDA 10.x (10.0, 10.1, 10.2)
 
 -   NVIDIA driver 418 or higher
 
 ### Compilation
 
-#### Step 1 Install dependencies
+#### Step 1 Download Milvus source code
+
+Download the latest Milvus source code and change directory:
+
+```shell
+$ git clone https://github.com/milvus-io/milvus
+$ cd ./milvus/core
+```
+
+#### Step 2 Install dependencies
 
 ##### Install in Ubuntu
 
 ```shell
-$ cd [Milvus root path]/core
 $ ./ubuntu_build_deps.sh
 ```
 
 ##### Install in CentOS
 
 ```shell
-$ cd [Milvus root path]/core
 $ ./centos7_build_deps.sh
 ```
 
-#### Step 2 Build
+#### Step 3 Build Milvus source code
 
 ```shell
-$ cd [Milvus root path]/core
 $ ./build.sh -t Debug
 ```
-
-or
-
-```shell
-$ ./build.sh -t Release
-```
-
-By default, it will build CPU-only version. To build GPU version, add `-g` option.
-
-```shell
-$ ./build.sh -g
-```
-
-If you want to know the complete build options, run the following command.
-
-```shell
-$./build.sh -h
-```
-
-When the build is completed, everything that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
+When the build completes, everything that you need to run Milvus is under `[Milvus root path]/core/milvus`.
 
 ### Launch Milvus server
 
@@ -176,7 +163,6 @@ $ docker exec -it [container_id] bash
 Download latest Milvus source code:
 
 ```shell
-$ cd /home
 $ git clone https://github.com/milvus-io/milvus
 ```
 

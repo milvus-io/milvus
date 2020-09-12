@@ -1,0 +1,45 @@
+version: '2.3'
+
+services:
+  cpu_centos7:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: cpu/centos7/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  gpu_centos7:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: gpu/centos7/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  cpu_ubuntu16.04:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: cpu/ubuntu16.04/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  gpu_ubuntu16.04:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: gpu/ubuntu16.04/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  cpu_ubuntu18.04:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: cpu/ubuntu18.04/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  gpu_ubuntu18.04:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: gpu/ubuntu18.04/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}

@@ -32,7 +32,7 @@
 #include <vector>
 
 #include "GrpcRequestHandler.h"
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
@@ -78,13 +78,15 @@ GrpcServer::Stop() {
 Status
 GrpcServer::StartService() {
     SetThreadName("grpcserv_thread");
-    Config& config = Config::GetInstance();
-    std::string address, port;
 
+<<<<<<< HEAD
+    std::string server_address(config.network.bind.address() + ":" + std::to_string(config.network.bind.port()));
+=======
     STATUS_CHECK(config.GetNetworkConfigBindAddress(address));
     STATUS_CHECK(config.GetNetworkConfigBindPort(port));
 
     std::string server_address(address + ":" + port);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));
@@ -96,7 +98,7 @@ GrpcServer::StartService() {
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_NONE);
 
     GrpcRequestHandler service(opentracing::Tracer::Global());
-    service.RegisterRequestHandler(RequestHandler());
+    service.RegisterRequestHandler(ReqHandler());
 
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);

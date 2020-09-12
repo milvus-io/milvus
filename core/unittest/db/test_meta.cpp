@@ -9,11 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "db/Constants.h"
-#include "db/Utils.h"
-#include "db/meta/MetaConsts.h"
-#include "db/meta/SqliteMetaImpl.h"
+#include "db/meta/MetaNames.h"
+#include "db/meta/backend/MetaContext.h"
+#include "db/snapshot/ResourceContext.h"
 #include "db/utils.h"
+<<<<<<< HEAD
+#include "utils/Json.h"
+
+template<typename T>
+using ResourceContext = milvus::engine::snapshot::ResourceContext<T>;
+template<typename T>
+using ResourceContextBuilder = milvus::engine::snapshot::ResourceContextBuilder<T>;
+
+using FType = milvus::engine::DataType;
+using FEType = milvus::engine::FieldElementType;
+using Op = milvus::engine::meta::MetaContextOp;
+using State = milvus::engine::snapshot::State;
+
+TEST_F(MetaTest, ApplyTest) {
+    ID_TYPE result_id;
+
+    auto collection = std::make_shared<Collection>("meta_test_c1");
+    auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+    auto status = meta_->Execute<Collection>(c_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection->SetID(result_id);
+
+    collection->Activate();
+    auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+    status = meta_->Execute<Collection>(c2_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    ASSERT_EQ(result_id, collection->GetID());
+
+    auto c3_ctx = ResourceContextBuilder<Collection>().SetID(result_id).SetOp(Op::oDelete).CreatePtr();
+    status = meta_->Execute<Collection>(c3_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    ASSERT_EQ(result_id, collection->GetID());
+=======
 
 #include <fiu-control.h>
 #include <fiu-local.h>
@@ -363,221 +399,194 @@ TEST_F(MetaTest, FAILED_TEST) {
         ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
         fiu_disable("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollectionFolder_ThrowException");
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }
 
-TEST_F(MetaTest, COLLECTION_FILE_TEST) {
-    auto collection_id = "meta_test_table";
+TEST_F(MetaTest, SessionTest) {
+    ID_TYPE result_id;
 
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    collection.dimension_ = 256;
-    auto status = impl_->CreateCollection(collection);
+    auto collection = std::make_shared<Collection>("meta_test_c1");
+    auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+    auto status = meta_->Execute<Collection>(c_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection->SetID(result_id);
 
-    milvus::engine::meta::SegmentSchema table_file;
-    table_file.collection_id_ = collection.collection_id_;
-    status = impl_->CreateCollectionFile(table_file);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
+    auto partition = std::make_shared<Partition>("meta_test_p1", result_id);
+    auto p_ctx = ResourceContextBuilder<Partition>().SetResource(partition).CreatePtr();
+    status = meta_->Execute<Partition>(p_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    partition->SetID(result_id);
 
-    uint64_t cnt = 0;
-    status = impl_->Count(collection_id, cnt);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(cnt, 0UL);
+    auto field = std::make_shared<Field>("meta_test_f1", 1, FType::INT64);
+    auto f_ctx = ResourceContextBuilder<Field>().SetResource(field).CreatePtr();
+    status = meta_->Execute<Field>(f_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    field->SetID(result_id);
 
-    auto file_id = table_file.file_id_;
+    auto field_element = std::make_shared<FieldElement>(collection->GetID(), field->GetID(),
+                                                        "meta_test_f1_fe1", FEType::FET_RAW);
+    auto fe_ctx = ResourceContextBuilder<FieldElement>().SetResource(field_element).CreatePtr();
+    status = meta_->Execute<FieldElement>(fe_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    field_element->SetID(result_id);
 
-    auto new_file_type = milvus::engine::meta::SegmentSchema::INDEX;
-    table_file.file_type_ = new_file_type;
+    auto session = meta_->CreateSession();
+    ASSERT_TRUE(collection->Activate());
+    auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+    status = session->Apply<Collection>(c2_ctx);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
-    status = impl_->UpdateCollectionFile(table_file);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.file_type_, new_file_type);
+    ASSERT_TRUE(partition->Activate());
+    auto p2_ctx = ResourceContextBuilder<Partition>().SetResource(partition)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+    status = session->Apply<Partition>(p2_ctx);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    ASSERT_TRUE(field->Activate());
+    auto f2_ctx = ResourceContextBuilder<Field>().SetResource(field)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+    status = session->Apply<Field>(f2_ctx);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    ASSERT_TRUE(field_element->Activate());
+    auto fe2_ctx = ResourceContextBuilder<FieldElement>().SetResource(field_element)
+        .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+    status = session->Apply<FieldElement>(fe2_ctx);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::vector<ID_TYPE> result_ids;
+    status = session->Commit(result_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(result_ids.size(), 4);
+    ASSERT_EQ(result_ids.at(0), collection->GetID());
+    ASSERT_EQ(result_ids.at(1), partition->GetID());
+    ASSERT_EQ(result_ids.at(2), field->GetID());
+    ASSERT_EQ(result_ids.at(3), field_element->GetID());
 }
 
-TEST_F(MetaTest, HYBRID_COLLECTION_TEST) {
-    auto collection_id = "meta_test_hybrid";
+TEST_F(MetaTest, SelectTest) {
+    ID_TYPE result_id;
 
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    collection.dimension_ = 128;
-    milvus::engine::meta::hybrid::FieldsSchema fields_schema;
-    fields_schema.fields_schema_.resize(2);
-    fields_schema.fields_schema_[0].collection_id_ = collection_id;
-    fields_schema.fields_schema_[0].field_name_ = "field_0";
-    fields_schema.fields_schema_[0].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::INT64;
-    fields_schema.fields_schema_[0].field_params_ = "";
+    auto collection = std::make_shared<Collection>("meta_test_c1");
+    ASSERT_TRUE(collection->Activate());
+    auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+    auto status = meta_->Execute<Collection>(c_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection->SetID(result_id);
 
-    fields_schema.fields_schema_[1].collection_id_ = collection_id;
-    fields_schema.fields_schema_[1].field_name_ = "field_1";
-    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::VECTOR;
-    fields_schema.fields_schema_[1].field_params_ = "";
+    Collection::Ptr return_collection;
+    status = meta_->Select<Collection>(collection->GetID(), return_collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(collection->GetID(), return_collection->GetID());
+    ASSERT_EQ(collection->GetName(), return_collection->GetName());
 
-    auto status = impl_->CreateHybridCollection(collection, fields_schema);
-    ASSERT_TRUE(status.ok());
-    milvus::engine::meta::CollectionSchema describe_collection;
-    milvus::engine::meta::hybrid::FieldsSchema describe_fields;
-    describe_collection.collection_id_ = collection_id;
-    status = impl_->DescribeHybridCollection(describe_collection, describe_fields);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(describe_fields.fields_schema_.size(), 2);
+    auto collection2 = std::make_shared<Collection>("meta_test_c2");
+    ASSERT_TRUE(collection2->Activate());
+    auto c2_ctx = ResourceContextBuilder<Collection>().SetResource(collection2).CreatePtr();
+    status = meta_->Execute<Collection>(c2_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection2->SetID(result_id);
+
+    ASSERT_GT(collection2->GetID(), collection->GetID());
+
+    std::vector<Collection::Ptr> return_collections;
+    status = meta_->SelectBy<Collection, ID_TYPE>(milvus::engine::meta::F_ID,
+                                                  {collection2->GetID()}, return_collections);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(return_collections.size(), 1);
+    ASSERT_EQ(return_collections.at(0)->GetID(), collection2->GetID());
+    ASSERT_EQ(return_collections.at(0)->GetName(), collection2->GetName());
+    return_collections.clear();
+
+    status = meta_->SelectBy<Collection, State>(milvus::engine::meta::F_STATE, {State::ACTIVE}, return_collections);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(return_collections.size(), 2);
+
+    std::vector<ID_TYPE> ids;
+    status = meta_->SelectResourceIDs<Collection, std::string>(ids, "", {""});
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(ids.size(), 2);
+
+    ids.clear();
+    status = meta_->SelectResourceIDs<Collection, std::string>(ids, milvus::engine::meta::F_NAME,
+                                                               {collection->GetName()});
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(ids.size(), 1);
+    ASSERT_EQ(ids.at(0), collection->GetID());
 }
 
-TEST_F(MetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
-    auto collection_id = "row_count_test_table";
+TEST_F(MetaTest, TruncateTest) {
+    ID_TYPE result_id;
 
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    collection.dimension_ = 256;
-    auto status = impl_->CreateCollection(collection);
+    auto collection = std::make_shared<Collection>("meta_test_c1");
+    ASSERT_TRUE(collection->Activate());
+    auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+    auto status = meta_->Execute<Collection>(c_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection->SetID(result_id);
 
-    milvus::engine::meta::SegmentSchema table_file;
-    table_file.row_count_ = 100;
-    table_file.collection_id_ = collection.collection_id_;
-    table_file.file_type_ = 1;
-    status = impl_->CreateCollectionFile(table_file);
+    status = meta_->TruncateAll();
+    ASSERT_TRUE(status.ok()) << status.ToString();
 
-    uint64_t cnt = 0;
-    status = impl_->Count(collection_id, cnt);
-    ASSERT_EQ(table_file.row_count_, cnt);
-
-    table_file.row_count_ = 99999;
-    milvus::engine::meta::SegmentsSchema table_files = {table_file};
-    status = impl_->UpdateCollectionFilesRowCount(table_files);
-    ASSERT_TRUE(status.ok());
-
-    cnt = 0;
-    status = impl_->Count(collection_id, cnt);
-    ASSERT_EQ(table_file.row_count_, cnt);
-
-    std::vector<size_t> ids = {table_file.id_};
-    milvus::engine::meta::FilesHolder files_holder;
-    status = impl_->GetCollectionFiles(collection_id, ids, files_holder);
-
-    milvus::engine::meta::SegmentsSchema& schemas = files_holder.HoldFiles();
-    ASSERT_EQ(schemas.size(), 1UL);
-    ASSERT_EQ(table_file.row_count_, schemas[0].row_count_);
-    ASSERT_EQ(table_file.file_id_, schemas[0].file_id_);
-    ASSERT_EQ(table_file.file_type_, schemas[0].file_type_);
-    ASSERT_EQ(table_file.segment_id_, schemas[0].segment_id_);
-    ASSERT_EQ(table_file.collection_id_, schemas[0].collection_id_);
-    ASSERT_EQ(table_file.engine_type_, schemas[0].engine_type_);
-    ASSERT_EQ(table_file.dimension_, schemas[0].dimension_);
-    ASSERT_EQ(table_file.flush_lsn_, schemas[0].flush_lsn_);
+    Collection::Ptr return_collection;
+    status = meta_->Select<Collection>(collection->GetID(), return_collection);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(return_collection, nullptr);
 }
 
-TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
-    srand(time(0));
-    milvus::engine::DBMetaOptions options;
-    options.path_ = "/tmp/milvus_test";
-    unsigned int seed = 1;
-    int days_num = rand_r(&seed) % 100;
-    std::stringstream ss;
-    ss << "days:" << days_num;
-    options.archive_conf_ = milvus::engine::ArchiveConf("delete", ss.str());
+TEST_F(MetaTest, MultiThreadRequestTest) {
+    auto request_worker = [&](size_t i) {
+        std::string collection_name_prefix = "meta_test_collection_" + std::to_string(i) + "_";
+        int64_t result_id;
+        for (size_t ii = 0; ii < 30; ii++) {
+            std::string collection_name = collection_name_prefix + std::to_string(ii);
+            auto collection = std::make_shared<Collection>(collection_name);
+            auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).CreatePtr();
+            auto status = meta_->Execute<Collection>(c_ctx, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_GT(result_id, 0);
 
-    milvus::engine::meta::SqliteMetaImpl impl(options);
-    auto collection_id = "meta_test_table";
+            collection->SetID(result_id);
+            collection->Activate();
+            auto c_ctx2 = ResourceContextBuilder<Collection>().SetResource(collection)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            status = meta_->Execute<Collection>(c_ctx2, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
 
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    auto status = impl.CreateCollection(collection);
+            CollectionPtr collection2;
+            status = meta_->Select<Collection>(result_id, collection2);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(collection2->GetID(), result_id);
+            ASSERT_EQ(collection2->GetState(), State::ACTIVE);
+            ASSERT_EQ(collection2->GetName(), collection_name);
 
-    milvus::engine::meta::SegmentsSchema files;
-    milvus::engine::meta::SegmentSchema table_file;
-    table_file.collection_id_ = collection.collection_id_;
+            collection->Deactivate();
+            auto c_ctx3 = ResourceContextBuilder<Collection>().SetResource(collection)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            status = meta_->Execute<Collection>(c_ctx3, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(result_id, collection->GetID());
 
-    auto cnt = 100;
-    int64_t ts = milvus::engine::utils::GetMicroSecTimeStamp();
-    std::vector<int> days;
-    std::vector<size_t> ids;
-    for (auto i = 0; i < cnt; ++i) {
-        status = impl.CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
-        int day = rand_r(&seed) % (days_num * 2);
-        table_file.created_on_ = ts - day * milvus::engine::meta::DAY * milvus::engine::meta::US_PS - 10000;
-        status = impl.UpdateCollectionFile(table_file);
-        files.push_back(table_file);
-        days.push_back(day);
-        ids.push_back(table_file.id_);
-    }
-
-    {
-        fiu_init(0);
-        FIU_ENABLE_FIU("SqliteMetaImpl.Archive.throw_exception");
-        status = impl.Archive();
-        ASSERT_EQ(status.code(), milvus::DB_META_TRANSACTION_FAILED);
-        fiu_disable("SqliteMetaImpl.Archive.throw_exception");
-    }
-
-    impl.Archive();
-    int i = 0;
-
-    milvus::engine::meta::FilesHolder files_holder;
-    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_holder);
-    ASSERT_TRUE(status.ok());
-
-    milvus::engine::meta::SegmentsSchema& files_get = files_holder.HoldFiles();
-    for (auto& file : files_get) {
-        if (days[i] < days_num) {
-            ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
+            auto c_ctx4 = ResourceContextBuilder<Collection>().SetID(result_id)
+                .SetOp(Op::oDelete).SetTable(Collection::Name).CreatePtr();
+            status = meta_->Execute<Collection>(c_ctx4, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            CollectionPtr collection3;
+            status = meta_->Select<Collection>(result_id, collection3);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_EQ(collection3, nullptr);
         }
-        i++;
-    }
-
-    impl.DropAll();
-}
-
-TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
-    milvus::engine::DBMetaOptions options;
-    options.path_ = "/tmp/milvus_test";
-    options.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:11");
-
-    milvus::engine::meta::SqliteMetaImpl impl(options);
-    auto collection_id = "meta_test_group";
-
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    auto status = impl.CreateCollection(collection);
-
-    milvus::engine::meta::SegmentsSchema files;
-    milvus::engine::meta::SegmentSchema table_file;
-    table_file.collection_id_ = collection.collection_id_;
-
-    auto cnt = 10;
-    auto each_size = 2UL;
-    std::vector<size_t> ids;
-    for (auto i = 0; i < cnt; ++i) {
-        status = impl.CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
-        table_file.file_size_ = each_size * milvus::engine::GB;
-        status = impl.UpdateCollectionFile(table_file);
-        files.push_back(table_file);
-        ids.push_back(table_file.id_);
-    }
-
-    {
-        fiu_init(0);
-        FIU_ENABLE_FIU("SqliteMetaImpl.DiscardFiles.throw_exception");
-        status = impl.Archive();
-        fiu_disable("SqliteMetaImpl.DiscardFiles.throw_exception");
-
-        FIU_ENABLE_FIU("SqliteMetaImpl.DiscardFiles.fail_commited");
-        status = impl.Archive();
-        fiu_disable("SqliteMetaImpl.DiscardFiles.fail_commited");
-    }
-
-    impl.Archive();
-    int i = 0;
-
-    milvus::engine::meta::FilesHolder files_holder;
-    status = impl.GetCollectionFiles(table_file.collection_id_, ids, files_holder);
-    ASSERT_TRUE(status.ok());
-
-    milvus::engine::meta::SegmentsSchema& files_get = files_holder.HoldFiles();
-    for (auto& file : files_get) {
-        if (i >= 5) {
-            ASSERT_EQ(file.file_type_, milvus::engine::meta::SegmentSchema::NEW);
-        }
+<<<<<<< HEAD
+    };
+=======
         ++i;
     }
 
@@ -623,59 +632,78 @@ TEST_F(MetaTest, COLLECTION_FILES_TEST) {
         table_file.row_count_ = 1;
         status = impl_->UpdateCollectionFile(table_file);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
-    for (auto i = 0; i < new_files_cnt; ++i) {
-        status = impl_->CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::NEW;
-        status = impl_->UpdateCollectionFile(table_file);
+    auto cc_task = [&](size_t j) {
+        std::string collection_name_prefix = "meta_test_collection_cc_" + std::to_string(j) + "_";
+        int64_t result_id;
+        Status status;
+        for (size_t jj = 0; jj < 20; jj ++) {
+            std::string collection_name = collection_name_prefix + std::to_string(jj);
+            milvus::json cj{{"segment_row_count", 1024}};
+            auto collection = std::make_shared<Collection>(collection_name, cj);
+            auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).SetOp(Op::oAdd).CreatePtr();
+            status = meta_->Execute<Collection>(c_ctx, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_GT(result_id, 0);
+            collection->SetID(result_id);
+
+            std::string partition_name = collection_name + "_p_" + std::to_string(jj);
+            auto partition = std::make_shared<Partition>(partition_name, collection->GetID());
+            auto p_ctx = ResourceContextBuilder<Partition>().SetResource(partition).SetOp(Op::oAdd).CreatePtr();
+            status = meta_->Execute<Partition>(p_ctx, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_GT(result_id, 0);
+            partition->SetID(result_id);
+
+            std::string segment_name = partition_name + "_s_" + std::to_string(jj);
+            auto segment = std::make_shared<Segment>(collection->GetID(), partition->GetID());
+            auto s_ctx = ResourceContextBuilder<Segment>().SetResource(segment).SetOp(Op::oAdd).CreatePtr();
+            status = meta_->Execute<Segment>(s_ctx, result_id);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+            ASSERT_GT(result_id, 0);
+            segment->SetID(result_id);
+
+            auto session = meta_->CreateSession();
+
+            collection->Activate();
+            auto c_ctx2 = ResourceContextBuilder<Collection>().SetResource(collection)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            ASSERT_TRUE(session->Apply<Collection>(c_ctx2).ok());
+            partition->Activate();
+            auto p_ctx2 = ResourceContextBuilder<Partition>().SetResource(partition)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            ASSERT_TRUE(session->Apply<Partition>(p_ctx2).ok());
+            segment->Activate();
+            auto s_ctx2 = ResourceContextBuilder<Segment>().SetResource(segment)
+                .SetOp(Op::oUpdate).AddAttr(milvus::engine::meta::F_STATE).CreatePtr();
+            ASSERT_TRUE(session->Apply<Segment>(s_ctx2).ok());
+            std::vector<int64_t> ids;
+            status = session->Commit(ids);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+        }
+    };
+
+    unsigned int thread_hint = std::thread::hardware_concurrency();
+    std::vector<std::thread> request_threads;
+    for (size_t i = 0; i < 3 * thread_hint; i++) {
+        request_threads.emplace_back(request_worker, i);
     }
 
-    for (auto i = 0; i < raw_files_cnt; ++i) {
-        status = impl_->CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
-        table_file.row_count_ = 1;
-        status = impl_->UpdateCollectionFile(table_file);
+    std::vector<std::thread> cc_threads;
+    for (size_t j = 0; j < 3 * thread_hint; j++) {
+        cc_threads.emplace_back(cc_task, j);
     }
 
-    for (auto i = 0; i < to_index_files_cnt; ++i) {
-        status = impl_->CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::TO_INDEX;
-        table_file.row_count_ = 1;
-        status = impl_->UpdateCollectionFile(table_file);
+    for (auto& t : request_threads) {
+        t.join();
     }
 
-    for (auto i = 0; i < index_files_cnt; ++i) {
-        status = impl_->CreateCollectionFile(table_file);
-        table_file.file_type_ = milvus::engine::meta::SegmentSchema::INDEX;
-        table_file.row_count_ = 1;
-        status = impl_->UpdateCollectionFile(table_file);
+    for (auto& t : cc_threads) {
+        t.join();
     }
-
-    uint64_t total_row_count = 0;
-    status = impl_->Count(collection_id, total_row_count);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(total_row_count, raw_files_cnt + to_index_files_cnt + index_files_cnt);
-
-    milvus::engine::meta::FilesHolder files_holder;
-    status = impl_->FilesToIndex(files_holder);
-    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt);
-
-    files_holder.ReleaseFiles();
-    status = impl_->FilesToMerge(collection.collection_id_, files_holder);
-    ASSERT_EQ(files_holder.HoldFiles().size(), raw_files_cnt);
-
-    files_holder.ReleaseFiles();
-    status = impl_->FilesToIndex(files_holder);
-    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt);
-
-    files_holder.ReleaseFiles();
-    status = impl_->FilesToSearch(collection_id, files_holder);
-    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
-
-    std::vector<size_t> ids;
-    for (auto& file : files_holder.HoldFiles()) {
-        ids.push_back(file.id_);
-    }
+<<<<<<< HEAD
+=======
     size_t cnt = files_holder.HoldFiles().size();
     files_holder.ReleaseFiles();
     status = impl_->FilesByID(ids, files_holder);
@@ -793,4 +821,5 @@ TEST_F(MetaTest, LSN_TEST) {
     temp_lsb = 0;
     status = impl_->GetGlobalLastLSN(temp_lsb);
     ASSERT_EQ(temp_lsb, lsn);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 }

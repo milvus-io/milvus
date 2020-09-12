@@ -48,6 +48,18 @@ constexpr const char* ef = "ef";
 // Annoy Params
 constexpr const char* n_trees = "n_trees";
 constexpr const char* search_k = "search_k";
+
+// PQ Params
+constexpr const char* PQM = "PQM";
+
+// NGT Params
+constexpr const char* edge_size = "edge_size";
+// NGT_PANNG Params
+constexpr const char* forcedly_pruned_edge_size = "forcedly_pruned_edge_size";
+constexpr const char* selectively_pruned_edge_size = "selectively_pruned_edge_size";
+// NGT_ONNG Params
+constexpr const char* outgoing_edge_size = "outgoing_edge_size";
+constexpr const char* incoming_edge_size = "incoming_edge_size";
 }  // namespace IndexParams
 
 namespace Metric {

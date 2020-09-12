@@ -531,16 +531,24 @@ public:
 #ifndef NGT_SHARED_MEMORY_ALLOCATOR
     void save(std::string indexPath) { saveIndex(indexPath); }
 #endif
+<<<<<<< HEAD
     static void
     mmkdir(const std::string& dir) {
 #if 0
+=======
+    static void mkdir(const std::string & dir)
+    {
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
         if (::mkdir(dir.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0)
         {
             std::stringstream msg;
             msg << "NGT::Index::mkdir: Cannot make the specified directory. " << dir;
             NGTThrowException(msg);
         }
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
     }
     static void create(const std::string & database, NGT::Property & prop, bool redirect = false)
     {
@@ -913,7 +921,11 @@ public:
 #ifndef NGT_SHARED_MEMORY_ALLOCATOR
         try
         {
+<<<<<<< HEAD
             mmkdir(ofile);
+=======
+            mkdir(ofile);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
         }
         catch (...)
         {
@@ -983,7 +995,11 @@ public:
     {
         try
         {
+<<<<<<< HEAD
             mmkdir(ofile);
+=======
+            mkdir(ofile);
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
         }
         catch (...)
         {

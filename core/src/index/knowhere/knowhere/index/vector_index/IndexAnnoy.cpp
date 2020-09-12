@@ -18,9 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "hnswlib/hnswalg.h"
-#include "hnswlib/space_ip.h"
-#include "hnswlib/space_l2.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -43,9 +40,9 @@ IndexAnnoy::Serialize(const Config& config) {
     std::shared_ptr<uint8_t[]> dim_data(new uint8_t[sizeof(uint64_t)]);
     memcpy(dim_data.get(), &dim, sizeof(uint64_t));
 
-    auto index_length = index_->get_index_length();
+    size_t index_length = index_->get_index_length();
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_length]);
-    memcpy(index_data.get(), index_->get_index(), (size_t)index_length);
+    memcpy(index_data.get(), index_->get_index(), index_length);
 
     BinarySet res_set;
     res_set.Append("annoy_metric_type", metric_type, metric_type_length);
@@ -57,12 +54,12 @@ IndexAnnoy::Serialize(const Config& config) {
 void
 IndexAnnoy::Load(const BinarySet& index_binary) {
     auto metric_type = index_binary.GetByName("annoy_metric_type");
-    metric_type_.resize((size_t)metric_type->size);
-    memcpy(metric_type_.data(), metric_type->data.get(), (size_t)metric_type->size);
+    metric_type_.resize(static_cast<size_t>(metric_type->size));
+    memcpy(metric_type_.data(), metric_type->data.get(), static_cast<size_t>(metric_type->size));
 
     auto dim_data = index_binary.GetByName("annoy_dim");
     uint64_t dim;
-    memcpy(&dim, dim_data->data.get(), (size_t)dim_data->size);
+    memcpy(&dim, dim_data->data.get(), static_cast<size_t>(dim_data->size));
 
     if (metric_type_ == Metric::L2) {
         index_ = std::make_shared<AnnoyIndex<int64_t, float, ::Euclidean, ::Kiss64Random>>(dim);
@@ -89,7 +86,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         return;
     }
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GET_TENSOR(dataset_ptr)
 
     metric_type_ = config[Metric::TYPE];
     if (metric_type_ == Metric::L2) {
@@ -101,7 +98,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     for (int i = 0; i < rows; ++i) {
-        index_->add_item(p_ids[i], (const float*)p_data + dim * i);
+        index_->add_item(p_ids[i], static_cast<const float*>(p_data) + dim * i);
     }
 
     index_->build(config[IndexParams::n_trees].get<int64_t>());
@@ -113,12 +110,12 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    GETTENSOR(dataset_ptr)
+    GET_TENSOR_DATA_DIM(dataset_ptr)
     auto k = config[meta::TOPK].get<int64_t>();
     auto search_k = config[IndexParams::search_k].get<int64_t>();
     auto all_num = rows * k;
-    auto p_id = (int64_t*)malloc(all_num * sizeof(int64_t));
-    auto p_dist = (float*)malloc(all_num * sizeof(float));
+    auto p_id = static_cast<int64_t*>(malloc(all_num * sizeof(int64_t)));
+    auto p_dist = static_cast<float*>(malloc(all_num * sizeof(float)));
     faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
@@ -127,7 +124,8 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         result.reserve(k);
         std::vector<float> distances;
         distances.reserve(k);
-        index_->get_nns_by_vector((const float*)p_data + i * dim, k, search_k, &result, &distances, blacklist);
+        index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances,
+                                  blacklist);
 
         int64_t result_num = result.size();
         auto local_p_id = p_id + k * i;

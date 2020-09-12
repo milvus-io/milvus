@@ -11,10 +11,11 @@
 
 #pragma once
 
+#include <any>
 #include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "BooleanQuery.h"
 #include "Field.h"
@@ -39,15 +40,20 @@ enum class IndexType {
     SPTAGBKT = 8,
     HNSW = 11,
     ANNOY = 12,
+    RHNSWFLAT = 13,
+    RHNSWPQ = 14,
+    RHNSWSQ = 15,
+    NGTPANNG = 16,
+    NGTONNG = 17,
 };
 
 enum class MetricType {
-    L2 = 1,        // Euclidean Distance
-    IP = 2,        // Cosine Similarity
-    HAMMING = 3,   // Hamming Distance
-    JACCARD = 4,   // Jaccard Distance
-    TANIMOTO = 5,  // Tanimoto Distance
-    SUBSTRUCTURE = 6,   // Substructure Distance
+    L2 = 1,              // Euclidean Distance
+    IP = 2,              // Cosine Similarity
+    HAMMING = 3,         // Hamming Distance
+    JACCARD = 4,         // Jaccard Distance
+    TANIMOTO = 5,        // Tanimoto Distance
+    SUBSTRUCTURE = 6,    // Substructure Distance
     SUPERSTRUCTURE = 7,  // Superstructure Distance
 };
 
@@ -60,23 +66,44 @@ struct ConnectParam {
 };
 
 /**
- * @brief Collection parameters
+ * @brief Attribute record
  */
-struct CollectionParam {
-    std::string collection_name;              ///< Collection_name name
-    int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
-    int64_t index_file_size = 1024;           ///< Index file size, must be a positive value, unit: MB
-    MetricType metric_type = MetricType::L2;  ///< Index metric type
+struct AttrRecord {
+    std::vector<int64_t> int_record;
+    std::vector<double> double_record;
 };
 
 /**
- * @brief TopK query result
+ * @brief field value
+ */
+struct FieldValue {
+    int64_t row_num;
+    std::unordered_map<std::string, std::vector<int8_t>> int8_value;
+    std::unordered_map<std::string, std::vector<int16_t>> int16_value;
+    std::unordered_map<std::string, std::vector<int32_t>> int32_value;
+    std::unordered_map<std::string, std::vector<int64_t>> int64_value;
+    std::unordered_map<std::string, std::vector<float>> float_value;
+    std::unordered_map<std::string, std::vector<double>> double_value;
+    std::unordered_map<std::string, std::vector<VectorData>> vector_value;
+};
+
+/**
+ * @brief Vector parameters
+ */
+struct VectorParam {
+    std::string json_param;
+    std::vector<VectorData> vector_records;
+};
+
+/**
+ * @brief query result
  */
 struct QueryResult {
     std::vector<int64_t> ids;      ///< Query entity ids result
     std::vector<float> distances;  ///< Query distances result
+    FieldValue field_value;
 };
-using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
+using TopKQueryResult = std::vector<QueryResult>;  ///< Topk hybrid query result
 
 /**
  * @brief Index parameters
@@ -97,9 +124,9 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk query result
  *           ///< efConstruction range:[100, 500]
  */
 struct IndexParam {
-    std::string collection_name;        ///< Collection name for create index
-    IndexType index_type;               ///< Index type
-    std::string extra_params;           ///< Extra parameters according to different index type, must be json format
+    std::string collection_name;  ///< Collection name for create index
+    std::string field_name;       ///< Field name
+    std::string index_params;     ///< Extra parameters according to different index type, must be json format
 };
 
 /**
@@ -112,17 +139,10 @@ struct PartitionParam {
 
 using PartitionTagList = std::vector<std::string>;
 
-
-struct HMapping {
+struct Mapping {
     std::string collection_name;
-    std::vector<FieldPtr> numerica_fields;
-    std::vector<VectorFieldPtr> vector_fields;
-};
-
-struct HEntity {
-    int64_t row_num;
-    std::unordered_map<std::string, std::vector<int8_t>> numerica_value;
-    std::unordered_map<std::string, std::vector<Entity>> vector_value;
+    std::vector<FieldPtr> fields;
+    std::string extra_params;
 };
 
 /**
@@ -131,9 +151,9 @@ struct HEntity {
 class Connection {
  public:
     /**
-     * @brief Create connection
+     * @brief Create connection instance
      *
-     * Create a connection instance and return it's shared pointer
+     * Create a connection instance and return its shared pointer
      *
      * @return connection instance pointer
      */
@@ -142,13 +162,13 @@ class Connection {
     Create();
 
     /**
-     * @brief Destroy connection
+     * @brief Destroy connection instance
      *
      * Destroy the connection instance
      *
      * @param connection, the shared pointer to the instance to be destroyed
      *
-     * @return if destroy is successful
+     * @return Indicate if destroy successfully
      */
 
     static Status
@@ -157,12 +177,12 @@ class Connection {
     /**
      * @brief Connect
      *
-     * This method is used to connect server.
-     * Connect function should be called before any operations.
+     * This method is used to connect to Milvus server.
+     * Connect function must be called before all other operations.
      *
-     * @param param, use to provide server information
+     * @param param, used to provide server information
      *
-     * @return Indicate if connect is successful
+     * @return Indicate if connect successfully
      */
 
     virtual Status
@@ -171,20 +191,20 @@ class Connection {
     /**
      * @brief Connect
      *
-     * This method is used to connect server.
-     * Connect function should be called before any operations.
+     * This method is used to connect to Milvus server.
+     * Connect function must be called before all other operations.
      *
-     * @param uri, use to provide server uri, example: milvus://ipaddress:port
+     * @param uri, used to provide server uri, example: milvus://ipaddress:port
      *
-     * @return Indicate if connect is successful
+     * @return Indicate if connect successfully
      */
     virtual Status
     Connect(const std::string& uri) = 0;
 
     /**
-     * @brief Connected
+     * @brief Check connection
      *
-     * This method is used to test whether server is connected.
+     * This method is used to check whether Milvus server is connected.
      *
      * @return Indicate if connection status
      */
@@ -194,80 +214,36 @@ class Connection {
     /**
      * @brief Disconnect
      *
-     * This method is used to disconnect server.
+     * This method is used to disconnect from Milvus server.
      *
-     * @return Indicate if disconnect is successful
+     * @return Indicate if disconnect successfully
      */
     virtual Status
     Disconnect() = 0;
-
-    /**
-     * @brief Get the client version
-     *
-     * This method is used to give the client version.
-     *
-     * @return Client version.
-     */
-    virtual std::string
-    ClientVersion() const = 0;
-
-    /**
-     * @brief Get the server version
-     *
-     * This method is used to give the server version.
-     *
-     * @return Server version.
-     */
-    virtual std::string
-    ServerVersion() const = 0;
-
-    /**
-     * @brief Get the server status
-     *
-     * This method is used to give the server status.
-     *
-     * @return Server status.
-     */
-    virtual std::string
-    ServerStatus() const = 0;
-
-    /**
-     * @brief Get config method
-     *
-     * This method is used to set config.
-     *
-     * @param node_name, config node name.
-     * @param value, config value.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    GetConfig(const std::string& node_name, std::string& value) const = 0;
-
-    /**
-     * @brief Set config method
-     *
-     * This method is used to set config.
-     *
-     * @param node_name, config node name.
-     * @param value, config value.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    SetConfig(const std::string& node_name, const std::string& value) const = 0;
 
     /**
      * @brief Create collection method
      *
      * This method is used to create collection.
      *
-     * @param param, use to provide collection information to be created.
+     * @param param, used to provide collection information to be created.
      *
      * @return Indicate if collection is created successfully
      */
     virtual Status
-    CreateCollection(const CollectionParam& param) = 0;
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) = 0;
+
+    /**
+     * @brief Drop collection method
+     *
+     * This method is used to drop collection (and its partitions).
+     *
+     * @param collection_name, target collection's name.
+     *
+     * @return Indicate if collection is dropped successfully.
+     */
+    virtual Status
+    DropCollection(const std::string& collection_name) = 0;
 
     /**
      * @brief Test collection existence method
@@ -276,142 +252,10 @@ class Connection {
      *
      * @param collection_name, target collection's name.
      *
-     * @return Indicate if collection is cexist
+     * @return Indicate if the collection exists
      */
     virtual bool
     HasCollection(const std::string& collection_name) = 0;
-
-    /**
-     * @brief Drop collection method
-     *
-     * This method is used to drop collection(and its partitions).
-     *
-     * @param collection_name, target collection's name.
-     *
-     * @return Indicate if collection is drop successfully.
-     */
-    virtual Status
-    DropCollection(const std::string& collection_name) = 0;
-
-    /**
-     * @brief Create index method
-     *
-     * This method is used to create index for whole collection(and its partitions).
-     *
-     * @param index_param, use to provide index information to be created.
-     *
-     * @return Indicate if create index successfully.
-     */
-    virtual Status
-    CreateIndex(const IndexParam& index_param) = 0;
-
-    /**
-     * @brief Insert entity to collection
-     *
-     * This method is used to insert vector array to collection.
-     *
-     * @param collection_name, target collection's name.
-     * @param partition_tag, target partition's tag, keep empty if no partition specified.
-     * @param entity_array, entity array is inserted, each entitu represent a vector.
-     * @param id_array,
-     *  specify id for each entity,
-     *  if this array is empty, milvus will generate unique id for each entity,
-     *  and return all ids by this parameter.
-     *
-     * @return Indicate if entity array are inserted successfully
-     */
-    virtual Status
-    Insert(const std::string& collection_name,
-           const std::string& partition_tag,
-           const std::vector<Entity>& entity_array,
-           std::vector<int64_t>& id_array) = 0;
-
-    /**
-     * @brief Get entity data by id
-     *
-     * This method is used to get entities data by id array from a collection.
-     * Return the first found entity if there are entities with duplicated id
-     *
-     * @param collection_name, target collection's name.
-     * @param id_array, target entities id array.
-     * @param entities_data, returned entities data.
-     *
-     * @return Indicate if the operation is succeed.
-     */
-    virtual Status
-    GetEntityByID(const std::string& collection_name,
-                  const std::vector<int64_t>& id_array,
-                  std::vector<Entity>& entities_data) = 0;
-
-    /**
-     * @brief List entity ids from a segment
-     *
-     * This method is used to get entity ids from a segment
-     * Return all entity(not deleted) ids
-     *
-     * @param collection_name, target collection's name.
-     * @param segment_name, target segment name.
-     * @param id_array, returned entity id array.
-     *
-     * @return Indicate if the operation is succeed.
-     */
-    virtual Status
-    ListIDInSegment(const std::string& collection_name,
-                    const std::string& segment_name,
-                    std::vector<int64_t>& id_array) = 0;
-
-    /**
-     * @brief Search entities in a collection
-     *
-     * This method is used to query entity in collection.
-     *
-     * @param collection_name, target collection's name.
-     * @param partition_tag_array, target partitions, keep empty if no partition specified.
-     * @param query_entity_array, vectors to be queried.
-     * @param topk, how many similarity entities will be returned.
-     * @param extra_params, extra search parameters according to different index type, must be json format.
-     * Note: extra_params is extra parameters list, it must be json format, for example:
-     *       For different index type, parameter list is different accordingly
-     *       FLAT/IVFLAT/SQ8/IVFPQ:  {nprobe: 32}
-     *           ///< nprobe range:[1,999999]
-     *       NSG:  {search_length:100}
-     *           ///< search_length range:[10, 300]
-     *       HNSW  {ef: 64}
-     *           ///< ef range:[topk, 4096]
-     * @param topk_query_result, result array.
-     *
-     * @return Indicate if query is successful.
-     */
-    virtual Status
-    Search(const std::string& collection_name, const PartitionTagList& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) = 0;
-
-    /**
-     * @brief Get collection information
-     *
-     * This method is used to get collection information.
-     *
-     * @param collection_name, target collection's name.
-     * @param collection_param, collection_param is given when operation is successful.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) = 0;
-
-    /**
-     * @brief Get collection entity count
-     *
-     * This method is used to get collection entity count.
-     *
-     * @param collection_name, target collection's name.
-     * @param entity_count, collection total entity count(including partitions).
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    CountEntities(const std::string& collection_name, int64_t& entity_count) = 0;
 
     /**
      * @brief List all collections in database
@@ -424,6 +268,19 @@ class Connection {
      */
     virtual Status
     ListCollections(std::vector<std::string>& collection_array) = 0;
+
+    /**
+     * @brief Get collection information
+     *
+     * This method is used to get collection information.
+     *
+     * @param collection_name, target collection's name.
+     * @param collection_param, collection_param is given when operation is successful.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) = 0;
 
     /**
      * @brief Get collection statistics
@@ -439,54 +296,17 @@ class Connection {
     GetCollectionStats(const std::string& collection_name, std::string& collection_stats) = 0;
 
     /**
-     * @brief Delete entity by id
+     * @brief Get collection entity count
      *
-     * This method is used to delete entity by id.
+     * This method is used to get collection entity count.
      *
      * @param collection_name, target collection's name.
-     * @param id_array, entity id array to be deleted.
+     * @param entity_count, total entity count in collection.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) = 0;
-
-    /**
-     * @brief Load collection from disk to memory
-     *
-     * This method is used to load collection data into memory
-     *
-     * @param collection_name, target collection's name.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    LoadCollection(const std::string& collection_name) const = 0;
-
-    /**
-     * @brief Get index information
-     *
-     * This method is used to get index information
-     *
-     * @param collection_name, target collection's name.
-     * @param index_param, returned index information.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const = 0;
-
-    /**
-     * @brief Drop index
-     *
-     * This method is used to drop index of collection(and its partitions)
-     *
-     * @param collection_name, target collection's name.
-     *
-     * @return Indicate if this operation is successful.
-     */
-    virtual Status
-    DropIndex(const std::string& collection_name) const = 0;
+    CountEntities(const std::string& collection_name, int64_t& entity_count) = 0;
 
     /**
      * @brief Create partition method
@@ -501,7 +321,23 @@ class Connection {
     CreatePartition(const PartitionParam& partition_param) = 0;
 
     /**
+<<<<<<< HEAD
+     * @brief Delete partition method
+     *
+     * This method is used to delete collection's partition.
+     *
+     * @param partition_param, target partition to be deleted.
+     *
+     * @return Indicate if partition is delete successfully.
+     */
+    virtual Status
+    DropPartition(const PartitionParam& partition_param) = 0;
+
+    /**
      * @brief Has partition method
+=======
+     * @brief Get collection information
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
      *
      * This method is used to test existence of collection's partition
      *
@@ -527,16 +363,137 @@ class Connection {
     ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
 
     /**
-     * @brief Delete partition method
+     * @brief Create index method
      *
-     * This method is used to delete collection's partition.
+     * This method is used to create index for collection.
      *
-     * @param partition_param, target partition to be deleted.
+     * @param collection_name, target collection's name.
+     * @param field_name, target field name.
+     * @param index_name, name of index.
+     * @param index_params, extra informations of index such as index type, must be json format.
      *
-     * @return Indicate if partition is delete successfully.
+     * @return Indicate if create index successfully.
      */
     virtual Status
-    DropPartition(const PartitionParam& partition_param) = 0;
+    CreateIndex(const IndexParam& index_param) = 0;
+
+    /**
+     * @brief Drop index method
+     *
+     * This method is used to drop index of collection.
+     *
+     * @param collection_name, target collection's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const = 0;
+
+    /**
+     * @brief Insert entity to collection
+     *
+     * This method is used to insert vector array to collection.
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag, target partition's tag, keep empty if no partition specified.
+     * @param entity_array, entity array is inserted, each entity represent a vector.
+     * @param id_array,
+     *  specify id for each entity,
+     *  if this array is empty, milvus will generate unique id for each entity,
+     *  and return all ids by this parameter.
+     *
+     * @return Indicate if entity array are inserted successfully
+     */
+    virtual Status
+    Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
+           std::vector<int64_t>& id_array) = 0;
+
+    /**
+     * @brief Get entity data by id
+     *
+     * This method is used to get entities data by id array from a collection.
+     * Return the first found entity if there are entities with duplicated id
+     *
+     * @param collection_name, target collection's name.
+     * @param id_array, target entities id array.
+     * @param entities_data, returned entities data.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, std::string& entities) = 0;
+
+    /**
+     * @brief Delete entity by id
+     *
+     * This method is used to delete entity by id.
+     *
+     * @param collection_name, target collection's name.
+     * @param id_array, entity id array to be deleted.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) = 0;
+
+    /**
+     * @brief Search entities in a collection
+     *
+     * This method is used to query entity in collection.
+     *
+     * @param collection_name, target collection's name.
+     * @param partition_tag_array, target partitions, keep empty if no partition specified.
+     * @param query_entity_array, vectors to be queried.
+     * @param topk, how many similarity entities will be returned.
+     * @param extra_params, extra search parameters according to different index type, must be json format.
+     * Note: extra_params is extra parameters list, it must be json format, for example:
+     *       For different index type, parameter list is different accordingly
+     *       FLAT/IVFLAT/SQ8/IVFPQ:  {nprobe: 32}
+     *           ///< nprobe range:[1,999999]
+     *       NSG:  {search_length:100}
+     *           ///< search_length range:[10, 300]
+     *       HNSW  {ef: 64}
+     *           ///< ef range:[topk, 4096]
+     * @param topk_query_result, result array.
+     *
+     * @return Indicate if query is successful.
+     */
+    virtual Status
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
+           const VectorParam& vector_param, TopKQueryResult& query_result) = 0;
+
+    virtual Status
+    SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) = 0;
+
+    /**
+     * @brief List entity ids from a segment
+     *
+     * This method is used to get entity ids from a segment
+     * Return all entity(not deleted) ids
+     *
+     * @param collection_name, target collection's name.
+     * @param segment_name, target segment name.
+     * @param id_array, returned entity id array.
+     *
+     * @return Indicate if the operation is succeed.
+     */
+    virtual Status
+    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+                    std::vector<int64_t>& id_array) = 0;
+
+    /**
+     * @brief Load collection into memory
+     *
+     * This method is used to load collection data into memory
+     *
+     * @param collection_name, target collection's name.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    LoadCollection(const std::string& collection_name) const = 0;
 
     /**
      * @brief Flush collections insert buffer into storage
@@ -561,24 +518,6 @@ class Connection {
      */
     virtual Status
     Compact(const std::string& collection_name) = 0;
-
-    /*******************************New Interface**********************************/
-
-    virtual Status
-    CreateHybridCollection(const HMapping& mapping) = 0;
-
-    virtual Status
-    InsertEntity(const std::string& collection_name,
-                 const std::string& partition_tag,
-                 HEntity& entities,
-                 std::vector<uint64_t>& id_array) = 0;
-
-    virtual Status
-    HybridSearch(const std::string& collection_name,
-                 const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query,
-                 const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) = 0;
 };
 
 }  // namespace milvus

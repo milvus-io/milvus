@@ -13,7 +13,7 @@ from utils import *
 dim = 128
 index_file_size = 10
 collection_id = "test_mix"
-add_interval_time = 2
+add_interval_time = 5
 vectors = gen_vectors(10000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
@@ -72,7 +72,7 @@ class TestMixBase:
         p_create.join()
 
     @pytest.mark.level(2)
-    def test_mix_multi_collections(self, connect):
+    def _test_mix_multi_collections(self, connect):
         '''
         target: test functions with multiple collections of different metric_types and index_types
         method: create 60 collections which 30 are L2 and the other are IP, add vectors into them

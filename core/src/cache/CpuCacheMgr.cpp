@@ -13,14 +13,18 @@
 
 #include <utility>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "utils/Log.h"
 
 namespace milvus {
 namespace cache {
 
+<<<<<<< HEAD
+CpuCacheMgr::CpuCacheMgr() {
+    cache_ = std::make_shared<Cache<DataObjPtr>>(config.cache.cache_size(), 1UL << 32, "[CACHE CPU]");
+=======
 namespace {
 // constexpr int64_t unit = 1024 * 1024 * 1024;
 constexpr int64_t unit = 1;
@@ -36,30 +40,27 @@ CpuCacheMgr::CpuCacheMgr() {
     LOG_SERVER_DEBUG_ << "cpu cache.size: " << cap;
     LOG_SERVER_INFO_ << "cpu cache.size: " << cap;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, "[CACHE CPU]");
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
-    float cpu_cache_threshold;
-    config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
-    cache_->set_freemem_percent(cpu_cache_threshold);
-
-    SetIdentity("CpuCacheMgr");
-    AddCpuCacheCapacityListener();
+    if (config.cache.cpu_cache_threshold() > 0.0) {
+        cache_->set_freemem_percent(config.cache.cpu_cache_threshold());
+    }
+    ConfigMgr::GetInstance().Attach("cache.cache_size", this);
 }
 
-CpuCacheMgr*
+CpuCacheMgr::~CpuCacheMgr() {
+    ConfigMgr::GetInstance().Detach("cache.cache_size", this);
+}
+
+CpuCacheMgr&
 CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
-    return &s_mgr;
-}
-
-DataObjPtr
-CpuCacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
+    return s_mgr;
 }
 
 void
-CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
-    SetCapacity(value * unit);
+CpuCacheMgr::ConfigUpdate(const std::string& name) {
+    SetCapacity(config.cache.cache_size());
 }
 
 }  // namespace cache

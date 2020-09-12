@@ -31,6 +31,9 @@ GenBinaryQuery(BooleanQueryPtr clause, BinaryQueryPtr& binary_query);
 uint64_t
 BinaryQueryHeight(BinaryQueryPtr& binary_query);
 
+Status
+ValidateBooleanQuery(BooleanQueryPtr& boolean_query);
+
 bool
 ValidateBinaryQuery(BinaryQueryPtr& binary_query);
 

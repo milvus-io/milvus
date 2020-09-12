@@ -13,11 +13,7 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
-//#include <src/db/MySQLMetaImpl.h>
 
-#include "db/DB.h"
-#include "db/meta/MySQLMetaImpl.h"
-#include "db/meta/SqliteMetaImpl.h"
 #include <fiu-control.h>
 #define TIMING
 
@@ -40,40 +36,12 @@
 #define FIU_ENABLE_FIU(name) fiu_enable(name, 1, nullptr, 0)
 #endif
 
-void
-ASSERT_STATS(milvus::Status& stat);
-
-// class TestEnv : public ::testing::Environment {
-// public:
-//
-//    static std::string getURI() {
-//        if (const char* uri = std::getenv("MILVUS_DBMETA_URI")) {
-//            return uri;
-//        }
-//        else {
-//            return "";
-//        }
-//    }
-//
-//    void SetUp() override {
-//        getURI();
-//    }
-//
-//};
-//
-//::testing::Environment* const test_env =
-//        ::testing::AddGlobalTestEnvironment(new TestEnv);
-
 class MetricTest : public ::testing::Test {
  protected:
-    milvus::engine::DBPtr db_;
-
     void
     InitLog();
     void
     SetUp() override;
     void
     TearDown() override;
-    virtual milvus::engine::DBOptions
-    GetOptions();
 };

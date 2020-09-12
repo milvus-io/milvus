@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "MilvusApi.h"
 #include "BooleanQuery.h"
+#include "MilvusApi.h"
 #include "thirdparty/nlohmann/json.hpp"
 
 #include <memory>
@@ -45,7 +45,7 @@ class Utils {
     IndexTypeName(const milvus::IndexType& index_type);
 
     static void
-    PrintCollectionParam(const milvus::CollectionParam& collection_param);
+    PrintCollectionParam(const milvus::Mapping& collection_param);
 
     static void
     PrintPartitionParam(const milvus::PartitionParam& partition_param);
@@ -54,25 +54,41 @@ class Utils {
     PrintIndexParam(const milvus::IndexParam& index_param);
 
     static void
-    BuildEntities(int64_t from, int64_t to, std::vector<milvus::Entity>& entity_array,
-                  std::vector<int64_t>& entity_ids, int64_t dimension);
+    PrintMapping(const milvus::Mapping& mapping);
 
     static void
-    PrintSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+    BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, std::vector<int64_t>& entity_ids,
+                  int64_t dimension);
+
+    static void
+    PrintSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
                       const milvus::TopKQueryResult& topk_query_result);
 
     static void
-    CheckSearchResult(const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+    CheckSearchResult(const std::vector<std::pair<int64_t, milvus::VectorData>>& entity_array,
                       const milvus::TopKQueryResult& topk_query_result);
 
     static void
     DoSearch(std::shared_ptr<milvus::Connection> conn, const std::string& collection_name,
              const std::vector<std::string>& partition_tags, int64_t top_k, int64_t nprobe,
-             const std::vector<std::pair<int64_t, milvus::Entity>>& entity_array,
+             std::vector<std::pair<int64_t, milvus::VectorData>> search_entity_array,
              milvus::TopKQueryResult& topk_query_result);
+
+    static void
+    ConstructVectors(int64_t from, int64_t to, std::vector<milvus::VectorData>& query_vector,
+                     std::vector<int64_t>& search_ids, int64_t dimension);
 
     static std::vector<milvus::LeafQueryPtr>
     GenLeafQuery();
+
+    static void
+    GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);
+
+    static void
+    GenBinaryDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);
+
+    static void
+    PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result);
 };
 
 }  // namespace milvus_sdk

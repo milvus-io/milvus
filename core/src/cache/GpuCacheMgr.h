@@ -17,7 +17,7 @@
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
-#include "config/handler/GpuResourceConfigHandler.h"
+#include "config/ConfigMgr.h"
 
 namespace milvus {
 namespace cache {
@@ -27,34 +27,23 @@ class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 using MutexPtr = std::shared_ptr<std::mutex>;
 
-class GpuCacheMgr : public CacheMgr<DataObjPtr>, public server::GpuResourceConfigHandler {
+class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
  public:
     explicit GpuCacheMgr(int64_t gpu_id);
 
     ~GpuCacheMgr();
 
-    DataObjPtr
-    GetIndex(const std::string& key);
-
-    void
-    InsertItem(const std::string& key, const DataObjPtr& data);
-
-    bool
-    Reserve(const int64_t size);
-
     static GpuCacheMgrPtr
     GetInstance(int64_t gpu_id);
 
- protected:
+ public:
     void
-    OnGpuCacheCapacityChanged(int64_t capacity) override;
+    ConfigUpdate(const std::string& name) override;
 
  private:
-    bool gpu_enable_ = true;
     int64_t gpu_id_;
     static std::mutex global_mutex_;
     static std::unordered_map<int64_t, GpuCacheMgrPtr> instance_;
-    std::string identity_;
 };
 #endif
 

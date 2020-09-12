@@ -11,29 +11,53 @@
 
 #pragma once
 
-#include "Task.h"
+#include <string>
+
+#include "db/engine/ExecutionEngine.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/BuildIndexJob.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
 
-class XBuildIndexTask : public Task {
+class BuildIndexTask : public Task {
  public:
-    explicit XBuildIndexTask(SegmentSchemaPtr file, TaskLabelPtr label);
+    explicit BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
+                            engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
+                            TaskLabelPtr label);
 
-    void
-    Load(LoadType type, uint8_t device_id) override;
+    inline json
+    Dump() const override {
+        json ret{
+            {"type", type_},
+            {"segment_id", segment_id_},
+        };
+        return ret;
+    }
 
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
+
+    Status
+    OnExecute() override;
+
+ private:
     void
-    Execute() override;
+    CreateExecEngine();
 
  public:
-    SegmentSchemaPtr file_;
-    SegmentSchema table_file_;
-    size_t to_index_id_ = 0;
-    int to_index_type_ = 0;
-    ExecutionEnginePtr to_index_engine_ = nullptr;
+    engine::snapshot::ScopedSnapshotT snapshot_;
+    engine::DBOptions options_;
+    engine::snapshot::ID_TYPE segment_id_;
+
+    // structured field could not be processed with vector field in a task
+    // vector field could be build by cpu or gpu, so each task could only handle one field
+    // the target_fields_ is passed to tell ExecutionEngine which field should be build by this task
+    engine::TargetFields target_fields_;
+
+    engine::ExecutionEnginePtr execution_engine_;
 };
 
 }  // namespace scheduler

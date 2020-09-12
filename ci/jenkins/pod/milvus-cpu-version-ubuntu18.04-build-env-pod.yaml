@@ -8,7 +8,7 @@ metadata:
 spec:
   containers:
   - name: milvus-cpu-build-env
-    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.9.0-ubuntu18.04
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.10.2-ubuntu18.04
     env:
     - name: POD_IP
       valueFrom:
@@ -17,7 +17,7 @@ spec:
     - name: OS_NAME
       value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
-      value: "4719a06f1b77393fed7a4336058baab74745715a431193d3876e9b51262505bd"
+      value: "4e30ebe398d1a10150c625e52f44d5426c71a557afbb3f16ee9cea20e52e1b9d"
     command:
     - cat
     tty: true
@@ -28,21 +28,6 @@ spec:
       requests:
         memory: "8Gi"
         cpu: "4.0"
-  - name: milvus-mysql
-    image: mysql:5.6
-    env:
-    - name: MYSQL_ROOT_PASSWORD
-      value: 123456
-    ports:
-    - containerPort: 3306
-      name: mysql
-    resources:
-      limits:
-        memory: "500Mi"
-        cpu: "0.5"
-      requests:
-        memory: "200Mi"
-        cpu: "0.2"
   tolerations:
   - key: dedicated
     operator: Equal

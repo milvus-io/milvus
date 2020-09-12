@@ -70,6 +70,11 @@ void runL2Distance(GpuResources* resources,
                    Tensor<int, 2, true>& outIndices,
                    bool ignoreOutDistances = false);
 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 void runL2Distance(GpuResources* resources,
                    Tensor<float, 2, true>& vectors,
                    bool vectorsRowMajor,
@@ -86,11 +91,20 @@ void runL2Distance(GpuResources* resources,
                     int curTile,
                     int nprobe,
                     Tensor<uint8_t, 1, true>& bitset);
+<<<<<<< HEAD
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 //
 // General distance implementation, assumes that all arguments are on the
 // device. This is the top-level internal distance function to call to dispatch
 // based on metric type.
 //
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 
 template <typename T>
 void bfKnnOnDevice(GpuResources* resources,
@@ -139,6 +153,10 @@ void bfKnnOnDevice(GpuResources* resources,
                       bitset);
                    }
 
+<<<<<<< HEAD
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 template <typename T>
 void bfKnnOnDevice(GpuResources* resources,
                    int device,

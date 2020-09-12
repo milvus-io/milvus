@@ -1,3 +1,15 @@
+#-------------------------------------------------------------------------------
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
+#-------------------------------------------------------------------------------
 
 macro(set_option_category name)
     set(KNOWHERE_OPTION_CATEGORY ${name})
@@ -41,15 +53,6 @@ macro(define_option_string name description default)
 endmacro()
 
 #----------------------------------------------------------------------
-set_option_category("GPU version")
-
-if (MILVUS_GPU_VERSION)
-    define_option(KNOWHERE_GPU_VERSION "Build GPU version" ON)
-else ()
-    define_option(KNOWHERE_GPU_VERSION "Build GPU version" OFF)
-endif ()
-
-#----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
 set(KNOWHERE_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
@@ -60,6 +63,8 @@ define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "AUTO"
         "BUNDLED"
         "SYSTEM")
+
+define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
@@ -80,6 +85,8 @@ define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
 define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
+
+define_option(MILVUS_CUDA_ARCH "Build with CUDA arch" "DEFAULT")
 
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
@@ -102,7 +109,7 @@ macro(config_summary)
     message(STATUS "  Source directory: ${CMAKE_CURRENT_SOURCE_DIR}")
     if (${CMAKE_EXPORT_COMPILE_COMMANDS})
         message(
-                STATUS "  Compile commands: ${INDEX_BINARY_DIR}/compile_commands.json")
+                STATUS "  Compile commands: ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json")
     endif ()
 
     foreach (category ${KNOWHERE_OPTION_CATEGORIES})

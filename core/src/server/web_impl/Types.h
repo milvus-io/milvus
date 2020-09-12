@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <map>
 #include <string>
 #include <unordered_map>
 
@@ -71,6 +72,20 @@ enum StatusCode : int {
 
     MAX = ILLEGAL_QUERY_PARAM
 };
+
+static std::map<std::string, engine::DataType> str2type = {{"int32", engine::DataType::INT32},
+                                                           {"int64", engine::DataType::INT64},
+                                                           {"float", engine::DataType::FLOAT},
+                                                           {"double", engine::DataType::DOUBLE},
+                                                           {"vector_float", engine::DataType::VECTOR_FLOAT},
+                                                           {"vector_binary", engine::DataType::VECTOR_BINARY}};
+
+static std::map<engine::DataType, std::string> type2str = {{engine::DataType::INT32, "int32"},
+                                                           {engine::DataType::INT64, "int64"},
+                                                           {engine::DataType::FLOAT, "float"},
+                                                           {engine::DataType::DOUBLE, "double"},
+                                                           {engine::DataType::VECTOR_FLOAT, "vector_float"},
+                                                           {engine::DataType::VECTOR_BINARY, "vector_binary"}};
 
 }  // namespace web
 }  // namespace server

@@ -13,8 +13,12 @@
 
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "db/Types.h"
 #include "utils/Json.h"
 
 namespace milvus {
@@ -45,9 +49,10 @@ struct QueryColumn {
 };
 
 struct TermQuery {
-    std::string field_name;
-    std::vector<uint8_t> field_value;
-    float boost;
+    milvus::json json_obj;
+    //    std::string field_name;
+    //    std::vector<uint8_t> field_value;
+    //    float boost;
 };
 using TermQueryPtr = std::shared_ptr<TermQuery>;
 
@@ -57,9 +62,10 @@ struct CompareExpr {
 };
 
 struct RangeQuery {
-    std::string field_name;
-    std::vector<CompareExpr> compare_expr;
-    float boost;
+    milvus::json json_obj;
+    //    std::string field_name;
+    //    std::vector<CompareExpr> compare_expr;
+    //    float boost;
 };
 using RangeQueryPtr = std::shared_ptr<RangeQuery>;
 
@@ -70,8 +76,10 @@ struct VectorRecord {
 
 struct VectorQuery {
     std::string field_name;
-    milvus::json extra_params;
+    milvus::json extra_params = {};
     int64_t topk;
+    int64_t nq;
+    std::string metric_type = "";
     float boost;
     VectorRecord query_vector;
 };
@@ -92,7 +100,7 @@ using GeneralQueryPtr = std::shared_ptr<GeneralQuery>;
 struct LeafQuery {
     TermQueryPtr term_query;
     RangeQueryPtr range_query;
-    VectorQueryPtr vector_query;
+    std::string vector_placeholder;
     float query_boost;
 };
 
@@ -102,6 +110,19 @@ struct BinaryQuery {
     QueryRelation relation;
     float query_boost;
 };
+
+struct Query {
+    GeneralQueryPtr root;
+    std::unordered_map<std::string, VectorQueryPtr> vectors;
+
+    std::string collection_id;
+    std::vector<std::string> partitions;
+    std::vector<std::string> field_names;
+    std::set<std::string> index_fields;
+    std::unordered_map<std::string, std::string> metric_types;
+    std::string index_type;
+};
+using QueryPtr = std::shared_ptr<Query>;
 
 }  // namespace query
 }  // namespace milvus

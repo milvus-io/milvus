@@ -12,7 +12,7 @@
 #include <fstream>
 #include <string>
 
-#include "config/Config.h"
+#include "config/ServerConfig.h"
 #include "storage/utils.h"
 #include "utils/CommonUtil.h"
 
@@ -44,16 +44,16 @@ WriteToFile(const std::string& file_path, const char* content) {
 void
 StorageTest::SetUp() {
     std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::CreateDirectory(config_path);
+    milvus::CommonUtil::CreateDirectory(config_path);
     config_path += CONFIG_FILE;
     WriteToFile(config_path, CONFIG_STR);
 
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
+    // milvus::server::Config& config = milvus::server::Config::GetInstance();
+    // ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
 }
 
 void
 StorageTest::TearDown() {
     std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::DeleteDirectory(config_path);
+    milvus::CommonUtil::DeleteDirectory(config_path);
 }

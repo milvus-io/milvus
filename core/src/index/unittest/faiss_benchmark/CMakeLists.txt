@@ -1,4 +1,4 @@
-if (KNOWHERE_GPU_VERSION)
+if (MILVUS_GPU_VERSION)
 
     include_directories(${INDEX_SOURCE_DIR}/thirdparty)
     include_directories(${INDEX_SOURCE_DIR}/include)

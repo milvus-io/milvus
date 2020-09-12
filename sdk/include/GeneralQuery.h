@@ -13,24 +13,23 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace milvus {
 
 /**
  * @brief Entity inserted, currently each entity represent a vector
  */
-struct Entity {
+struct VectorData {
     std::vector<float> float_data;     ///< Vector raw float data
     std::vector<uint8_t> binary_data;  ///< Vector raw binary data
 };
 
-
 // base class of all queries
 struct Sort {
     std::string field_name;
-    int64_t rules;      // 0 is inc, 1 is dec
+    int64_t rules;  // 0 is inc, 1 is dec
 };
 
 struct Query {
@@ -57,7 +56,8 @@ struct QueryColumn {
 };
 
 struct TermQuery : Query {
-    std::vector<int8_t> field_value;
+    std::vector<int64_t> int_value;
+    std::vector<double> double_value;
 };
 using TermQueryPtr = std::shared_ptr<TermQuery>;
 
@@ -80,7 +80,7 @@ struct VectorQuery : Query {
     uint64_t topk;
     float distance_limitation;
     float query_boost;
-    std::vector<Entity> query_vector;
+    std::vector<VectorData> query_vector;
     std::string extra_params;
 };
 using VectorQueryPtr = std::shared_ptr<VectorQuery>;
@@ -93,4 +93,4 @@ struct LeafQuery {
 };
 using LeafQueryPtr = std::shared_ptr<LeafQuery>;
 
-} // namespace milvus
+}  // namespace milvus

@@ -34,9 +34,10 @@ RUN source /etc/profile.d/devtoolset-7.sh && \
 RUN yum install -y ccache && \
     rm -rf /var/cache/yum/*
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
-WORKDIR /root
+# use login shell to activate environment un the RUN commands
+SHELL [ "/bin/bash", "-c", "-l" ]
 
-ENTRYPOINT [ "/app/docker-entrypoint.sh" ]
-CMD [ "start" ]
+# use login shell when running the container
+ENTRYPOINT [ "/bin/bash", "-c", "-l" ]

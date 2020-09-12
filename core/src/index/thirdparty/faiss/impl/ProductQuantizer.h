@@ -173,6 +173,10 @@ struct ProductQuantizer {
                      float_maxheap_array_t * res,
                      bool init_finalize_heap = true) const;
 
+<<<<<<< HEAD
+    size_t cal_size() { return sizeof(*this) + centroids.size() * sizeof(float); }
+=======
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 

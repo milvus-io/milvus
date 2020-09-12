@@ -35,112 +35,81 @@ class ClientProxy : public Connection {
     Status
     Disconnect() override;
 
-    std::string
-    ClientVersion() const override;
-
-    std::string
-    ServerVersion() const override;
-
-    std::string
-    ServerStatus() const override;
+    Status
+    CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
 
     Status
-    GetConfig(const std::string& node_name, std::string& value) const override;
-
-    Status
-    SetConfig(const std::string& node_name, const std::string& value) const override;
-
-    Status
-    CreateCollection(const CollectionParam& param) override;
+    DropCollection(const std::string& collection_name) override;
 
     bool
     HasCollection(const std::string& collection_name) override;
 
     Status
-    DropCollection(const std::string& collection_name) override;
+    ListCollections(std::vector<std::string>& collection_array) override;
+
+    Status
+    GetCollectionInfo(const std::string& collection_name, Mapping& mapping) override;
+
+    Status
+    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
+
+    Status
+    CountEntities(const std::string& collection_name, int64_t& entity_count) override;
+
+    Status
+    CreatePartition(const PartitionParam& partition_param) override;
+
+    Status
+<<<<<<< HEAD
+    DropPartition(const PartitionParam& partition_param) override;
+
+    bool
+    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
+=======
+    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+
+    Status
+    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     CreateIndex(const IndexParam& index_param) override;
 
     Status
-    Insert(const std::string& collection_name,
-           const std::string& partition_tag,
-           const std::vector<Entity>& entity_array,
+    DropIndex(const std::string& collection_name, const std::string& field_name,
+              const std::string& index_name) const override;
+
+    Status
+    Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
            std::vector<int64_t>& id_array) override;
 
     Status
-    GetEntityByID(const std::string& collection_name,
-                  const std::vector<int64_t>& id_array,
-                  std::vector<Entity>& entities_data) override;
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                  std::string& entities) override;
+
+    Status
+    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
+
+    Status
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
+           const VectorParam& vector_param, TopKQueryResult& query_result) override;
+
+    Status
+    SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
+             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
     ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
                     std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& collection_name, const std::vector<std::string>& partition_tag_array,
-           const std::vector<Entity>& entity_array, int64_t topk,
-           const std::string& extra_params, TopKQueryResult& topk_query_result) override;
-
-    Status
-    GetCollectionInfo(const std::string& collection_name, CollectionParam& collection_param) override;
-
-    Status
-    CountEntities(const std::string& collection_name, int64_t& entity_count) override;
-
-    Status
-    ListCollections(std::vector<std::string>& collection_array) override;
-
-    Status
-    GetCollectionStats(const std::string& collection_name, std::string& collection_stats) override;
-
-    Status
-    DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
-
-    Status
     LoadCollection(const std::string& collection_name) const override;
-
-    Status
-    GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;
-
-    Status
-    DropIndex(const std::string& collection_name) const override;
-
-    Status
-    CreatePartition(const PartitionParam& partition_param) override;
-
-    bool
-    HasPartition(const std::string& collection_name, const std::string& partition_tag) const override;
-
-    Status
-    ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
-
-    Status
-    DropPartition(const PartitionParam& partition_param) override;
 
     Status
     Flush(const std::vector<std::string>& collection_name_array) override;
 
     Status
     Compact(const std::string& collection_name) override;
-
-    /*******************************New Interface**********************************/
-
-    Status
-    CreateHybridCollection(const HMapping& mapping) override;
-
-    Status
-    InsertEntity(const std::string& collection_name,
-                 const std::string& partition_tag,
-                 HEntity& entities,
-                 std::vector<uint64_t>& id_array) override;
-
-    Status
-    HybridSearch(const std::string& collection_name,
-                 const std::vector<std::string>& partition_list,
-                 BooleanQueryPtr& boolean_query,
-                 const std::string& extra_params,
-                 TopKQueryResult& topk_query_result) override;
 
  private:
     std::shared_ptr<::grpc::Channel> channel_;

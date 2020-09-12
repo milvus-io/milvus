@@ -22,7 +22,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "segment/Types.h"
+#include "db/SnapshotVisitor.h"
+#include "db/Types.h"
+#include "segment/Segment.h"
+#include "segment/SegmentReader.h"
 #include "storage/FSHandler.h"
 #include "utils/Status.h"
 
@@ -31,54 +34,83 @@ namespace segment {
 
 class SegmentWriter {
  public:
-    explicit SegmentWriter(const std::string& directory);
+    explicit SegmentWriter(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
 
     Status
-    AddVectors(const std::string& name, const std::vector<uint8_t>& data, const std::vector<doc_id_t>& uids);
+    AddChunk(const engine::DataChunkPtr& chunk_ptr);
 
     Status
+<<<<<<< HEAD
+    AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
+=======
     AddVectors(const std::string& name, const uint8_t* data, uint64_t size, const std::vector<doc_id_t>& uids);
 
     Status
     AddAttrs(const std::string& name, const std::unordered_map<std::string, uint64_t>& attr_nbytes,
              const std::unordered_map<std::string, std::vector<uint8_t>>& attr_data, const std::vector<doc_id_t>& uids);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
     Status
-    SetVectorIndex(const knowhere::VecIndexPtr& index);
+    CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
-    WriteBloomFilter(const IdBloomFilterPtr& bloom_filter_ptr);
+    WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
-    WriteDeletedDocs(const DeletedDocsPtr& deleted_docs);
+    WriteDeletedDocs(const std::string& file_path, const DeletedDocsPtr& deleted_docs);
 
     Status
     Serialize();
 
     Status
-    Cache();
-
-    Status
-    GetSegment(SegmentPtr& segment_ptr);
-
-    Status
-    Merge(const std::string& segment_dir_to_merge, const std::string& name);
+    Merge(const SegmentReaderPtr& segment_reader);
 
     size_t
-    Size();
-
-    size_t
-    VectorCount();
+    RowCount();
 
     Status
-    WriteVectorIndex(const std::string& location);
+    LoadUids(std::vector<engine::idx_t>& uids);
+
+    Status
+    SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
+
+    Status
+    WriteVectorIndex(const std::string& field_name);
+
+    Status
+    SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index);
+
+    Status
+    WriteStructuredIndex(const std::string& field_name);
+
+    Status
+    GetSegment(engine::SegmentPtr& segment_ptr);
+
+    Status
+    GetSegmentID(int64_t& id);
+
+    std::string
+    GetSegmentPath();
+
+    std::string
+    GetRootPath() const {
+        return dir_root_;
+    }
+
+    engine::SegmentVisitorPtr
+    GetSegmentVisitor() const {
+        return segment_visitor_;
+    }
 
  private:
     Status
-    WriteVectors();
+    Initialize();
 
     Status
-    WriteAttrs();
+    WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw);
+
+    Status
+    WriteFields();
 
     Status
     WriteBloomFilter();
@@ -87,8 +119,12 @@ class SegmentWriter {
     WriteDeletedDocs();
 
  private:
+    engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
-    SegmentPtr segment_ptr_;
+    engine::SegmentPtr segment_ptr_;
+
+    std::string dir_root_;
+    std::string dir_collections_;
 };
 
 using SegmentWriterPtr = std::shared_ptr<SegmentWriter>;

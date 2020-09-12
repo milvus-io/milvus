@@ -75,7 +75,9 @@ namespace hnswlib {
 
         virtual void *get_dist_func_param() = 0;
 
-        virtual ~SpaceInterface() {}
+        SpaceInterface() =default;
+
+        virtual ~SpaceInterface() =default;
     };
 
     template<typename dist_t>
@@ -96,3 +98,4 @@ namespace hnswlib {
 #include "space_ip.h"
 #include "bruteforce.h"
 #include "hnswalg.h"
+

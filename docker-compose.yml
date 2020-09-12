@@ -1,33 +1,18 @@
 version: '3.5'
 
-volumes:
-  amd64-ubuntu-18.04-cache:
-  amd64-centos-7-cache:
-
 x-ccache: &ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_COMPRESS: 1
   CCACHE_COMPRESSLEVEL: 5
   CCACHE_MAXSIZE: 2G
-  CCACHE_DIR: /build/ccache
+  CCACHE_DIR: /ccache
 
 services:
-  db:
-    image: mysql:5.6
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: 123456
-    networks:
-      milvus:
-        aliases:
-          - "mysql"
-
   ubuntu-core:
     image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     build:
       context: .
-      dockerfile: ci/docker/ubuntu-${UBUNTU}-core.dockerfile
+      dockerfile: docker/build_env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-core
     shm_size: 2G
@@ -35,19 +20,18 @@ services:
       <<: *ccache
     volumes: &ubuntu-volumes
       - .:/milvus:delegated
-      - ${ARCH}-ubuntu-${UBUNTU}-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu-${UBUNTU}-cache:/ccache:delegated
     networks:
       - milvus
     command: &ubuntu-command
-      ["/milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
-        /milvus/ci/scripts/coverage.sh"]
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   centos-core:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
     build:
       context: .
-      dockerfile: ci/docker/centos-${CENTOS}-core.dockerfile
+      dockerfile: docker/build_env/cpu/centos${CENTOS}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-centos-${CENTOS}-core
     shm_size: 2G
@@ -55,13 +39,78 @@ services:
       <<: *ccache
     volumes: &centos-volumes
       - .:/milvus:delegated
-      - ${ARCH}-centos-${CENTOS}-cache:/build:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-centos-${CENTOS}-cache:/ccache:delegated
     networks:
       - milvus
     command: &centos-command
-      ["/milvus/ci/scripts/build.sh -t Release -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -l -u &&
-        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX} --mysql_user=root --mysql_password=123456 --mysql_host=mysql &&
-        /milvus/ci/scripts/coverage.sh"]
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
+        /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
+
+  ubuntu-cuda-core:
+    image: ${REPO}:${ARCH}-ubuntu-${UBUNTU}-cuda-core
+    build:
+      context: .
+      dockerfile: docker/build_env/gpu/ubuntu${UBUNTU}/Dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-ubuntu-${UBUNTU}-cuda-core
+    shm_size: 2G
+    environment:
+      <<: *ccache
+    volumes: &ubuntu-cuda-volumes
+      - .:/milvus:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu-${UBUNTU}-cuda-cache:/ccache:delegated
+    networks:
+      - milvus
+    command: &ubuntu-cuda-command
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
+
+  centos-cuda-core:
+    image: ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
+    build:
+      context: .
+      dockerfile: docker/build_env/gpu/centos${CENTOS}/Dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
+    shm_size: 2G
+    environment:
+      <<: *ccache
+    volumes: &centos-cuda-volumes
+      - .:/milvus:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-centos-${CENTOS}-cuda-cache:/ccache:delegated
+    networks:
+      - milvus
+    command: &centos-cuda-command
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
+
+  cpplint:
+    image: ${REPO}:${ARCH}-centos-${CENTOS}-core
+    build:
+      context: .
+      dockerfile: docker/build_env/cpu/centos${CENTOS}/Dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-centos-${CENTOS}-core
+    shm_size: 2G
+    volumes:
+      - .:/milvus:delegated
+    networks:
+      - milvus
+    command:
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l --tidy -n"]
+
+  cpplint-gpu:
+    image: ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
+    build:
+      context: .
+      dockerfile: docker/build_env/gpu/centos${CENTOS}/Dockerfile
+      cache_from:
+        - ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
+    shm_size: 2G
+    volumes:
+      - .:/milvus:delegated
+    networks:
+      - milvus
+    command:
+      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l -g --tidy -n"]
 
 networks:
   milvus:

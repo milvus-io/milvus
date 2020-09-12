@@ -9,33 +9,35 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <utility>
+
 #include "server/context/Context.h"
 
 namespace milvus {
 namespace server {
 
-Context::Context(const std::string& request_id) : request_id_(request_id) {
+Context::Context(std::string req_id) : req_id_(std::move(req_id)) {
 }
 
-const std::shared_ptr<tracing::TraceContext>&
+const tracing::TraceContextPtr&
 Context::GetTraceContext() const {
     return trace_context_;
 }
 
 void
-Context::SetTraceContext(const std::shared_ptr<tracing::TraceContext>& trace_context) {
+Context::SetTraceContext(const tracing::TraceContextPtr& trace_context) {
     trace_context_ = trace_context;
 }
 std::shared_ptr<Context>
 Context::Child(const std::string& operation_name) const {
-    auto new_context = std::make_shared<Context>(request_id_);
+    auto new_context = std::make_shared<Context>(req_id_);
     new_context->SetTraceContext(trace_context_->Child(operation_name));
     return new_context;
 }
 
 std::shared_ptr<Context>
 Context::Follower(const std::string& operation_name) const {
-    auto new_context = std::make_shared<Context>(request_id_);
+    auto new_context = std::make_shared<Context>(req_id_);
     new_context->SetTraceContext(trace_context_->Follower(operation_name));
     return new_context;
 }
@@ -54,14 +56,14 @@ Context::IsConnectionBroken() const {
     return context_->IsConnectionBroken();
 }
 
-BaseRequest::RequestType
-Context::GetRequestType() const {
-    return request_type_;
+ReqType
+Context::GetReqType() const {
+    return req_type_;
 }
 
 void
-Context::SetRequestType(BaseRequest::RequestType type) {
-    request_type_ = type;
+Context::SetReqType(ReqType type) {
+    req_type_ = type;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////

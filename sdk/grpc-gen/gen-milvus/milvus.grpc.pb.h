@@ -53,11 +53,11 @@ class MilvusService final {
     // @param CollectionSchema, use to provide collection information to be created.
     //
     // @return Status
-    virtual ::grpc::Status CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) {
+    virtual ::grpc::Status CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncCreateCollectionRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncCreateCollectionRaw(context, request, cq));
     }
     // *
@@ -79,12 +79,12 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return CollectionSchema
-    virtual ::grpc::Status DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionSchema* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>> AsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>>(AsyncDescribeCollectionRaw(context, request, cq));
+    virtual ::grpc::Status DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Mapping* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>> AsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>>(AsyncDescribeCollectionRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>> PrepareAsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>>(PrepareAsyncDescribeCollectionRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>> PrepareAsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>>(PrepareAsyncDescribeCollectionRaw(context, request, cq));
     }
     // *
     // @brief This method is used to get collection schema.
@@ -170,11 +170,11 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return Status
-    virtual ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    virtual ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncDropIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncDropIndexRaw(context, request, cq));
     }
     // *
@@ -235,25 +235,25 @@ class MilvusService final {
     // @param InsertParam, insert parameters.
     //
     // @return VectorIds
-    virtual ::grpc::Status Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::milvus::grpc::VectorIds* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>> AsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>>(AsyncInsertRaw(context, request, cq));
+    virtual ::grpc::Status Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::milvus::grpc::EntityIds* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>> AsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>>(AsyncInsertRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>> PrepareAsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>>(PrepareAsyncInsertRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>> PrepareAsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>>(PrepareAsyncInsertRaw(context, request, cq));
     }
     // *
-    // @brief This method is used to get vectors data by id array.
+    // @brief This method is used to get entities data by id array.
     //
-    // @param VectorsIdentity, target vector id array.
+    // @param EntitiesIdentity, target entity id array.
     //
-    // @return VectorsData
-    virtual ::grpc::Status GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::milvus::grpc::VectorsData* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>> AsyncGetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>>(AsyncGetVectorsByIDRaw(context, request, cq));
+    // @return EntitiesData
+    virtual ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::milvus::grpc::Entities* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>>(AsyncGetEntityByIDRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>> PrepareAsyncGetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>>(PrepareAsyncGetVectorsByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>> PrepareAsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>>(PrepareAsyncGetEntityByIDRaw(context, request, cq));
     }
     // *
     // @brief This method is used to get vector ids from a segment
@@ -261,25 +261,25 @@ class MilvusService final {
     // @param GetVectorIDsParam, target collection and segment
     //
     // @return VectorIds
-    virtual ::grpc::Status GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::milvus::grpc::VectorIds* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>> AsyncGetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>>(AsyncGetVectorIDsRaw(context, request, cq));
+    virtual ::grpc::Status GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::milvus::grpc::EntityIds* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>> AsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>>(AsyncGetEntityIDsRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>> PrepareAsyncGetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>>(PrepareAsyncGetVectorIDsRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>> PrepareAsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>>(PrepareAsyncGetEntityIDsRaw(context, request, cq));
     }
     // *
     // @brief This method is used to query vector in collection.
     //
     // @param SearchParam, search parameters.
     //
-    // @return TopKQueryResult
-    virtual ::grpc::Status Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncSearchRaw(context, request, cq));
+    // @return KQueryResult
+    virtual ::grpc::Status Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::milvus::grpc::QueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> AsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(AsyncSearchRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> PrepareAsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchRaw(context, request, cq));
     }
     // *
     // @brief This method is used to query vector by id.
@@ -287,12 +287,12 @@ class MilvusService final {
     // @param SearchByIDParam, search parameters.
     //
     // @return TopKQueryResult
-    virtual ::grpc::Status SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncSearchByIDRaw(context, request, cq));
+    virtual ::grpc::Status SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::milvus::grpc::QueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> AsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(AsyncSearchByIDRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> PrepareAsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchByIDRaw(context, request, cq));
     }
     // *
     // @brief This method is used to query vector in specified files.
@@ -300,12 +300,12 @@ class MilvusService final {
     // @param SearchInFilesParam, search in files paremeters.
     //
     // @return TopKQueryResult
-    virtual ::grpc::Status SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncSearchInFilesRaw(context, request, cq));
+    virtual ::grpc::Status SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::milvus::grpc::QueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> AsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(AsyncSearchInFilesRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchInFilesRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> PrepareAsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchInFilesRaw(context, request, cq));
     }
     // *
     // @brief This method is used to give the server status.
@@ -387,114 +387,12 @@ class MilvusService final {
     }
     // *******************************New Interface*******************************************
     //
-    virtual ::grpc::Status CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncCreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncCreateHybridCollectionRaw(context, request, cq));
+    virtual ::grpc::Status SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::milvus::grpc::QueryResult* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> AsyncSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(AsyncSearchPBRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncCreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncCreateHybridCollectionRaw(context, request, cq));
-    }
-    virtual ::grpc::Status HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::BoolReply* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>> AsyncHasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>>(AsyncHasHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>> PrepareAsyncHasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>>(PrepareAsyncHasHybridCollectionRaw(context, request, cq));
-    }
-    virtual ::grpc::Status DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncDropHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncDropHybridCollectionRaw(context, request, cq));
-    }
-    virtual ::grpc::Status DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Mapping* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>> AsyncDescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>>(AsyncDescribeHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>> PrepareAsyncDescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>>(PrepareAsyncDescribeHybridCollectionRaw(context, request, cq));
-    }
-    virtual ::grpc::Status CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionRowCount* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>> AsyncCountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>>(AsyncCountHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>> PrepareAsyncCountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>>(PrepareAsyncCountHybridCollectionRaw(context, request, cq));
-    }
-    virtual ::grpc::Status ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::milvus::grpc::MappingList* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>> AsyncShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>>(AsyncShowHybridCollectionsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>> PrepareAsyncShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>>(PrepareAsyncShowHybridCollectionsRaw(context, request, cq));
-    }
-    virtual ::grpc::Status ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionInfo* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>> AsyncShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>>(AsyncShowHybridCollectionInfoRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>> PrepareAsyncShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>>(PrepareAsyncShowHybridCollectionInfoRaw(context, request, cq));
-    }
-    virtual ::grpc::Status PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncPreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncPreloadHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncPreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncPreloadHybridCollectionRaw(context, request, cq));
-    }
-    // /////////////////////////////////////////////////////////////////
-    //
-    //    rpc CreateIndex(IndexParam) returns (Status) {}
-    //
-    //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
-    //
-    //    rpc DropIndex(CollectionName) returns (Status) {}
-    //
-    // /////////////////////////////////////////////////////////////////
-    //
-    virtual ::grpc::Status InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::milvus::grpc::HEntityIDs* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>> AsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>>(AsyncInsertEntityRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>> PrepareAsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>>(PrepareAsyncInsertEntityRaw(context, request, cq));
-    }
-    // TODO(yukun): will change to HQueryResult
-    virtual ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
-    }
-    virtual ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::TopKQueryResult* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
-    }
-    virtual ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::milvus::grpc::HEntity* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>>(AsyncGetEntityByIDRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>> PrepareAsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>>(PrepareAsyncGetEntityByIDRaw(context, request, cq));
-    }
-    virtual ::grpc::Status GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::milvus::grpc::HEntityIDs* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>> AsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>>(AsyncGetEntityIDsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>> PrepareAsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>>(PrepareAsyncGetEntityIDsRaw(context, request, cq));
-    }
-    virtual ::grpc::Status DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::milvus::grpc::Status* response) = 0;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> AsyncDeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(AsyncDeleteEntitiesByIDRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>> PrepareAsyncDeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>>(PrepareAsyncDeleteEntitiesByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>> PrepareAsyncSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchPBRaw(context, request, cq));
     }
     class experimental_async_interface {
      public:
@@ -505,9 +403,9 @@ class MilvusService final {
       // @param CollectionSchema, use to provide collection information to be created.
       //
       // @return Status
-      virtual void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
       virtual void CreateCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void CreateCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to test collection existence.
@@ -525,10 +423,10 @@ class MilvusService final {
       // @param CollectionName, target collection name.
       //
       // @return CollectionSchema
-      virtual void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionSchema* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionSchema* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionSchema* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionSchema* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to get collection schema.
       //
@@ -595,9 +493,9 @@ class MilvusService final {
       // @param CollectionName, target collection name.
       //
       // @return Status
-      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
       virtual void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       virtual void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to create partition
@@ -645,60 +543,60 @@ class MilvusService final {
       // @param InsertParam, insert parameters.
       //
       // @return VectorIds
-      virtual void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
-      // @brief This method is used to get vectors data by id array.
+      // @brief This method is used to get entities data by id array.
       //
-      // @param VectorsIdentity, target vector id array.
+      // @param EntitiesIdentity, target entity id array.
       //
-      // @return VectorsData
-      virtual void GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity* request, ::milvus::grpc::VectorsData* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetVectorsByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorsData* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity* request, ::milvus::grpc::VectorsData* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetVectorsByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorsData* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      // @return EntitiesData
+      virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity* request, ::milvus::grpc::Entities* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Entities* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity* request, ::milvus::grpc::Entities* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Entities* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to get vector ids from a segment
       //
       // @param GetVectorIDsParam, target collection and segment
       //
       // @return VectorIds
-      virtual void GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetVectorIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetVectorIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to query vector in collection.
       //
       // @param SearchParam, search parameters.
       //
-      // @return TopKQueryResult
-      virtual void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      // @return KQueryResult
+      virtual void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to query vector by id.
       //
       // @param SearchByIDParam, search parameters.
       //
       // @return TopKQueryResult
-      virtual void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to query vector in specified files.
       //
       // @param SearchInFilesParam, search in files paremeters.
       //
       // @return TopKQueryResult
-      virtual void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *
       // @brief This method is used to give the server status.
       //
@@ -761,82 +659,19 @@ class MilvusService final {
       virtual void Compact(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
       // *******************************New Interface*******************************************
       //
-      virtual void CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void CreateHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void CreateHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HasHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HasHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DropHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DropHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DescribeHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DescribeHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void CountHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void CountHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionRowCount* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::MappingList* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void ShowHybridCollections(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::MappingList* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::MappingList* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void ShowHybridCollections(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::MappingList* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionInfo* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionInfo* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionInfo* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionInfo* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void PreloadHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void PreloadHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      // /////////////////////////////////////////////////////////////////
-      //
-      //    rpc CreateIndex(IndexParam) returns (Status) {}
-      //
-      //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
-      //
-      //    rpc DropIndex(CollectionName) returns (Status) {}
-      //
-      // /////////////////////////////////////////////////////////////////
-      //
-      virtual void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      // TODO(yukun): will change to HQueryResult
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DeleteEntitiesByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) = 0;
-      virtual void DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
-      virtual void DeleteEntitiesByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
+      virtual void SearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) = 0;
     };
     virtual class experimental_async_interface* experimental_async() { return nullptr; }
   private:
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* AsyncHasCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* PrepareAsyncHasCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>* AsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionSchema>* PrepareAsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>* AsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>* PrepareAsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>* AsyncCountCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>* PrepareAsyncCountCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionNameList>* AsyncShowCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) = 0;
@@ -849,8 +684,8 @@ class MilvusService final {
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* AsyncHasPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
@@ -859,18 +694,18 @@ class MilvusService final {
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::PartitionList>* PrepareAsyncShowPartitionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>* AsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>* PrepareAsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>* AsyncGetVectorsByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorsData>* PrepareAsyncGetVectorsByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>* AsyncGetVectorIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::VectorIds>* PrepareAsyncGetVectorIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>* AsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>* PrepareAsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Entities>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::EntityIds>* PrepareAsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* AsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* PrepareAsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* AsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* PrepareAsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* AsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* PrepareAsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::StringReply>* AsyncCmdRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::StringReply>* PrepareAsyncCmdRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDeleteByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::DeleteByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
@@ -883,43 +718,17 @@ class MilvusService final {
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncFlushRaw(::grpc::ClientContext* context, const ::milvus::grpc::FlushParam& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCompactRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCompactRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncCreateHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncCreateHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* AsyncHasHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::BoolReply>* PrepareAsyncHasHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDropHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDropHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>* AsyncDescribeHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Mapping>* PrepareAsyncDescribeHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>* AsyncCountHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionRowCount>* PrepareAsyncCountHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>* AsyncShowHybridCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::MappingList>* PrepareAsyncShowHybridCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>* AsyncShowHybridCollectionInfoRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::CollectionInfo>* PrepareAsyncShowHybridCollectionInfoRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncPreloadHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncPreloadHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* AsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* PrepareAsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntity>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::HEntityIDs>* PrepareAsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* AsyncDeleteEntitiesByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
-    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::Status>* PrepareAsyncDeleteEntitiesByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* AsyncSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::milvus::grpc::QueryResult>* PrepareAsyncSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) = 0;
   };
   class Stub final : public StubInterface {
    public:
     Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel);
-    ::grpc::Status CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) {
+    ::grpc::Status CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncCreateCollectionRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncCreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncCreateCollectionRaw(context, request, cq));
     }
     ::grpc::Status HasCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::BoolReply* response) override;
@@ -929,12 +738,12 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>> PrepareAsyncHasCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>>(PrepareAsyncHasCollectionRaw(context, request, cq));
     }
-    ::grpc::Status DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionSchema* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>> AsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>>(AsyncDescribeCollectionRaw(context, request, cq));
+    ::grpc::Status DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Mapping* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>> AsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>>(AsyncDescribeCollectionRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>> PrepareAsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>>(PrepareAsyncDescribeCollectionRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>> PrepareAsyncDescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>>(PrepareAsyncDescribeCollectionRaw(context, request, cq));
     }
     ::grpc::Status CountCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionRowCount* response) override;
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>> AsyncCountCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
@@ -978,11 +787,11 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>> PrepareAsyncDescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>>(PrepareAsyncDescribeIndexRaw(context, request, cq));
     }
-    ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    ::grpc::Status DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncDropIndexRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncDropIndexRaw(context, request, cq));
     }
     ::grpc::Status CreatePartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::milvus::grpc::Status* response) override;
@@ -1013,47 +822,47 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropPartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncDropPartitionRaw(context, request, cq));
     }
-    ::grpc::Status Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::milvus::grpc::VectorIds* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>> AsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>>(AsyncInsertRaw(context, request, cq));
+    ::grpc::Status Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::milvus::grpc::EntityIds* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>> AsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>>(AsyncInsertRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>> PrepareAsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>>(PrepareAsyncInsertRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>> PrepareAsyncInsert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>>(PrepareAsyncInsertRaw(context, request, cq));
     }
-    ::grpc::Status GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::milvus::grpc::VectorsData* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>> AsyncGetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>>(AsyncGetVectorsByIDRaw(context, request, cq));
+    ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::milvus::grpc::Entities* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>>(AsyncGetEntityByIDRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>> PrepareAsyncGetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>>(PrepareAsyncGetVectorsByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>> PrepareAsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>>(PrepareAsyncGetEntityByIDRaw(context, request, cq));
     }
-    ::grpc::Status GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::milvus::grpc::VectorIds* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>> AsyncGetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>>(AsyncGetVectorIDsRaw(context, request, cq));
+    ::grpc::Status GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::milvus::grpc::EntityIds* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>> AsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>>(AsyncGetEntityIDsRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>> PrepareAsyncGetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>>(PrepareAsyncGetVectorIDsRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>> PrepareAsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>>(PrepareAsyncGetEntityIDsRaw(context, request, cq));
     }
-    ::grpc::Status Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::milvus::grpc::TopKQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncSearchRaw(context, request, cq));
+    ::grpc::Status Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::milvus::grpc::QueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> AsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(AsyncSearchRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> PrepareAsyncSearch(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchRaw(context, request, cq));
     }
-    ::grpc::Status SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::milvus::grpc::TopKQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncSearchByIDRaw(context, request, cq));
+    ::grpc::Status SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::milvus::grpc::QueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> AsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(AsyncSearchByIDRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> PrepareAsyncSearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchByIDRaw(context, request, cq));
     }
-    ::grpc::Status SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::milvus::grpc::TopKQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncSearchInFilesRaw(context, request, cq));
+    ::grpc::Status SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::milvus::grpc::QueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> AsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(AsyncSearchInFilesRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncSearchInFilesRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> PrepareAsyncSearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchInFilesRaw(context, request, cq));
     }
     ::grpc::Status Cmd(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::milvus::grpc::StringReply* response) override;
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::StringReply>> AsyncCmd(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) {
@@ -1097,119 +906,28 @@ class MilvusService final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncCompact(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncCompactRaw(context, request, cq));
     }
-    ::grpc::Status CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncCreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncCreateHybridCollectionRaw(context, request, cq));
+    ::grpc::Status SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::milvus::grpc::QueryResult* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> AsyncSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(AsyncSearchPBRaw(context, request, cq));
     }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncCreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncCreateHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::BoolReply* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>> AsyncHasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>>(AsyncHasHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>> PrepareAsyncHasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>>(PrepareAsyncHasHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncDropHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncDropHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Mapping* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>> AsyncDescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>>(AsyncDescribeHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>> PrepareAsyncDescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>>(PrepareAsyncDescribeHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionRowCount* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>> AsyncCountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>>(AsyncCountHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>> PrepareAsyncCountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>>(PrepareAsyncCountHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::milvus::grpc::MappingList* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>> AsyncShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>>(AsyncShowHybridCollectionsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>> PrepareAsyncShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>>(PrepareAsyncShowHybridCollectionsRaw(context, request, cq));
-    }
-    ::grpc::Status ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::CollectionInfo* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>> AsyncShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>>(AsyncShowHybridCollectionInfoRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>> PrepareAsyncShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>>(PrepareAsyncShowHybridCollectionInfoRaw(context, request, cq));
-    }
-    ::grpc::Status PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncPreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncPreloadHybridCollectionRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncPreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncPreloadHybridCollectionRaw(context, request, cq));
-    }
-    ::grpc::Status InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::milvus::grpc::HEntityIDs* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>> AsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>>(AsyncInsertEntityRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>> PrepareAsyncInsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>>(PrepareAsyncInsertEntityRaw(context, request, cq));
-    }
-    ::grpc::Status HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::milvus::grpc::TopKQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchRaw(context, request, cq));
-    }
-    ::grpc::Status HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::milvus::grpc::TopKQueryResult* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> AsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(AsyncHybridSearchInSegmentsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>> PrepareAsyncHybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>>(PrepareAsyncHybridSearchInSegmentsRaw(context, request, cq));
-    }
-    ::grpc::Status GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::milvus::grpc::HEntity* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>> AsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>>(AsyncGetEntityByIDRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>> PrepareAsyncGetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>>(PrepareAsyncGetEntityByIDRaw(context, request, cq));
-    }
-    ::grpc::Status GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::milvus::grpc::HEntityIDs* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>> AsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>>(AsyncGetEntityIDsRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>> PrepareAsyncGetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>>(PrepareAsyncGetEntityIDsRaw(context, request, cq));
-    }
-    ::grpc::Status DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::milvus::grpc::Status* response) override;
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> AsyncDeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(AsyncDeleteEntitiesByIDRaw(context, request, cq));
-    }
-    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>> PrepareAsyncDeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) {
-      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>>(PrepareAsyncDeleteEntitiesByIDRaw(context, request, cq));
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>> PrepareAsyncSearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>>(PrepareAsyncSearchPBRaw(context, request, cq));
     }
     class experimental_async final :
       public StubInterface::experimental_async_interface {
      public:
-      void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
+      void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void CreateCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void CreateCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void HasCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) override;
       void HasCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) override;
       void HasCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void HasCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionSchema* response, std::function<void(::grpc::Status)>) override;
-      void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionSchema* response, std::function<void(::grpc::Status)>) override;
-      void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionSchema* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionSchema* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) override;
+      void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) override;
+      void DescribeCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void DescribeCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void CountCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) override;
       void CountCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) override;
       void CountCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
@@ -1234,9 +952,9 @@ class MilvusService final {
       void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, std::function<void(::grpc::Status)>) override;
       void DescribeIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void DescribeIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::IndexParam* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
+      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void DropIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void DropIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void CreatePartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void CreatePartition(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
@@ -1254,30 +972,30 @@ class MilvusService final {
       void DropPartition(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void DropPartition(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void DropPartition(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) override;
-      void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) override;
-      void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity* request, ::milvus::grpc::VectorsData* response, std::function<void(::grpc::Status)>) override;
-      void GetVectorsByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorsData* response, std::function<void(::grpc::Status)>) override;
-      void GetVectorsByID(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity* request, ::milvus::grpc::VectorsData* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetVectorsByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorsData* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) override;
-      void GetVectorIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, std::function<void(::grpc::Status)>) override;
-      void GetVectorIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetVectorIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::VectorIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) override;
+      void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) override;
+      void Insert(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void Insert(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity* request, ::milvus::grpc::Entities* response, std::function<void(::grpc::Status)>) override;
+      void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Entities* response, std::function<void(::grpc::Status)>) override;
+      void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity* request, ::milvus::grpc::Entities* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Entities* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) override;
+      void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, std::function<void(::grpc::Status)>) override;
+      void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::EntityIds* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void Search(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void Search(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchByID(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchInFiles(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchInFiles(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void Cmd(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::StringReply* response, std::function<void(::grpc::Status)>) override;
       void Cmd(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::StringReply* response, std::function<void(::grpc::Status)>) override;
       void Cmd(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::StringReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
@@ -1302,62 +1020,10 @@ class MilvusService final {
       void Compact(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
       void Compact(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
       void Compact(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void CreateHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void CreateHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void CreateHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) override;
-      void HasHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, std::function<void(::grpc::Status)>) override;
-      void HasHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HasHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::BoolReply* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DropHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DropHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DropHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) override;
-      void DescribeHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, std::function<void(::grpc::Status)>) override;
-      void DescribeHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DescribeHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Mapping* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) override;
-      void CountHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionRowCount* response, std::function<void(::grpc::Status)>) override;
-      void CountHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void CountHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionRowCount* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::MappingList* response, std::function<void(::grpc::Status)>) override;
-      void ShowHybridCollections(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::MappingList* response, std::function<void(::grpc::Status)>) override;
-      void ShowHybridCollections(::grpc::ClientContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::MappingList* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void ShowHybridCollections(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::MappingList* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionInfo* response, std::function<void(::grpc::Status)>) override;
-      void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionInfo* response, std::function<void(::grpc::Status)>) override;
-      void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionInfo* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void ShowHybridCollectionInfo(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::CollectionInfo* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void PreloadHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void PreloadHybridCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void PreloadHybridCollection(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) override;
-      void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) override;
-      void InsertEntity(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void InsertEntity(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearch(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, std::function<void(::grpc::Status)>) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void HybridSearchInSegments(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::TopKQueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) override;
-      void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, std::function<void(::grpc::Status)>) override;
-      void GetEntityByID(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetEntityByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntity* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) override;
-      void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, std::function<void(::grpc::Status)>) override;
-      void GetEntityIDs(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void GetEntityIDs(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::HEntityIDs* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DeleteEntitiesByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)>) override;
-      void DeleteEntitiesByID(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
-      void DeleteEntitiesByID(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, std::function<void(::grpc::Status)>) override;
+      void SearchPB(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
+      void SearchPB(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::QueryResult* response, ::grpc::experimental::ClientUnaryReactor* reactor) override;
      private:
       friend class Stub;
       explicit experimental_async(Stub* stub): stub_(stub) { }
@@ -1369,12 +1035,12 @@ class MilvusService final {
    private:
     std::shared_ptr< ::grpc::ChannelInterface> channel_;
     class experimental_async async_stub_{this};
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionSchema& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreateCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* AsyncHasCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* PrepareAsyncHasCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>* AsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionSchema>* PrepareAsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>* AsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>* PrepareAsyncDescribeCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>* AsyncCountCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>* PrepareAsyncCountCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionNameList>* AsyncShowCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) override;
@@ -1387,8 +1053,8 @@ class MilvusService final {
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* AsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::IndexParam>* PrepareAsyncDescribeIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreatePartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* AsyncHasPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
@@ -1397,18 +1063,18 @@ class MilvusService final {
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::PartitionList>* PrepareAsyncShowPartitionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropPartitionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PartitionParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>* AsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>* PrepareAsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>* AsyncGetVectorsByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorsData>* PrepareAsyncGetVectorsByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::VectorsIdentity& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>* AsyncGetVectorIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::VectorIds>* PrepareAsyncGetVectorIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetVectorIDsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>* AsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>* PrepareAsyncInsertRaw(::grpc::ClientContext* context, const ::milvus::grpc::InsertParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Entities>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::EntityIdentity& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::EntityIds>* PrepareAsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::GetEntityIDsParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* AsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* PrepareAsyncSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* AsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* PrepareAsyncSearchByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchByIDParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* AsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* PrepareAsyncSearchInFilesRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchInFilesParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::StringReply>* AsyncCmdRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::StringReply>* PrepareAsyncCmdRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDeleteByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::DeleteByIDParam& request, ::grpc::CompletionQueue* cq) override;
@@ -1421,34 +1087,8 @@ class MilvusService final {
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncFlushRaw(::grpc::ClientContext* context, const ::milvus::grpc::FlushParam& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCompactRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCompactRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncCreateHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncCreateHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* AsyncHasHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::BoolReply>* PrepareAsyncHasHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDropHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDropHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>* AsyncDescribeHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Mapping>* PrepareAsyncDescribeHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>* AsyncCountHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionRowCount>* PrepareAsyncCountHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>* AsyncShowHybridCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::MappingList>* PrepareAsyncShowHybridCollectionsRaw(::grpc::ClientContext* context, const ::milvus::grpc::Command& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>* AsyncShowHybridCollectionInfoRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::CollectionInfo>* PrepareAsyncShowHybridCollectionInfoRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncPreloadHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncPreloadHybridCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* AsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* PrepareAsyncInsertEntityRaw(::grpc::ClientContext* context, const ::milvus::grpc::HInsertParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* AsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::TopKQueryResult>* PrepareAsyncHybridSearchInSegmentsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HSearchInSegmentsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>* AsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntity>* PrepareAsyncGetEntityByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HEntityIdentity& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* AsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::HEntityIDs>* PrepareAsyncGetEntityIDsRaw(::grpc::ClientContext* context, const ::milvus::grpc::HGetEntityIDsParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* AsyncDeleteEntitiesByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) override;
-    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* PrepareAsyncDeleteEntitiesByIDRaw(::grpc::ClientContext* context, const ::milvus::grpc::HDeleteByIDParam& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* AsyncSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::milvus::grpc::QueryResult>* PrepareAsyncSearchPBRaw(::grpc::ClientContext* context, const ::milvus::grpc::SearchParamPB& request, ::grpc::CompletionQueue* cq) override;
     const ::grpc::internal::RpcMethod rpcmethod_CreateCollection_;
     const ::grpc::internal::RpcMethod rpcmethod_HasCollection_;
     const ::grpc::internal::RpcMethod rpcmethod_DescribeCollection_;
@@ -1464,8 +1104,8 @@ class MilvusService final {
     const ::grpc::internal::RpcMethod rpcmethod_ShowPartitions_;
     const ::grpc::internal::RpcMethod rpcmethod_DropPartition_;
     const ::grpc::internal::RpcMethod rpcmethod_Insert_;
-    const ::grpc::internal::RpcMethod rpcmethod_GetVectorsByID_;
-    const ::grpc::internal::RpcMethod rpcmethod_GetVectorIDs_;
+    const ::grpc::internal::RpcMethod rpcmethod_GetEntityByID_;
+    const ::grpc::internal::RpcMethod rpcmethod_GetEntityIDs_;
     const ::grpc::internal::RpcMethod rpcmethod_Search_;
     const ::grpc::internal::RpcMethod rpcmethod_SearchByID_;
     const ::grpc::internal::RpcMethod rpcmethod_SearchInFiles_;
@@ -1475,20 +1115,7 @@ class MilvusService final {
     const ::grpc::internal::RpcMethod rpcmethod_ReloadSegments_;
     const ::grpc::internal::RpcMethod rpcmethod_Flush_;
     const ::grpc::internal::RpcMethod rpcmethod_Compact_;
-    const ::grpc::internal::RpcMethod rpcmethod_CreateHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_HasHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_DropHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_DescribeHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_CountHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_ShowHybridCollections_;
-    const ::grpc::internal::RpcMethod rpcmethod_ShowHybridCollectionInfo_;
-    const ::grpc::internal::RpcMethod rpcmethod_PreloadHybridCollection_;
-    const ::grpc::internal::RpcMethod rpcmethod_InsertEntity_;
-    const ::grpc::internal::RpcMethod rpcmethod_HybridSearch_;
-    const ::grpc::internal::RpcMethod rpcmethod_HybridSearchInSegments_;
-    const ::grpc::internal::RpcMethod rpcmethod_GetEntityByID_;
-    const ::grpc::internal::RpcMethod rpcmethod_GetEntityIDs_;
-    const ::grpc::internal::RpcMethod rpcmethod_DeleteEntitiesByID_;
+    const ::grpc::internal::RpcMethod rpcmethod_SearchPB_;
   };
   static std::unique_ptr<Stub> NewStub(const std::shared_ptr< ::grpc::ChannelInterface>& channel, const ::grpc::StubOptions& options = ::grpc::StubOptions());
 
@@ -1502,7 +1129,7 @@ class MilvusService final {
     // @param CollectionSchema, use to provide collection information to be created.
     //
     // @return Status
-    virtual ::grpc::Status CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionSchema* request, ::milvus::grpc::Status* response);
+    virtual ::grpc::Status CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response);
     // *
     // @brief This method is used to test collection existence.
     //
@@ -1516,7 +1143,7 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return CollectionSchema
-    virtual ::grpc::Status DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionSchema* response);
+    virtual ::grpc::Status DescribeCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response);
     // *
     // @brief This method is used to get collection schema.
     //
@@ -1565,7 +1192,7 @@ class MilvusService final {
     // @param CollectionName, target collection name.
     //
     // @return Status
-    virtual ::grpc::Status DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response);
+    virtual ::grpc::Status DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response);
     // *
     // @brief This method is used to create partition
     //
@@ -1600,42 +1227,42 @@ class MilvusService final {
     // @param InsertParam, insert parameters.
     //
     // @return VectorIds
-    virtual ::grpc::Status Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::VectorIds* response);
+    virtual ::grpc::Status Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request, ::milvus::grpc::EntityIds* response);
     // *
-    // @brief This method is used to get vectors data by id array.
+    // @brief This method is used to get entities data by id array.
     //
-    // @param VectorsIdentity, target vector id array.
+    // @param EntitiesIdentity, target entity id array.
     //
-    // @return VectorsData
-    virtual ::grpc::Status GetVectorsByID(::grpc::ServerContext* context, const ::milvus::grpc::VectorsIdentity* request, ::milvus::grpc::VectorsData* response);
+    // @return EntitiesData
+    virtual ::grpc::Status GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::EntityIdentity* request, ::milvus::grpc::Entities* response);
     // *
     // @brief This method is used to get vector ids from a segment
     //
     // @param GetVectorIDsParam, target collection and segment
     //
     // @return VectorIds
-    virtual ::grpc::Status GetVectorIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetVectorIDsParam* request, ::milvus::grpc::VectorIds* response);
+    virtual ::grpc::Status GetEntityIDs(::grpc::ServerContext* context, const ::milvus::grpc::GetEntityIDsParam* request, ::milvus::grpc::EntityIds* response);
     // *
     // @brief This method is used to query vector in collection.
     //
     // @param SearchParam, search parameters.
     //
-    // @return TopKQueryResult
-    virtual ::grpc::Status Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::TopKQueryResult* response);
+    // @return KQueryResult
+    virtual ::grpc::Status Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request, ::milvus::grpc::QueryResult* response);
     // *
     // @brief This method is used to query vector by id.
     //
     // @param SearchByIDParam, search parameters.
     //
     // @return TopKQueryResult
-    virtual ::grpc::Status SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::TopKQueryResult* response);
+    virtual ::grpc::Status SearchByID(::grpc::ServerContext* context, const ::milvus::grpc::SearchByIDParam* request, ::milvus::grpc::QueryResult* response);
     // *
     // @brief This method is used to query vector in specified files.
     //
     // @param SearchInFilesParam, search in files paremeters.
     //
     // @return TopKQueryResult
-    virtual ::grpc::Status SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::TopKQueryResult* response);
+    virtual ::grpc::Status SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request, ::milvus::grpc::QueryResult* response);
     // *
     // @brief This method is used to give the server status.
     //
@@ -1680,31 +1307,7 @@ class MilvusService final {
     virtual ::grpc::Status Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response);
     // *******************************New Interface*******************************************
     //
-    virtual ::grpc::Status CreateHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response);
-    virtual ::grpc::Status HasHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::BoolReply* response);
-    virtual ::grpc::Status DropHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response);
-    virtual ::grpc::Status DescribeHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Mapping* response);
-    virtual ::grpc::Status CountHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionRowCount* response);
-    virtual ::grpc::Status ShowHybridCollections(::grpc::ServerContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::MappingList* response);
-    virtual ::grpc::Status ShowHybridCollectionInfo(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::CollectionInfo* response);
-    virtual ::grpc::Status PreloadHybridCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response);
-    // /////////////////////////////////////////////////////////////////
-    //
-    //    rpc CreateIndex(IndexParam) returns (Status) {}
-    //
-    //    rpc DescribeIndex(CollectionName) returns (IndexParam) {}
-    //
-    //    rpc DropIndex(CollectionName) returns (Status) {}
-    //
-    // /////////////////////////////////////////////////////////////////
-    //
-    virtual ::grpc::Status InsertEntity(::grpc::ServerContext* context, const ::milvus::grpc::HInsertParam* request, ::milvus::grpc::HEntityIDs* response);
-    // TODO(yukun): will change to HQueryResult
-    virtual ::grpc::Status HybridSearch(::grpc::ServerContext* context, const ::milvus::grpc::HSearchParam* request, ::milvus::grpc::TopKQueryResult* response);
-    virtual ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* context, const ::milvus::grpc::HSearchInSegmentsParam* request, ::milvus::grpc::TopKQueryResult* response);
-    virtual ::grpc::Status GetEntityByID(::grpc::ServerContext* context, const ::milvus::grpc::HEntityIdentity* request, ::milvus::grpc::HEntity* response);
-    virtual ::grpc::Status GetEntityIDs(::grpc::ServerContext* context, const ::milvus::grpc::HGetEntityIDsParam* request, ::milvus::grpc::HEntityIDs* response);
-    virtual ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* context, const ::milvus::grpc::HDeleteByIDParam* request, ::milvus::grpc::Status* response);
+    virtual ::grpc::Status SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request, ::milvus::grpc::QueryResult* response);
   };
   template <class BaseClass>
   class WithAsyncMethod_CreateCollection : public BaseClass {
@@ -1718,11 +1321,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestCreateCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionSchema* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestCreateCollection(::grpc::ServerContext* context, ::milvus::grpc::Mapping* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(0, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -1758,11 +1361,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/) override {
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestDescribeCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::CollectionSchema>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestDescribeCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Mapping>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(2, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -1898,11 +1501,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestDropIndex(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestDropIndex(::grpc::ServerContext* context, ::milvus::grpc::IndexParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(9, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -1998,51 +1601,51 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestInsert(::grpc::ServerContext* context, ::milvus::grpc::InsertParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::VectorIds>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestInsert(::grpc::ServerContext* context, ::milvus::grpc::InsertParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::EntityIds>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(14, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
-  class WithAsyncMethod_GetVectorsByID : public BaseClass {
+  class WithAsyncMethod_GetEntityByID : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithAsyncMethod_GetVectorsByID() {
+    WithAsyncMethod_GetEntityByID() {
       ::grpc::Service::MarkMethodAsync(15);
     }
-    ~WithAsyncMethod_GetVectorsByID() override {
+    ~WithAsyncMethod_GetEntityByID() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/) override {
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestGetVectorsByID(::grpc::ServerContext* context, ::milvus::grpc::VectorsIdentity* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::VectorsData>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestGetEntityByID(::grpc::ServerContext* context, ::milvus::grpc::EntityIdentity* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Entities>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(15, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
-  class WithAsyncMethod_GetVectorIDs : public BaseClass {
+  class WithAsyncMethod_GetEntityIDs : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithAsyncMethod_GetVectorIDs() {
+    WithAsyncMethod_GetEntityIDs() {
       ::grpc::Service::MarkMethodAsync(16);
     }
-    ~WithAsyncMethod_GetVectorIDs() override {
+    ~WithAsyncMethod_GetEntityIDs() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetVectorIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetVectorIDsParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestGetVectorIDs(::grpc::ServerContext* context, ::milvus::grpc::GetVectorIDsParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::VectorIds>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestGetEntityIDs(::grpc::ServerContext* context, ::milvus::grpc::GetEntityIDsParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::EntityIds>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(16, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2058,11 +1661,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestSearch(::grpc::ServerContext* context, ::milvus::grpc::SearchParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::TopKQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestSearch(::grpc::ServerContext* context, ::milvus::grpc::SearchParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::QueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(17, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2078,11 +1681,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestSearchByID(::grpc::ServerContext* context, ::milvus::grpc::SearchByIDParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::TopKQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestSearchByID(::grpc::ServerContext* context, ::milvus::grpc::SearchByIDParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::QueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(18, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2098,11 +1701,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestSearchInFiles(::grpc::ServerContext* context, ::milvus::grpc::SearchInFilesParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::TopKQueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestSearchInFiles(::grpc::ServerContext* context, ::milvus::grpc::SearchInFilesParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::QueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(19, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -2168,6 +1771,13 @@ class MilvusService final {
   };
   template <class BaseClass>
   class WithAsyncMethod_ReloadSegments : public BaseClass {
+<<<<<<< HEAD
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithAsyncMethod_ReloadSegments() {
+      ::grpc::Service::MarkMethodAsync(23);
+=======
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
@@ -2193,6 +1803,37 @@ class MilvusService final {
    public:
     WithAsyncMethod_Flush() {
       ::grpc::Service::MarkMethodAsync(24);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~WithAsyncMethod_ReloadSegments() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+<<<<<<< HEAD
+    void RequestReloadSegments(::grpc::ServerContext* context, ::milvus::grpc::ReLoadSegmentsParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(23, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestFlush(::grpc::ServerContext* context, ::milvus::grpc::FlushParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(24, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+  };
+  template <class BaseClass>
+  class WithAsyncMethod_Flush : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    WithAsyncMethod_Flush() {
+      ::grpc::Service::MarkMethodAsync(24);
+=======
+    WithAsyncMethod_Compact() {
+      ::grpc::Service::MarkMethodAsync(25);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithAsyncMethod_Flush() override {
       BaseClassMustBeDerivedFromService(this);
@@ -2202,8 +1843,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestFlush(::grpc::ServerContext* context, ::milvus::grpc::FlushParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(24, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestCompact(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(25, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -2211,8 +1857,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithAsyncMethod_Compact() {
       ::grpc::Service::MarkMethodAsync(25);
+=======
+    WithAsyncMethod_CreateHybridCollection() {
+      ::grpc::Service::MarkMethodAsync(26);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithAsyncMethod_Compact() override {
       BaseClassMustBeDerivedFromService(this);
@@ -2222,195 +1873,362 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestCompact(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(25, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithAsyncMethod_CreateHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithAsyncMethod_CreateHybridCollection() {
-      ::grpc::Service::MarkMethodAsync(26);
-    }
-    ~WithAsyncMethod_CreateHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
+=======
     void RequestCreateHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::Mapping* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(26, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
-  class WithAsyncMethod_HasHybridCollection : public BaseClass {
+  class WithAsyncMethod_SearchPB : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    WithAsyncMethod_SearchPB() {
+      ::grpc::Service::MarkMethodAsync(26);
+=======
     WithAsyncMethod_HasHybridCollection() {
       ::grpc::Service::MarkMethodAsync(27);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_HasHybridCollection() override {
+    ~WithAsyncMethod_SearchPB() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HasHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    void RequestSearchPB(::grpc::ServerContext* context, ::milvus::grpc::SearchParamPB* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::QueryResult>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(26, context, request, response, new_call_cq, notification_cq, tag);
+=======
     void RequestHasHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::BoolReply>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(27, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
+  typedef WithAsyncMethod_CreateCollection<WithAsyncMethod_HasCollection<WithAsyncMethod_DescribeCollection<WithAsyncMethod_CountCollection<WithAsyncMethod_ShowCollections<WithAsyncMethod_ShowCollectionInfo<WithAsyncMethod_DropCollection<WithAsyncMethod_CreateIndex<WithAsyncMethod_DescribeIndex<WithAsyncMethod_DropIndex<WithAsyncMethod_CreatePartition<WithAsyncMethod_HasPartition<WithAsyncMethod_ShowPartitions<WithAsyncMethod_DropPartition<WithAsyncMethod_Insert<WithAsyncMethod_GetEntityByID<WithAsyncMethod_GetEntityIDs<WithAsyncMethod_Search<WithAsyncMethod_SearchByID<WithAsyncMethod_SearchInFiles<WithAsyncMethod_Cmd<WithAsyncMethod_DeleteByID<WithAsyncMethod_PreloadCollection<WithAsyncMethod_ReloadSegments<WithAsyncMethod_Flush<WithAsyncMethod_Compact<WithAsyncMethod_SearchPB<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > AsyncService;
   template <class BaseClass>
-  class WithAsyncMethod_DropHybridCollection : public BaseClass {
+  class ExperimentalWithCallbackMethod_CreateCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_CreateCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(0,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Mapping, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::Mapping* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->CreateCollection(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_CreateCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::Mapping, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Mapping, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(0))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_DropHybridCollection() {
       ::grpc::Service::MarkMethodAsync(28);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_DropHybridCollection() override {
+    ~ExperimentalWithCallbackMethod_CreateCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestDropHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(28, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_DescribeHybridCollection : public BaseClass {
+  class ExperimentalWithCallbackMethod_HasCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_HasCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(1,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::BoolReply* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->HasCollection(context, request, response, controller);
+                 }));
+=======
     WithAsyncMethod_DescribeHybridCollection() {
       ::grpc::Service::MarkMethodAsync(29);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_DescribeHybridCollection() override {
+    void SetMessageAllocatorFor_HasCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>*>(
+          ::grpc::Service::experimental().GetHandler(1))
+              ->SetMessageAllocator(allocator);
+    }
+    ~ExperimentalWithCallbackMethod_HasCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
+    ::grpc::Status HasCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void HasCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestDescribeHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Mapping>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(29, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_CountHybridCollection : public BaseClass {
+  class ExperimentalWithCallbackMethod_DescribeCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_DescribeCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(2,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Mapping>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::Mapping* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->DescribeCollection(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_DescribeCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Mapping>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Mapping>*>(
+          ::grpc::Service::experimental().GetHandler(2))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_CountHybridCollection() {
       ::grpc::Service::MarkMethodAsync(30);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_CountHybridCollection() override {
+    ~ExperimentalWithCallbackMethod_DescribeCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status CountHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestCountHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::CollectionRowCount>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(30, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_ShowHybridCollections : public BaseClass {
+  class ExperimentalWithCallbackMethod_CountCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_CountCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(3,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::CollectionRowCount* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->CountCollection(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_CountCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>*>(
+          ::grpc::Service::experimental().GetHandler(3))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_ShowHybridCollections() {
       ::grpc::Service::MarkMethodAsync(31);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_ShowHybridCollections() override {
+    ~ExperimentalWithCallbackMethod_CountCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::MappingList* /*response*/) override {
+    ::grpc::Status CountCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void CountCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestShowHybridCollections(::grpc::ServerContext* context, ::milvus::grpc::Command* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::MappingList>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(31, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_ShowHybridCollectionInfo : public BaseClass {
+  class ExperimentalWithCallbackMethod_ShowCollections : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_ShowCollections() {
+      ::grpc::Service::experimental().MarkMethodCallback(4,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::Command* request,
+                 ::milvus::grpc::CollectionNameList* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->ShowCollections(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_ShowCollections(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>*>(
+          ::grpc::Service::experimental().GetHandler(4))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_ShowHybridCollectionInfo() {
       ::grpc::Service::MarkMethodAsync(32);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_ShowHybridCollectionInfo() override {
+    ~ExperimentalWithCallbackMethod_ShowCollections() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
+    ::grpc::Status ShowCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::CollectionNameList* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void ShowCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::CollectionNameList* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestShowHybridCollectionInfo(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::CollectionInfo>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(32, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_PreloadHybridCollection : public BaseClass {
+  class ExperimentalWithCallbackMethod_ShowCollectionInfo : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_ShowCollectionInfo() {
+      ::grpc::Service::experimental().MarkMethodCallback(5,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::CollectionInfo* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->ShowCollectionInfo(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_ShowCollectionInfo(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>*>(
+          ::grpc::Service::experimental().GetHandler(5))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_PreloadHybridCollection() {
       ::grpc::Service::MarkMethodAsync(33);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_PreloadHybridCollection() override {
+    ~ExperimentalWithCallbackMethod_ShowCollectionInfo() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status PreloadHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status ShowCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void ShowCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestPreloadHybridCollection(::grpc::ServerContext* context, ::milvus::grpc::CollectionName* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(33, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_InsertEntity : public BaseClass {
+  class ExperimentalWithCallbackMethod_DropCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_DropCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(6,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->DropCollection(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_DropCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(6))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_InsertEntity() {
       ::grpc::Service::MarkMethodAsync(34);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithAsyncMethod_InsertEntity() override {
+    ~ExperimentalWithCallbackMethod_DropCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status InsertEntity(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HInsertParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
+    ::grpc::Status DropCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
+    virtual void DropCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+=======
     void RequestInsertEntity(::grpc::ServerContext* context, ::milvus::grpc::HInsertParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::HEntityIDs>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(34, context, request, response, new_call_cq, notification_cq, tag);
     }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
-  class WithAsyncMethod_HybridSearch : public BaseClass {
+  class ExperimentalWithCallbackMethod_CreateIndex : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_CreateIndex() {
+      ::grpc::Service::experimental().MarkMethodCallback(7,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::IndexParam* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->CreateIndex(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_CreateIndex(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(7))
+              ->SetMessageAllocator(allocator);
+=======
     WithAsyncMethod_HybridSearch() {
       ::grpc::Service::MarkMethodAsync(35);
     }
@@ -2493,257 +2311,7 @@ class MilvusService final {
    public:
     WithAsyncMethod_DeleteEntitiesByID() {
       ::grpc::Service::MarkMethodAsync(39);
-    }
-    ~WithAsyncMethod_DeleteEntitiesByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HDeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestDeleteEntitiesByID(::grpc::ServerContext* context, ::milvus::grpc::HDeleteByIDParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(39, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  typedef WithAsyncMethod_CreateCollection<WithAsyncMethod_HasCollection<WithAsyncMethod_DescribeCollection<WithAsyncMethod_CountCollection<WithAsyncMethod_ShowCollections<WithAsyncMethod_ShowCollectionInfo<WithAsyncMethod_DropCollection<WithAsyncMethod_CreateIndex<WithAsyncMethod_DescribeIndex<WithAsyncMethod_DropIndex<WithAsyncMethod_CreatePartition<WithAsyncMethod_HasPartition<WithAsyncMethod_ShowPartitions<WithAsyncMethod_DropPartition<WithAsyncMethod_Insert<WithAsyncMethod_GetVectorsByID<WithAsyncMethod_GetVectorIDs<WithAsyncMethod_Search<WithAsyncMethod_SearchByID<WithAsyncMethod_SearchInFiles<WithAsyncMethod_Cmd<WithAsyncMethod_DeleteByID<WithAsyncMethod_PreloadCollection<WithAsyncMethod_ReloadSegments<WithAsyncMethod_Flush<WithAsyncMethod_Compact<WithAsyncMethod_CreateHybridCollection<WithAsyncMethod_HasHybridCollection<WithAsyncMethod_DropHybridCollection<WithAsyncMethod_DescribeHybridCollection<WithAsyncMethod_CountHybridCollection<WithAsyncMethod_ShowHybridCollections<WithAsyncMethod_ShowHybridCollectionInfo<WithAsyncMethod_PreloadHybridCollection<WithAsyncMethod_InsertEntity<WithAsyncMethod_HybridSearch<WithAsyncMethod_HybridSearchInSegments<WithAsyncMethod_GetEntityByID<WithAsyncMethod_GetEntityIDs<WithAsyncMethod_DeleteEntitiesByID<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > AsyncService;
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_CreateCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_CreateCollection() {
-      ::grpc::Service::experimental().MarkMethodCallback(0,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionSchema, ::milvus::grpc::Status>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionSchema* request,
-                 ::milvus::grpc::Status* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->CreateCollection(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_CreateCollection(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionSchema, ::milvus::grpc::Status>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionSchema, ::milvus::grpc::Status>*>(
-          ::grpc::Service::experimental().GetHandler(0))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_CreateCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_HasCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_HasCollection() {
-      ::grpc::Service::experimental().MarkMethodCallback(1,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
-                 ::milvus::grpc::BoolReply* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->HasCollection(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_HasCollection(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>*>(
-          ::grpc::Service::experimental().GetHandler(1))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_HasCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HasCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void HasCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_DescribeCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_DescribeCollection() {
-      ::grpc::Service::experimental().MarkMethodCallback(2,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionSchema>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
-                 ::milvus::grpc::CollectionSchema* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->DescribeCollection(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_DescribeCollection(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionSchema>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionSchema>*>(
-          ::grpc::Service::experimental().GetHandler(2))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_DescribeCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_CountCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_CountCollection() {
-      ::grpc::Service::experimental().MarkMethodCallback(3,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
-                 ::milvus::grpc::CollectionRowCount* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->CountCollection(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_CountCollection(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionRowCount>*>(
-          ::grpc::Service::experimental().GetHandler(3))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_CountCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CountCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void CountCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_ShowCollections : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_ShowCollections() {
-      ::grpc::Service::experimental().MarkMethodCallback(4,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::Command* request,
-                 ::milvus::grpc::CollectionNameList* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->ShowCollections(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_ShowCollections(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::CollectionNameList>*>(
-          ::grpc::Service::experimental().GetHandler(4))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_ShowCollections() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::CollectionNameList* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void ShowCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::CollectionNameList* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_ShowCollectionInfo : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_ShowCollectionInfo() {
-      ::grpc::Service::experimental().MarkMethodCallback(5,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
-                 ::milvus::grpc::CollectionInfo* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->ShowCollectionInfo(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_ShowCollectionInfo(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionInfo>*>(
-          ::grpc::Service::experimental().GetHandler(5))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_ShowCollectionInfo() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void ShowCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_DropCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_DropCollection() {
-      ::grpc::Service::experimental().MarkMethodCallback(6,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
-                 ::milvus::grpc::Status* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->DropCollection(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_DropCollection(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
-          ::grpc::Service::experimental().GetHandler(6))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_DropCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DropCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DropCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_CreateIndex : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_CreateIndex() {
-      ::grpc::Service::experimental().MarkMethodCallback(7,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::IndexParam* request,
-                 ::milvus::grpc::Status* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->CreateIndex(context, request, response, controller);
-                 }));
-    }
-    void SetMessageAllocatorFor_CreateIndex(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>*>(
-          ::grpc::Service::experimental().GetHandler(7))
-              ->SetMessageAllocator(allocator);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~ExperimentalWithCallbackMethod_CreateIndex() override {
       BaseClassMustBeDerivedFromService(this);
@@ -2753,8 +2321,16 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     virtual void CreateIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
+=======
+    void RequestDeleteEntitiesByID(::grpc::ServerContext* context, ::milvus::grpc::HDeleteByIDParam* request, ::grpc::ServerAsyncResponseWriter< ::milvus::grpc::Status>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(39, context, request, response, new_call_cq, notification_cq, tag);
+    }
+  };
+  typedef WithAsyncMethod_CreateCollection<WithAsyncMethod_HasCollection<WithAsyncMethod_DescribeCollection<WithAsyncMethod_CountCollection<WithAsyncMethod_ShowCollections<WithAsyncMethod_ShowCollectionInfo<WithAsyncMethod_DropCollection<WithAsyncMethod_CreateIndex<WithAsyncMethod_DescribeIndex<WithAsyncMethod_DropIndex<WithAsyncMethod_CreatePartition<WithAsyncMethod_HasPartition<WithAsyncMethod_ShowPartitions<WithAsyncMethod_DropPartition<WithAsyncMethod_Insert<WithAsyncMethod_GetVectorsByID<WithAsyncMethod_GetVectorIDs<WithAsyncMethod_Search<WithAsyncMethod_SearchByID<WithAsyncMethod_SearchInFiles<WithAsyncMethod_Cmd<WithAsyncMethod_DeleteByID<WithAsyncMethod_PreloadCollection<WithAsyncMethod_ReloadSegments<WithAsyncMethod_Flush<WithAsyncMethod_Compact<WithAsyncMethod_CreateHybridCollection<WithAsyncMethod_HasHybridCollection<WithAsyncMethod_DropHybridCollection<WithAsyncMethod_DescribeHybridCollection<WithAsyncMethod_CountHybridCollection<WithAsyncMethod_ShowHybridCollections<WithAsyncMethod_ShowHybridCollectionInfo<WithAsyncMethod_PreloadHybridCollection<WithAsyncMethod_InsertEntity<WithAsyncMethod_HybridSearch<WithAsyncMethod_HybridSearchInSegments<WithAsyncMethod_GetEntityByID<WithAsyncMethod_GetEntityIDs<WithAsyncMethod_DeleteEntitiesByID<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > AsyncService;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_DescribeIndex : public BaseClass {
    private:
@@ -2793,17 +2369,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_DropIndex() {
       ::grpc::Service::experimental().MarkMethodCallback(9,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
           [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::CollectionName* request,
+                 const ::milvus::grpc::IndexParam* request,
                  ::milvus::grpc::Status* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->DropIndex(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_DropIndex(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>*>(
           ::grpc::Service::experimental().GetHandler(9))
               ->SetMessageAllocator(allocator);
     }
@@ -2811,11 +2387,11 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class ExperimentalWithCallbackMethod_CreatePartition : public BaseClass {
@@ -2948,17 +2524,17 @@ class MilvusService final {
    public:
     ExperimentalWithCallbackMethod_Insert() {
       ::grpc::Service::experimental().MarkMethodCallback(14,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::VectorIds>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::EntityIds>(
           [this](::grpc::ServerContext* context,
                  const ::milvus::grpc::InsertParam* request,
-                 ::milvus::grpc::VectorIds* response,
+                 ::milvus::grpc::EntityIds* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
                    return this->Insert(context, request, response, controller);
                  }));
     }
     void SetMessageAllocatorFor_Insert(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::InsertParam, ::milvus::grpc::VectorIds>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::VectorIds>*>(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::InsertParam, ::milvus::grpc::EntityIds>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::EntityIds>*>(
           ::grpc::Service::experimental().GetHandler(14))
               ->SetMessageAllocator(allocator);
     }
@@ -2966,55 +2542,28 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
-  class ExperimentalWithCallbackMethod_GetVectorsByID : public BaseClass {
+  class ExperimentalWithCallbackMethod_GetEntityByID : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    ExperimentalWithCallbackMethod_GetVectorsByID() {
+    ExperimentalWithCallbackMethod_GetEntityByID() {
       ::grpc::Service::experimental().MarkMethodCallback(15,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::VectorsIdentity, ::milvus::grpc::VectorsData>(
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::EntityIdentity, ::milvus::grpc::Entities>(
           [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::VectorsIdentity* request,
-                 ::milvus::grpc::VectorsData* response,
+                 const ::milvus::grpc::EntityIdentity* request,
+                 ::milvus::grpc::Entities* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   return this->GetVectorsByID(context, request, response, controller);
+<<<<<<< HEAD
+                   return this->GetEntityByID(context, request, response, controller);
                  }));
-    }
-    void SetMessageAllocatorFor_GetVectorsByID(
-        ::grpc::experimental::MessageAllocator< ::milvus::grpc::VectorsIdentity, ::milvus::grpc::VectorsData>* allocator) {
-      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::VectorsIdentity, ::milvus::grpc::VectorsData>*>(
-          ::grpc::Service::experimental().GetHandler(15))
-              ->SetMessageAllocator(allocator);
-    }
-    ~ExperimentalWithCallbackMethod_GetVectorsByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithCallbackMethod_GetVectorIDs : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithCallbackMethod_GetVectorIDs() {
-      ::grpc::Service::experimental().MarkMethodCallback(16,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::GetVectorIDsParam, ::milvus::grpc::VectorIds>(
-          [this](::grpc::ServerContext* context,
-                 const ::milvus::grpc::GetVectorIDsParam* request,
-                 ::milvus::grpc::VectorIds* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+=======
                    return this->GetVectorIDs(context, request, response, controller);
                  }));
     }
@@ -4180,6 +3729,868 @@ class MilvusService final {
    public:
     WithGenericMethod_Compact() {
       ::grpc::Service::MarkMethodGeneric(25);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    void SetMessageAllocatorFor_GetEntityByID(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::EntityIdentity, ::milvus::grpc::Entities>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::EntityIdentity, ::milvus::grpc::Entities>*>(
+          ::grpc::Service::experimental().GetHandler(15))
+              ->SetMessageAllocator(allocator);
+    }
+    ~ExperimentalWithCallbackMethod_GetEntityByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_GetEntityIDs : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_GetEntityIDs() {
+      ::grpc::Service::experimental().MarkMethodCallback(16,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::GetEntityIDsParam, ::milvus::grpc::EntityIds>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::GetEntityIDsParam* request,
+                 ::milvus::grpc::EntityIds* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->GetEntityIDs(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_GetEntityIDs(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::GetEntityIDsParam, ::milvus::grpc::EntityIds>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::GetEntityIDsParam, ::milvus::grpc::EntityIds>*>(
+          ::grpc::Service::experimental().GetHandler(16))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_CreateHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(26);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_GetEntityIDs() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_Search : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_Search() {
+      ::grpc::Service::experimental().MarkMethodCallback(17,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchParam, ::milvus::grpc::QueryResult>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::SearchParam* request,
+                 ::milvus::grpc::QueryResult* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->Search(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_Search(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::SearchParam, ::milvus::grpc::QueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchParam, ::milvus::grpc::QueryResult>*>(
+          ::grpc::Service::experimental().GetHandler(17))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_HasHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(27);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_Search() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_SearchByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_SearchByID() {
+      ::grpc::Service::experimental().MarkMethodCallback(18,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchByIDParam, ::milvus::grpc::QueryResult>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::SearchByIDParam* request,
+                 ::milvus::grpc::QueryResult* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->SearchByID(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_SearchByID(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::SearchByIDParam, ::milvus::grpc::QueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchByIDParam, ::milvus::grpc::QueryResult>*>(
+          ::grpc::Service::experimental().GetHandler(18))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_DropHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(28);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_SearchByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_SearchInFiles : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_SearchInFiles() {
+      ::grpc::Service::experimental().MarkMethodCallback(19,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchInFilesParam, ::milvus::grpc::QueryResult>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::SearchInFilesParam* request,
+                 ::milvus::grpc::QueryResult* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->SearchInFiles(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_SearchInFiles(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::SearchInFilesParam, ::milvus::grpc::QueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchInFilesParam, ::milvus::grpc::QueryResult>*>(
+          ::grpc::Service::experimental().GetHandler(19))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_DescribeHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(29);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_SearchInFiles() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_Cmd : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_Cmd() {
+      ::grpc::Service::experimental().MarkMethodCallback(20,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::StringReply>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::Command* request,
+                 ::milvus::grpc::StringReply* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->Cmd(context, request, response, controller);
+                 }));
+=======
+    WithGenericMethod_CountHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(30);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    void SetMessageAllocatorFor_Cmd(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::Command, ::milvus::grpc::StringReply>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::Command, ::milvus::grpc::StringReply>*>(
+          ::grpc::Service::experimental().GetHandler(20))
+              ->SetMessageAllocator(allocator);
+    }
+    ~ExperimentalWithCallbackMethod_Cmd() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Cmd(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::StringReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Cmd(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::StringReply* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_DeleteByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_DeleteByID() {
+      ::grpc::Service::experimental().MarkMethodCallback(21,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::DeleteByIDParam, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::DeleteByIDParam* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->DeleteByID(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_DeleteByID(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::DeleteByIDParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::DeleteByIDParam, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(21))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_ShowHybridCollections() {
+      ::grpc::Service::MarkMethodGeneric(31);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_DeleteByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DeleteByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::DeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void DeleteByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::DeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_PreloadCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_PreloadCollection() {
+      ::grpc::Service::experimental().MarkMethodCallback(22,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->PreloadCollection(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_PreloadCollection(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(22))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_ShowHybridCollectionInfo() {
+      ::grpc::Service::MarkMethodGeneric(32);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_PreloadCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreloadCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void PreloadCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_ReloadSegments : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_ReloadSegments() {
+      ::grpc::Service::experimental().MarkMethodCallback(23,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::ReLoadSegmentsParam, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::ReLoadSegmentsParam* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->ReloadSegments(context, request, response, controller);
+                 }));
+=======
+    WithGenericMethod_PreloadHybridCollection() {
+      ::grpc::Service::MarkMethodGeneric(33);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    void SetMessageAllocatorFor_ReloadSegments(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::ReLoadSegmentsParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::ReLoadSegmentsParam, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(23))
+              ->SetMessageAllocator(allocator);
+    }
+    ~ExperimentalWithCallbackMethod_ReloadSegments() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_Flush : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_Flush() {
+      ::grpc::Service::experimental().MarkMethodCallback(24,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::FlushParam, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::FlushParam* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->Flush(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_Flush(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::FlushParam, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::FlushParam, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(24))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_InsertEntity() {
+      ::grpc::Service::MarkMethodGeneric(34);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_Flush() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Flush(::grpc::ServerContext* /*context*/, const ::milvus::grpc::FlushParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Flush(::grpc::ServerContext* /*context*/, const ::milvus::grpc::FlushParam* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_Compact : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_Compact() {
+      ::grpc::Service::experimental().MarkMethodCallback(25,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::CollectionName* request,
+                 ::milvus::grpc::Status* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->Compact(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_Compact(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>*>(
+          ::grpc::Service::experimental().GetHandler(25))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_HybridSearch() {
+      ::grpc::Service::MarkMethodGeneric(35);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_Compact() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Compact(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Compact(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithCallbackMethod_SearchPB : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithCallbackMethod_SearchPB() {
+      ::grpc::Service::experimental().MarkMethodCallback(26,
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchParamPB, ::milvus::grpc::QueryResult>(
+          [this](::grpc::ServerContext* context,
+                 const ::milvus::grpc::SearchParamPB* request,
+                 ::milvus::grpc::QueryResult* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   return this->SearchPB(context, request, response, controller);
+                 }));
+    }
+    void SetMessageAllocatorFor_SearchPB(
+        ::grpc::experimental::MessageAllocator< ::milvus::grpc::SearchParamPB, ::milvus::grpc::QueryResult>* allocator) {
+      static_cast<::grpc_impl::internal::CallbackUnaryHandler< ::milvus::grpc::SearchParamPB, ::milvus::grpc::QueryResult>*>(
+          ::grpc::Service::experimental().GetHandler(26))
+              ->SetMessageAllocator(allocator);
+=======
+    WithGenericMethod_HybridSearchInSegments() {
+      ::grpc::Service::MarkMethodGeneric(36);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~ExperimentalWithCallbackMethod_SearchPB() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  typedef ExperimentalWithCallbackMethod_CreateCollection<ExperimentalWithCallbackMethod_HasCollection<ExperimentalWithCallbackMethod_DescribeCollection<ExperimentalWithCallbackMethod_CountCollection<ExperimentalWithCallbackMethod_ShowCollections<ExperimentalWithCallbackMethod_ShowCollectionInfo<ExperimentalWithCallbackMethod_DropCollection<ExperimentalWithCallbackMethod_CreateIndex<ExperimentalWithCallbackMethod_DescribeIndex<ExperimentalWithCallbackMethod_DropIndex<ExperimentalWithCallbackMethod_CreatePartition<ExperimentalWithCallbackMethod_HasPartition<ExperimentalWithCallbackMethod_ShowPartitions<ExperimentalWithCallbackMethod_DropPartition<ExperimentalWithCallbackMethod_Insert<ExperimentalWithCallbackMethod_GetEntityByID<ExperimentalWithCallbackMethod_GetEntityIDs<ExperimentalWithCallbackMethod_Search<ExperimentalWithCallbackMethod_SearchByID<ExperimentalWithCallbackMethod_SearchInFiles<ExperimentalWithCallbackMethod_Cmd<ExperimentalWithCallbackMethod_DeleteByID<ExperimentalWithCallbackMethod_PreloadCollection<ExperimentalWithCallbackMethod_ReloadSegments<ExperimentalWithCallbackMethod_Flush<ExperimentalWithCallbackMethod_Compact<ExperimentalWithCallbackMethod_SearchPB<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > ExperimentalCallbackService;
+  template <class BaseClass>
+  class WithGenericMethod_CreateCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    WithGenericMethod_CreateCollection() {
+      ::grpc::Service::MarkMethodGeneric(0);
+=======
+    WithGenericMethod_GetEntityByID() {
+      ::grpc::Service::MarkMethodGeneric(37);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~WithGenericMethod_CreateCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_HasCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    WithGenericMethod_HasCollection() {
+      ::grpc::Service::MarkMethodGeneric(1);
+=======
+    WithGenericMethod_GetEntityIDs() {
+      ::grpc::Service::MarkMethodGeneric(38);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~WithGenericMethod_HasCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status HasCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DescribeCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    WithGenericMethod_DescribeCollection() {
+      ::grpc::Service::MarkMethodGeneric(2);
+=======
+    WithGenericMethod_DeleteEntitiesByID() {
+      ::grpc::Service::MarkMethodGeneric(39);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~WithGenericMethod_DescribeCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_CountCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_CountCollection() {
+      ::grpc::Service::MarkMethodGeneric(3);
+    }
+    ~WithGenericMethod_CountCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status CountCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_ShowCollections : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_ShowCollections() {
+      ::grpc::Service::MarkMethodGeneric(4);
+    }
+    ~WithGenericMethod_ShowCollections() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ShowCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::CollectionNameList* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_ShowCollectionInfo : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_ShowCollectionInfo() {
+      ::grpc::Service::MarkMethodGeneric(5);
+    }
+    ~WithGenericMethod_ShowCollectionInfo() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ShowCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DropCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_DropCollection() {
+      ::grpc::Service::MarkMethodGeneric(6);
+    }
+    ~WithGenericMethod_DropCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DropCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_CreateIndex : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_CreateIndex() {
+      ::grpc::Service::MarkMethodGeneric(7);
+    }
+    ~WithGenericMethod_CreateIndex() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status CreateIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DescribeIndex : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_DescribeIndex() {
+      ::grpc::Service::MarkMethodGeneric(8);
+    }
+    ~WithGenericMethod_DescribeIndex() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DescribeIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::IndexParam* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DropIndex : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_DropIndex() {
+      ::grpc::Service::MarkMethodGeneric(9);
+    }
+    ~WithGenericMethod_DropIndex() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_CreatePartition : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_CreatePartition() {
+      ::grpc::Service::MarkMethodGeneric(10);
+    }
+    ~WithGenericMethod_CreatePartition() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status CreatePartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_HasPartition : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_HasPartition() {
+      ::grpc::Service::MarkMethodGeneric(11);
+    }
+    ~WithGenericMethod_HasPartition() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status HasPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_ShowPartitions : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_ShowPartitions() {
+      ::grpc::Service::MarkMethodGeneric(12);
+    }
+    ~WithGenericMethod_ShowPartitions() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ShowPartitions(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::PartitionList* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DropPartition : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_DropPartition() {
+      ::grpc::Service::MarkMethodGeneric(13);
+    }
+    ~WithGenericMethod_DropPartition() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DropPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_Insert : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_Insert() {
+      ::grpc::Service::MarkMethodGeneric(14);
+    }
+    ~WithGenericMethod_Insert() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_GetEntityByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_GetEntityByID() {
+      ::grpc::Service::MarkMethodGeneric(15);
+    }
+    ~WithGenericMethod_GetEntityByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_GetEntityIDs : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_GetEntityIDs() {
+      ::grpc::Service::MarkMethodGeneric(16);
+    }
+    ~WithGenericMethod_GetEntityIDs() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_Search : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_Search() {
+      ::grpc::Service::MarkMethodGeneric(17);
+    }
+    ~WithGenericMethod_Search() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_SearchByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_SearchByID() {
+      ::grpc::Service::MarkMethodGeneric(18);
+    }
+    ~WithGenericMethod_SearchByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_SearchInFiles : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_SearchInFiles() {
+      ::grpc::Service::MarkMethodGeneric(19);
+    }
+    ~WithGenericMethod_SearchInFiles() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_Cmd : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_Cmd() {
+      ::grpc::Service::MarkMethodGeneric(20);
+    }
+    ~WithGenericMethod_Cmd() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Cmd(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::StringReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_DeleteByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_DeleteByID() {
+      ::grpc::Service::MarkMethodGeneric(21);
+    }
+    ~WithGenericMethod_DeleteByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DeleteByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::DeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_PreloadCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_PreloadCollection() {
+      ::grpc::Service::MarkMethodGeneric(22);
+    }
+    ~WithGenericMethod_PreloadCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreloadCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_ReloadSegments : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_ReloadSegments() {
+      ::grpc::Service::MarkMethodGeneric(23);
+    }
+    ~WithGenericMethod_ReloadSegments() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_Flush : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_Flush() {
+      ::grpc::Service::MarkMethodGeneric(24);
+    }
+    ~WithGenericMethod_Flush() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Flush(::grpc::ServerContext* /*context*/, const ::milvus::grpc::FlushParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
+  class WithGenericMethod_Compact : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_Compact() {
+      ::grpc::Service::MarkMethodGeneric(25);
     }
     ~WithGenericMethod_Compact() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4191,261 +4602,85 @@ class MilvusService final {
     }
   };
   template <class BaseClass>
-  class WithGenericMethod_CreateHybridCollection : public BaseClass {
+<<<<<<< HEAD
+  class WithGenericMethod_SearchPB : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithGenericMethod_CreateHybridCollection() {
+    WithGenericMethod_SearchPB() {
       ::grpc::Service::MarkMethodGeneric(26);
-    }
-    ~WithGenericMethod_CreateHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_HasHybridCollection : public BaseClass {
+=======
+  class WithRawMethod_ReloadSegments : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithGenericMethod_HasHybridCollection() {
-      ::grpc::Service::MarkMethodGeneric(27);
+    WithRawMethod_ReloadSegments() {
+      ::grpc::Service::MarkMethodRaw(23);
     }
-    ~WithGenericMethod_HasHybridCollection() override {
+    ~WithRawMethod_ReloadSegments() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status HasHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    void RequestReloadSegments(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(23, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
-  class WithGenericMethod_DropHybridCollection : public BaseClass {
+  class WithRawMethod_Flush : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithGenericMethod_DropHybridCollection() {
-      ::grpc::Service::MarkMethodGeneric(28);
+    WithRawMethod_Flush() {
+      ::grpc::Service::MarkMethodRaw(24);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithGenericMethod_DropHybridCollection() override {
+    ~WithGenericMethod_SearchPB() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_DescribeHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_DescribeHybridCollection() {
-      ::grpc::Service::MarkMethodGeneric(29);
+<<<<<<< HEAD
+=======
+    void RequestFlush(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(24, context, request, response, new_call_cq, notification_cq, tag);
     }
-    ~WithGenericMethod_DescribeHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DescribeHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_CountHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_CountHybridCollection() {
-      ::grpc::Service::MarkMethodGeneric(30);
-    }
-    ~WithGenericMethod_CountHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CountHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_ShowHybridCollections : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_ShowHybridCollections() {
-      ::grpc::Service::MarkMethodGeneric(31);
-    }
-    ~WithGenericMethod_ShowHybridCollections() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::MappingList* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_ShowHybridCollectionInfo : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_ShowHybridCollectionInfo() {
-      ::grpc::Service::MarkMethodGeneric(32);
-    }
-    ~WithGenericMethod_ShowHybridCollectionInfo() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_PreloadHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_PreloadHybridCollection() {
-      ::grpc::Service::MarkMethodGeneric(33);
-    }
-    ~WithGenericMethod_PreloadHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status PreloadHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_InsertEntity : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_InsertEntity() {
-      ::grpc::Service::MarkMethodGeneric(34);
-    }
-    ~WithGenericMethod_InsertEntity() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status InsertEntity(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HInsertParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_HybridSearch : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_HybridSearch() {
-      ::grpc::Service::MarkMethodGeneric(35);
-    }
-    ~WithGenericMethod_HybridSearch() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_HybridSearchInSegments : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_HybridSearchInSegments() {
-      ::grpc::Service::MarkMethodGeneric(36);
-    }
-    ~WithGenericMethod_HybridSearchInSegments() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_GetEntityByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_GetEntityByID() {
-      ::grpc::Service::MarkMethodGeneric(37);
-    }
-    ~WithGenericMethod_GetEntityByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HEntityIdentity* /*request*/, ::milvus::grpc::HEntity* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_GetEntityIDs : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_GetEntityIDs() {
-      ::grpc::Service::MarkMethodGeneric(38);
-    }
-    ~WithGenericMethod_GetEntityIDs() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HGetEntityIDsParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-  };
-  template <class BaseClass>
-  class WithGenericMethod_DeleteEntitiesByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithGenericMethod_DeleteEntitiesByID() {
-      ::grpc::Service::MarkMethodGeneric(39);
-    }
-    ~WithGenericMethod_DeleteEntitiesByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HDeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
   };
   template <class BaseClass>
   class WithRawMethod_CreateCollection : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_CreateCollection() {
       ::grpc::Service::MarkMethodRaw(0);
+=======
+    WithRawMethod_Compact() {
+      ::grpc::Service::MarkMethodRaw(25);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_CreateCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestCreateCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(0, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestCompact(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(25, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4453,8 +4688,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_HasCollection() {
       ::grpc::Service::MarkMethodRaw(1);
+=======
+    WithRawMethod_CreateHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(26);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_HasCollection() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4464,8 +4704,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestHasCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(1, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestCreateHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(26, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4473,19 +4718,29 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_DescribeCollection() {
       ::grpc::Service::MarkMethodRaw(2);
+=======
+    WithRawMethod_HasHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(27);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_DescribeCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/) override {
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestDescribeCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(2, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestHasHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(27, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4493,8 +4748,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_CountCollection() {
       ::grpc::Service::MarkMethodRaw(3);
+=======
+    WithRawMethod_DropHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(28);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_CountCollection() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4504,8 +4764,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestCountCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(3, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestDropHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(28, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4513,8 +4778,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_ShowCollections() {
       ::grpc::Service::MarkMethodRaw(4);
+=======
+    WithRawMethod_DescribeHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(29);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_ShowCollections() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4524,8 +4794,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestShowCollections(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(4, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestDescribeHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(29, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4533,8 +4808,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_ShowCollectionInfo() {
       ::grpc::Service::MarkMethodRaw(5);
+=======
+    WithRawMethod_CountHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(30);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_ShowCollectionInfo() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4544,8 +4824,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestShowCollectionInfo(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(5, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestCountHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(30, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4553,8 +4838,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_DropCollection() {
       ::grpc::Service::MarkMethodRaw(6);
+=======
+    WithRawMethod_ShowHybridCollections() {
+      ::grpc::Service::MarkMethodRaw(31);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_DropCollection() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4564,8 +4854,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestDropCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(6, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestShowHybridCollections(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(31, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4573,8 +4868,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_CreateIndex() {
       ::grpc::Service::MarkMethodRaw(7);
+=======
+    WithRawMethod_ShowHybridCollectionInfo() {
+      ::grpc::Service::MarkMethodRaw(32);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_CreateIndex() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4584,8 +4884,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestCreateIndex(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(7, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestShowHybridCollectionInfo(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(32, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4593,8 +4898,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_DescribeIndex() {
       ::grpc::Service::MarkMethodRaw(8);
+=======
+    WithRawMethod_PreloadHybridCollection() {
+      ::grpc::Service::MarkMethodRaw(33);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_DescribeIndex() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4604,8 +4914,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestDescribeIndex(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(8, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestPreloadHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(33, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4613,19 +4928,29 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_DropIndex() {
       ::grpc::Service::MarkMethodRaw(9);
+=======
+    WithRawMethod_InsertEntity() {
+      ::grpc::Service::MarkMethodRaw(34);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_DropIndex() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestDropIndex(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(9, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestInsertEntity(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(34, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4633,8 +4958,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_CreatePartition() {
       ::grpc::Service::MarkMethodRaw(10);
+=======
+    WithRawMethod_HybridSearch() {
+      ::grpc::Service::MarkMethodRaw(35);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_CreatePartition() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4644,8 +4974,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestCreatePartition(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(10, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestHybridSearch(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(35, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4653,8 +4988,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_HasPartition() {
       ::grpc::Service::MarkMethodRaw(11);
+=======
+    WithRawMethod_HybridSearchInSegments() {
+      ::grpc::Service::MarkMethodRaw(36);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_HasPartition() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4664,8 +5004,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestHasPartition(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(11, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestHybridSearchInSegments(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(36, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4673,8 +5018,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_ShowPartitions() {
       ::grpc::Service::MarkMethodRaw(12);
+=======
+    WithRawMethod_GetEntityByID() {
+      ::grpc::Service::MarkMethodRaw(37);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_ShowPartitions() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4684,8 +5034,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestShowPartitions(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(12, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestGetEntityByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(37, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4693,8 +5048,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_DropPartition() {
       ::grpc::Service::MarkMethodRaw(13);
+=======
+    WithRawMethod_GetEntityIDs() {
+      ::grpc::Service::MarkMethodRaw(38);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_DropPartition() override {
       BaseClassMustBeDerivedFromService(this);
@@ -4704,8 +5064,13 @@ class MilvusService final {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestDropPartition(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(13, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestGetEntityIDs(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(38, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
@@ -4713,58 +5078,68 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithRawMethod_Insert() {
       ::grpc::Service::MarkMethodRaw(14);
+=======
+    WithRawMethod_DeleteEntitiesByID() {
+      ::grpc::Service::MarkMethodRaw(39);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithRawMethod_Insert() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
+<<<<<<< HEAD
     void RequestInsert(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(14, context, request, response, new_call_cq, notification_cq, tag);
+=======
+    void RequestDeleteEntitiesByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(39, context, request, response, new_call_cq, notification_cq, tag);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
   };
   template <class BaseClass>
-  class WithRawMethod_GetVectorsByID : public BaseClass {
+  class WithRawMethod_GetEntityByID : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithRawMethod_GetVectorsByID() {
+    WithRawMethod_GetEntityByID() {
       ::grpc::Service::MarkMethodRaw(15);
     }
-    ~WithRawMethod_GetVectorsByID() override {
+    ~WithRawMethod_GetEntityByID() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/) override {
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestGetVectorsByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestGetEntityByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(15, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
-  class WithRawMethod_GetVectorIDs : public BaseClass {
+  class WithRawMethod_GetEntityIDs : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithRawMethod_GetVectorIDs() {
+    WithRawMethod_GetEntityIDs() {
       ::grpc::Service::MarkMethodRaw(16);
     }
-    ~WithRawMethod_GetVectorIDs() override {
+    ~WithRawMethod_GetEntityIDs() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status GetVectorIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetVectorIDsParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestGetVectorIDs(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestGetEntityIDs(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(16, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
@@ -4780,7 +5155,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4800,7 +5175,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4820,7 +5195,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -4949,283 +5324,23 @@ class MilvusService final {
     }
   };
   template <class BaseClass>
-  class WithRawMethod_CreateHybridCollection : public BaseClass {
+  class WithRawMethod_SearchPB : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithRawMethod_CreateHybridCollection() {
+    WithRawMethod_SearchPB() {
       ::grpc::Service::MarkMethodRaw(26);
     }
-    ~WithRawMethod_CreateHybridCollection() override {
+    ~WithRawMethod_SearchPB() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    void RequestCreateHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+    void RequestSearchPB(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
       ::grpc::Service::RequestAsyncUnary(26, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_HasHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_HasHybridCollection() {
-      ::grpc::Service::MarkMethodRaw(27);
-    }
-    ~WithRawMethod_HasHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HasHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestHasHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(27, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_DropHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_DropHybridCollection() {
-      ::grpc::Service::MarkMethodRaw(28);
-    }
-    ~WithRawMethod_DropHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DropHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestDropHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(28, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_DescribeHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_DescribeHybridCollection() {
-      ::grpc::Service::MarkMethodRaw(29);
-    }
-    ~WithRawMethod_DescribeHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DescribeHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestDescribeHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(29, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_CountHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_CountHybridCollection() {
-      ::grpc::Service::MarkMethodRaw(30);
-    }
-    ~WithRawMethod_CountHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CountHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestCountHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(30, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_ShowHybridCollections : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_ShowHybridCollections() {
-      ::grpc::Service::MarkMethodRaw(31);
-    }
-    ~WithRawMethod_ShowHybridCollections() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::MappingList* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestShowHybridCollections(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(31, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_ShowHybridCollectionInfo : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_ShowHybridCollectionInfo() {
-      ::grpc::Service::MarkMethodRaw(32);
-    }
-    ~WithRawMethod_ShowHybridCollectionInfo() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestShowHybridCollectionInfo(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(32, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_PreloadHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_PreloadHybridCollection() {
-      ::grpc::Service::MarkMethodRaw(33);
-    }
-    ~WithRawMethod_PreloadHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status PreloadHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestPreloadHybridCollection(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(33, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_InsertEntity : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_InsertEntity() {
-      ::grpc::Service::MarkMethodRaw(34);
-    }
-    ~WithRawMethod_InsertEntity() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status InsertEntity(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HInsertParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestInsertEntity(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(34, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_HybridSearch : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_HybridSearch() {
-      ::grpc::Service::MarkMethodRaw(35);
-    }
-    ~WithRawMethod_HybridSearch() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestHybridSearch(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(35, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_HybridSearchInSegments : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_HybridSearchInSegments() {
-      ::grpc::Service::MarkMethodRaw(36);
-    }
-    ~WithRawMethod_HybridSearchInSegments() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestHybridSearchInSegments(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(36, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_GetEntityByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_GetEntityByID() {
-      ::grpc::Service::MarkMethodRaw(37);
-    }
-    ~WithRawMethod_GetEntityByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HEntityIdentity* /*request*/, ::milvus::grpc::HEntity* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestGetEntityByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(37, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_GetEntityIDs : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_GetEntityIDs() {
-      ::grpc::Service::MarkMethodRaw(38);
-    }
-    ~WithRawMethod_GetEntityIDs() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HGetEntityIDsParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestGetEntityIDs(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(38, context, request, response, new_call_cq, notification_cq, tag);
-    }
-  };
-  template <class BaseClass>
-  class WithRawMethod_DeleteEntitiesByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    WithRawMethod_DeleteEntitiesByID() {
-      ::grpc::Service::MarkMethodRaw(39);
-    }
-    ~WithRawMethod_DeleteEntitiesByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HDeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    void RequestDeleteEntitiesByID(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncUnary(39, context, request, response, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
@@ -5247,7 +5362,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -5297,7 +5412,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/) override {
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -5472,7 +5587,7 @@ class MilvusService final {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
@@ -5504,306 +5619,14 @@ class MilvusService final {
     virtual void CreatePartition(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
+<<<<<<< HEAD
   class ExperimentalWithRawCallbackMethod_HasPartition : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     ExperimentalWithRawCallbackMethod_HasPartition() {
       ::grpc::Service::experimental().MarkMethodRawCallback(11,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->HasPartition(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_HasPartition() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HasPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void HasPartition(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_ShowPartitions : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_ShowPartitions() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(12,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->ShowPartitions(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_ShowPartitions() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowPartitions(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::PartitionList* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void ShowPartitions(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_DropPartition : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_DropPartition() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(13,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->DropPartition(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_DropPartition() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DropPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DropPartition(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_Insert : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_Insert() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(14,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->Insert(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_Insert() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void Insert(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_GetVectorsByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_GetVectorsByID() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(15,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetVectorsByID(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_GetVectorsByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void GetVectorsByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_GetVectorIDs : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_GetVectorIDs() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(16,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetVectorIDs(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_GetVectorIDs() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetVectorIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetVectorIDsParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void GetVectorIDs(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_Search : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_Search() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(17,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->Search(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_Search() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void Search(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_SearchByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_SearchByID() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(18,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->SearchByID(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_SearchByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void SearchByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_SearchInFiles : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_SearchInFiles() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(19,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->SearchInFiles(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_SearchInFiles() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void SearchInFiles(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_Cmd : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_Cmd() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(20,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->Cmd(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_Cmd() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status Cmd(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::StringReply* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void Cmd(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_DeleteByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_DeleteByID() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(21,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->DeleteByID(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_DeleteByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DeleteByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::DeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DeleteByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_PreloadCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_PreloadCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(22,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->PreloadCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_PreloadCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status PreloadCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void PreloadCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
+=======
   class ExperimentalWithRawCallbackMethod_ReloadSegments : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
@@ -5835,6 +5658,397 @@ class MilvusService final {
    public:
     ExperimentalWithRawCallbackMethod_Flush() {
       ::grpc::Service::experimental().MarkMethodRawCallback(24,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->HasPartition(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_HasPartition() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status HasPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void HasPartition(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_ShowPartitions : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_ShowPartitions() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(12,
+=======
+    ExperimentalWithRawCallbackMethod_Compact() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(25,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->ShowPartitions(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_ShowPartitions() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ShowPartitions(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::PartitionList* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void ShowPartitions(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_DropPartition : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_DropPartition() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(13,
+=======
+    ExperimentalWithRawCallbackMethod_CreateHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(26,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->DropPartition(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_DropPartition() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DropPartition(::grpc::ServerContext* /*context*/, const ::milvus::grpc::PartitionParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void DropPartition(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_Insert : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_Insert() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(14,
+=======
+    ExperimentalWithRawCallbackMethod_HasHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(27,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->Insert(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_Insert() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Insert(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_GetEntityByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_GetEntityByID() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(15,
+=======
+    ExperimentalWithRawCallbackMethod_DropHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(28,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->GetEntityByID(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_GetEntityByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void GetEntityByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_GetEntityIDs : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_GetEntityIDs() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(16,
+=======
+    ExperimentalWithRawCallbackMethod_DescribeHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(29,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->GetEntityIDs(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_GetEntityIDs() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void GetEntityIDs(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_Search : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_Search() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(17,
+=======
+    ExperimentalWithRawCallbackMethod_CountHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(30,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->Search(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_Search() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Search(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_SearchByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_SearchByID() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(18,
+=======
+    ExperimentalWithRawCallbackMethod_ShowHybridCollections() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(31,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->SearchByID(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_SearchByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void SearchByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_SearchInFiles : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_SearchInFiles() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(19,
+=======
+    ExperimentalWithRawCallbackMethod_ShowHybridCollectionInfo() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(32,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->SearchInFiles(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_SearchInFiles() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void SearchInFiles(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_Cmd : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_Cmd() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(20,
+=======
+    ExperimentalWithRawCallbackMethod_PreloadHybridCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(33,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->Cmd(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_Cmd() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status Cmd(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::StringReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void Cmd(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_DeleteByID : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_DeleteByID() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(21,
+=======
+    ExperimentalWithRawCallbackMethod_InsertEntity() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(34,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->DeleteByID(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_DeleteByID() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status DeleteByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::DeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void DeleteByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_PreloadCollection : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_PreloadCollection() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(22,
+=======
+    ExperimentalWithRawCallbackMethod_HybridSearch() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(35,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->PreloadCollection(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_PreloadCollection() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreloadCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void PreloadCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_ReloadSegments : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_ReloadSegments() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(23,
+=======
+    ExperimentalWithRawCallbackMethod_HybridSearchInSegments() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(36,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+          [this](::grpc::ServerContext* context,
+                 const ::grpc::ByteBuffer* request,
+                 ::grpc::ByteBuffer* response,
+                 ::grpc::experimental::ServerCallbackRpcController* controller) {
+                   this->ReloadSegments(context, request, response, controller);
+                 }));
+    }
+    ~ExperimentalWithRawCallbackMethod_ReloadSegments() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual void ReloadSegments(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+  };
+  template <class BaseClass>
+  class ExperimentalWithRawCallbackMethod_Flush : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_Flush() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(24,
+=======
+    ExperimentalWithRawCallbackMethod_GetEntityByID() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(37,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
           [this](::grpc::ServerContext* context,
                  const ::grpc::ByteBuffer* request,
@@ -5858,8 +6072,13 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     ExperimentalWithRawCallbackMethod_Compact() {
       ::grpc::Service::experimental().MarkMethodRawCallback(25,
+=======
+    ExperimentalWithRawCallbackMethod_GetEntityIDs() {
+      ::grpc::Service::experimental().MarkMethodRawCallback(38,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
           [this](::grpc::ServerContext* context,
                  const ::grpc::ByteBuffer* request,
@@ -5879,354 +6098,34 @@ class MilvusService final {
     virtual void Compact(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_CreateHybridCollection : public BaseClass {
+  class ExperimentalWithRawCallbackMethod_SearchPB : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    ExperimentalWithRawCallbackMethod_CreateHybridCollection() {
+<<<<<<< HEAD
+    ExperimentalWithRawCallbackMethod_SearchPB() {
       ::grpc::Service::experimental().MarkMethodRawCallback(26,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->CreateHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_CreateHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_HasHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_HasHybridCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(27,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->HasHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_HasHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HasHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::BoolReply* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void HasHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_DropHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_DropHybridCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(28,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->DropHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_DropHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DropHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DropHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_DescribeHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_DescribeHybridCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(29,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->DescribeHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_DescribeHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status DescribeHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void DescribeHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_CountHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_CountHybridCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(30,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->CountHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_CountHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status CountHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionRowCount* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void CountHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_ShowHybridCollections : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_ShowHybridCollections() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(31,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->ShowHybridCollections(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_ShowHybridCollections() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollections(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Command* /*request*/, ::milvus::grpc::MappingList* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void ShowHybridCollections(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_ShowHybridCollectionInfo : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_ShowHybridCollectionInfo() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(32,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->ShowHybridCollectionInfo(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_ShowHybridCollectionInfo() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status ShowHybridCollectionInfo(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionInfo* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void ShowHybridCollectionInfo(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_PreloadHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_PreloadHybridCollection() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(33,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->PreloadHybridCollection(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_PreloadHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status PreloadHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void PreloadHybridCollection(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_InsertEntity : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_InsertEntity() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(34,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->InsertEntity(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_InsertEntity() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status InsertEntity(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HInsertParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void InsertEntity(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_HybridSearch : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_HybridSearch() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(35,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->HybridSearch(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_HybridSearch() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearch(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void HybridSearch(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_HybridSearchInSegments : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_HybridSearchInSegments() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(36,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->HybridSearchInSegments(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_HybridSearchInSegments() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HSearchInSegmentsParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void HybridSearchInSegments(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_GetEntityByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_GetEntityByID() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(37,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetEntityByID(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_GetEntityByID() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HEntityIdentity* /*request*/, ::milvus::grpc::HEntity* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void GetEntityByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_GetEntityIDs : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
-    ExperimentalWithRawCallbackMethod_GetEntityIDs() {
-      ::grpc::Service::experimental().MarkMethodRawCallback(38,
-        new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
-          [this](::grpc::ServerContext* context,
-                 const ::grpc::ByteBuffer* request,
-                 ::grpc::ByteBuffer* response,
-                 ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->GetEntityIDs(context, request, response, controller);
-                 }));
-    }
-    ~ExperimentalWithRawCallbackMethod_GetEntityIDs() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable synchronous version of this method
-    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HGetEntityIDsParam* /*request*/, ::milvus::grpc::HEntityIDs* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    virtual void GetEntityIDs(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
-  };
-  template <class BaseClass>
-  class ExperimentalWithRawCallbackMethod_DeleteEntitiesByID : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
+=======
     ExperimentalWithRawCallbackMethod_DeleteEntitiesByID() {
       ::grpc::Service::experimental().MarkMethodRawCallback(39,
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
         new ::grpc_impl::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
           [this](::grpc::ServerContext* context,
                  const ::grpc::ByteBuffer* request,
                  ::grpc::ByteBuffer* response,
                  ::grpc::experimental::ServerCallbackRpcController* controller) {
-                   this->DeleteEntitiesByID(context, request, response, controller);
+                   this->SearchPB(context, request, response, controller);
                  }));
     }
-    ~ExperimentalWithRawCallbackMethod_DeleteEntitiesByID() override {
+    ~ExperimentalWithRawCallbackMethod_SearchPB() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable synchronous version of this method
-    ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HDeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
-    virtual void DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
+    virtual void SearchPB(::grpc::ServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/, ::grpc::experimental::ServerCallbackRpcController* controller) { controller->Finish(::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "")); }
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_CreateCollection : public BaseClass {
@@ -6235,18 +6134,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_CreateCollection() {
       ::grpc::Service::MarkMethodStreamed(0,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionSchema, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_CreateCollection<BaseClass>::StreamedCreateCollection, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::Mapping, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_CreateCollection<BaseClass>::StreamedCreateCollection, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_CreateCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionSchema* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status CreateCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedCreateCollection(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionSchema,::milvus::grpc::Status>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedCreateCollection(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::Mapping,::milvus::grpc::Status>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_HasCollection : public BaseClass {
@@ -6275,18 +6174,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_DescribeCollection() {
       ::grpc::Service::MarkMethodStreamed(2,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::CollectionSchema>(std::bind(&WithStreamedUnaryMethod_DescribeCollection<BaseClass>::StreamedDescribeCollection, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Mapping>(std::bind(&WithStreamedUnaryMethod_DescribeCollection<BaseClass>::StreamedDescribeCollection, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_DescribeCollection() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::CollectionSchema* /*response*/) override {
+    ::grpc::Status DescribeCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Mapping* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedDescribeCollection(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::CollectionSchema>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedDescribeCollection(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::Mapping>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_CountCollection : public BaseClass {
@@ -6415,18 +6314,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_DropIndex() {
       ::grpc::Service::MarkMethodStreamed(9,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_DropIndex<BaseClass>::StreamedDropIndex, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_DropIndex<BaseClass>::StreamedDropIndex, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_DropIndex() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::CollectionName* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status DropIndex(::grpc::ServerContext* /*context*/, const ::milvus::grpc::IndexParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedDropIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::Status>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedDropIndex(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::IndexParam,::milvus::grpc::Status>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_CreatePartition : public BaseClass {
@@ -6515,58 +6414,58 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_Insert() {
       ::grpc::Service::MarkMethodStreamed(14,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::VectorIds>(std::bind(&WithStreamedUnaryMethod_Insert<BaseClass>::StreamedInsert, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::InsertParam, ::milvus::grpc::EntityIds>(std::bind(&WithStreamedUnaryMethod_Insert<BaseClass>::StreamedInsert, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_Insert() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status Insert(::grpc::ServerContext* /*context*/, const ::milvus::grpc::InsertParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedInsert(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::InsertParam,::milvus::grpc::VectorIds>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedInsert(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::InsertParam,::milvus::grpc::EntityIds>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
-  class WithStreamedUnaryMethod_GetVectorsByID : public BaseClass {
+  class WithStreamedUnaryMethod_GetEntityByID : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithStreamedUnaryMethod_GetVectorsByID() {
+    WithStreamedUnaryMethod_GetEntityByID() {
       ::grpc::Service::MarkMethodStreamed(15,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::VectorsIdentity, ::milvus::grpc::VectorsData>(std::bind(&WithStreamedUnaryMethod_GetVectorsByID<BaseClass>::StreamedGetVectorsByID, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::EntityIdentity, ::milvus::grpc::Entities>(std::bind(&WithStreamedUnaryMethod_GetEntityByID<BaseClass>::StreamedGetEntityByID, this, std::placeholders::_1, std::placeholders::_2)));
     }
-    ~WithStreamedUnaryMethod_GetVectorsByID() override {
+    ~WithStreamedUnaryMethod_GetEntityByID() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status GetVectorsByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::VectorsIdentity* /*request*/, ::milvus::grpc::VectorsData* /*response*/) override {
+    ::grpc::Status GetEntityByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::EntityIdentity* /*request*/, ::milvus::grpc::Entities* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedGetVectorsByID(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::VectorsIdentity,::milvus::grpc::VectorsData>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedGetEntityByID(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::EntityIdentity,::milvus::grpc::Entities>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
-  class WithStreamedUnaryMethod_GetVectorIDs : public BaseClass {
+  class WithStreamedUnaryMethod_GetEntityIDs : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithStreamedUnaryMethod_GetVectorIDs() {
+    WithStreamedUnaryMethod_GetEntityIDs() {
       ::grpc::Service::MarkMethodStreamed(16,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::GetVectorIDsParam, ::milvus::grpc::VectorIds>(std::bind(&WithStreamedUnaryMethod_GetVectorIDs<BaseClass>::StreamedGetVectorIDs, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::GetEntityIDsParam, ::milvus::grpc::EntityIds>(std::bind(&WithStreamedUnaryMethod_GetEntityIDs<BaseClass>::StreamedGetEntityIDs, this, std::placeholders::_1, std::placeholders::_2)));
     }
-    ~WithStreamedUnaryMethod_GetVectorIDs() override {
+    ~WithStreamedUnaryMethod_GetEntityIDs() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status GetVectorIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetVectorIDsParam* /*request*/, ::milvus::grpc::VectorIds* /*response*/) override {
+    ::grpc::Status GetEntityIDs(::grpc::ServerContext* /*context*/, const ::milvus::grpc::GetEntityIDsParam* /*request*/, ::milvus::grpc::EntityIds* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedGetVectorIDs(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::GetVectorIDsParam,::milvus::grpc::VectorIds>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedGetEntityIDs(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::GetEntityIDsParam,::milvus::grpc::EntityIds>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_Search : public BaseClass {
@@ -6575,18 +6474,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_Search() {
       ::grpc::Service::MarkMethodStreamed(17,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchParam, ::milvus::grpc::TopKQueryResult>(std::bind(&WithStreamedUnaryMethod_Search<BaseClass>::StreamedSearch, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchParam, ::milvus::grpc::QueryResult>(std::bind(&WithStreamedUnaryMethod_Search<BaseClass>::StreamedSearch, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_Search() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status Search(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedSearch(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchParam,::milvus::grpc::TopKQueryResult>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedSearch(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchParam,::milvus::grpc::QueryResult>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_SearchByID : public BaseClass {
@@ -6595,18 +6494,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_SearchByID() {
       ::grpc::Service::MarkMethodStreamed(18,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchByIDParam, ::milvus::grpc::TopKQueryResult>(std::bind(&WithStreamedUnaryMethod_SearchByID<BaseClass>::StreamedSearchByID, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchByIDParam, ::milvus::grpc::QueryResult>(std::bind(&WithStreamedUnaryMethod_SearchByID<BaseClass>::StreamedSearchByID, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_SearchByID() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchByIDParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedSearchByID(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchByIDParam,::milvus::grpc::TopKQueryResult>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedSearchByID(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchByIDParam,::milvus::grpc::QueryResult>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_SearchInFiles : public BaseClass {
@@ -6615,18 +6514,18 @@ class MilvusService final {
    public:
     WithStreamedUnaryMethod_SearchInFiles() {
       ::grpc::Service::MarkMethodStreamed(19,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchInFilesParam, ::milvus::grpc::TopKQueryResult>(std::bind(&WithStreamedUnaryMethod_SearchInFiles<BaseClass>::StreamedSearchInFiles, this, std::placeholders::_1, std::placeholders::_2)));
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchInFilesParam, ::milvus::grpc::QueryResult>(std::bind(&WithStreamedUnaryMethod_SearchInFiles<BaseClass>::StreamedSearchInFiles, this, std::placeholders::_1, std::placeholders::_2)));
     }
     ~WithStreamedUnaryMethod_SearchInFiles() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::TopKQueryResult* /*response*/) override {
+    ::grpc::Status SearchInFiles(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchInFilesParam* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedSearchInFiles(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchInFilesParam,::milvus::grpc::TopKQueryResult>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedSearchInFiles(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchInFilesParam,::milvus::grpc::QueryResult>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_Cmd : public BaseClass {
@@ -6690,6 +6589,14 @@ class MilvusService final {
   };
   template <class BaseClass>
   class WithStreamedUnaryMethod_ReloadSegments : public BaseClass {
+<<<<<<< HEAD
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithStreamedUnaryMethod_ReloadSegments() {
+      ::grpc::Service::MarkMethodStreamed(23,
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::ReLoadSegmentsParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_ReloadSegments<BaseClass>::StreamedReloadSegments, this, std::placeholders::_1, std::placeholders::_2)));
+=======
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
@@ -6716,6 +6623,33 @@ class MilvusService final {
     WithStreamedUnaryMethod_Flush() {
       ::grpc::Service::MarkMethodStreamed(24,
         new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::FlushParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_Flush<BaseClass>::StreamedFlush, this, std::placeholders::_1, std::placeholders::_2)));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+    }
+    ~WithStreamedUnaryMethod_ReloadSegments() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable regular version of this method
+    ::grpc::Status ReloadSegments(::grpc::ServerContext* /*context*/, const ::milvus::grpc::ReLoadSegmentsParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    // replace default version of method with streamed unary
+    virtual ::grpc::Status StreamedReloadSegments(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::ReLoadSegmentsParam,::milvus::grpc::Status>* server_unary_streamer) = 0;
+  };
+  template <class BaseClass>
+  class WithStreamedUnaryMethod_Flush : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+<<<<<<< HEAD
+    WithStreamedUnaryMethod_Flush() {
+      ::grpc::Service::MarkMethodStreamed(24,
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::FlushParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_Flush<BaseClass>::StreamedFlush, this, std::placeholders::_1, std::placeholders::_2)));
+=======
+    WithStreamedUnaryMethod_Compact() {
+      ::grpc::Service::MarkMethodStreamed(25,
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_Compact<BaseClass>::StreamedCompact, this, std::placeholders::_1, std::placeholders::_2)));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithStreamedUnaryMethod_Flush() override {
       BaseClassMustBeDerivedFromService(this);
@@ -6733,9 +6667,15 @@ class MilvusService final {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
+<<<<<<< HEAD
     WithStreamedUnaryMethod_Compact() {
       ::grpc::Service::MarkMethodStreamed(25,
         new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_Compact<BaseClass>::StreamedCompact, this, std::placeholders::_1, std::placeholders::_2)));
+=======
+    WithStreamedUnaryMethod_CreateHybridCollection() {
+      ::grpc::Service::MarkMethodStreamed(26,
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::Mapping, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_CreateHybridCollection<BaseClass>::StreamedCreateHybridCollection, this, std::placeholders::_1, std::placeholders::_2)));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
     ~WithStreamedUnaryMethod_Compact() override {
       BaseClassMustBeDerivedFromService(this);
@@ -6749,30 +6689,15 @@ class MilvusService final {
     virtual ::grpc::Status StreamedCompact(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::CollectionName,::milvus::grpc::Status>* server_unary_streamer) = 0;
   };
   template <class BaseClass>
-  class WithStreamedUnaryMethod_CreateHybridCollection : public BaseClass {
+  class WithStreamedUnaryMethod_SearchPB : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
-    WithStreamedUnaryMethod_CreateHybridCollection() {
+<<<<<<< HEAD
+    WithStreamedUnaryMethod_SearchPB() {
       ::grpc::Service::MarkMethodStreamed(26,
-        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::Mapping, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_CreateHybridCollection<BaseClass>::StreamedCreateHybridCollection, this, std::placeholders::_1, std::placeholders::_2)));
-    }
-    ~WithStreamedUnaryMethod_CreateHybridCollection() override {
-      BaseClassMustBeDerivedFromService(this);
-    }
-    // disable regular version of this method
-    ::grpc::Status CreateHybridCollection(::grpc::ServerContext* /*context*/, const ::milvus::grpc::Mapping* /*request*/, ::milvus::grpc::Status* /*response*/) override {
-      abort();
-      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
-    }
-    // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedCreateHybridCollection(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::Mapping,::milvus::grpc::Status>* server_unary_streamer) = 0;
-  };
-  template <class BaseClass>
-  class WithStreamedUnaryMethod_HasHybridCollection : public BaseClass {
-   private:
-    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
-   public:
+        new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::SearchParamPB, ::milvus::grpc::QueryResult>(std::bind(&WithStreamedUnaryMethod_SearchPB<BaseClass>::StreamedSearchPB, this, std::placeholders::_1, std::placeholders::_2)));
+=======
     WithStreamedUnaryMethod_HasHybridCollection() {
       ::grpc::Service::MarkMethodStreamed(27,
         new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::CollectionName, ::milvus::grpc::BoolReply>(std::bind(&WithStreamedUnaryMethod_HasHybridCollection<BaseClass>::StreamedHasHybridCollection, this, std::placeholders::_1, std::placeholders::_2)));
@@ -7016,21 +6941,28 @@ class MilvusService final {
     WithStreamedUnaryMethod_DeleteEntitiesByID() {
       ::grpc::Service::MarkMethodStreamed(39,
         new ::grpc::internal::StreamedUnaryHandler< ::milvus::grpc::HDeleteByIDParam, ::milvus::grpc::Status>(std::bind(&WithStreamedUnaryMethod_DeleteEntitiesByID<BaseClass>::StreamedDeleteEntitiesByID, this, std::placeholders::_1, std::placeholders::_2)));
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
     }
-    ~WithStreamedUnaryMethod_DeleteEntitiesByID() override {
+    ~WithStreamedUnaryMethod_SearchPB() override {
       BaseClassMustBeDerivedFromService(this);
     }
     // disable regular version of this method
-    ::grpc::Status DeleteEntitiesByID(::grpc::ServerContext* /*context*/, const ::milvus::grpc::HDeleteByIDParam* /*request*/, ::milvus::grpc::Status* /*response*/) override {
+    ::grpc::Status SearchPB(::grpc::ServerContext* /*context*/, const ::milvus::grpc::SearchParamPB* /*request*/, ::milvus::grpc::QueryResult* /*response*/) override {
       abort();
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     // replace default version of method with streamed unary
-    virtual ::grpc::Status StreamedDeleteEntitiesByID(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::HDeleteByIDParam,::milvus::grpc::Status>* server_unary_streamer) = 0;
+    virtual ::grpc::Status StreamedSearchPB(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::milvus::grpc::SearchParamPB,::milvus::grpc::QueryResult>* server_unary_streamer) = 0;
   };
+<<<<<<< HEAD
+  typedef WithStreamedUnaryMethod_CreateCollection<WithStreamedUnaryMethod_HasCollection<WithStreamedUnaryMethod_DescribeCollection<WithStreamedUnaryMethod_CountCollection<WithStreamedUnaryMethod_ShowCollections<WithStreamedUnaryMethod_ShowCollectionInfo<WithStreamedUnaryMethod_DropCollection<WithStreamedUnaryMethod_CreateIndex<WithStreamedUnaryMethod_DescribeIndex<WithStreamedUnaryMethod_DropIndex<WithStreamedUnaryMethod_CreatePartition<WithStreamedUnaryMethod_HasPartition<WithStreamedUnaryMethod_ShowPartitions<WithStreamedUnaryMethod_DropPartition<WithStreamedUnaryMethod_Insert<WithStreamedUnaryMethod_GetEntityByID<WithStreamedUnaryMethod_GetEntityIDs<WithStreamedUnaryMethod_Search<WithStreamedUnaryMethod_SearchByID<WithStreamedUnaryMethod_SearchInFiles<WithStreamedUnaryMethod_Cmd<WithStreamedUnaryMethod_DeleteByID<WithStreamedUnaryMethod_PreloadCollection<WithStreamedUnaryMethod_ReloadSegments<WithStreamedUnaryMethod_Flush<WithStreamedUnaryMethod_Compact<WithStreamedUnaryMethod_SearchPB<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > StreamedUnaryService;
+  typedef Service SplitStreamedService;
+  typedef WithStreamedUnaryMethod_CreateCollection<WithStreamedUnaryMethod_HasCollection<WithStreamedUnaryMethod_DescribeCollection<WithStreamedUnaryMethod_CountCollection<WithStreamedUnaryMethod_ShowCollections<WithStreamedUnaryMethod_ShowCollectionInfo<WithStreamedUnaryMethod_DropCollection<WithStreamedUnaryMethod_CreateIndex<WithStreamedUnaryMethod_DescribeIndex<WithStreamedUnaryMethod_DropIndex<WithStreamedUnaryMethod_CreatePartition<WithStreamedUnaryMethod_HasPartition<WithStreamedUnaryMethod_ShowPartitions<WithStreamedUnaryMethod_DropPartition<WithStreamedUnaryMethod_Insert<WithStreamedUnaryMethod_GetEntityByID<WithStreamedUnaryMethod_GetEntityIDs<WithStreamedUnaryMethod_Search<WithStreamedUnaryMethod_SearchByID<WithStreamedUnaryMethod_SearchInFiles<WithStreamedUnaryMethod_Cmd<WithStreamedUnaryMethod_DeleteByID<WithStreamedUnaryMethod_PreloadCollection<WithStreamedUnaryMethod_ReloadSegments<WithStreamedUnaryMethod_Flush<WithStreamedUnaryMethod_Compact<WithStreamedUnaryMethod_SearchPB<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > StreamedService;
+=======
   typedef WithStreamedUnaryMethod_CreateCollection<WithStreamedUnaryMethod_HasCollection<WithStreamedUnaryMethod_DescribeCollection<WithStreamedUnaryMethod_CountCollection<WithStreamedUnaryMethod_ShowCollections<WithStreamedUnaryMethod_ShowCollectionInfo<WithStreamedUnaryMethod_DropCollection<WithStreamedUnaryMethod_CreateIndex<WithStreamedUnaryMethod_DescribeIndex<WithStreamedUnaryMethod_DropIndex<WithStreamedUnaryMethod_CreatePartition<WithStreamedUnaryMethod_HasPartition<WithStreamedUnaryMethod_ShowPartitions<WithStreamedUnaryMethod_DropPartition<WithStreamedUnaryMethod_Insert<WithStreamedUnaryMethod_GetVectorsByID<WithStreamedUnaryMethod_GetVectorIDs<WithStreamedUnaryMethod_Search<WithStreamedUnaryMethod_SearchByID<WithStreamedUnaryMethod_SearchInFiles<WithStreamedUnaryMethod_Cmd<WithStreamedUnaryMethod_DeleteByID<WithStreamedUnaryMethod_PreloadCollection<WithStreamedUnaryMethod_ReloadSegments<WithStreamedUnaryMethod_Flush<WithStreamedUnaryMethod_Compact<WithStreamedUnaryMethod_CreateHybridCollection<WithStreamedUnaryMethod_HasHybridCollection<WithStreamedUnaryMethod_DropHybridCollection<WithStreamedUnaryMethod_DescribeHybridCollection<WithStreamedUnaryMethod_CountHybridCollection<WithStreamedUnaryMethod_ShowHybridCollections<WithStreamedUnaryMethod_ShowHybridCollectionInfo<WithStreamedUnaryMethod_PreloadHybridCollection<WithStreamedUnaryMethod_InsertEntity<WithStreamedUnaryMethod_HybridSearch<WithStreamedUnaryMethod_HybridSearchInSegments<WithStreamedUnaryMethod_GetEntityByID<WithStreamedUnaryMethod_GetEntityIDs<WithStreamedUnaryMethod_DeleteEntitiesByID<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > StreamedUnaryService;
   typedef Service SplitStreamedService;
   typedef WithStreamedUnaryMethod_CreateCollection<WithStreamedUnaryMethod_HasCollection<WithStreamedUnaryMethod_DescribeCollection<WithStreamedUnaryMethod_CountCollection<WithStreamedUnaryMethod_ShowCollections<WithStreamedUnaryMethod_ShowCollectionInfo<WithStreamedUnaryMethod_DropCollection<WithStreamedUnaryMethod_CreateIndex<WithStreamedUnaryMethod_DescribeIndex<WithStreamedUnaryMethod_DropIndex<WithStreamedUnaryMethod_CreatePartition<WithStreamedUnaryMethod_HasPartition<WithStreamedUnaryMethod_ShowPartitions<WithStreamedUnaryMethod_DropPartition<WithStreamedUnaryMethod_Insert<WithStreamedUnaryMethod_GetVectorsByID<WithStreamedUnaryMethod_GetVectorIDs<WithStreamedUnaryMethod_Search<WithStreamedUnaryMethod_SearchByID<WithStreamedUnaryMethod_SearchInFiles<WithStreamedUnaryMethod_Cmd<WithStreamedUnaryMethod_DeleteByID<WithStreamedUnaryMethod_PreloadCollection<WithStreamedUnaryMethod_ReloadSegments<WithStreamedUnaryMethod_Flush<WithStreamedUnaryMethod_Compact<WithStreamedUnaryMethod_CreateHybridCollection<WithStreamedUnaryMethod_HasHybridCollection<WithStreamedUnaryMethod_DropHybridCollection<WithStreamedUnaryMethod_DescribeHybridCollection<WithStreamedUnaryMethod_CountHybridCollection<WithStreamedUnaryMethod_ShowHybridCollections<WithStreamedUnaryMethod_ShowHybridCollectionInfo<WithStreamedUnaryMethod_PreloadHybridCollection<WithStreamedUnaryMethod_InsertEntity<WithStreamedUnaryMethod_HybridSearch<WithStreamedUnaryMethod_HybridSearchInSegments<WithStreamedUnaryMethod_GetEntityByID<WithStreamedUnaryMethod_GetEntityIDs<WithStreamedUnaryMethod_DeleteEntitiesByID<Service > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > StreamedService;
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 };
 
 }  // namespace grpc

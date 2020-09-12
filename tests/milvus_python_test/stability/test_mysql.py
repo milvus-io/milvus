@@ -5,7 +5,10 @@ import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
+<<<<<<< HEAD
+=======
 from milvus import IndexType, MetricType
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 from utils import *
 
 
@@ -13,7 +16,11 @@ dim = 128
 index_file_size = 10
 collection_id = "mysql_failure"
 nprobe = 1
+<<<<<<< HEAD
+tag = "1970_01_01"
+=======
 tag = "1970-01-01"
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
 
 
 class TestMysql:

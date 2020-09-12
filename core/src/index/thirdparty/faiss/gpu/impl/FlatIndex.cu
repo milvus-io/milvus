@@ -192,6 +192,8 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                   outIndices,
                   !exactDistance);
 #endif
+<<<<<<< HEAD
+=======
 }
 
 void
@@ -271,6 +273,40 @@ FlatIndex::query(Tensor<float, 2, true>& input,
 }
 
 
+<<<<<<< HEAD
+=======
+#ifdef FAISS_USE_FLOAT16
+void
+FlatIndex::query(Tensor<half, 2, true>& input,
+                 Tensor<uint8_t, 1, true>& bitset,
+                 int k,
+                 faiss::MetricType metric,
+                 float metricArg,
+                 Tensor<float, 2, true>& outDistances,
+                 Tensor<int, 2, true>& outIndices,
+                 bool exactDistance) {
+  FAISS_ASSERT(useFloat16_);
+
+  bfKnnOnDevice(resources_,
+                getCurrentDevice(),
+                resources_->getDefaultStreamCurrentDevice(),
+                storeTransposed_ ? vectorsHalfTransposed_ : vectorsHalf_,
+                !storeTransposed_, // is vectors row major?
+                &norms_,
+                input,
+                true, // input is row major
+                bitset,
+                k,
+                metric,
+                metricArg,
+                outDistances,
+                outIndices,
+                !exactDistance);
+>>>>>>> af8ea3cc1f1816f42e94a395ab9286dfceb9ceda
+}
+#endif
+
+>>>>>>> 098c2d823ad05b6670bc91b16555f4f37e77d3d7
 #ifdef FAISS_USE_FLOAT16
 void
 FlatIndex::query(Tensor<half, 2, true>& input,

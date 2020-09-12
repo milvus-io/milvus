@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "db/merge/MergeStrategy.h"
@@ -22,7 +23,7 @@ namespace engine {
 class MergeSimpleStrategy : public MergeStrategy {
  public:
     Status
-    RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) override;
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) override;
 };  // MergeSimpleStrategy
 
 }  // namespace engine

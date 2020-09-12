@@ -16,8 +16,37 @@ namespace milvus {
 namespace engine {
 
 Status
-MergeSimpleStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
-    files_groups.push_back(files_holder.HoldFiles());
+MergeSimpleStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment,
+                                     SegmentGroups& groups) {
+    for (auto& kv : part2segment) {
+        if (kv.second.size() <= 1) {
+            continue;  // no segment or only one segment, no need to merge
+        }
+
+        snapshot::IDS_TYPE ids;
+        int64_t row_count_sum = 0;
+        for (const SegmentInfo& segment_info : kv.second) {
+            if (segment_info.row_count_ <= 0 || segment_info.row_count_ >= row_per_segment) {
+                continue;  // empty segment or full segment
+            }
+
+            ids.push_back(segment_info.id_);
+            row_count_sum += segment_info.row_count_;
+            if (row_count_sum >= row_per_segment) {
+                if (ids.size() >= 2) {
+                    groups.push_back(ids);
+                }
+                ids.clear();
+                row_count_sum = 0;
+                continue;
+            }
+        }
+
+        if (ids.size() >= 2) {
+            groups.push_back(ids);
+        }
+    }
+
     return Status::OK();
 }
 

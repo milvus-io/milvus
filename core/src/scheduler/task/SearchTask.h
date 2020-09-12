@@ -15,53 +15,67 @@
 #include <string>
 #include <vector>
 
-#include "Task.h"
+#include "db/SnapshotVisitor.h"
+#include "db/engine/ExecutionEngine.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/task/Task.h"
 
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxyu): rewrite
-class XSearchTask : public Task {
+class SearchTask : public Task {
  public:
-    explicit XSearchTask(const std::shared_ptr<server::Context>& context, SegmentSchemaPtr file, TaskLabelPtr label);
+    explicit SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
+                        const engine::DBOptions& options, const query::QueryPtr& query_ptr,
+                        engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
-    void
-    Load(LoadType type, uint8_t device_id) override;
+    inline json
+    Dump() const override {
+        json ret{
+            {"type", type_},
+            {"segment_id", segment_id_},
+        };
+        return ret;
+    }
 
-    void
-    Execute() override;
+    Status
+    OnLoad(LoadType type, uint8_t device_id) override;
 
- public:
+    Status
+    OnExecute() override;
+
     static void
-    MergeTopkToResultSet(const scheduler::ResultIds& src_ids, const scheduler::ResultDistances& src_distances,
-                         size_t src_k, size_t nq, size_t topk, bool ascending, scheduler::ResultIds& tar_ids,
-                         scheduler::ResultDistances& tar_distances);
+    MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances, size_t src_k,
+                         size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result);
 
-    //    static void
-    //    MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& tar_distance, uint64_t& tar_input_k,
-    //                   const std::vector<int64_t>& src_ids, const std::vector<float>& src_distance, uint64_t
-    //                   src_input_k, uint64_t nq, uint64_t topk, bool ascending);
+    int64_t
+    nq();
 
-    const std::string&
-    GetLocation() const;
+    milvus::json
+    ExtraParam();
 
-    size_t
-    GetIndexId() const;
+    std::string
+    IndexType();
+
+ private:
+    void
+    CreateExecEngine();
 
  public:
     const std::shared_ptr<server::Context> context_;
+    engine::snapshot::ScopedSnapshotT snapshot_;
 
-    SegmentSchemaPtr file_;
+    const engine::DBOptions& options_;
+    query::QueryPtr query_ptr_;
+    engine::snapshot::ID_TYPE segment_id_;
+    std::string index_type_;
 
-    size_t index_id_ = 0;
-    int index_type_ = 0;
-    ExecutionEnginePtr index_engine_ = nullptr;
+    engine::ExecutionEnginePtr execution_engine_;
 
     // distance -- value 0 means two vectors equal, ascending reduce, L2/HAMMING/JACCARD/TONIMOTO ...
     // similarity -- infinity value means two vectors equal, descending reduce, IP
-    bool ascending_reduce = true;
+    bool ascending_reduce_ = true;
 };
 
 }  // namespace scheduler

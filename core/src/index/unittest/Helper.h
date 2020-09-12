@@ -12,17 +12,19 @@
 #include <memory>
 #include <string>
 
+#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFPQ.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
+#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
 int DEVICEID = 0;
@@ -62,6 +64,18 @@ IndexFactory(const milvus::knowhere::IndexType& type, const milvus::knowhere::In
             std::cout << "Invalid IndexType " << type << std::endl;
         }
 #endif
+    }
+    return nullptr;
+}
+
+milvus::knowhere::IVFNMPtr
+IndexFactoryNM(const milvus::knowhere::IndexType& type, const milvus::knowhere::IndexMode mode) {
+    if (mode == milvus::knowhere::IndexMode::MODE_CPU) {
+        if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+            return std::make_shared<milvus::knowhere::IVF_NM>();
+        } else {
+            std::cout << "Invalid IndexType " << type << std::endl;
+        }
     }
     return nullptr;
 }
