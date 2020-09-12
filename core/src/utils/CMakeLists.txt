@@ -11,7 +11,10 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
+# aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
+set(UTILS_FILES 
+Status.cpp
+)
 
 add_library( utils STATIC ${UTILS_FILES} )
 

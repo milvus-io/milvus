@@ -60,6 +60,7 @@ include( DefineOptions )
 
 include( ExternalProject )
 include( FetchContent )
+include_directories(thirdparty)
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "src/utils/Json.h"
+#include "utils/Json.h"
 
 namespace milvus {
 namespace knowhere {
