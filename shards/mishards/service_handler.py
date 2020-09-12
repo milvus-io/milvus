@@ -317,9 +317,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         #     raise exceptions.InvalidArgumentError(
         #         message='Invalid nprobe: {}'.format(nprobe), metadata=metadata)
 
-        if topk > self.MAX_TOPK or topk <= 0:
-            raise exceptions.InvalidTopKError(
-                message='Invalid topk: {}'.format(topk), metadata=metadata)
+        # if topk > self.MAX_TOPK or topk <= 0:
+        #     raise exceptions.InvalidTopKError(
+        #         message='Invalid topk: {}'.format(topk), metadata=metadata)
 
         collection_meta = self.collection_meta.get(collection_name, None)
 
