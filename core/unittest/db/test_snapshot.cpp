@@ -442,7 +442,7 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_EQ(lsn, ss->GetMaxLsn());
 
     OperationContext context;
-    context.lsn = lsn;
+    context.lsn = lsn - 1;
     auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss);
     std::string partition_name("p1");
     PartitionContext p_ctx;
@@ -456,7 +456,7 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_TRUE(partition->HasAssigned());
 
     status = cp_op->Push();
-    ASSERT_FALSE(status.ok());
+    ASSERT_FALSE(status.ok()) << status.ToString();
 }
 
 TEST_F(SnapshotTest, DropSegmentTest){
@@ -696,7 +696,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
 TEST_F(SnapshotTest, OperationTest) {
     std::string to_string;
-    LSN_TYPE lsn;
+    LSN_TYPE lsn = 0;
     Status status;
 
     /* ID_TYPE collection_id; */

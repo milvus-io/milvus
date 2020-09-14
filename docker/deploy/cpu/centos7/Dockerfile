@@ -22,7 +22,9 @@ RUN yum install -y wget && \
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
-COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
+COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/
+RUN ln -s /var/lib/milvus/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/libopenblas.so.0 && \
+    ln -s /var/lib/milvus/lib/libopenblas.so.0 /var/lib/milvus/lib/libopenblas.so
 
 WORKDIR /var/lib/milvus
 
