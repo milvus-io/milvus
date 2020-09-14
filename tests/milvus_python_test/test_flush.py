@@ -6,15 +6,11 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
-segment_row_count = 5000
-index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
 nprobe = 1
 tag = "1970_01_01"
 top_k = 1
-nb = 6000
 tag = "partition_tag"
 field_name = "float_vector"
 entity = gen_entities(1)
@@ -307,9 +303,15 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
+    def test_flush_async_long_drop_collection(self, connect, collection):
+        # vectors = gen_vectors(nb, dim)
+        for i in range(5):
+            ids = connect.insert(collection, entities)
+        future = connect.flush([collection], _async=True)
+        logging.getLogger().info("DROP")
+        connect.drop_collection(collection)
+
     def test_flush_async(self, connect, collection):
-        nb = 100000
-        vectors = gen_vectors(nb, dim)
         connect.insert(collection, entities)
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
