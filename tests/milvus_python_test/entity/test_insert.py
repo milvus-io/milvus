@@ -677,6 +677,7 @@ class TestInsertMultiCollections:
             assert len(ids) == nb
             count = connect.count_entities(collection_name)
             assert count == nb
+            connect.drop_collection(collection_name)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_drop_collection_insert_vector_another(self, connect, collection):
