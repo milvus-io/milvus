@@ -88,6 +88,7 @@ class TestDropCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_drop_collection_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:

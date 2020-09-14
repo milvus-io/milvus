@@ -10,7 +10,6 @@ import sklearn.preprocessing
 from milvus import IndexType, MetricType
 from utils import *
 
-dim = 128
 index_file_size = 10
 collection_id = "test_mix"
 add_interval_time = 5

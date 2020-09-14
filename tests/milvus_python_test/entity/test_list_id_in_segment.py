@@ -7,9 +7,6 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
-segment_row_count = 100000
-nb = 6000
 tag = "1970_01_01"
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
@@ -227,10 +224,9 @@ class TestListIdInSegmentBase:
         get_simple_index["metric_type"] = "IP"
         ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, seg_id)
-        # TODO: 
+        # TODO:
         segment_row_count = connect.get_collection_info(collection)["segment_row_limit"]
-        assert vector_ids == ids[0:segment_row_count]
-
+        assert vector_ids[0:segment_row_count] == ids[0:segment_row_count]
 
 class TestListIdInSegmentBinary:
     """

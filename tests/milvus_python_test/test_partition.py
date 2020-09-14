@@ -8,13 +8,10 @@ import pytest
 from utils import *
 
 
-dim = 128
-segment_row_count = 5000
 collection_id = "partition"
 nprobe = 1
 tag = "1970_01_01"
 TIMEOUT = 120
-nb = 6000
 tag = "partition_tag"
 field_name = "float_vector"
 entity = gen_entities(1)
@@ -39,14 +36,16 @@ class TestCreateBase:
         '''
         connect.create_partition(collection, tag)
 
+    # TODO: enable
     @pytest.mark.level(2)
-    def test_create_partition_limit(self, connect, collection, args):
+    @pytest.mark.timeout(1200)
+    def _test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned
         method: call function: create_partition for 4097 times
         expected: exception raised
         '''
-        threads_num = 16
+        threads_num = 8
         threads = []
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
@@ -374,6 +373,7 @@ class TestNameInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_drop_partition_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test drop partition, with invalid collection name, check status returned
@@ -396,6 +396,7 @@ class TestNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, tag_name)
 
+    @pytest.mark.level(2)
     def test_list_partitions_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test show partitions, with invalid collection name, check status returned
