@@ -897,9 +897,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         }
     }
 
-    if (status.ok()) {
-        CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
-    }
+    CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
