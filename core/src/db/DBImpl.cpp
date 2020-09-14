@@ -204,6 +204,9 @@ DBImpl::DropCollection(const std::string& collection_name) {
     // erase cache
     ClearCollectionCache(ss, options_.meta_.path_);
 
+    // clear index failed retry map of this collection
+    ClearIndexFailedRecord(collection_name);
+
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
@@ -360,6 +363,9 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         }
     }
 
+    // clear index failed retry map of this collection
+    ClearIndexFailedRecord(collection_name);
+
     // step 3: iterate segments need to be build index, wait until all segments are built
     while (true) {
         // start background build index thread
@@ -374,9 +380,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
             break;  // all segments build index finished
         }
 
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        IgnoreIndexFailedSegments(ss->GetCollectionId(), segment_ids);
+        IgnoreIndexFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             break;  // some segments failed to build index, and ignored
         }
@@ -992,11 +996,6 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bo
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
         if (index_thread_results_.empty()) {
-            if (force_build) {
-                std::lock_guard<std::mutex> lock(index_retry_mutex_);
-                index_retry_map_.clear();  // reset index retry times
-            }
-
             index_thread_results_.push_back(
                 index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names, force_build));
         }
@@ -1024,8 +1023,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         }
 
         // check index retry times
-        snapshot::ID_TYPE collection_id = latest_ss->GetCollectionId();
-        IgnoreIndexFailedSegments(collection_id, segment_ids);
+        IgnoreIndexFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             continue;
         }
@@ -1044,7 +1042,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
 
         // record failed segments, avoid build index hang
         snapshot::IDS_TYPE& failed_ids = job->FailedSegments();
-        MarkIndexFailedSegments(collection_id, failed_ids);
+        MarkIndexFailedSegments(collection_name, failed_ids);
 
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
@@ -1187,18 +1185,18 @@ DBImpl::ConfigUpdate(const std::string& name) {
 }
 
 void
-DBImpl::MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids) {
+DBImpl::MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids) {
     std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
     for (auto& id : failed_ids) {
         retry_map[id]++;
     }
 }
 
 void
-DBImpl::IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids) {
+DBImpl::IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids) {
     std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
     snapshot::IDS_TYPE segment_ids_to_build;
     for (auto id : segment_ids) {
         if (retry_map[id] < BUILD_INEDX_RETRY_TIMES) {
@@ -1206,6 +1204,12 @@ DBImpl::IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS
         }
     }
     segment_ids.swap(segment_ids_to_build);
+}
+
+void
+DBImpl::ClearIndexFailedRecord(const std::string& collection_name) {
+    std::lock_guard<std::mutex> lock(index_retry_mutex_);
+    index_retry_map_.erase(collection_name);
 }
 
 }  // namespace engine

@@ -173,10 +173,13 @@ class DBImpl : public DB, public ConfigObserver {
     DecreaseLiveBuildTaskNum();
 
     void
-    MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
+    MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids);
 
     void
-    IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids);
+    IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids);
+
+    void
+    ClearIndexFailedRecord(const std::string& collection_name);
 
  private:
     DBOptions options_;
@@ -205,7 +208,7 @@ class DBImpl : public DB, public ConfigObserver {
     std::list<std::future<void>> index_thread_results_;
 
     using SegmentIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, int64_t>;
-    using CollectionIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, SegmentIndexRetryMap>;
+    using CollectionIndexRetryMap = std::unordered_map<std::string, SegmentIndexRetryMap>;
     CollectionIndexRetryMap index_retry_map_;
     std::mutex index_retry_mutex_;
 
