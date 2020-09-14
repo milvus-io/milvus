@@ -181,6 +181,10 @@ Status
 WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     WaitCleanupFinish();
 
+    if (db == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
     LOG_ENGINE_DEBUG_ << "Begin wal recovery";
 
     try {
@@ -238,6 +242,8 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
                 }
             }
         }
+
+        return db->Flush();
     } catch (std::exception& ex) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
