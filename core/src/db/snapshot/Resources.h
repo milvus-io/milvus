@@ -25,6 +25,7 @@
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/ScopedResource.h"
 #include "utils/Json.h"
+#include "utils/Status.h"
 
 using milvus::engine::utils::GetMicroSecTimeStamp;
 
@@ -50,6 +51,39 @@ class MappingsField {
 
  protected:
     MappingT mappings_;
+};
+
+class FlushableMappingsField : public MappingsField {
+ public:
+    explicit FlushableMappingsField(MappingT ids = {}) : ids_(std::move(ids)) {
+    }
+
+    void
+    UpdateFlushIds() {
+        if (ids_.size() == 0) {
+            ids_ = {1};
+        } else {
+            ids_ = {*(ids_.begin()) + 1};
+        }
+    }
+
+    Status
+    LoadIds(const std::string& base_path, const std::string& prefix = "");
+    Status
+    FlushIds(const std::string& base_path, const std::string& prefix = "");
+
+    const MappingT&
+    GetFlushIds() const {
+        return ids_;
+    }
+    MappingT&
+    GetFlushIds() {
+        return ids_;
+    }
+
+ protected:
+    MappingT ids_;
+    bool loaded_ = false;
 };
 
 class StateField {
@@ -503,7 +537,7 @@ using CollectionPtr = Collection::Ptr;
 class CollectionCommit : public BaseResource<CollectionCommit>,
                          public CollectionIdField,
                          public SchemaIdField,
-                         public MappingsField,
+                         public FlushableMappingsField,
                          public RowCountField,
                          public SizeField,
                          public IdField,
@@ -552,7 +586,7 @@ using PartitionPtr = Partition::Ptr;
 class PartitionCommit : public BaseResource<PartitionCommit>,
                         public CollectionIdField,
                         public PartitionIdField,
-                        public MappingsField,
+                        public FlushableMappingsField,
                         public RowCountField,
                         public SizeField,
                         public IdField,

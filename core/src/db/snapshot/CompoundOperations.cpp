@@ -20,6 +20,7 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
 
@@ -1014,14 +1015,24 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     AddStepWithLsn(*partition, c_context_.lsn, p_ctx_p);
     context_.new_partition = partition;
     PartitionCommitPtr partition_commit;
-    STATUS_CHECK(store->CreateResource<PartitionCommit>(PartitionCommit(collection->GetID(), partition->GetID()),
-                                                        partition_commit));
+    PartitionCommit temp_pc(collection->GetID(), partition->GetID());
+    temp_pc.UpdateFlushIds();
+    auto base_pc_path = GetResPath<Partition>(store->GetRootPath(), partition);
+    temp_pc.FlushIds(base_pc_path);
+
+    STATUS_CHECK(store->CreateResource<PartitionCommit>(std::move(temp_pc), partition_commit));
     auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*partition_commit, c_context_.lsn, pc_ctx_p);
     context_.new_partition_commit = partition_commit;
     CollectionCommitPtr collection_commit;
-    STATUS_CHECK(store->CreateResource<CollectionCommit>(
-        CollectionCommit(collection->GetID(), schema_commit->GetID(), {partition_commit->GetID()}), collection_commit));
+
+    CollectionCommit temp_cc(collection->GetID(), schema_commit->GetID());
+    temp_cc.UpdateFlushIds();
+    temp_cc.GetMappings().insert(partition_commit->GetID());
+    auto base_path = GetResPath<Collection>(store->GetRootPath(), collection);
+    temp_cc.FlushIds(base_path);
+
+    STATUS_CHECK(store->CreateResource<CollectionCommit>(std::move(temp_cc), collection_commit));
     auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
     AddStepWithLsn(*collection_commit, c_context_.lsn, cc_ctx_p);
     context_.new_collection_commit = collection_commit;
