@@ -375,7 +375,6 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
     // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
     std::experimental::filesystem::path full_path(wal_path_);
     full_path.append(collection_name);
-    std::experimental::filesystem::create_directory(full_path);
     full_path.append(file_name);
 
     std::string path(full_path.c_str());
