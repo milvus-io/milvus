@@ -181,6 +181,11 @@ SegmentOperation::PreCheck() {
         emsg << GetRepr() << ". prev_partition should be specified in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
+    if (!GetStartedSS()->GetResource<Partition>(context_.prev_partition->GetID())) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Partition is stale";
+        return Status(SS_STALE_ERROR, emsg.str());
+    }
     return Status::OK();
 }
 

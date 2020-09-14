@@ -1225,6 +1225,96 @@ TEST_F(SnapshotTest, OperationTest2) {
     }
 }
 
+TEST_F(SnapshotTest, DropTest) {
+    Status status;
+    std::atomic<LSN_TYPE> lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, next_lsn());
+    ASSERT_TRUE(ss);
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    {
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResources<Partition>().begin()->second.Get();
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(new_seg->ToString().empty());
+        SegmentFilePtr seg_file;
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+
+        status = Snapshots::GetInstance().DropCollection(ss->GetName(), next_lsn());
+        ASSERT_TRUE(status.ok());
+        status = op->Push();
+        ASSERT_FALSE(status.ok()) << status.message();
+    }
+
+    ss = CreateCollection(collection_name, next_lsn());
+    ASSERT_TRUE(ss);
+
+    {
+        PartitionContext pp_ctx;
+        pp_ctx.name = "p1";
+        ss = CreatePartition(ss->GetName(), pp_ctx, next_lsn());
+        ASSERT_TRUE(ss);
+
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetPartition(pp_ctx.name);
+        ASSERT_TRUE(context.prev_partition);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(new_seg->ToString().empty());
+        SegmentFilePtr seg_file;
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.collection_id = new_seg->GetCollectionId();
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+
+        status = Snapshots::GetInstance().DropPartition(
+                context.prev_partition->GetCollectionId(), context.prev_partition->GetID(), next_lsn());
+        ASSERT_TRUE(status.ok());
+
+        status = op->Push();
+        ASSERT_FALSE(status.ok());
+
+        {
+            context.lsn = next_lsn();
+            auto c_op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            OperationContext new_seg_ctx;
+            new_seg_ctx.prev_partition = context.prev_partition;
+            status = c_op->CommitNewSegment(new_seg_ctx, new_seg);
+            ASSERT_TRUE(status.ok());
+            status = c_op->Push();
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+        {
+            status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+            ASSERT_TRUE(status.ok());
+            context.lsn = next_lsn();
+            auto c_op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            OperationContext new_seg_ctx;
+            new_seg_ctx.prev_partition = context.prev_partition;
+            status = c_op->CommitNewSegment(new_seg_ctx, new_seg);
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+    }
+}
+
 TEST_F(SnapshotTest, CompoundTest1) {
     Status status;
     std::atomic<LSN_TYPE> lsn = 0;

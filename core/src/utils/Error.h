@@ -137,5 +137,6 @@ constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
 constexpr ErrorCode SS_TIMEOUT = ToSSErrorCode(10);
 constexpr ErrorCode SS_NOT_COMMITED = ToSSErrorCode(11);
+constexpr ErrorCode SS_COLLECTION_DROPPED = ToSSErrorCode(12);
 
 }  // namespace milvus
