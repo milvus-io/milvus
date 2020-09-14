@@ -113,7 +113,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
-    extra_params["segment_row_count"] = 1024;
+    extra_params["segment_row_limit"] = 10000;
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
 
     milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
