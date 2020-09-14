@@ -273,7 +273,6 @@ TEST_F(SnapshotTest, DropCollectionTest) {
 
     auto ss_2 = CreateCollection(collection_name, ++lsn);
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
-//    EXPECT_DEATH({assert(1 == 2);}, "nullptr")
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(ss_2->GetID(), lss->GetID());
     ASSERT_NE(prev_ss_id, ss_2->GetID());
@@ -544,13 +543,15 @@ TEST_F(SnapshotTest, IndexTest) {
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
 
+    std::cout << ss->ToString() << std::endl;
+
     OperationContext context;
     context.lsn = next_lsn();
     context.prev_partition = ss->GetResource<Partition>(sf_context.partition_id);
     auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
     SegmentFilePtr seg_file;
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok()) << status.message();
     ASSERT_TRUE(seg_file);
     auto op_ctx = build_op->GetContext();
     ASSERT_EQ(seg_file, op_ctx.new_segment_files[0]);
@@ -1346,12 +1347,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             lock.unlock();
             std::unique_lock<std::mutex> blk(built_mtx);
             std::cout << status.ToString() << std::endl;
-            /* for (auto id : built_segs) { */
-            /*     std::cout << "builted " << id << std::endl; */
-            /* } */
-            /* for (auto id : seg_ids) { */
-            /*     std::cout << "to_merge " << id << std::endl; */
-            /* } */
             bool stale_found = false;
             for (auto& seg_id : seg_ids) {
                 auto it = built_segs.find(seg_id);

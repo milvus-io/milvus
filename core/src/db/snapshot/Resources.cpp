@@ -10,11 +10,87 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Resources.h"
+#include <experimental/filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include "db/snapshot/Store.h"
 
 namespace milvus::engine::snapshot {
+
+Status
+FlushableMappingsField::LoadIds(const std::string& base_path, const std::string& prefix) {
+    if (loaded_) {
+        return Status::OK();
+    }
+    loaded_ = true;
+    if (ids_.size() == 0) {
+        return Status(SS_ERROR, "LoadIds ids_ should not be empty");
+    }
+
+    if (!std::experimental::filesystem::exists(base_path)) {
+        return Status(SS_NOT_FOUND_ERROR, "FlushIds base_path: " + base_path + " not found");
+    }
+
+    auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
+    if (!std::experimental::filesystem::exists(path)) {
+        return Status(SS_NOT_FOUND_ERROR, "FlushIds path: " + path + " not found");
+    }
+
+    try {
+        std::ifstream ifs(path, std::ifstream::binary);
+        ifs.seekg(0, ifs.end);
+        auto size = ifs.tellg();
+        ifs.seekg(0, ifs.beg);
+        if (size > 0) {
+            std::string str((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+
+            std::stringstream ss(str);
+
+            for (ID_TYPE i; ss >> i;) {
+                std::string::size_type sz;
+                mappings_.insert(i);
+                if (ss.peek() == ',') {
+                    ss.ignore();
+                }
+            }
+        }
+
+        ifs.close();
+    } catch (...) {
+        Status(SS_ERROR, "Cannot LoadIds from " + path);
+    }
+
+    return Status::OK();
+}
+
+Status
+FlushableMappingsField::FlushIds(const std::string& base_path, const std::string& prefix) {
+    if (ids_.size() == 0) {
+        return Status(SS_ERROR, "FlushIds ids_ should not be empty");
+    }
+    if (!std::experimental::filesystem::exists(base_path)) {
+        std::experimental::filesystem::create_directories(base_path);
+    }
+    auto path = base_path + "/" + prefix + std::to_string(*(ids_.begin())) + ".map";
+
+    try {
+        std::ofstream ofs(path, std::ofstream::binary);
+        bool first = true;
+        for (auto& id : mappings_) {
+            if (!first) {
+                ofs << ",";
+            }
+            ofs << id;
+            first = false;
+        }
+        ofs.close();
+    } catch (...) {
+        Status(SS_ERROR, "Cannot FlushIds to " + path);
+    }
+
+    return Status::OK();
+}
 
 Collection::Collection(const std::string& name, const json& params, ID_TYPE id, LSN_TYPE lsn, State state,
                        TS_TYPE created_on, TS_TYPE updated_on)
@@ -32,7 +108,7 @@ CollectionCommit::CollectionCommit(ID_TYPE collection_id, ID_TYPE schema_id, con
                                    TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       SchemaIdField(schema_id),
-      MappingsField(mappings),
+      FlushableMappingsField(mappings),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),
@@ -58,7 +134,7 @@ PartitionCommit::PartitionCommit(ID_TYPE collection_id, ID_TYPE partition_id, co
                                  TS_TYPE created_on, TS_TYPE updated_on)
     : CollectionIdField(collection_id),
       PartitionIdField(partition_id),
-      MappingsField(mappings),
+      FlushableMappingsField(mappings),
       RowCountField(row_cnt),
       SizeField(size),
       IdField(id),

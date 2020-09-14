@@ -68,6 +68,9 @@ RequireRawFile(const std::string& index_type);
 bool
 RequireCompressFile(const std::string& index_type);
 
+void
+ListFiles(const std::string& root_path, const std::string& prefix);
+
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus
