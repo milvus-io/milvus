@@ -249,7 +249,8 @@ class TestCompactBase:
         connect.flush([collection])
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
-        delete_ids = ids[:nb//2]
+        # delete one entity from the second segment
+        delete_ids = ids[segment_row_count:segment_row_count+1]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])
@@ -261,7 +262,7 @@ class TestCompactBase:
         # get collection info after compact
         info_after = connect.get_collection_stats(collection)
         logging.getLogger().info(info_after["partitions"])
-        assert info["partitions"][1]["segments"][0]["data_size"] > info_after["partitions"][1]["segments"][0]["data_size"]
+        assert info["partitions"][1]["segments"][1]["data_size"] > info_after["partitions"][1]["segments"][1]["data_size"]
 
     @pytest.fixture(
         scope="function",

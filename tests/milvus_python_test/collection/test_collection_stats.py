@@ -140,20 +140,19 @@ class TestStatsBase:
         method: add and delete entities, and compact collection, check count in collection info
         expected: status ok, count as expected
         '''
-        delete_length = 1000
         ids = connect.insert(collection, entities)
         status = connect.flush([collection])
-        delete_ids = ids[:delete_length]
+        delete_ids = ids[segment_row_count:segment_row_count+1]
         connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        assert stats["row_count"] == nb - delete_length
-        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
+        assert stats["row_count"] == nb - 1
+        compact_before = stats["partitions"][0]["segments"][1]["data_size"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
+        compact_after = stats["partitions"][0]["segments"][1]["data_size"]
         assert compact_before > compact_after
 
     def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
