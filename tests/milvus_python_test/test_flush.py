@@ -303,9 +303,15 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
+    def test_flush_async_long_drop_collection(self, connect, collection):
+        # vectors = gen_vectors(nb, dim)
+        for i in range(5):
+            ids = connect.insert(collection, entities)
+        future = connect.flush([collection], _async=True)
+        logging.getLogger().info("DROP")
+        connect.drop_collection(collection)
+
     def test_flush_async(self, connect, collection):
-        nb = 100000
-        vectors = gen_vectors(nb, dim)
         connect.insert(collection, entities)
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)

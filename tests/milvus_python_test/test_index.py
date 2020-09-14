@@ -766,6 +766,19 @@ class TestIndexAsync:
         # TODO:
         logging.getLogger().info(res)
 
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_drop(self, connect, collection, get_simple_index):
+        '''
+        target: test create index interface
+        method: create collection and add entities in it, create index
+        expected: return search success
+        '''
+        ids = connect.insert(collection, entities)
+        logging.getLogger().info("start index")
+        future = connect.create_index(collection, field_name, get_simple_index, _async=True)
+        logging.getLogger().info("DROP")
+        connect.drop_collection(collection)
+
     def test_create_index_with_invalid_collectionname(self, connect):
         collection_name = " "
         future = connect.create_index(collection_name, field_name, default_index, _async=True)

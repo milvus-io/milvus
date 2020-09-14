@@ -243,3 +243,81 @@ class TestRestartBase:
         info = connect.get_collection_stats(collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert size_before > size_after
+
+
+    @pytest.mark.level(2)
+    def test_insert_during_flushing_multi_collections(self, connect, args):
+        '''
+        target: flushing will recover
+        method: call function: create collections, then insert/flushing, restart server and assert row count
+        expected: row count equals 0
+        '''
+        # disable_autoflush()
+        collection_num = 2
+        collection_list = []
+        for i in range(collection_num):
+            collection_name = gen_unique_str(collection_id)
+            collection_list.append(collection_name)
+            connect.create_collection(collection_name, default_fields)
+            ids = connect.insert(collection_name, big_entities)
+        connect.flush(collection_list, _async=True)
+        res_count = connect.count_entities(collection_list[-1])
+        logging.getLogger().info(res_count)
+        if res_count < big_nb:
+            # restart server
+            assert restart_server(args["service_name"])
+            # assert row count again
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            res_count_2 = new_connect.count_entities(collection_list[-1])
+            logging.getLogger().info(res_count_2)
+            timeout = 300
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                count_list = []
+                break_flag = True
+                for index, name in enumerate(collection_list):
+                    tmp_count = new_connect.count_entities(name)
+                    count_list.append(tmp_count)
+                    logging.getLogger().info(count_list)
+                    if tmp_count != big_nb:
+                        break_flag = False
+                        break
+                if break_flag == True:
+                    break
+                time.sleep(10)
+            for name in collection_list:
+                assert new_connect.count_entities(name) == big_nb
+
+    @pytest.mark.level(2)
+    def test_insert_during_flushing_multi_partitions(self, connect, collection, args):
+        '''
+        target: flushing will recover
+        method: call function: create collection/partition, then insert/flushing, restart server and assert row count
+        expected: row count equals 0
+        '''
+        # disable_autoflush()
+        partitions_num = 2
+        partitions = []
+        for i in range(partitions_num):
+            tag_tmp = gen_unique_str()
+            partitions.append(tag_tmp)
+            connect.create_partition(collection, tag_tmp)
+            ids = connect.insert(collection, big_entities, partition_tag=tag_tmp)
+        connect.flush([collection], _async=True)
+        res_count = connect.count_entities(collection)
+        logging.getLogger().info(res_count)
+        if res_count < big_nb:
+            # restart server
+            assert restart_server(args["service_name"])
+            # assert row count again
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            res_count_2 = new_connect.count_entities(collection)
+            logging.getLogger().info(res_count_2)
+            timeout = 300
+            start_time = time.time()
+            while new_connect.count_entities(collection) != big_nb * 2 and (time.time() - start_time < timeout):
+                time.sleep(10)
+                logging.getLogger().info(new_connect.count_entities(collection))
+            res_count_3 = new_connect.count_entities(collection)
+            logging.getLogger().info(res_count_3)
+            assert res_count_3 == big_nb * 2
