@@ -65,12 +65,12 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_count": segment_row_count
+                "segment_row_limit": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_count'] == segment_row_count
+        assert res['segment_row_limit'] == segment_row_count
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -87,11 +87,11 @@ class TestInfoBase:
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_count"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         # assert segment row count
         res = connect.get_collection_info(collection_name)
-        assert res['segment_row_count'] == get_segment_row_count
+        assert res['segment_row_limit'] == get_segment_row_count
 
     def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, field_name, get_simple_index)
@@ -164,7 +164,7 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_count": segment_row_count
+                "segment_row_limit": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, vector_field["params"]["dim"])
@@ -172,7 +172,7 @@ class TestInfoBase:
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_count'] == segment_row_count
+        assert res['segment_row_limit'] == segment_row_count
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -189,14 +189,14 @@ class TestInfoBase:
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_count"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, fields["fields"][-1]["params"]["dim"])
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_count'] == get_segment_row_count
+        assert res['segment_row_limit'] == get_segment_row_count
 
 
 class TestInfoInvalid(object):
