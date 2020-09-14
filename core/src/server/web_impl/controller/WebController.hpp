@@ -555,15 +555,14 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_DEFAULT_CORS(GetEntities)
+    ADD_DEFAULT_CORS(EntityOp)
 
-    ENDPOINT("GET", "/collections/{collection_name}/entities", GetEntities, PATH(String, collection_name),
-             QUERIES(QueryParams, query_params)) {
+    ENDPOINT("GET", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+             QUERIES(QueryParams, query_params), BODY_STRING(String, body_str)) {
         auto handler = WebRequestHandler();
 
-
-         String response;
-        auto status_dto = handler.GetEntity(collection_name, query_params, response);
+        String response;
+        auto status_dto = handler.EntityOp(collection_name, query_params, body_str, response);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 return createResponse(Status::CODE_200, response);
@@ -656,11 +655,11 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
-    ADD_DEFAULT_CORS(EntityOp)
+    ADD_DEFAULT_CORS(Delete)
 
-    ENDPOINT("PUT", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+    ENDPOINT("DELETE", "/collections/{collection_name}/entities", Delete, PATH(String, collection_name),
              BODY_STRING(String, body)) {
-        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/collections/" + collection_name->std_str() +
                         "/vectors\'");
         tr.RecordSection("Received request.");
 
@@ -668,7 +667,7 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         OString result;
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.EntityOp(collection_name, body, result);
+        auto status_dto = handler.DeleteByIDs(collection_name, body, result);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 response = createResponse(Status::CODE_200, result);
@@ -685,6 +684,36 @@ class WebController : public oatpp::web::server::api::ApiController {
 
         return response;
     }
+
+    //    ADD_DEFAULT_CORS(EntityOp)
+    //
+    //    ENDPOINT("GET", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
+    //             BODY_STRING(String, body)) {
+    //        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "PUT \'/hybrid_collections/" + collection_name->std_str() +
+    //                        "/vectors\'");
+    //        tr.RecordSection("Received request.");
+    //
+    //        WebRequestHandler handler = WebRequestHandler();
+    //
+    //        OString result;
+    //        std::shared_ptr<OutgoingResponse> response;
+    //        auto status_dto = handler.EntityOp(collection_name, body, result);
+    //        switch (*(status_dto->code)) {
+    //            case StatusCode::SUCCESS:
+    //                response = createResponse(Status::CODE_200, result);
+    //                break;
+    //            case StatusCode::COLLECTION_NOT_EXISTS:
+    //                response = createDtoResponse(Status::CODE_404, status_dto);
+    //                break;
+    //            default:
+    //                response = createDtoResponse(Status::CODE_400, status_dto);
+    //        }
+    //
+    //        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
+    //                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+    //
+    //        return response;
+    //    }
 
     ADD_DEFAULT_CORS(SystemOptions)
 
@@ -736,6 +765,30 @@ class WebController : public oatpp::web::server::api::ApiController {
             default:
                 response = createDtoResponse(Status::CODE_400, status_dto);
         }
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
+    }
+
+    ADD_DEFAULT_CORS(Status)
+
+    ENDPOINT("GET", "/status", Status) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + R"(GET /status/)");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        OString result = "";
+        auto status_dto = handler.ServerStatus(result);
+        std::shared_ptr<OutgoingResponse> response;
+        switch (*(status_dto->code)) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, result);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
         tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
                            ", reason = " + status_dto->message->std_str() + ". Total cost");
 

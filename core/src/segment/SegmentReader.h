@@ -31,7 +31,8 @@ namespace segment {
 
 class SegmentReader {
  public:
-    explicit SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor);
+    SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor,
+                  bool initialize = true);
 
     Status
     Load();
@@ -94,9 +95,24 @@ class SegmentReader {
         return segment_visitor_;
     }
 
+    // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
+    Status
+    ClearCache();
+
+    // clear index cache from cache manager, use this method for index drop
+    // if the field_name is empty, will clear all fields index
+    Status
+    ClearIndexCache(const std::string& field_name);
+
  private:
     Status
     Initialize();
+
+    Status
+    GetTempIndexPath(const std::string& field_name, std::string& path);
+
+    Status
+    ClearFieldIndexCache(const engine::SegmentVisitor::FieldVisitorT& field_visitor);
 
  private:
     engine::SegmentVisitorPtr segment_visitor_;

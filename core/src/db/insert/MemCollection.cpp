@@ -245,8 +245,18 @@ MemCollection::ApplyDeleteToFile() {
 
         // Step 4: update delete docs and bloom filter
         {
-            segment::IdBloomFilterPtr bloom_filter;
-            STATUS_CHECK(segment_writer->CreateBloomFilter(bloom_filter_file_path, bloom_filter));
+            // Load previous delete_id and merge into 'delete_ids'
+            segment::DeletedDocsPtr prev_del_docs;
+            STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
+            std::vector<engine::offset_t> pre_del_offsets;
+            if (prev_del_docs) {
+                pre_del_offsets = prev_del_docs->GetDeletedDocs();
+                for (auto& offset : pre_del_offsets) {
+                    ids_to_check.insert(uids[offset]);
+                }
+            }
+
+            segment::IdBloomFilterPtr bloom_filter = std::make_shared<segment::IdBloomFilter>(uids.size());
             std::vector<engine::offset_t> delete_docs_offset;
             for (size_t i = 0; i < uids.size(); i++) {
                 if (std::binary_search(ids_to_check.begin(), ids_to_check.end(), uids[i])) {
@@ -256,22 +266,8 @@ MemCollection::ApplyDeleteToFile() {
                 }
             }
 
-            STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), delete_docs_offset.size(), true));
-
-            // Load previous delete_id and merge into 'delete_ids'
-            segment::DeletedDocsPtr prev_del_docs;
-            STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
-            if (prev_del_docs) {
-                auto& pre_del_offsets = prev_del_docs->GetDeletedDocs();
-                size_t delete_docs_size = delete_docs_offset.size();
-                for (auto& offset : pre_del_offsets) {
-                    if (!std::binary_search(delete_docs_offset.begin(), delete_docs_offset.begin() + delete_docs_size,
-                                            offset)) {
-                        delete_docs_offset.emplace_back(offset);
-                    }
-                }
-            }
-            std::sort(delete_docs_offset.begin(), delete_docs_offset.end());
+            STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(),
+                                                          delete_docs_offset.size() - pre_del_offsets.size(), true));
 
             auto delete_docs = std::make_shared<segment::DeletedDocs>(delete_docs_offset);
             STATUS_CHECK(segment_writer->WriteDeletedDocs(del_docs_path, delete_docs));

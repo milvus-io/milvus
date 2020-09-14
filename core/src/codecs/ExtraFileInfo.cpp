@@ -41,7 +41,7 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr) {
     magic.resize(MAGIC_SIZE);
     fs_ptr->reader_ptr_->Read(magic.data(), MAGIC_SIZE);
 
-    return !strcmp(magic.data(), MAGIC);
+    return !strncmp(magic.data(), MAGIC, MAGIC_SIZE);
 }
 
 std::unordered_map<std::string, std::string>

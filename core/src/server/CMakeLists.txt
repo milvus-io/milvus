@@ -17,8 +17,13 @@ set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
                         )
 
+set( SERVER_INIT_FILES  ${MILVUS_ENGINE_SRC}/server/init/CpuChecker.cpp
+                        ${MILVUS_ENGINE_SRC}/server/init/Directory.cpp
+                        ${MILVUS_ENGINE_SRC}/server/init/GpuChecker.cpp
+                        ${MILVUS_ENGINE_SRC}/server/init/Timezone.cpp
+        )
+
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server                   SERVER_SERVICE_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/server/init              SERVER_INIT_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery/request  DELIVERY_REQUEST_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery/strategy DELIVERY_STRATEGY_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/delivery          DELIVERY_FILES )
@@ -63,3 +68,5 @@ target_sources( server
                         ${WEB_SERVER_FILES}
                         ${SERVER_CONTEXT_FILES}
                         )
+
+add_subdirectory(init)

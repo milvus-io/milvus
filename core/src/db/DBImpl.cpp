@@ -201,6 +201,9 @@ DBImpl::DropCollection(const std::string& collection_name) {
     // erase insert buffer of this collection
     mem_mgr_->EraseMem(ss->GetCollectionId());
 
+    // erase cache
+    ClearCollectionCache(ss, options_.meta_.path_);
+
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
@@ -284,10 +287,13 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // erase insert buffer of this partition
     auto partition = ss->GetPartition(partition_name);
     if (partition != nullptr) {
+        // erase insert buffer of this partition
         mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
+
+        // erase cache
+        ClearPartitionCache(ss, options_.meta_.path_, partition->GetID());
     }
 
     snapshot::PartitionContext context;
@@ -400,6 +406,9 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    ClearIndexCache(ss, options_.meta_.path_, field_name);
+
     std::set<int64_t> collection_ids = {ss->GetCollectionId()};
     StartMergeTask(collection_ids, true);
 
@@ -634,9 +643,15 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
+
+    SuspendIfFirst();
+
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
+
+    ResumeIfLast();
+
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
     if (!job->status().ok()) {
@@ -948,6 +963,10 @@ DBImpl::TimingMetricThread() {
 
 void
 DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times) {
+    if (collection_names.empty()) {
+        return;  // no need to start thread
+    }
+
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -1005,8 +1024,12 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
+
+        IncreaseLiveBuildTaskNum();
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
+        DecreaseLiveBuildTaskNum();
+
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         // record failed segments, avoid build index hang
@@ -1053,6 +1076,10 @@ DBImpl::WaitBuildIndexFinish() {
 
 void
 DBImpl::StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all) {
+    if (collection_ids.empty()) {
+        return;  // no need to start thread
+    }
+
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
@@ -1122,6 +1149,24 @@ DBImpl::ResumeIfLast() {
         LOG_ENGINE_TRACE_ << "live_search_num_: " << live_search_num_;
         knowhere::BuildResume();
     }
+}
+
+void
+DBImpl::IncreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    ++live_build_num_;
+}
+
+void
+DBImpl::DecreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    --live_build_num_;
+}
+
+bool
+DBImpl::IsBuildingIndex() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    return live_build_num_ > 0;
 }
 
 void
