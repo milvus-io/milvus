@@ -59,6 +59,18 @@ MemSegment::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
         return Status::OK();
     }
 
+    // previous action is delete? combine delete action
+    if (!actions_.empty()) {
+        MemAction& pre_action = *actions_.rbegin();
+        if (!pre_action.delete_ids_.empty()) {
+            for (auto& id : ids) {
+                pre_action.delete_ids_.insert(id);
+            }
+            return Status::OK();
+        }
+    }
+
+    // create new action
     MemAction action;
     action.op_id_ = op_id;
     for (auto& id : ids) {

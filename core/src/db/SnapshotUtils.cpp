@@ -266,28 +266,27 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
 Status
 GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count) {
-    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
-    const json params = collection->GetParams();
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
-    }
-
-    return Status::OK();
+    return GetSegmentRowCount(collection, segment_row_count);
 }
 
 Status
 GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
-    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
+    return GetSegmentRowCount(collection, segment_row_count);
+}
+
+Status
+GetSegmentRowCount(const snapshot::CollectionPtr& collection, int64_t& segment_row_count) {
+    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
     const json params = collection->GetParams();
     if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
         segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
@@ -341,6 +340,19 @@ ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, cons
     }
 
     return Status::OK();
+}
+
+Status
+DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id) {
+    snapshot::OperationContext drop_seg_context;
+    auto segment = ss->GetResource<snapshot::Segment>(segment_id);
+    if (segment == nullptr) {
+        return Status(DB_ERROR, "Invalid segment id");
+    }
+
+    drop_seg_context.prev_segment = segment;
+    auto drop_op = std::make_shared<snapshot::DropSegmentOperation>(drop_seg_context, ss);
+    return drop_op->Push();
 }
 
 }  // namespace engine
