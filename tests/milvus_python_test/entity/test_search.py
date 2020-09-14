@@ -150,7 +150,7 @@ class TestSearchBase:
 
     def test_search_flat(self, connect, collection, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, change top-k value
+        target: test basic search function, all the search params is corrent, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -169,7 +169,7 @@ class TestSearchBase:
 
     def test_search_flat_top_k(self, connect, collection, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, change top-k value
+        target: test basic search function, all the search params is corrent, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -188,7 +188,7 @@ class TestSearchBase:
 
     def test_search_field(self, connect, collection, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, change top-k value
+        target: test basic search function, all the search params is corrent, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -212,7 +212,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -256,7 +256,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: add vectors into collection, search with the given vectors, check the result
         expected: the length of the result is top_k, search collection with partition tag return empty
         '''
@@ -286,7 +286,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -315,7 +315,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partition_C(self, connect, collection, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search with the given vectors and tag (tag name not existed in collection), check the result
         expected: error raised
         '''
@@ -334,7 +334,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         '''
@@ -367,7 +367,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         '''
@@ -403,7 +403,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_ip_flat(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, change top-k value
+        target: test basic search function, all the search params is corrent, change top-k value
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -423,7 +423,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
@@ -451,7 +451,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_ip_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: add vectors into collection, search with the given vectors, check the result
         expected: the length of the result is top_k, search collection with partition tag return empty
         '''
@@ -483,7 +483,7 @@ class TestSearchBase:
     @pytest.mark.level(2)
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
-        target: test basic search fuction, all the search params is corrent, test all index params, and build
+        target: test basic search function, all the search params is corrent, test all index params, and build
         method: search collection with the given vectors and tags, check the result
         expected: the length of the result is top_k
         '''
@@ -1555,7 +1555,7 @@ class TestSearchInvalid(object):
     @pytest.mark.level(1)
     def test_search_with_invalid_top_k(self, connect, collection, get_top_k):
         '''
-        target: test search fuction, with the wrong top_k
+        target: test search function, with the wrong top_k
         method: search with top_k
         expected: raise an error, and the connection is normal
         '''
@@ -1578,7 +1578,7 @@ class TestSearchInvalid(object):
     @pytest.mark.level(2)
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
-        target: test search fuction, with the wrong nprobe
+        target: test search function, with the wrong nprobe
         method: search with nprobe
         expected: raise an error, and the connection is normal
         '''
@@ -1597,7 +1597,7 @@ class TestSearchInvalid(object):
     @pytest.mark.level(2)
     def test_search_with_invalid_params_binary(self, connect, binary_collection):
         '''
-        target: test search fuction, with the wrong nprobe
+        target: test search function, with the wrong nprobe
         method: search with nprobe
         expected: raise an error, and the connection is normal
         '''
@@ -1613,7 +1613,7 @@ class TestSearchInvalid(object):
     @pytest.mark.level(2)
     def test_search_with_empty_params(self, connect, collection, args, get_simple_index):
         '''
-        target: test search fuction, with empty search params
+        target: test search function, with empty search params
         method: search with params
         expected: raise an error, and the connection is normal
         '''
