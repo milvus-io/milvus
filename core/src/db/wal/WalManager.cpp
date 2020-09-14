@@ -463,10 +463,11 @@ WalManager::CleanupThread() {
             {
                 std::lock_guard<std::mutex> lock(file_map_mutex_);
                 file_map_.erase(target_collection);
-            }
 
-            // remove collection folder
-            std::experimental::filesystem::remove_all(collection_path);
+                // remove collection folder
+                // do this under the lock to avoid multi-thread conflict
+                std::experimental::filesystem::remove_all(collection_path);
+            }
 
             TakeCleanupTask(target_collection);
             continue;
