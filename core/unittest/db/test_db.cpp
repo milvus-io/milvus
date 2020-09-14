@@ -791,13 +791,15 @@ TEST_F(DBTest, GetEntityTest) {
 
     milvus::engine::IDNumbers entity_ids;
     milvus::engine::DataChunkPtr dataChunkPtr;
-    insert_entities(collection_name, "", 10000, 0, entity_ids, dataChunkPtr);
+    insert_entities(collection_name, "", 2000, 0, entity_ids, dataChunkPtr);
+    std::cout << "Post InsertEntities" << std::endl;
     ASSERT_TRUE(status.ok()) << status.ToString();
 
     milvus::engine::snapshot::CollectionPtr collection;
     milvus::engine::snapshot::FieldElementMappings field_mappings;
     status = db_->GetCollectionInfo(collection_name, collection, field_mappings);
     ASSERT_TRUE(status.ok()) << status.ToString();
+    std::cout << "Post GetCollectionInfo" << std::endl;
 
     {
         std::vector<std::string> field_names;
@@ -814,6 +816,7 @@ TEST_F(DBTest, GetEntityTest) {
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
         }
     }
+    std::cout << "Post GetEntityByID1" << std::endl;
 
     {
         std::vector<std::string> field_names;
@@ -826,6 +829,7 @@ TEST_F(DBTest, GetEntityTest) {
         status = db_->GetEntityByID(collection_name, entity_ids, field_names, valid_row, get_data_chunk);
         ASSERT_TRUE(!status.ok());
     }
+    std::cout << "Post GetEntityByID2" << std::endl;
 
     {
         std::vector<std::string> field_names;
@@ -846,6 +850,7 @@ TEST_F(DBTest, GetEntityTest) {
             ASSERT_TRUE(get_data_chunk->fixed_fields_[name]->data_ == dataChunkPtr->fixed_fields_[name]->data_);
         }
     }
+    std::cout << "Post GetEntityByID3" << std::endl;
 }
 
 TEST_F(DBTest, CompactTest) {
