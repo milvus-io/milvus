@@ -172,6 +172,9 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
     {
         std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         immu_mem_list_.swap(temp_immutable_list);
+        if (temp_immutable_list.empty()) {
+            return Status::OK();
+        }
     }
 
     std::lock_guard<std::mutex> lock(flush_mtx_);

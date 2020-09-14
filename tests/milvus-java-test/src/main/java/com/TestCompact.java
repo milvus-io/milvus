@@ -9,7 +9,6 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.MoreExecutors;
-import javax.annotation.Nullable;
 
 public class TestCompact {
     int nb = Constants.nb;
@@ -114,7 +113,7 @@ public class TestCompact {
         // define callback
         FutureCallback<Response> futureCallback = new FutureCallback<Response>() {
             @Override
-            public void onSuccess(@Nullable Response compactResponse) {
+            public void onSuccess(Response compactResponse) {
                 assert(compactResponse != null);
                 assert(compactResponse.ok());
 
@@ -160,7 +159,7 @@ public class TestCompact {
         // define callback
         FutureCallback<Response> futureCallback = new FutureCallback<Response>() {
             @Override
-            public void onSuccess(@Nullable Response compactResponse) {
+            public void onSuccess(Response compactResponse) {
                 assert(compactResponse != null);
                 assert(!compactResponse.ok());
             }

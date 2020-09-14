@@ -12,6 +12,7 @@
 #include "db/wal/WalFile.h"
 #include "db/Constants.h"
 #include "db/Types.h"
+#include "utils/Log.h"
 
 #include <limits>
 
@@ -44,12 +45,14 @@ WalFile::OpenFile(const std::string& path, OpenMode mode) {
         file_ = fopen(path.c_str(), str_mode.c_str());
         if (file_ == nullptr) {
             std::string msg = "Failed to create wal file: " + path;
+            LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
         file_path_ = path;
         mode_ = mode;
     } catch (std::exception& ex) {
         std::string msg = "Failed to create wal file, reason: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << msg;
         return Status(DB_ERROR, msg);
     }
 

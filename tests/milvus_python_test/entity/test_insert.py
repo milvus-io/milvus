@@ -525,10 +525,12 @@ class TestInsertBase:
         method: disable autoflush and insert, get entity
         expected: the count is equal to 0
         '''
+        delete_nums = 500;
         disable_flush(connect)
         ids = connect.insert(collection, entities)
-        res = connect.get_entity_by_id(collection, ids[:500])
-        assert len(res) == 0
+        res = connect.get_entity_by_id(collection, ids[:delete_nums])
+        assert len(res) == delete_nums
+        assert res[0] is None
 
 
 class TestInsertAsync:

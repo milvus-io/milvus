@@ -268,6 +268,14 @@ class Snapshot : public ReferenceProxy {
     void
     UnRefAll();
 
+    void
+    UnRef() override {
+        ReferenceProxy::UnRef();
+        if (ref_count_ == 0) {
+            UnRefAll();
+        }
+    }
+
     template <typename ResourceT>
     void
     DumpResource(const std::string& tag = "") const {
