@@ -5,8 +5,7 @@ import itertools
 from time import sleep
 from multiprocessing import Process
 from utils import *
-import const
-import constants
+from constants import const
 
 uid = "load_collection"
 

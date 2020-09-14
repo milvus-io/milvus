@@ -9,8 +9,7 @@ import sklearn.preprocessing
 
 import pytest
 from utils import *
-import const
-import constants
+from constants import const
 
 uid = "create_collection"
 

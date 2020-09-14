@@ -6,8 +6,7 @@ import threading
 from time import sleep
 from multiprocessing import Process
 from utils import *
-import const
-import constants
+from constants import const
 
 uid = "has_collection"
 

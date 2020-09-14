@@ -1,5 +1,23 @@
-import const
 import utils
+
+class Const(object):
+    # class ConstError(TypeException): pass
+    def __setattr__(self, key, value):
+        if (key in self.__dict__):
+            raise(self.ConstError, "Changing const.%s" % key)
+        else:
+            self.__dict__[key] = value
+
+    def __getattr__(self, key):
+        if (key in self.__dict__):
+            return self.key
+        else:
+            return None
+
+###############################################################
+# Constants Definitions
+###############################################################
+const = Const()
 
 const.port = 19530
 const.epsilon = 0.000001

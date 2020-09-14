@@ -6,8 +6,7 @@ from multiprocessing import Pool, Process
 
 import pytest
 from utils import *
-import const
-import constants
+from constants import const
 
 uid = "collection_stats"
 

@@ -6,8 +6,7 @@ from time import sleep
 import threading
 from multiprocessing import Process
 from utils import *
-import const
-import constants
+from constants import const
 
 uniq_id = "drop_collection"
 
