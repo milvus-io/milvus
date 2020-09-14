@@ -130,7 +130,7 @@ SearchTask::OnExecute() {
             LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
                                           segment_ptr->GetID());
         } else {
-            //            std::unique_lock<std::mutex> lock(search_job->mutex());
+            std::unique_lock<std::mutex> lock(search_job->mutex());
             if (!search_job->query_result()) {
                 search_job->query_result() = std::make_shared<engine::QueryResult>();
                 search_job->query_result()->row_num_ = nq;
