@@ -10,6 +10,5 @@ func TestFakeCreateCollectionByGRPC(t *testing.T) {
 	if reason != "" {
 		t.Error(reason)
 	}
-	fmt.Println(collectionName)
 	fmt.Println(segmentID)
 }

@@ -13,4 +13,5 @@ add_library(milvus_dog_segment SHARED
         )
 #add_dependencies( segment sqlite mysqlpp )
 
-target_link_libraries(milvus_dog_segment tbb utils pthread knowhere log)
+target_link_libraries(milvus_dog_segment tbb milvus_utils pthread)
+
