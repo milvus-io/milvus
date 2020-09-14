@@ -8,23 +8,16 @@ import concurrent.futures
 from threading import current_thread
 import pytest
 from utils import *
+from constants import const
 
-collection_id = "test_get"
-DELETE_TIMEOUT = 60
-tag = "1970_01_01"
-entity = gen_entities(1)
-binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
 default_single_query = {
     "bool": {
         "must": [
             {"vector": {
-                default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
+                const.default_float_vec_field_name: {"topk": 10, "query": gen_vectors(1, dim), "params": {"nprobe": 10}}}}
         ]
     }
 }
-
 
 class TestGetBase:
     """
@@ -47,7 +40,7 @@ class TestGetBase:
         scope="function",
         params=[
             1,
-            500
+            const.default_nb // 2
         ],
     )
     def get_pos(self, request):
@@ -59,13 +52,13 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         assert res_count == nb
         get_ids = [ids[get_pos]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][get_pos])
+        assert_equal_vector(res[0].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][get_pos])
 
     def test_get_entity_multi_ids(self, connect, collection, get_pos):
         '''
@@ -73,12 +66,12 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     def test_get_entity_parts_ids(self, connect, collection):
         '''
@@ -86,12 +79,12 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(collection, get_ids)
-        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
-        assert_equal_vector(res[-1].get(default_float_vec_field_name), entities[-1]["values"][-1])
+        assert_equal_vector(res[0].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][-1])
         assert res[1] is None
 
     def test_get_entity_limit(self, connect, collection, args):
@@ -103,7 +96,7 @@ class TestGetBase:
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
 
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, ids)
@@ -115,12 +108,12 @@ class TestGetBase:
         expected: entity returned equals insert
         '''
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(id_collection, entities, ids)
+        res_ids = connect.insert(id_collection, const.default_entities, ids)
         connect.flush([id_collection])
         get_ids = [ids[0]]
         res = connect.get_entity_by_id(id_collection, get_ids)
         assert len(res) == 1
-        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
+        assert_equal_vector(res[0].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][0])
 
     def test_get_entity_params_same_ids(self, connect, id_collection):
         '''
@@ -129,14 +122,14 @@ class TestGetBase:
         expected: entity returned equals insert
         '''
         ids = [1]
-        res_ids = connect.insert(id_collection, entity, ids)
+        res_ids = connect.insert(id_collection, const.default_entity, ids)
         connect.flush([id_collection])
         get_ids = [1, 1]
         res = connect.get_entity_by_id(id_collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
             logging.getLogger().info(i)
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entity[-1]["values"][0])
 
     def test_get_entities_params_same_ids(self, connect, collection):
         '''
@@ -144,13 +137,13 @@ class TestGetBase:
         method: add entities, and get entity with the same ids
         expected: entity returned equals insert
         '''
-        res_ids = connect.insert(collection, entities)
+        res_ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [res_ids[0], res_ids[0]]
         res = connect.get_entity_by_id(collection, get_ids)
         assert len(res) == len(get_ids)
         for i in range(len(get_ids)):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][0])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][0])
 
     """
     ******************************************************************
@@ -164,12 +157,12 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(binary_collection, binary_entities)
+        ids = connect.insert(binary_collection, const.default_binary_entities)
         connect.flush([binary_collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(binary_collection, get_ids)
-        assert_equal_vector(res[0].get("binary_vector"), binary_entities[-1]["values"][0])
-        assert_equal_vector(res[-1].get("binary_vector"), binary_entities[-1]["values"][-1])
+        assert_equal_vector(res[0].get("binary_vector"), const.default_binary_entities[-1]["values"][0])
+        assert_equal_vector(res[-1].get("binary_vector"), const.default_binary_entities[-1]["values"][-1])
         assert res[1] is None
 
     """
@@ -184,13 +177,13 @@ class TestGetBase:
         method: add entities with tag, get
         expected: entity returned
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, const.default_tag)
+        ids = connect.insert(collection, const.default_entities, partition_tag = const.default_tag)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     def test_get_entities_tag_default(self, connect, collection, get_pos):
         '''
@@ -198,13 +191,13 @@ class TestGetBase:
         method: add entities with default tag, get
         expected: entity returned
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities)
+        connect.create_partition(collection, const.default_tag)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     def test_get_entities_tags_default(self, connect, collection, get_pos):
         '''
@@ -213,14 +206,14 @@ class TestGetBase:
         expected: entity returned
         '''
         tag_new = "tag_new"
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     def test_get_entities_tags_A(self, connect, collection, get_pos):
         '''
@@ -229,14 +222,14 @@ class TestGetBase:
         expected: entity returned
         '''
         tag_new = "tag_new"
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        ids = connect.insert(collection, const.default_entities, partition_tag = const.default_tag)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     def test_get_entities_tags_B(self, connect, collection, get_pos):
         '''
@@ -245,19 +238,19 @@ class TestGetBase:
         expected: entity returned
         '''
         tag_new = "tag_new"
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         connect.create_partition(collection, tag_new)
         new_entities = gen_entities(nb + 1)
-        ids = connect.insert(collection, entities, partition_tag=tag)
-        ids_new = connect.insert(collection, new_entities, partition_tag=tag_new)
+        ids = connect.insert(collection, const.default_entities, partition_tag = const.default_tag)
+        ids_new = connect.insert(collection, new_entities, partition_tag = tag_new)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         get_ids.extend(ids_new[:get_pos])
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
         for i in range(get_pos, get_pos * 2):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i - get_pos])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), new_entities[-1]["values"][i - get_pos])
 
     @pytest.mark.level(2)
     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
@@ -266,14 +259,14 @@ class TestGetBase:
         method: add entities with tag, get
         expected: entity returned
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, const.default_tag)
+        ids = connect.insert(collection, const.default_entities, partition_tag = const.default_tag)
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     """
     ******************************************************************
@@ -287,15 +280,15 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int64"]
-        res = connect.get_entity_by_id(collection, get_ids, fields=fields)
+        res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
         res = res.dict()
         assert res[0]["field"] == fields[0]
-        assert res[0]["values"] == [entities[0]["values"][get_pos]]
+        assert res[0]["values"] == [const.default_entities[0]["values"][get_pos]]
         assert res[0]["type"] == DataType.INT64
 
     def test_get_entity_fields(self, connect, collection, get_pos):
@@ -304,21 +297,21 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
-        fields = ["int64", "float", default_float_vec_field_name]
-        res = connect.get_entity_by_id(collection, get_ids, fields=fields)
+        fields = ["int64", "float", const.default_float_vec_field_name]
+        res = connect.get_entity_by_id(collection, get_ids, fields = fields)
         # assert fields
         res = res.dict()
         assert len(res) == len(fields)
         for field in res:
             if field["field"] == fields[0]:
-                assert field["values"] == [entities[0]["values"][get_pos]]
+                assert field["values"] == [const.default_entities[0]["values"][get_pos]]
             elif field["field"] == fields[1]:
-                assert field["values"] == [entities[1]["values"][get_pos]]
+                assert field["values"] == [const.default_entities[1]["values"][get_pos]]
             else:
-                assert_equal_vector(field["values"][0], entities[-1]["values"][get_pos])
+                assert_equal_vector(field["values"][0], const.default_entities[-1]["values"][get_pos])
 
     # TODO: assert exception
     def test_get_entity_field_not_match(self, connect, collection, get_pos):
@@ -327,12 +320,12 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
         with pytest.raises(Exception) as e:
-            res = connect.get_entity_by_id(collection, get_ids, fields=fields)
+            res = connect.get_entity_by_id(collection, get_ids, fields = fields)
 
     # TODO: assert exception
     def test_get_entity_fields_not_match(self, connect, collection, get_pos):
@@ -341,12 +334,12 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
         with pytest.raises(Exception) as e:
-            res = connect.get_entity_by_id(collection, get_ids, fields=fields)
+            res = connect.get_entity_by_id(collection, get_ids, fields = fields)
 
     def test_get_entity_id_not_exised(self, connect, collection):
         '''
@@ -354,7 +347,7 @@ class TestGetBase:
         method: add entity and get 
         expected: empty result
         '''
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, const.default_entity)
         connect.flush([collection])
         res = connect.get_entity_by_id(collection, [1])
         assert res[0] is None
@@ -365,7 +358,7 @@ class TestGetBase:
         method: add entity and get
         expected: error raised
         '''
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, const.default_entity)
         connect.flush([collection])
         collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
@@ -383,7 +376,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         delete_ids = [ids[get_pos]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -398,7 +391,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -414,7 +407,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -431,13 +424,13 @@ class TestGetBase:
         method: add entities batch, create index, get
         expected: entity returned
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
     @pytest.mark.level(2)
     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
@@ -448,13 +441,13 @@ class TestGetBase:
         '''
         ids = []
         for i in range(nb):
-            ids.append(connect.insert(collection, entity)[0])
+            ids.append(connect.insert(collection, const.default_entity)[0])
         connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
         for i in range(get_pos):
-            assert_equal_vector(res[i].get(default_float_vec_field_name), entity[-1]["values"][0])
+            assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entity[-1]["values"][0])
 
     def test_get_entities_with_deleted_ids(self, connect, id_collection):
         '''
@@ -463,14 +456,14 @@ class TestGetBase:
         expected:
         '''
         ids = [i for i in range(nb)]
-        res_ids = connect.insert(id_collection, entities, ids)
+        res_ids = connect.insert(id_collection, const.default_entities, ids)
         connect.flush([id_collection])
         status = connect.delete_entity_by_id(id_collection, [res_ids[1]])
         connect.flush([id_collection])
         get_ids = res_ids[:2]
         res = connect.get_entity_by_id(id_collection, get_ids)
         assert len(res) == len(get_ids)
-        assert_equal_vector(res[0].get(default_float_vec_field_name), entities[-1]["values"][0])
+        assert_equal_vector(res[0].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][0])
         assert res[1] is None
 
     # TODO: unable to set config
@@ -480,7 +473,7 @@ class TestGetBase:
         method: disable autoflush, add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         try:
@@ -489,7 +482,7 @@ class TestGetBase:
             get_ids = ids[:get_pos]
             res = connect.get_entity_by_id(collection, get_ids)
             for i in range(get_pos):
-                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+                assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
         finally:
             enable_flush(connect)
 
@@ -501,7 +494,7 @@ class TestGetBase:
         '''
         ids = [i for i in range(nb)]
         ids[0] = 1
-        res_ids = connect.insert(id_collection, entities, ids)
+        res_ids = connect.insert(id_collection, const.default_entities, ids)
         connect.flush([id_collection])
         status = connect.delete_entity_by_id(id_collection, [1])
         connect.flush([id_collection])
@@ -515,8 +508,8 @@ class TestGetBase:
         method: add entities into partition, and delete, get entity by the given id
         expected: get one entity
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, const.default_tag)
+        ids = connect.insert(collection, const.default_entities, partition_tag = const.default_tag)
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [ids[get_pos]])
         connect.flush([collection])
@@ -524,7 +517,7 @@ class TestGetBase:
         assert res[0] is None
 
     def test_get_entity_by_id_multithreads(self, connect, collection):
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_id = ids[100:200]
 
@@ -532,7 +525,7 @@ class TestGetBase:
             res = connect.get_entity_by_id(collection, get_id)
             assert len(res) == len(get_id)
             for i in range(len(res)):
-                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][100 + i])
+                assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][100 + i])
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_results = {executor.submit(
@@ -547,7 +540,7 @@ class TestGetBase:
         method: thread do insert and get
         expected:
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         connect.flush([collection])
         get_id = ids[:1000]
 
@@ -564,7 +557,7 @@ class TestGetBase:
             res = connect.get_entity_by_id(collection, get_id)
             assert len(res) == len(get_id)
             for i in range(len(res)):
-                assert_equal_vector(res[i].get(default_float_vec_field_name), entities[-1]["values"][i])
+                assert_equal_vector(res[i].get(const.default_float_vec_field_name), const.default_entities[-1]["values"][i])
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             for i in range(20):
@@ -585,7 +578,7 @@ class TestGetBase:
                 res = connect.get_entity_by_id(collection, group_ids)
                 assert len(res) == len(group_ids)
                 for i in range(len(res)):
-                    assert_equal_vector(res[i].get(default_float_vec_field_name), group_entities[-1]["values"][i])
+                    assert_equal_vector(res[i].get(const.default_float_vec_field_name), group_entities[-1]["values"][i])
 
             def insert(group_vectors):
                 # logging.getLogger().info(current_thread().getName() + " insert")
@@ -593,7 +586,7 @@ class TestGetBase:
                     group_entities = [
                         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
                         {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
-                        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
+                        {"field": const.default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
                     ]
                     group_ids = connect.insert(collection, group_entities)
                     connect.flush([collection])
@@ -670,4 +663,4 @@ class TestGetInvalid(object):
         ids = [1]
         fields = [field_name]
         with pytest.raises(Exception):
-            res = connect.get_entity_by_id(collection, ids, fields=fields)
+            res = connect.get_entity_by_id(collection, ids, fields = fields)

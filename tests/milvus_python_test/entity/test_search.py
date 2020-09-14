@@ -9,26 +9,24 @@ import numpy as np
 
 from milvus import DataType
 from utils import *
+from constants import const
 
 top_k_limit = 2048
-collection_id = "search"
-tag = "1970_01_01"
-insert_interval_time = 1.5
+uid = "search"
 top_k = 10
 nq = 1
 nprobe = 1
 epsilon = 0.001
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
-default_fields = gen_default_fields()
 search_param = {"nprobe": 1}
+
 entity = gen_entities(1, is_normal=True)
-raw_vector, binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb, is_normal=True)
+raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_k, nq)
 default_binary_query, default_binary_query_vecs = gen_query_vectors(binary_field_name, binary_entities, top_k, nq)
-
 
 def init_data(connect, collection, nb=1200, partition_tags=None, auto_id=True):
     '''
@@ -268,7 +266,7 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
@@ -282,7 +280,7 @@ class TestSearchBase:
             assert len(res[0]) >= top_k
             assert res[0]._distances[0] < epsilon
             assert check_id_result(res[0], ids[0])
-            res = connect.search(collection, query, partition_tags=[tag])
+            res = connect.search(collection, query, partition_tags=[const.default_tag])
             assert len(res) == nq
 
     @pytest.mark.level(2)
@@ -298,12 +296,12 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
-        connect.create_partition(collection, tag)
-        entities, ids = init_data(connect, collection, partition_tags=tag)
+        connect.create_partition(collection, const.default_tag)
+        entities, ids = init_data(connect, collection, partition_tags=const.default_tag)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
-        for tags in [[tag], [tag, "new_tag"]]:
+        for tags in [[const.default_tag], [const.default_tag, "new_tag"]]:
             if top_k > top_k_limit:
                 with pytest.raises(Exception) as e:
                     res = connect.search(collection, query, partition_tags=tags)
@@ -346,9 +344,9 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         connect.create_partition(collection, new_tag)
-        entities, ids = init_data(connect, collection, partition_tags=tag)
+        entities, ids = init_data(connect, collection, partition_tags=const.default_tag)
         new_entities, new_ids = init_data(connect, collection, nb=6001, partition_tags=new_tag)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
@@ -463,7 +461,7 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         entities, ids = init_data(connect, collection)
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
@@ -479,7 +477,7 @@ class TestSearchBase:
             assert len(res[0]) >= top_k
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
             assert check_id_result(res[0], ids[0])
-            res = connect.search(collection, query, partition_tags=[tag])
+            res = connect.search(collection, query, partition_tags=[const.default_tag])
             assert len(res) == nq
 
     @pytest.mark.level(2)
@@ -496,9 +494,9 @@ class TestSearchBase:
         index_type = get_simple_index["index_type"]
         if index_type == "IVF_PQ":
             pytest.skip("Skip PQ")
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, const.default_tag)
         connect.create_partition(collection, new_tag)
-        entities, ids = init_data(connect, collection, partition_tags=tag)
+        entities, ids = init_data(connect, collection, partition_tags=const.default_tag)
         new_entities, new_ids = init_data(connect, collection, nb=6001, partition_tags=new_tag)
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
@@ -534,7 +532,7 @@ class TestSearchBase:
         method: search with the random collection_name, which is not in db
         expected: status not ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
@@ -775,11 +773,11 @@ class TestSearchBase:
         top_k = 10
         threads_num = 4
         threads = []
-        collection = gen_unique_str(collection_id)
+        collection = gen_unique_str(uid)
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        milvus.create_collection(collection, default_fields)
+        milvus.create_collection(collection, const.default_fields)
         entities, ids = init_data(milvus, collection)
 
         def search(milvus):
@@ -809,11 +807,11 @@ class TestSearchBase:
         top_k = 10
         threads_num = 4
         threads = []
-        collection = gen_unique_str(collection_id)
+        collection = gen_unique_str(uid)
         uri = "tcp://%s:%s" % (args["ip"], args["port"])
         # create collection
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        milvus.create_collection(collection, default_fields)
+        milvus.create_collection(collection, const.default_fields)
         entities, ids = init_data(milvus, collection)
 
         def search(milvus):
@@ -841,8 +839,8 @@ class TestSearchBase:
         top_k = 10
         nq = 20
         for i in range(num):
-            collection = gen_unique_str(collection_id + str(i))
-            connect.create_collection(collection, default_fields)
+            collection = gen_unique_str(uid + str(i))
+            connect.create_collection(collection, const.default_fields)
             entities, ids = init_data(connect, collection)
             assert len(ids) == nb
             query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
@@ -1077,7 +1075,7 @@ class TestSearchDSL(object):
         method: build query with field named "term"
         expected: error raised
         '''
-        term_fields = add_field_default(default_fields, field_name="term")
+        term_fields = add_field_default(const.default_fields, field_name="term")
         collection_term = gen_unique_str("term")
         connect.create_collection(collection_term, term_fields)
         term_entities = add_field(entities, field_name="term")
