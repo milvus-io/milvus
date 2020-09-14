@@ -44,14 +44,8 @@ class MemManager {
     virtual Status
     EraseMem(int64_t collection_id, int64_t partition_id) = 0;
 
-    virtual size_t
-    GetCurrentMutableMem() = 0;
-
-    virtual size_t
-    GetCurrentImmutableMem() = 0;
-
-    virtual size_t
-    GetCurrentMem() = 0;
+    virtual bool
+    RequireFlush(std::set<int64_t>& collection_ids) = 0;
 };
 
 using MemManagerPtr = std::shared_ptr<MemManager>;
