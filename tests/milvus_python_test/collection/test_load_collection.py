@@ -5,17 +5,12 @@ import itertools
 from time import sleep
 from multiprocessing import Process
 from utils import *
+import const
+import constants
 
-collection_id = "load_collection"
-default_fields = gen_default_fields() 
-entities = gen_entities(nb)
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-raw_vectors, binary_entities = gen_binary_entities(nb)
-
+uid = "load_collection"
 
 class TestLoadBase:
-
     """
     ******************************************************************
       The following cases are used to test `load_collection` function
@@ -48,10 +43,10 @@ class TestLoadBase:
         method: insert and create index, load collection with correct params
         expected: no error raised
         ''' 
-        connect.insert(collection, entities)
+        connect.insert(collection, const.default_entities)
         connect.flush([collection])
         logging.getLogger().info(get_simple_index)
-        connect.create_index(collection, field_name, get_simple_index)
+        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
 
     @pytest.mark.level(2)
@@ -61,16 +56,16 @@ class TestLoadBase:
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         ''' 
-        connect.insert(binary_collection, binary_entities)
+        connect.insert(binary_collection, const.default_binary_entities)
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
             logging.getLogger().info(metric_type)
             get_binary_index["metric_type"] = metric_type
             if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
                 with pytest.raises(Exception) as e:
-                    connect.create_index(binary_collection, binary_field_name, get_binary_index)
+                    connect.create_index(binary_collection, const.default_binary_vec_field_name, get_binary_index)
             else:
-                connect.create_index(binary_collection, binary_field_name, get_binary_index)
+                connect.create_index(binary_collection, const.default_binary_vec_field_name, get_binary_index)
             connect.load_collection(binary_collection)
 
     def load_empty_collection(self, connect, collection):
@@ -93,7 +88,7 @@ class TestLoadBase:
 
     @pytest.mark.level(2)
     def test_load_collection_not_existed(self, connect, collection):
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
 

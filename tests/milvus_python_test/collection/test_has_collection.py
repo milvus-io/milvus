@@ -6,13 +6,12 @@ import threading
 from time import sleep
 from multiprocessing import Process
 from utils import *
+import const
+import constants
 
-collection_id = "has_collection"
-default_fields = gen_default_fields() 
-
+uid = "has_collection"
 
 class TestHasCollection:
-
     """
     ******************************************************************
       The following cases are used to test `has_collection` function
@@ -55,8 +54,8 @@ class TestHasCollection:
         '''
         threads_num = 4 
         threads = []
-        collection_name = gen_unique_str(collection_id)
-        connect.create_collection(collection_name, default_fields)
+        collection_name = gen_unique_str(uid)
+        connect.create_collection(collection_name, const.default_fields)
 
         def has():
             assert not assert_collection(connect, collection_name)

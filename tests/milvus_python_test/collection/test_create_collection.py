@@ -9,16 +9,12 @@ import sklearn.preprocessing
 
 import pytest
 from utils import *
+import const
+import constants
 
-nb = 1
-collection_id = "create_collection"
-default_segment_row_limit = 1024 * 512
-drop_collection_interval_time = 3
-default_fields = gen_default_fields() 
-entities = gen_entities(nb)
+uid = "create_collection"
 
 class TestCreateCollection:
-
     """
     ******************************************************************
       The following cases are used to test `create_collection` function
@@ -54,7 +50,7 @@ class TestCreateCollection:
         filter_field = get_filter_field
         logging.getLogger().info(filter_field)
         vector_field = get_vector_field
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
                 "segment_row_limit": segment_row_limit
@@ -71,7 +67,7 @@ class TestCreateCollection:
         '''
         filter_field = get_filter_field
         vector_field = get_vector_field
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
                 "segment_row_limit": segment_row_limit
@@ -85,8 +81,8 @@ class TestCreateCollection:
         method: create collection with diff segment_row_limit
         expected: no exception raised
         '''
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(const.default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
@@ -99,9 +95,9 @@ class TestCreateCollection:
         expected: create status return ok
         '''
         disable_flush(connect)
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         try:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
         finally:
             enable_flush(connect)
         # pdb.set_trace()
@@ -113,10 +109,10 @@ class TestCreateCollection:
         expected: error raised
         '''
         # pdb.set_trace()
-        connect.insert(collection, entities)
+        connect.insert(collection, const.default_entity)
 
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection, default_fields)
+            connect.create_collection(collection, const.default_fields)
 
     def test_create_collection_after_insert_flush(self, connect, collection):
         '''
@@ -124,10 +120,10 @@ class TestCreateCollection:
         method: insert vector and create collection
         expected: error raised
         '''
-        connect.insert(collection, entities)
+        connect.insert(collection, const.default_entity)
         connect.flush([collection])
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection, default_fields)
+            connect.create_collection(collection, const.default_fields)
 
     # TODO: assert exception
     def test_create_collection_without_connection(self, dis_connect):
@@ -136,9 +132,9 @@ class TestCreateCollection:
         method: create collection with correct params, with a disconnected instance
         expected: error raised
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
 
     def test_create_collection_existed(self, connect):
         '''
@@ -146,10 +142,10 @@ class TestCreateCollection:
         method: create collection with the same collection_name
         expected: error raised
         '''
-        collection_name = gen_unique_str(collection_id)
-        connect.create_collection(collection_name, default_fields)
+        collection_name = gen_unique_str(uid)
+        connect.create_collection(collection_name, const.default_fields)
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
 
     def test_create_after_drop_collection(self, connect, collection):
         '''
@@ -159,7 +155,7 @@ class TestCreateCollection:
         '''
         connect.drop_collection(collection)
         time.sleep(2)
-        connect.create_collection(collection, default_fields)
+        connect.create_collection(collection, const.default_fields)
 
     @pytest.mark.level(2)
     def test_create_collection_multithread(self, connect):
@@ -173,9 +169,9 @@ class TestCreateCollection:
         collection_names = []
 
         def create():
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
         for i in range(threads_num):
             t = threading.Thread(target=create, args=())
             threads.append(t)
@@ -231,7 +227,7 @@ class TestCreateCollectionInvalid(object):
     @pytest.mark.level(2)
     def test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
         collection_name = gen_unique_str()
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(const.default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
@@ -240,7 +236,7 @@ class TestCreateCollectionInvalid(object):
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
         collection_name = gen_unique_str()
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(const.default_fields)
         fields["fields"][-1]["params"]["dim"] = dimension
         with pytest.raises(Exception) as e:
              connect.create_collection(collection_name, fields)
@@ -249,19 +245,19 @@ class TestCreateCollectionInvalid(object):
     def test_create_collection_with_invalid_collectionname(self, connect, get_invalid_string):
         collection_name = get_invalid_string
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
 
     @pytest.mark.level(2)
     def test_create_collection_with_empty_collectionname(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
 
     @pytest.mark.level(2)
     def test_create_collection_with_none_collectionname(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
 
     def test_create_collection_None(self, connect):
         '''
@@ -270,7 +266,7 @@ class TestCreateCollectionInvalid(object):
         expected: create raise error
         '''
         with pytest.raises(Exception) as e:
-            connect.create_collection(None, default_fields)
+            connect.create_collection(None, const.default_fields)
 
     def test_create_collection_no_dimension(self, connect):
         '''
@@ -278,8 +274,8 @@ class TestCreateCollectionInvalid(object):
         method: create collection with corrent params
         expected: create status return ok
         '''
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(const.default_fields)
         fields["fields"][-1]["params"].pop("dim")
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
@@ -287,22 +283,22 @@ class TestCreateCollectionInvalid(object):
     def test_create_collection_no_segment_row_limit(self, connect):
         '''
         target: test create collection with no segment_row_limit params
-        method: create collection with corrent params
+        method: create collection with correct params
         expected: use default default_segment_row_limit
         '''
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(const.default_fields)
         fields.pop("segment_row_limit")
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res["segment_row_limit"] == default_segment_row_limit
+        assert res["segment_row_limit"] == const.default_server_segment_row_limit
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         limit_num = 64
-        fields = copy.deepcopy(default_fields)
+        fields = copy.deepcopy(const.default_fields)
         for i in range(limit_num):
             field_name = gen_unique_str("field_name")
             field = {"field": field_name, "type": DataType.INT64}
@@ -312,8 +308,8 @@ class TestCreateCollectionInvalid(object):
 
     # TODO: assert exception
     def test_create_collection_invalid_field_name(self, connect, get_invalid_string):
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(const.default_fields)
         field_name = get_invalid_string
         field = {"field": field_name, "type": DataType.INT64}
         fields["fields"].append(field)
@@ -322,8 +318,8 @@ class TestCreateCollectionInvalid(object):
 
     # TODO: assert exception
     def test_create_collection_invalid_field_type(self, connect, get_field_type):
-        collection_name = gen_unique_str(collection_id)
-        fields = copy.deepcopy(default_fields)
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(const.default_fields)
         field_type = get_field_type
         field = {"field": "test_field", "type": field_type}
         fields["fields"].append(field)

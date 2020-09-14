@@ -6,13 +6,12 @@ from time import sleep
 import threading
 from multiprocessing import Process
 from utils import *
+import const
+import constants
 
 uniq_id = "drop_collection"
-default_fields = gen_default_fields() 
-
 
 class TestDropCollection:
-
     """
     ******************************************************************
       The following cases are used to test `drop_collection` function
@@ -63,7 +62,7 @@ class TestDropCollection:
         def create():
             collection_name = gen_unique_str(collection_id)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, default_fields)
+            connect.create_collection(collection_name, const.default_fields)
             connect.drop_collection(collection_name)
         for i in range(threads_num):
             t = threading.Thread(target=create, args=())
