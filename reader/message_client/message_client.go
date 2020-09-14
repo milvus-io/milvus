@@ -2,10 +2,12 @@ package message_client
 
 import (
 	"context"
+	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
 	"log"
+	"time"
 )
 
 type MessageClient struct {
@@ -45,6 +47,8 @@ func (mc *MessageClient) GetSearchChan() chan *msgpb.SearchMsg {
 }
 
 func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
+	var count = 0
+	var start time.Time
 	for {
 		insetOrDeleteMsg := msgpb.InsertOrDeleteMsg{}
 		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
@@ -52,8 +56,16 @@ func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		if count == 0 {
+			start = time.Now()
+		}
+		count++
 		mc.insertOrDeleteChan <- &insetOrDeleteMsg
 		mc.insertOrDeleteConsumer.Ack(msg)
+		if count == 100000 - 1 {
+			elapsed := time.Since(start)
+			fmt.Println("Query node ReceiveInsertOrDeleteMsg time:", elapsed)
+		}
 	}
 }
 
