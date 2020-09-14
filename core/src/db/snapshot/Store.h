@@ -15,6 +15,7 @@
 #include "db/Utils.h"
 #include "db/meta/MetaFactory.h"
 #include "db/snapshot/ResourceContext.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Utils.h"
@@ -353,13 +354,23 @@ class Store : public std::enable_shared_from_this<Store> {
                     p_c_m.insert(s_c->GetID());
                 }
                 PartitionCommitPtr p_c;
-                CreateResource<PartitionCommit>(PartitionCommit(c->GetID(), p->GetID(), p_c_m, 0, 0, 0, 0, ACTIVE),
-                                                p_c);
+                PartitionCommit temp_pc(c->GetID(), p->GetID());
+                temp_pc.UpdateFlushIds();
+                temp_pc.GetMappings() = p_c_m;
+                auto base_path = GetResPath<Partition>(GetRootPath(), p);
+                temp_pc.FlushIds(base_path);
+                temp_pc.Activate();
+                CreateResource<PartitionCommit>(std::move(temp_pc), p_c);
                 all_records.push_back(p_c);
                 c_c_m.insert(p_c->GetID());
             }
             CollectionCommitPtr c_c;
-            CollectionCommit temp_cc(c->GetID(), schema->GetID(), c_c_m);
+            CollectionCommit temp_cc(c->GetID(), schema->GetID());
+            temp_cc.UpdateFlushIds();
+            temp_cc.GetMappings() = c_c_m;
+
+            auto base_path = GetResPath<Collection>(GetRootPath(), c);
+            temp_cc.FlushIds(base_path);
             temp_cc.Activate();
             CreateResource<CollectionCommit>(std::move(temp_cc), c_c);
             all_records.push_back(c_c);
