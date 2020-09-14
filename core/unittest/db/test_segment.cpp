@@ -334,131 +334,131 @@ TEST(BloomFilterTest, CloneTest) {
     error_rate_check(clone_filter, removed_id_array);
 }
 
-//TEST(SegmentUtilTest, CalcCopyRangeTest) {
-//    // invalid input test
-//    std::vector<int32_t> offsets;
-//    int64_t row_count = 0, delete_count = 0;
-//    milvus::segment::CopyRanges copy_ranges;
-//    bool res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
-//    ASSERT_FALSE(res);
-//
-//    row_count = 100;
-//
-//    auto compare_result =
-//        [&](const std::vector<int32_t>& offsets, const milvus::segment::CopyRanges& compare_range) -> void {
-//            milvus::segment::CopyRanges copy_ranges;
-//            res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
-//            ASSERT_TRUE(res);
-//
-//            int64_t compare_count = 0;
-//            for (auto offset : offsets) {
-//                if (offset >= 0 && offset < row_count) {
-//                    compare_count++;
-//                }
-//            }
-//
-//            ASSERT_EQ(delete_count, compare_count);
-//            ASSERT_EQ(copy_ranges.size(), compare_range.size());
-//            for (size_t i = 0; i < copy_ranges.size(); ++i) {
-//                ASSERT_EQ(copy_ranges[i], compare_range[i]);
-//            }
-//        };
-//
-//    {
-//        offsets = {0, 1, 2, 99, 100};
-//        milvus::segment::CopyRanges compare = {
-//            {3, 99}
-//        };
-//        compare_result(offsets, compare);
-//    }
-//
-//    {
-//        offsets = {-1, 5, 4, 3, 90, 91};
-//        milvus::segment::CopyRanges compare = {
-//            {0, 3},
-//            {6, 90},
-//            {92, 100},
-//        };
-//        compare_result(offsets, compare);
-//    }
-//}
-//
-//TEST(SegmentUtilTest, CopyRangeDataTest) {
-//    auto compare_result = [&](std::vector<uint8_t>& src_data,
-//                              std::vector<int32_t>& offsets,
-//                              int64_t row_count,
-//                              int64_t row_width) -> void {
-//        int64_t delete_count = 0;
-//        milvus::segment::CopyRanges copy_ranges;
-//        auto res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
-//        ASSERT_TRUE(res);
-//
-//        if (copy_ranges.empty()) {
-//            return;
-//        }
-//
-//        std::vector<uint8_t> target_data;
-//        res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
-//        ASSERT_TRUE(res);
-//
-//        // erase element from the largest offset
-//        std::vector<uint8_t> compare_data = src_data;
-//        std::set<int32_t> arrange_offsets;
-//        for (auto offset : offsets) {
-//            if (offset >= 0 && offset < row_count) {
-//                arrange_offsets.insert(offset);
-//            }
-//        }
-//
-//        for (auto iter = arrange_offsets.rbegin(); iter != arrange_offsets.rend(); ++iter) {
-//            auto step = (*iter) * row_width;
-//            compare_data.erase(compare_data.begin() + step, compare_data.begin() + step + row_width);
-//        }
-//        ASSERT_EQ(target_data, compare_data);
-//    };
-//
-//    // invalid input test
-//    std::vector<int32_t> offsets;
-//    std::vector<uint8_t> src_data;
-//    int64_t row_width = 0;
-//    milvus::segment::CopyRanges copy_ranges;
-//    std::vector<uint8_t> target_data;
-//    bool res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
-//    ASSERT_FALSE(res);
-//
-//    // construct source data
-//    row_width = 64;
-//    int64_t row_count = 100;
-//    src_data.resize(row_count * row_width);
-//    for (int64_t i = 0; i < row_count * row_width; ++i) {
-//        src_data[i] = i % 255;
-//    }
-//    {
-//        offsets = {0, 1, 2, 99, 100};
-//        compare_result(src_data, offsets, row_count, row_width);
-//    }
-//
-//    {
-//        offsets = {-1, 5, 4, 3, 90, 91};
-//        compare_result(src_data, offsets, row_count, row_width);
-//    }
-//
-//    // random test
-//    for (int32_t i = 0; i < 10; ++i) {
-//        std::default_random_engine random;
-//        row_count = random() % 100 + 1;
-//        row_width = random() % 8 + 8;
-//
-//        src_data.resize(row_count * row_width);
-//        for (int64_t i = 0; i < row_count * row_width; ++i) {
-//            src_data[i] = i % 255;
-//        }
-//
-//        int64_t offset_count = (row_count > 1) ? (random() % row_count + 1) : 1;
-//        offsets.resize(offset_count);
-//        for (int64_t k = 0; k < offset_count; ++k) {
-//            offsets[k] = (random() % row_count) + ((k % 2 == 0) ? 2 : -2);
-//        }
-//        compare_result(src_data, offsets, row_count, row_width);
-//    }
-//}
+TEST(SegmentUtilTest, CalcCopyRangeTest) {
+    // invalid input test
+    std::vector<int32_t> offsets;
+    int64_t row_count = 0, delete_count = 0;
+    milvus::segment::CopyRanges copy_ranges;
+    bool res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+    ASSERT_FALSE(res);
+
+    row_count = 100;
+
+    auto compare_result =
+        [&](const std::vector<int32_t>& offsets, const milvus::segment::CopyRanges& compare_range) -> void {
+            milvus::segment::CopyRanges copy_ranges;
+            res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+            ASSERT_TRUE(res);
+
+            int64_t compare_count = 0;
+            for (auto offset : offsets) {
+                if (offset >= 0 && offset < row_count) {
+                    compare_count++;
+                }
+            }
+
+            ASSERT_EQ(delete_count, compare_count);
+            ASSERT_EQ(copy_ranges.size(), compare_range.size());
+            for (size_t i = 0; i < copy_ranges.size(); ++i) {
+                ASSERT_EQ(copy_ranges[i], compare_range[i]);
+            }
+        };
+
+    {
+        offsets = {0, 1, 2, 99, 100};
+        milvus::segment::CopyRanges compare = {
+            {3, 99}
+        };
+        compare_result(offsets, compare);
+    }
+
+    {
+        offsets = {-1, 5, 4, 3, 90, 91};
+        milvus::segment::CopyRanges compare = {
+            {0, 3},
+            {6, 90},
+            {92, 100},
+        };
+        compare_result(offsets, compare);
+    }
+}
+
+TEST(SegmentUtilTest, CopyRangeDataTest) {
+    auto compare_result = [&](std::vector<uint8_t>& src_data,
+                              std::vector<int32_t>& offsets,
+                              int64_t row_count,
+                              int64_t row_width) -> void {
+        int64_t delete_count = 0;
+        milvus::segment::CopyRanges copy_ranges;
+        auto res = milvus::segment::CalcCopyRangesWithOffset(offsets, row_count, copy_ranges, delete_count);
+        ASSERT_TRUE(res);
+
+        if (copy_ranges.empty()) {
+            return;
+        }
+
+        std::vector<uint8_t> target_data;
+        res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
+        ASSERT_TRUE(res);
+
+        // erase element from the largest offset
+        std::vector<uint8_t> compare_data = src_data;
+        std::set<int32_t> arrange_offsets;
+        for (auto offset : offsets) {
+            if (offset >= 0 && offset < row_count) {
+                arrange_offsets.insert(offset);
+            }
+        }
+
+        for (auto iter = arrange_offsets.rbegin(); iter != arrange_offsets.rend(); ++iter) {
+            auto step = (*iter) * row_width;
+            compare_data.erase(compare_data.begin() + step, compare_data.begin() + step + row_width);
+        }
+        ASSERT_EQ(target_data, compare_data);
+    };
+
+    // invalid input test
+    std::vector<int32_t> offsets;
+    std::vector<uint8_t> src_data;
+    int64_t row_width = 0;
+    milvus::segment::CopyRanges copy_ranges;
+    std::vector<uint8_t> target_data;
+    bool res = milvus::segment::CopyDataWithRanges(src_data, row_width, copy_ranges, target_data);
+    ASSERT_FALSE(res);
+
+    // construct source data
+    row_width = 64;
+    int64_t row_count = 100;
+    src_data.resize(row_count * row_width);
+    for (int64_t i = 0; i < row_count * row_width; ++i) {
+        src_data[i] = i % 255;
+    }
+    {
+        offsets = {0, 1, 2, 99, 100};
+        compare_result(src_data, offsets, row_count, row_width);
+    }
+
+    {
+        offsets = {-1, 5, 4, 3, 90, 91};
+        compare_result(src_data, offsets, row_count, row_width);
+    }
+
+    // random test
+    for (int32_t i = 0; i < 10; ++i) {
+        std::default_random_engine random;
+        row_count = random() % 100 + 1;
+        row_width = random() % 8 + 8;
+
+        src_data.resize(row_count * row_width);
+        for (int64_t i = 0; i < row_count * row_width; ++i) {
+            src_data[i] = i % 255;
+        }
+
+        int64_t offset_count = (row_count > 1) ? (random() % row_count + 1) : 1;
+        offsets.resize(offset_count);
+        for (int64_t k = 0; k < offset_count; ++k) {
+            offsets[k] = (random() % row_count) + ((k % 2 == 0) ? 2 : -2);
+        }
+        compare_result(src_data, offsets, row_count, row_width);
+    }
+}
