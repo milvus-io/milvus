@@ -267,6 +267,10 @@ void
 CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                       const engine::snapshot::FieldElementMappings& field_mappings, int64_t id_size,
                       ::milvus::grpc::Entities* response) {
+    if (data_chunk == nullptr) {
+        return;
+    }
+
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
@@ -865,12 +869,12 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->id_array_size());
-    for (int i = 0; i < request->id_array_size(); i++) {
+    for (int64_t i = 0; i < request->id_array_size(); i++) {
         vector_ids.push_back(request->id_array(i));
     }
 
     std::vector<std::string> field_names(request->field_names_size());
-    for (int i = 0; i < request->field_names_size(); i++) {
+    for (int64_t i = 0; i < request->field_names_size(); i++) {
         field_names[i] = request->field_names(i);
     }
 
@@ -881,12 +885,11 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
-
     for (auto it : vector_ids) {
         response->add_ids(it);
     }
 
-    int valid_size = 0;
+    int64_t valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
         if (it) {
@@ -1298,7 +1301,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
-    for (int i = 0; i < request->entity_id_array_size(); i++) {
+    for (int64_t i = 0; i < request->entity_id_array_size(); i++) {
         if (request->entity_id_array(i) < 0) {
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
             SET_RESPONSE(response->mutable_status(), status, context);

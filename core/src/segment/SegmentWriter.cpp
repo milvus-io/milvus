@@ -237,7 +237,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 
     LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
 
-    TimeRecorderAuto recorder("SegmentWriter::Merge");
+    TimeRecorder recorder("SegmentWriter::Merge");
 
     // load raw data
     // After load fields, the data has been cached in segment.
@@ -259,6 +259,8 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
 
+    recorder.RecordSection("load data");
+
     // the source segment may be used in search, we can't change its data, so copy a new segment for merging
     engine::SegmentPtr duplicated_segment = std::make_shared<engine::Segment>();
     src_segment->CopyOutRawData(duplicated_segment);
@@ -266,6 +268,8 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         std::vector<engine::offset_t> delete_ids = src_deleted_docs->GetDeletedDocs();
         duplicated_segment->DeleteEntity(delete_ids);
     }
+
+    recorder.RecordSection("delete entities");
 
     // convert to DataChunk
     engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
@@ -279,6 +283,8 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 
     // clear cache of merged segment
     segment_reader->ClearCache();
+
+    recorder.ElapseFromBegin("done");
 
     // Note: no need to merge bloom filter, the bloom filter will be created during serialize
 
