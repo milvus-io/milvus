@@ -57,11 +57,17 @@ constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
+static const Status PERMISSION_ERROR = Status(DB_PERMISSION_ERROR, "Readonly server could not handle write requests!");
 }  // namespace
 
 #define CHECK_INITIALIZED                                \
     if (!initialized_.load(std::memory_order_acquire)) { \
         return SHUTDOWN_ERROR;                           \
+    }
+
+#define CHECK_WRITE_PERMISSION                                 \
+    if (options_.mode_ == DBOptions::MODE::CLUSTER_READONLY) { \
+        return PERMISSION_ERROR;                               \
     }
 
 DBImpl::DBImpl(const DBOptions& options)
@@ -153,6 +159,7 @@ DBImpl::Stop() {
 Status
 DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     auto ctx = context;
 
@@ -191,6 +198,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 Status
 DBImpl::DropCollection(const std::string& collection_name) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
@@ -267,6 +275,7 @@ DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
 Status
 DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -286,6 +295,7 @@ DBImpl::CreatePartition(const std::string& collection_name, const std::string& p
 Status
 DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -340,6 +350,7 @@ Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
@@ -400,6 +411,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
@@ -431,6 +443,7 @@ Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                idx_t op_id) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     if (data_chunk == nullptr) {
         return Status(DB_ERROR, "Null pointer");
@@ -575,6 +588,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 Status
 DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
     CHECK_INITIALIZED;
+    CHECK_WRITE_PERMISSION;
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -755,6 +769,8 @@ DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& col
 
 Status
 DBImpl::Flush(const std::string& collection_name) {
+    CHECK_WRITE_PERMISSION;
+
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
@@ -782,6 +798,7 @@ DBImpl::Flush() {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+    CHECK_WRITE_PERMISSION;
 
     LOG_ENGINE_DEBUG_ << "Begin flush all collections";
     InternalFlush();
@@ -795,6 +812,7 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
+    CHECK_WRITE_PERMISSION;
 
     LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
