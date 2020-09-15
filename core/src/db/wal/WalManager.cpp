@@ -181,6 +181,10 @@ Status
 WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     WaitCleanupFinish();
 
+    if (db == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
     LOG_ENGINE_DEBUG_ << "Begin wal recovery";
 
     try {
@@ -238,6 +242,9 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
                 }
             }
         }
+
+        // flush to makesure data is serialized
+        return db->Flush();
     } catch (std::exception& ex) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
@@ -375,7 +382,6 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
     // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
     std::experimental::filesystem::path full_path(wal_path_);
     full_path.append(collection_name);
-    std::experimental::filesystem::create_directory(full_path);
     full_path.append(file_name);
 
     std::string path(full_path.c_str());
@@ -464,10 +470,11 @@ WalManager::CleanupThread() {
             {
                 std::lock_guard<std::mutex> lock(file_map_mutex_);
                 file_map_.erase(target_collection);
-            }
 
-            // remove collection folder
-            std::experimental::filesystem::remove_all(collection_path);
+                // remove collection folder
+                // do this under the lock to avoid multi-thread conflict
+                std::experimental::filesystem::remove_all(collection_path);
+            }
 
             TakeCleanupTask(target_collection);
             continue;
