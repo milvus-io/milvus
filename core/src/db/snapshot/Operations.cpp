@@ -210,7 +210,10 @@ Operations::ApplyToStore(StorePtr store) {
 
 Status
 Operations::OnSnapshotDropped() {
-    return Status::OK();
+    std::stringstream msg;
+    msg << "Collection " << GetStartedSS()->GetCollection()->GetID() << " was dropped before" << std::endl;
+    LOG_ENGINE_WARNING_ << msg.str();
+    return Status(SS_COLLECTION_DROPPED, msg.str());
 }
 
 Status
@@ -233,6 +236,8 @@ Operations::PreExecute(StorePtr store) {
     if (GetStartedSS() && type_ == OperationsType::W_Compound) {
         STATUS_CHECK(Snapshots::GetInstance().GetSnapshot(context_.prev_ss, GetStartedSS()->GetCollectionId()));
         if (!context_.prev_ss) {
+            STATUS_CHECK(OnSnapshotDropped());
+        } else if (!prev_ss_->GetCollection()->IsActive()) {
             STATUS_CHECK(OnSnapshotDropped());
         } else if (prev_ss_->GetID() != context_.prev_ss->GetID()) {
             STATUS_CHECK(OnSnapshotStale());

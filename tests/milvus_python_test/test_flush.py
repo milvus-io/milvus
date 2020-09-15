@@ -150,7 +150,7 @@ class TestFlushBase:
         collection_new = gen_unique_str("test_flush")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count,
+            "segment_row_limit": segment_row_count,
             "auto_id": False
         }
         connect.create_collection(collection_new, fields)

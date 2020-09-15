@@ -91,6 +91,8 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
+    TimeRecorderAuto recorder("SegmentWriter::WriteField: " + file_path);
+
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw));
 
@@ -118,7 +120,7 @@ SegmentWriter::WriteFields() {
             auto file_size = milvus::CommonUtil::GetFileSize(file_path);
             segment_file->SetSize(file_size);
 
-            recorder.RecordSection("Serialize field raw file");
+            LOG_ENGINE_DEBUG_ << "Serialize raw file size: " << file_size;
         } else {
             return Status(DB_ERROR, "Raw element missed in snapshot");
         }
@@ -159,6 +161,8 @@ SegmentWriter::WriteBloomFilter() {
 
         auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::IdBloomFilterFormat::FilePostfix());
         segment_file->SetSize(file_size);
+
+        LOG_ENGINE_DEBUG_ << "Serialize bloom filter file size: " << file_size;
     } else {
         return Status(DB_ERROR, "Bloom filter element missed in snapshot");
     }
@@ -182,6 +186,8 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
 
 Status
 SegmentWriter::WriteDeletedDocs() {
+    TimeRecorder recorder("SegmentWriter::WriteDeletedDocs");
+
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
@@ -194,6 +200,8 @@ SegmentWriter::WriteDeletedDocs() {
 
         auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::DeletedDocsFormat::FilePostfix());
         segment_file->SetSize(file_size);
+
+        LOG_ENGINE_DEBUG_ << "Serialize deleted docs file size: " << file_size;
     } else {
         return Status(DB_ERROR, "Deleted-doc element missed in snapshot");
     }
@@ -232,7 +240,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
         return status;
     }
     if (src_id == target_id) {
-        return Status(DB_ERROR, "Cannot Merge Self");
+        return Status(DB_ERROR, "Cannot merge Self");
     }
 
     LOG_ENGINE_DEBUG_ << "Merging from " << segment_reader->GetSegmentPath() << " to " << GetSegmentPath();
@@ -330,6 +338,8 @@ SegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::knowh
 Status
 SegmentWriter::WriteVectorIndex(const std::string& field_name) {
     try {
+        TimeRecorder recorder("SegmentWriter::WriteVectorIndex");
+
         knowhere::VecIndexPtr index;
         auto status = segment_ptr_->GetVectorIndex(field_name, index);
         if (!status.ok() || index == nullptr) {
@@ -355,6 +365,8 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
                 auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::VectorIndexFormat::FilePostfix());
                 segment_file->SetSize(file_size);
+
+                recorder.RecordSection("Serialize index file size: " + std::to_string(file_size));
             }
         }
 
@@ -370,6 +382,8 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
                 auto file_size =
                     milvus::CommonUtil::GetFileSize(file_path + codec::VectorCompressFormat::FilePostfix());
                 segment_file->SetSize(file_size);
+
+                recorder.RecordSection("Serialize index compress file size: " + std::to_string(file_size));
             }
         }
     } catch (std::exception& e) {
@@ -391,6 +405,8 @@ SegmentWriter::SetStructuredIndex(const std::string& field_name, const knowhere:
 Status
 SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
     try {
+        TimeRecorder recorder("SegmentWriter::WriteStructuredIndex");
+
         knowhere::IndexPtr index;
         auto status = segment_ptr_->GetStructuredIndex(field_name, index);
         if (!status.ok() || index == nullptr) {
@@ -417,6 +433,8 @@ SegmentWriter::WriteStructuredIndex(const std::string& field_name) {
 
             auto file_size = milvus::CommonUtil::GetFileSize(file_path + codec::StructuredIndexFormat::FilePostfix());
             segment_file->SetSize(file_size);
+
+            recorder.RecordSection("Serialize structured index file size: " + std::to_string(file_size));
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to write vector index: " + std::string(e.what());

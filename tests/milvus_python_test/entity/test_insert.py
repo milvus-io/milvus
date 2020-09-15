@@ -213,7 +213,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count,
+            "segment_row_limit": segment_row_count,
             "auto_id": True
         }
         connect.create_collection(collection_name, fields)
@@ -288,7 +288,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count
+            "segment_row_limit": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, dim)

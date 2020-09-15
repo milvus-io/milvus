@@ -27,7 +27,7 @@ const char* PARAM_DIMENSION = knowhere::meta::DIM;
 const char* PARAM_INDEX_TYPE = "index_type";
 const char* PARAM_INDEX_METRIC_TYPE = knowhere::Metric::TYPE;
 const char* PARAM_INDEX_EXTRA_PARAMS = "params";
-const char* PARAM_SEGMENT_ROW_COUNT = "segment_row_count";
+const char* PARAM_SEGMENT_ROW_COUNT = "segment_row_limit";
 
 const char* DEFAULT_STRUCTURED_INDEX = "SORTED";  // this string should be defined in knowhere::IndexEnum
 const char* DEFAULT_PARTITON_TAG = "_default";
