@@ -57,6 +57,18 @@ class ResourceHolder {
         return Status::OK();
     }
 
+    void
+    Init(bool readonly = false) {
+        if (readonly) {
+            SetGCCB(NoopGCCB);
+        }
+    }
+
+    static void
+    NoopGCCB(ResourcePtr resource) {
+        std::cout << "NoopGCCB " << resource->ToString() << std::endl;
+    }
+
     ScopedT
     GetResource(StorePtr store, ID_TYPE id, bool scoped = true) {
         return Load(store, id, scoped);

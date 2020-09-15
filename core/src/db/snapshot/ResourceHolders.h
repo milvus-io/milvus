@@ -49,6 +49,23 @@ class SegmentCommitsHolder : public ResourceHolder<SegmentCommit, SegmentCommits
 
 class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder> {};
 
+inline void
+InitAllHolders(bool readonly = false) {
+    if (!readonly) return;
+
+    CollectionsHolder::GetInstance().Init(true);
+    SchemaCommitsHolder::GetInstance().Init(true);
+    FieldCommitsHolder::GetInstance().Init(true);
+    FieldsHolder::GetInstance().Init(true);
+    FieldElementsHolder::GetInstance().Init(true);
+    CollectionCommitsHolder::GetInstance().Init(true);
+    PartitionsHolder::GetInstance().Init(true);
+    PartitionCommitsHolder::GetInstance().Init(true);
+    SegmentsHolder::GetInstance().Init(true);
+    SegmentCommitsHolder::GetInstance().Init(true);
+    SegmentFilesHolder::GetInstance().Init(true);
+}
+
 }  // namespace snapshot
 }  // namespace engine
 }  // namespace milvus

@@ -17,6 +17,7 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/ResourceHolders.h"
 #include "utils/CommonUtil.h"
 
 namespace milvus::engine::snapshot {
@@ -229,6 +230,10 @@ Snapshots::StartService() {
     }
 
     auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    if (config.cluster.enable() && config.cluster.role() == ClusterRole::RO) {
+        InitAllHolders(true);
+    }
+
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::EventExecutor::Init(store);
