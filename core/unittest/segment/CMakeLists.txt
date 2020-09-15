@@ -12,7 +12,11 @@
 #-------------------------------------------------------------------------------
 
 include_directories(${MILVUS_ENGINE_SRC}/index)
+include_directories(${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index)
+include_directories(${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index/vector_index)
+include_directories(${MILVUS_ENGINE_SRC}/index/thirdparty/NGT/lib)
 include_directories(${MILVUS_ENGINE_SRC}/index/unittest)
+include_directories(${MILVUS_ENGINE_SRC}/metrics)
 
 set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_segment_rw.cpp
@@ -23,25 +27,41 @@ set(index_util_files
         ${MILVUS_ENGINE_SRC}/index/unittest/utils.cpp
         )
 
-set(util_files
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
+set(index_files
+        ${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index/IndexType.cpp
+        ${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index/vector_index/IndexIVF.cpp
+        ${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
+        ${MILVUS_ENGINE_SRC}/index/knowhere/knowhere/index/vector_index/VecIndexFactory.cpp
         )
+
+set(metrics_files
+        ${MILVUS_ENGINE_SRC}/metrics/Metrics.cpp
+        )
+
+aux_source_directory( ${MILVUS_ENGINE_SRC}/utils common_util_files )
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")  # access to private member function
 
 add_executable(test_segment
         ${test_files}
         ${index_util_files}
-        ${util_files}
-        ${common_files}
+        ${index_files}
+        ${metrics_files}
+        ${common_util_files}
         )
 
 target_link_libraries(test_segment
+        ${UNITTEST_LIBS}
         stdc++
-        knowhere
+        server
+        milvus_engine
         metrics
-        ${unittest_libs}
+        knowhere
+        config
+        utils
+        tracing
+        query
+        log
         )
 
 install(TARGETS test_segment DESTINATION unittest)

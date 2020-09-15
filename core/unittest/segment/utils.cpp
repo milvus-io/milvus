@@ -12,47 +12,13 @@
 #include <fstream>
 #include <string>
 
-#include "config/Config.h"
 #include "segment/utils.h"
-#include "utils/CommonUtil.h"
+#include "config/ServerConfig.h"
 #include "storage/s3/S3ClientWrapper.h"
-
-namespace {
-
-static const char* CONFIG_STR =
-    "storage:\n"
-    "  path: /tmp/milvus\n"
-    "  s3_enable: false\n"
-    "  s3_address: 127.0.0.1\n"
-    "  s3_port: 9000\n"
-    "  s3_access_key: minioadmin\n"
-    "  s3_secret_key: minioadmin\n"
-    "  s3_bucket: milvus-bucket\n"
-    "\n";
-
-void
-WriteToFile(const std::string& file_path, const char* content) {
-    std::fstream fs(file_path.c_str(), std::ios_base::out);
-
-    // write data to file
-    fs << content;
-    fs.close();
-}
-
-}  // namespace
 
 void
 SegmentTest::SetUp() {
-    std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::CreateDirectory(config_path);
-    config_path += CONFIG_FILE;
-    WriteToFile(config_path, CONFIG_STR);
-
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
-
-    bool s3_enable = false;
-    config.GetStorageConfigS3Enable(s3_enable);
+    bool s3_enable = milvus::config.storage.s3_enable();
     if (s3_enable) {
         ASSERT_TRUE(milvus::storage::S3ClientWrapper::GetInstance().StartService().ok());
     }
@@ -60,13 +26,8 @@ SegmentTest::SetUp() {
 
 void
 SegmentTest::TearDown() {
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    bool s3_enable = false;
-    config.GetStorageConfigS3Enable(s3_enable);
+    bool s3_enable = milvus::config.storage.s3_enable();
     if (s3_enable) {
         milvus::storage::S3ClientWrapper::GetInstance().StopService();
     }
-
-    std::string config_path(CONFIG_PATH);
-    milvus::server::CommonUtil::DeleteDirectory(config_path);
 }

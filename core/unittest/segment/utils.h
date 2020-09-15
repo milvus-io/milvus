@@ -13,9 +13,6 @@
 
 #include <gtest/gtest.h>
 
-static const char* CONFIG_PATH = "/tmp/milvus_test/";
-static const char* CONFIG_FILE = "server_config.yaml";
-
 class SegmentTest : public ::testing::Test {
  protected:
     void
