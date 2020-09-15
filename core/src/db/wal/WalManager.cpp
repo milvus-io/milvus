@@ -13,6 +13,7 @@
 #include "db/Utils.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 #include <map>
 #include <memory>
@@ -180,6 +181,8 @@ Status
 WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     WaitCleanupFinish();
 
+    LOG_ENGINE_DEBUG_ << "Begin wal recovery";
+
     try {
         using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
         DirectoryIterator iter_outer(wal_path_);
@@ -239,6 +242,8 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
     }
+
+    LOG_ENGINE_DEBUG_ << "Wal recovery finished";
 
     return Status::OK();
 }

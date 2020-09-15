@@ -10,12 +10,9 @@ import sklearn.preprocessing
 import pytest
 from utils import *
 
-nb = 6000
-dim = 128
 tag = "tag"
 collection_id = "count_collection"
 add_interval_time = 3
-segment_row_count = 5000
 default_fields = gen_default_fields()
 default_binary_fields = gen_binary_default_fields()
 entities = gen_entities(nb)
@@ -32,8 +29,8 @@ class TestCollectionCount:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -187,8 +184,8 @@ class TestCollectionCountIP:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -230,8 +227,8 @@ class TestCollectionCountBinary:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -423,8 +420,8 @@ class TestCollectionMultiCollections:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):

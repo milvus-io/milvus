@@ -11,7 +11,6 @@
 
 #include "db/SnapshotHandlers.h"
 
-#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -40,9 +39,8 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 
 ///////////////////////////////////////////////////////////////////////////////
 SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
-                                                   snapshot::IDS_TYPE& segment_ids)
-    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
-    build_index_threshold_ = config.engine.build_index_threshold();
+                                                   snapshot::IDS_TYPE& segment_ids, int64_t build_index_threshold)
+    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids), build_index_threshold_(build_index_threshold) {
 }
 
 Status

@@ -6,7 +6,6 @@ from time import sleep
 from multiprocessing import Process
 from utils import *
 
-dim = 128
 default_segment_row_count = 100000
 drop_collection_interval_time = 3
 segment_row_count = 5000
