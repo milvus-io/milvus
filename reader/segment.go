@@ -164,14 +164,12 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(queryString string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,
-	           const char* query_json,
+	           void* fake_query,
 	           unsigned long timestamp,
-			   float* query_raw_data,
-			   int num_of_query_raw_data,
 	           long int* result_ids,
 	           float* result_distances);
 	*/
@@ -181,23 +179,12 @@ func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord
 	resultIds := make([]int64, TopK)
 	resultDistances := make([]float32, TopK)
 
-	var cQueryJson = C.CString(queryJson)
+	var cQueryPtr = unsafe.Pointer(nil)
 	var cTimestamp = C.ulong(timestamp)
 	var cResultIds = (*C.long)(&resultIds[0])
 	var cResultDistances = (*C.float)(&resultDistances[0])
-	var cQueryRawData *C.float
-	var cQueryRawDataLength C.int
 
-	if vectorRecord.BinaryData != nil {
-		return nil, errors.New("Data of binary type is not supported yet")
-	} else if len(vectorRecord.FloatData) <= 0 {
-		return nil, errors.New("Null query vector data")
-	} else {
-		cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
-		cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
-	}
-
-	var status = C.Search(s.SegmentPtr, cQueryJson, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
+	var status = C.Search(s.SegmentPtr, cQueryPtr, cTimestamp, cResultIds, cResultDistances)
 
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
