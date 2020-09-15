@@ -714,7 +714,7 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     CreateCollection(client_ptr, connection_ptr, collection_name, mapping_json);
 
     const int64_t dim = DIM;
-    const int64_t nb = 3;
+    const int64_t nb = 100;
     nlohmann::json insert_json;
     GenEntities(nb, dim, insert_json);
 
@@ -724,15 +724,6 @@ TEST_F(WebControllerTest, GET_PAGE_ENTITY) {
     ASSERT_EQ(nb, result_dto->ids->size());
 
     auto status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
-    ASSERT_TRUE(status.ok());
-
-    GenEntities(22, dim, insert_json);
-    response = client_ptr->insert(collection_name.c_str(), insert_json.dump().c_str(), connection_ptr);
-    ASSERT_EQ(OStatus::CODE_201.code, response->getStatusCode());
-    result_dto = response->readBodyToDto<milvus::server::web::EntityIdsDtoT>(object_mapper.get());
-    ASSERT_EQ(22, result_dto->ids->size());
-
-    status = FlushCollection(client_ptr, connection_ptr, OString(collection_name.c_str()));
     ASSERT_TRUE(status.ok());
 
     std::string offset = "0";
