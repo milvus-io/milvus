@@ -270,7 +270,7 @@ HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MAX_EF = 4096;
+    static int64_t MAX_EF = 32768;
 
     CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
 
