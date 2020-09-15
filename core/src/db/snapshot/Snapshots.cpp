@@ -130,10 +130,12 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 }
 
 Status
-Snapshots::Init(StorePtr store) {
-    auto event = std::make_shared<InActiveResourcesGCEvent>();
-    EventExecutor::GetInstance().Submit(event, true);
-    STATUS_CHECK(event->WaitToFinish());
+Snapshots::Init(StorePtr store, bool readonly) {
+    if (!readonly) {
+        auto event = std::make_shared<InActiveResourcesGCEvent>();
+        EventExecutor::GetInstance().Submit(event, true);
+        STATUS_CHECK(event->WaitToFinish());
+    }
     auto op = std::make_shared<GetCollectionIDsOperation>();
     STATUS_CHECK((*op)(store));
     auto& collection_ids = op->GetIDs();
@@ -230,15 +232,18 @@ Snapshots::StartService() {
     }
 
     auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    bool readonly = false;
     if (config.cluster.enable() && config.cluster.role() == ClusterRole::RO) {
-        InitAllHolders(true);
+        readonly = true;
     }
+
+    InitAllHolders(readonly);
 
     snapshot::OperationExecutor::Init(store);
     snapshot::OperationExecutor::GetInstance().Start();
     snapshot::EventExecutor::Init(store);
     snapshot::EventExecutor::GetInstance().Start();
-    return snapshot::Snapshots::GetInstance().Init(store);
+    return snapshot::Snapshots::GetInstance().Init(store, readonly);
 }
 
 Status
