@@ -68,7 +68,7 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		seg.CloseTimeStamp = time.Now().Add(time.Duration(sec) * time.Second)
+		seg.CloseTimeStamp = uint64(time.Now().Add(time.Duration(sec) * time.Second).Unix())
 		updateData, err := mock.Segment2JSON(*seg)
 		if err != nil {
 			return err
@@ -119,25 +119,27 @@ func CollectionController(ch chan *messagepb.Mapping) {
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
 	for collection := range ch {
-		pTag := uuid.New()
+		sID := uuid.New()
 		cID := uuid.New()
-		c := mock.Collection{
-			Name:          collection.CollectionName,
-			CreateTime:    time.Now(),
-			ID:            uint64(cID.ID()),
-			PartitionTags: []string{pTag.String()},
+		fieldMetas := []*messagepb.FieldMeta{}
+		if collection.Schema != nil {
+			fieldMetas = collection.Schema.FieldMetas
 		}
-		s := mock.FakeCreateSegment(uint64(pTag.ID()), c, time.Now(), time.Unix(1<<36-1, 0))
-		collectionData, _ := mock.Collection2JSON(c)
+		c := mock.NewCollection(cID, collection.CollectionName,
+			time.Now(), fieldMetas, []uuid.UUID{sID},
+			[]string{"default"})
+		cm := mock.GrpcMarshal(&c)
+		s := mock.NewSegment(sID, c, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
+		collectionData, _ := mock.Collection2JSON(*cm)
 		segmentData, err := mock.Segment2JSON(s)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save(cID.String(), collectionData)
+		err = kvbase.Save("collection/"+cID.String(), collectionData)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save(pTag.String(), segmentData)
+		err = kvbase.Save("segment/"+sID.String(), segmentData)
 		if err != nil {
 			log.Fatal(err)
 		}

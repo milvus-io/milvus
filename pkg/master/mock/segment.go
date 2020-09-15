@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/gob"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type SegmentStats struct {
@@ -38,10 +40,21 @@ type Segment struct {
 	PartitionTag   string     `json:"partition_tag"`
 	ChannelStart   int        `json:"channel_start"`
 	ChannelEnd     int        `json:"channel_end"`
-	OpenTimeStamp  time.Time  `json:"open_timestamp"`
-	CloseTimeStamp time.Time  `json:"clost_timestamp"`
+	OpenTimeStamp  uint64     `json:"open_timestamp"`
+	CloseTimeStamp uint64     `json:"close_timestamp"`
 }
 
+func NewSegment(id uuid.UUID, collection Collection, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
+	return Segment{
+		SegmentID:      uint64(id.ID()),
+		Collection:     collection,
+		PartitionTag:   ptag,
+		ChannelStart:   chStart,
+		ChannelEnd:     chEnd,
+		OpenTimeStamp:  uint64(openTime.Unix()),
+		CloseTimeStamp: uint64(closeTime.Unix()),
+	}
+}
 func Segment2JSON(s Segment) (string, error) {
 	b, err := json.Marshal(&s)
 	if err != nil {
@@ -58,17 +71,4 @@ func JSON2Segment(s string) (*Segment, error) {
 		return &Segment{}, err
 	}
 	return &c, nil
-}
-
-func FakeCreateSegment(id uint64, cl Collection, opentime time.Time, closetime time.Time) Segment {
-	seg := Segment{
-		SegmentID:      id,
-		Collection:     cl,
-		PartitionTag:   "default",
-		ChannelStart:   0,
-		ChannelEnd:     100,
-		OpenTimeStamp:  opentime,
-		CloseTimeStamp: closetime,
-	}
-	return seg
 }
