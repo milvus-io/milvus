@@ -30,6 +30,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+
 template <typename ResourceT, typename Derived>
 class ResourceHolder {
     using ResourcePtr = std::shared_ptr<ResourceT>;
@@ -37,6 +38,7 @@ class ResourceHolder {
     using ScopedPtr = std::shared_ptr<ScopedT>;
     using IdMapT = std::map<ID_TYPE, ResourcePtr>;
     using Ptr = std::shared_ptr<Derived>;
+    using ResourceGCCB = std::function<void(ResourcePtr)>;
 
  protected:
     ResourceHolder() = default;
@@ -47,6 +49,12 @@ class ResourceHolder {
     GetInstance() {
         static Derived holder;
         return holder;
+    }
+
+    Status
+    SetGCCB(const ResourceGCCB& cb) {
+        gc_cb_ = cb;
+        return Status::OK();
     }
 
     ScopedT
@@ -123,7 +131,11 @@ class ResourceHolder {
             return false;
         }
         id_map_[resource->GetID()] = resource;
-        resource->RegisterOnNoRefCB(std::bind(&Derived::OnNoRefCallBack, this, resource));
+        if (gc_cb_) {
+            resource->RegisterOnNoRefCB(std::bind(gc_cb_, resource));
+        } else {
+            resource->RegisterOnNoRefCB(std::bind(&Derived::OnNoRefCallBack, this, resource));
+        }
         return true;
     }
 
@@ -164,6 +176,7 @@ class ResourceHolder {
  private:
     std::mutex mutex_;
     IdMapT id_map_;
+    ResourceGCCB gc_cb_ = nullptr;
 };
 
 }  // namespace snapshot

@@ -127,27 +127,50 @@ TEST_F(SnapshotTest, ScopedResourceTest) {
 
 TEST_F(SnapshotTest, ResourceHoldersTest) {
     ID_TYPE collection_id;
+    std::vector<ID_TYPE> ids;
+    Snapshots::GetInstance().GetCollectionIds(ids);
+    collection_id = ids.at(0);
     ASSERT_TRUE(GetFirstCollectionID(collection_id).ok());
-    auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-    auto prev_cnt = collection->ref_count();
     {
-        auto collection_2 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-        ASSERT_EQ(collection_2->GetID(), collection_id);
-        ASSERT_EQ(collection_2->ref_count(), prev_cnt);
+        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        auto prev_cnt = collection->ref_count();
+        {
+            auto collection_2 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+            ASSERT_EQ(collection_2->GetID(), collection_id);
+            ASSERT_EQ(collection_2->ref_count(), prev_cnt);
+        }
+
+        {
+            auto collection_3 = CollectionsHolder::GetInstance().GetResource(collection_id, true);
+            ASSERT_EQ(collection_3->GetID(), collection_id);
+            ASSERT_EQ(collection_3->ref_count(), 1+prev_cnt);
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+        collection->UnRef();
+        if (prev_cnt == 0) {
+            auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+            ASSERT_TRUE(!collection_4);
+        }
     }
 
+    ids.clear();
+    Snapshots::GetInstance().GetCollectionIds(ids);
+    collection_id = ids.at(1);
+    Snapshots::GetInstance().Reset();
+    CollectionsHolder::GetInstance().Reset();
+    bool gc_cb_called = false;
+    auto gc_cb = [&gc_cb_called](CollectionPtr res) {
+        gc_cb_called = true;
+    };
+    CollectionsHolder::GetInstance().SetGCCB(gc_cb);
+    Snapshots::GetInstance().Init(OperationExecutor::GetInstance().GetStore());
     {
-        auto collection_3 = CollectionsHolder::GetInstance().GetResource(collection_id, true);
-        ASSERT_EQ(collection_3->GetID(), collection_id);
-        ASSERT_EQ(collection_3->ref_count(), 1+prev_cnt);
+        auto collection = CollectionsHolder::GetInstance().GetResource(collection_id, false);
+        collection->UnRef();
     }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
-
-    if (prev_cnt == 0) {
-        auto collection_4 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-        ASSERT_TRUE(!collection_4);
-    }
+    ASSERT_TRUE(gc_cb_called);
 }
 
 TEST_F(SnapshotTest, DeleteOperationTest) {

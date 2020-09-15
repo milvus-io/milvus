@@ -87,6 +87,7 @@ using SegmentFileIterator = milvus::engine::snapshot::SegmentFileIterator;
 using Store = milvus::engine::snapshot::Store;
 using StorePtr = milvus::engine::snapshot::Store::Ptr;
 using MetaAdapterPtr = milvus::engine::meta::MetaAdapterPtr;
+using OperationExecutor = milvus::engine::snapshot::OperationExecutor;
 
 using DB = milvus::engine::DB;
 using DBOptions = milvus::engine::DBOptions;

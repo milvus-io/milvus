@@ -29,6 +29,11 @@ class OperationExecutor {
         Stop();
     }
 
+    StorePtr
+    GetStore() {
+        return store_;
+    }
+
     static void
     Init(StorePtr store) {
         auto& instance = GetInstanceImpl();
