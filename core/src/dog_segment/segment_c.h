@@ -50,6 +50,9 @@ Search(CSegmentBase c_segment,
 int
 Close(CSegmentBase c_segment);
 
+int
+BuildIndex(CSegmentBase c_segment);
+
 bool
 IsOpened(CSegmentBase c_segment);
 

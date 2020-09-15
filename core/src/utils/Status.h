@@ -31,18 +31,18 @@ using StatusCode = ErrorCode;
 class Status {
  public:
     Status(StatusCode code, const std::string& msg);
-    Status() = default;
-    virtual ~Status();
+    Status();
+    ~Status();
 
     Status(const Status& s);
-
-    Status(Status&& s) noexcept;
 
     Status&
     operator=(const Status& s);
 
+    Status(Status&& s);
+
     Status&
-    operator=(Status&& s) noexcept;
+    operator=(Status&& s);
 
     static Status
     OK() {

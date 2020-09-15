@@ -65,7 +65,7 @@ add_custom_command(TARGET generate_suvlim_pb_grpc
 	POST_BUILD
 	COMMAND echo "${PROTOC_EXCUTABLE}"
 	COMMAND bash "${PROTO_GEN_SCRIPTS_DIR}/generate_go.sh" -p  "${PROTOC_EXCUTABLE}"
-	COMMAND bash "${PROTO_GEN_SCRIPTS_DIR}/generate_cpp.sh" -p "${PROTOC_EXCUTABLE}" -g "${GRPC_CPP_PLUGIN_EXCUTABLE}"
+	COMMAND echo "${PROTO_GEN_SCRIPTS_DIR}/generate_cpp.sh" -p "${PROTOC_EXCUTABLE}" -g "${GRPC_CPP_PLUGIN_EXCUTABLE}"
 	)
 
 set_property( GLOBAL PROPERTY PROTOC_EXCUTABLE ${PROTOC_EXCUTABLE})

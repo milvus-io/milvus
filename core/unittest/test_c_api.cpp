@@ -7,6 +7,8 @@
 #include "dog_segment/segment_c.h"
 
 
+
+
 TEST(CApiTest, CollectionTest) {
   auto collection_name = "collection0";
   auto schema_tmp_conf = "null_schema";
@@ -137,8 +139,9 @@ TEST(CApiTest, SearchTest) {
 
   long result_ids[10];
   float result_distances[10];
-  auto sea_res = Search(segment, nullptr, 0, result_ids, result_distances);
+  auto sea_res = Search(segment, nullptr, 1, result_ids, result_distances);
   assert(sea_res == 0);
+  assert(result_ids[0] == 100911);
 
   DeleteCollection(collection);
   DeletePartition(partition);
@@ -180,7 +183,7 @@ TEST(CApiTest, CloseTest) {
 }
 
 
-
+namespace {
 auto generate_data(int N) {
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -201,6 +204,7 @@ auto generate_data(int N) {
         raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
+}
 }
 
 
@@ -235,6 +239,9 @@ TEST(CApiTest, TestQuery) {
     auto pre_off = PreDelete(segment, N / 2);
     Delete(segment, pre_off, N / 2, uids.data(), del_ts.data());
 
+    Close(segment);
+    BuildIndex(segment);
+
 
     std::vector<long> result_ids2(10);
     std::vector<float> result_distances2(10);
@@ -257,6 +264,7 @@ TEST(CApiTest, TestQuery) {
             ++iter;
         }
     }
+
 
     DeleteCollection(collection);
     DeletePartition(partition);

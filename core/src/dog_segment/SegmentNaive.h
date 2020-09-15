@@ -4,6 +4,7 @@
 #include <tbb/concurrent_vector.h>
 
 #include <shared_mutex>
+#include <knowhere/index/vector_index/VecIndex.h>
 
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
@@ -11,7 +12,7 @@
 // #include "knowhere/index/structured_index/StructuredIndex.h"
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
-using idx_t = int64_t;
+#include "dog_segment/DeletedRecord.h"
 
 namespace milvus::dog_segment {
 struct ColumnBasedDataChunk {
@@ -87,6 +88,27 @@ class SegmentNaive : public SegmentBase {
         return Status::OK();
     }
 
+public:
+    ssize_t
+    get_row_count() const override {
+        return record_.ack_responder_.GetAck();
+    }
+    SegmentState
+    get_state() const override {
+        return state_.load(std::memory_order_relaxed);
+    }
+    ssize_t
+    get_deleted_count() const override {
+        return 0;
+    }
+
+public:
+    friend std::unique_ptr<SegmentBase>
+    CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
+    explicit SegmentNaive(SchemaPtr schema, IndexMetaPtr index_meta)
+            : schema_(schema), index_meta_(index_meta), record_(*schema) {
+    }
+
  private:
     struct MutableRecord {
         ConcurrentVector<uint64_t> uids_;
@@ -103,79 +125,31 @@ class SegmentNaive : public SegmentBase {
         ConcurrentVector<idx_t, true> uids_;
         std::vector<std::shared_ptr<VectorBase>> entity_vec_;
         Record(const Schema& schema);
+        template<typename Type>
+        auto get_vec_entity(int offset) {
+            return std::static_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
+        }
     };
 
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 
-    struct DeletedRecord {
-        std::atomic<int64_t> reserved = 0;
-        AckResponder ack_responder_;
-        ConcurrentVector<Timestamp, true> timestamps_;
-        ConcurrentVector<idx_t, true> uids_;
-        struct TmpBitmap {
-            // Just for query
-            int64_t del_barrier = 0;
-            std::vector<char> bitmap;
 
-
-        };
-        std::shared_ptr<TmpBitmap> lru_;
-        std::shared_mutex shared_mutex_;
-
-        DeletedRecord(): lru_(std::make_shared<TmpBitmap>()) {}
-        auto get_lru_entry() {
-            std::shared_lock lck(shared_mutex_);
-            return lru_;
-        }
-        void insert_lru_entry(std::shared_ptr<TmpBitmap> new_entry) {
-            std::lock_guard lck(shared_mutex_);
-            if(new_entry->del_barrier <= lru_->del_barrier) {
-                // DO NOTHING
-                return;
-            }
-            lru_ = std::move(new_entry);
-        }
-    };
 
     std::shared_ptr<DeletedRecord::TmpBitmap> get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier);
 
     Status
     QueryImpl(const query::QueryPtr& query, Timestamp timestamp, QueryResult& results);
 
- public:
-    ssize_t
-    get_row_count() const override {
-        return record_.ack_responder_.GetAck();
-    }
-    SegmentState
-    get_state() const override {
-        return state_.load(std::memory_order_relaxed);
-    }
-    ssize_t
-    get_deleted_count() const override {
-        return 0;
-    }
-
- public:
-    friend std::unique_ptr<SegmentBase>
-    CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
-    explicit SegmentNaive(SchemaPtr schema, IndexMetaPtr index_meta)
-        : schema_(schema), index_meta_(index_meta), record_(*schema) {
-    }
+    template<typename Type>
+    knowhere::IndexPtr BuildVecIndexImpl(const IndexMeta::Entry& entry);
 
  private:
     SchemaPtr schema_;
-    IndexMetaPtr index_meta_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
     Record record_;
     DeletedRecord deleted_record_;
-    //  tbb::concurrent_unordered_map<uint64_t, int> internal_indexes_;
-    //  std::shared_ptr<MutableRecord> record_mutable_;
-    //  // to determined that if immutable data if available
-    //  std::shared_ptr<ImmutableRecord> record_immutable_ = nullptr;
-    //  std::unordered_map<int, knowhere::VecIndexPtr> vec_indexings_;
-    //  // TODO: scalar indexing
-    //  // std::unordered_map<int, knowhere::IndexPtr> scalar_indexings_;
-    //  tbb::concurrent_unordered_multimap<int, Timestamp> delete_logs_;
+
+    IndexMetaPtr index_meta_;
+    std::unordered_map<std::string, knowhere::IndexPtr> indexings_; // index_name => indexing
 };
 }  // namespace milvus::dog_segment

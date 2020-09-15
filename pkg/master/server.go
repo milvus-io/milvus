@@ -14,18 +14,15 @@ import (
 	"github.com/czs007/suvlim/pkg/master/informer"
 	"github.com/czs007/suvlim/pkg/master/kv"
 	"github.com/czs007/suvlim/pkg/master/mock"
-	"github.com/google/uuid"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
 
 func Run() {
 	go mock.FakePulsarProducer()
+	go GRPCServer()
 	go SegmentStatsController()
-	collectionChan := make(chan *messagepb.Mapping)
-	defer close(collectionChan)
-	go GRPCServer(collectionChan)
-	go CollectionController(collectionChan)
+	go CollectionController()
 	for {
 	}
 }
@@ -78,13 +75,13 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 	return nil
 }
 
-func GRPCServer(ch chan *messagepb.Mapping) error {
+func GRPCServer() error {
 	lis, err := net.Listen("tcp", common.DEFAULT_GRPC_PORT)
 	if err != nil {
 		return err
 	}
 	s := grpc.NewServer()
-	pb.RegisterMasterServer(s, GRPCMasterServer{CreateRequest: ch})
+	pb.RegisterMasterServer(s, GRPCMasterServer{})
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 		return err
@@ -92,13 +89,9 @@ func GRPCServer(ch chan *messagepb.Mapping) error {
 	return nil
 }
 
-type GRPCMasterServer struct {
-	CreateRequest chan *messagepb.Mapping
-}
+type GRPCMasterServer struct{}
 
 func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
-	ms.CreateRequest <- in
-	fmt.Println("Handle a new create collection request")
 	return &messagepb.Status{
 		ErrorCode: 0,
 		Reason:    "",
@@ -111,35 +104,26 @@ func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.M
 //	}, nil
 // }
 
-func CollectionController(ch chan *messagepb.Mapping) {
+func CollectionController() {
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{"127.0.0.1:12379"},
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
-	for collection := range ch {
-		pTag := uuid.New()
-		cID := uuid.New()
-		c := mock.Collection{
-			Name:          collection.CollectionName,
-			CreateTime:    time.Now(),
-			ID:            uint64(cID.ID()),
-			PartitionTags: []string{pTag.String()},
-		}
-		s := mock.FakeCreateSegment(uint64(pTag.ID()), c, time.Now(), time.Unix(1<<36-1, 0))
-		collectionData, _ := mock.Collection2JSON(c)
-		segmentData, err := mock.Segment2JSON(s)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = kvbase.Save(cID.String(), collectionData)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = kvbase.Save(pTag.String(), segmentData)
-		if err != nil {
-			log.Fatal(err)
-		}
+	c := mock.FakeCreateCollection(uint64(3333))
+	s := mock.FakeCreateSegment(uint64(11111), c, time.Now(), time.Unix(1<<36-1, 0))
+	collectionData, _ := mock.Collection2JSON(c)
+	segmentData, err := mock.Segment2JSON(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = kvbase.Save("test-collection", collectionData)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = kvbase.Save("test-segment", segmentData)
+	if err != nil {
+		log.Fatal(err)
 	}
 }

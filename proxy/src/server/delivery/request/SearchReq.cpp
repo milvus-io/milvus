@@ -58,7 +58,7 @@ SearchReq::OnExecute() {
         return send_status;
     }
 
-    Status status = client->GetQueryResult(query_id, result_);
+    Status status = client->GetQueryResult(query_id, *result_);
 
     return status;
 }

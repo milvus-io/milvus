@@ -38,6 +38,7 @@ namespace milvus::dog_segment {
 
 template <typename Type>
 using FixedVector = std::vector<Type>;
+constexpr int64_t DefaultElementPerChunk = 32 * 1024;
 
 template <typename Type>
 class ThreadSafeVector {
@@ -91,7 +92,7 @@ class VectorBase {
     virtual void set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
 };
 
-template <typename Type, bool is_scalar = false, ssize_t ElementsPerChunk = 32 * 1024>
+template <typename Type, bool is_scalar = false, ssize_t ElementsPerChunk = DefaultElementPerChunk>
 class ConcurrentVector : public VectorBase {
  public:
     // constants
