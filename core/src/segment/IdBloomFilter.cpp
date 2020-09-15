@@ -29,6 +29,9 @@ namespace segment {
 constexpr double BLOOM_FILTER_ERROR_RATE = 0.01;
 constexpr int64_t CAPACITY_EXPAND = 1024;
 
+// the magic num is converted from string "bloom_0"
+constexpr int64_t BLOOM_FILE_MAGIC_NUM = 0x305F6D6F6F6C62;
+
 IdBloomFilter::IdBloomFilter(int64_t capacity) : capacity_(capacity + CAPACITY_EXPAND) {
 }
 
@@ -117,6 +120,7 @@ IdBloomFilter::Write(const storage::FSHandlerPtr& fs_ptr) {
     scaling_bloom_t* bloom_filter = GetBloomFilter();
 
     try {
+        fs_ptr->writer_ptr_->Write(&(BLOOM_FILE_MAGIC_NUM), sizeof(BLOOM_FILE_MAGIC_NUM));
         fs_ptr->writer_ptr_->Write(&(bloom_filter->capacity), sizeof(bloom_filter->capacity));
         fs_ptr->writer_ptr_->Write(&(bloom_filter->error_rate), sizeof(bloom_filter->error_rate));
         fs_ptr->writer_ptr_->Write(&(bloom_filter->bitmap->bytes), sizeof(bloom_filter->bitmap->bytes));
@@ -137,6 +141,14 @@ IdBloomFilter::Read(const storage::FSHandlerPtr& fs_ptr) {
     FreeBloomFilter();
 
     try {
+
+        int64_t magic_num = 0;
+        fs_ptr->reader_ptr_->Read(&magic_num, sizeof(magic_num));
+        if (magic_num != BLOOM_FILE_MAGIC_NUM) {
+            LOG_ENGINE_ERROR_ << "legacy bloom filter file, could not read bloom filter data";
+            return Status(DB_ERROR, "");
+        }
+
         unsigned int capacity = 0;
         fs_ptr->reader_ptr_->Read(&capacity, sizeof(capacity));
         capacity_ = capacity;
