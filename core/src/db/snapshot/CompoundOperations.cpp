@@ -102,7 +102,7 @@ MultiSegmentsOperation::CommitNewSegment(const OperationContext& context, Segmen
     }
 
     auto partition = GetStartedSS()->GetResource<Partition>(context.prev_partition->GetID());
-    if (partition == nullptr || partition->GetState() != ACTIVE) {
+    if (partition == nullptr || partition->IsActive()) {
         return Status(SS_STALE_ERROR, "partition of segment has been staled");
     }
 

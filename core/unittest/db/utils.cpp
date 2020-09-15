@@ -156,7 +156,7 @@ DBTest::GetOptions() {
 
     auto options = DBOptions();
     options.meta_.path_ = "/tmp/milvus_ss/db";
-    options.meta_.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     options.auto_flush_interval_ = 1;
     return options;
@@ -226,7 +226,7 @@ SegmentTest::SetUp() {
     BaseTest::SetUp();
     DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss/db";
-    options.meta_.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(false, options);
 
@@ -245,10 +245,10 @@ SegmentTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaTest::SetUp() {
-//    auto engine = std::make_shared<milvus::engine::meta::MockEngine>();
-    milvus::engine::DBMetaOptions options;
-    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
-    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
+    auto engine = std::make_shared<milvus::engine::meta::MockEngine>();
+//    milvus::engine::DBMetaOptions options;
+//    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+//    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
     meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
     meta_->TruncateAll();
 }
@@ -263,7 +263,7 @@ SchedulerTest::SetUp() {
     BaseTest::SetUp();
     DBOptions options;
     options.meta_.path_ = "/tmp/milvus_ss/db";
-    options.meta_.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+    options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_enable_ = false;
     BaseTest::SnapshotStart(true, options);
     db_ = milvus::engine::DBFactory::BuildDB(options);
@@ -305,7 +305,7 @@ SchedulerTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 EventTest::SetUp() {
-    auto uri = "mysql://root:12345678@127.0.0.1:3309/milvus";
+    auto uri = "mock://:@:/";
     store_ = Store::Build(uri, "/tmp/milvus_ss/db");
     store_->DoReset();
 
