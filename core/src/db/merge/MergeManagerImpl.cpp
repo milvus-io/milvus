@@ -11,6 +11,7 @@
 
 #include "db/merge/MergeManagerImpl.h"
 #include "db/SnapshotUtils.h"
+#include "db/SnapshotVisitor.h"
 #include "db/merge/MergeLayerStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeTask.h"
@@ -23,6 +24,41 @@
 
 namespace milvus {
 namespace engine {
+
+namespace {
+
+static int64_t s_merge_times = 0;
+static int64_t s_merge_count = 0;
+
+void
+PrintMergeResult(const Partition2SegmentsMap& part2seg, const SegmentGroups& groups) {
+    std::string msg;
+    for (auto& group : groups) {
+        msg += "[";
+
+        std::string temp_str;
+        for (auto& id : group) {
+            for (auto& kv : part2seg) {
+                for (auto& info : kv.second) {
+                    if (info.id_ == id) {
+                        if (!temp_str.empty()) {
+                            temp_str += ",";
+                        }
+                        temp_str += std::to_string(info.row_count_);
+                        s_merge_count += info.row_count_;
+                    }
+                }
+            }
+        }
+        msg += temp_str;
+        msg += "]; ";
+    }
+    LOG_ENGINE_INFO_ << "Merge strategy results: " << msg;
+    s_merge_times++;
+    LOG_ENGINE_INFO_ << "Merge strategy times: " << s_merge_times;
+    LOG_ENGINE_INFO_ << "Merge strategy count: " << s_merge_count;
+}
+}  // namespace
 
 MergeManagerImpl::MergeManagerImpl(const DBOptions& options) : options_(options) {
 }
@@ -60,18 +96,23 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
         snapshot::ScopedSnapshotT latest_ss;
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
-        // collect all segments
+        snapshot::IDS_TYPE segment_ids;
+        SnapshotVisitor ss_visitor(latest_ss);
+        ss_visitor.SegmentsToMerge(segment_ids);
+        if (segment_ids.empty()) {
+            break;  // nothing to merge
+        }
+
+        // collect segments info
         Partition2SegmentsMap part2seg;
-        auto& segments = latest_ss->GetResources<snapshot::Segment>();
-        for (auto& kv : segments) {
-            snapshot::ID_TYPE segment_id = kv.second->GetID();
+        for (auto& segment_id : segment_ids) {
             auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(segment_id);
             if (segment_commit == nullptr) {
                 continue;  // maybe stale
             }
 
             SegmentInfo info(segment_id, segment_commit->GetRowCount(), segment_commit->GetCreatedTime());
-            part2seg[kv.second->GetPartitionId()].emplace_back(info);
+            part2seg[segment_commit->GetPartitionId()].emplace_back(info);
         }
 
         if (part2seg.empty()) {
@@ -96,6 +137,9 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
         if (segment_groups.empty()) {
             break;
         }
+
+        //        // only for debug
+        //        PrintMergeResult(part2seg, segment_groups);
 
         // do merge
         for (auto& segments : segment_groups) {

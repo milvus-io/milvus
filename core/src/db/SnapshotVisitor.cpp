@@ -61,6 +61,21 @@ SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TY
     return handler->GetStatus();
 }
 
+Status
+SnapshotVisitor::SegmentsToMerge(snapshot::IDS_TYPE& segment_ids) {
+    STATUS_CHECK(status_);
+
+    // segment whose row count is less than segment_row_count will be counted in
+    int64_t segment_row_count = 0;
+    auto collection = ss_->GetCollection();
+    GetSegmentRowCount(collection, segment_row_count);
+
+    auto handler = std::make_shared<SegmentsToMergeCollector>(ss_, segment_ids, segment_row_count);
+    handler->Iterate();
+
+    return handler->GetStatus();
+}
+
 SegmentFieldElementVisitor::Ptr
 SegmentFieldElementVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::FieldElementPtr& field_element,
                                   const snapshot::SegmentPtr& segment, const snapshot::SegmentFilePtr& segment_file) {
