@@ -97,7 +97,7 @@ IVFSQHybrid::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     }
 }
 
-std::pair<VecIndexPtr, QuantizerPtr>
+std::pair<VecIndexPtr, FaissIVFQuantizerPtr>
 IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
@@ -126,7 +126,7 @@ IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t device_id, const Config& co
 }
 
 VecIndexPtr
-IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& quantizer_ptr, const Config& config) {
+IVFSQHybrid::LoadData(const FaissIVFQuantizerPtr& quantizer_ptr, const Config& config) {
     int64_t gpu_id = config[knowhere::meta::DEVICEID];
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
@@ -153,7 +153,7 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& quantizer_ptr, const Config&
     }
 }
 
-QuantizerPtr
+FaissIVFQuantizerPtr
 IVFSQHybrid::LoadQuantizer(const Config& config) {
     auto gpu_id = config[knowhere::meta::DEVICEID].get<int64_t>();
 
@@ -176,8 +176,6 @@ IVFSQHybrid::LoadQuantizer(const Config& config) {
         q->size = q_ptr->d * q_ptr->getNumVecs() * sizeof(float);
         q->quantizer = q_ptr;
         q->gpu_id = gpu_id;
-        res_ = res;
-        gpu_mode_ = 1;
         return q;
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
@@ -185,20 +183,17 @@ IVFSQHybrid::LoadQuantizer(const Config& config) {
 }
 
 void
-IVFSQHybrid::SetQuantizer(const QuantizerPtr& quantizer_ptr) {
-    auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(quantizer_ptr);
-    if (ivf_quantizer == nullptr) {
-        KNOWHERE_THROW_MSG("Quantizer type error");
-    }
-
+IVFSQHybrid::SetQuantizer(const FaissIVFQuantizerPtr& quantizer_ptr) {
     faiss::IndexIVF* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-
-    faiss::gpu::GpuIndexFlat* is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
-    if (is_gpu_flat_index == nullptr) {
-        //        delete ivf_index->quantizer;
-        ivf_index->quantizer = ivf_quantizer->quantizer;
+    if (ivf_index == nullptr) {
+        KNOWHERE_THROW_MSG("Index type error");
     }
-    quantizer_gpu_id_ = ivf_quantizer->gpu_id;
+
+    // Once SetQuantizer() is called, make sure UnsetQuantizer() is also called before destructuring.
+    // Otherwise, ivf_index->quantizer will be double free.
+
+    quantizer_ = quantizer_ptr;
+    ivf_index->quantizer = quantizer_->quantizer;
     gpu_mode_ = 1;
 }
 
@@ -209,8 +204,10 @@ IVFSQHybrid::UnsetQuantizer() {
         KNOWHERE_THROW_MSG("Index type error");
     }
 
-    ivf_index->quantizer = nullptr;
-    quantizer_gpu_id_ = -1;
+    // set back to cpu mode
+    ivf_index->restore_quantizer();
+    quantizer_ = nullptr;
+    gpu_mode_ = 0;
 }
 
 BinarySet
@@ -252,11 +249,12 @@ IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances
         GPUIVF::QueryImpl(n, data, k, distances, labels, config);
         //        index_->search(n, (float*)data, k, distances, labels);
     } else if (gpu_mode_ == 1) {  // hybrid
-        if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(quantizer_gpu_id_)) {
-            ResScope rs(res, quantizer_gpu_id_, true);
+        auto gpu_id = quantizer_->gpu_id;
+        if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
+            ResScope rs(res, gpu_id, true);
             IVF::QueryImpl(n, data, k, distances, labels, config);
         } else {
-            KNOWHERE_THROW_MSG("Hybrid Search Error, can't get gpu: " + std::to_string(quantizer_gpu_id_) + "resource");
+            KNOWHERE_THROW_MSG("Hybrid Search Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
         }
     } else if (gpu_mode_ == 0) {
         IVF::QueryImpl(n, data, k, distances, labels, config);
@@ -282,7 +280,6 @@ FaissIVFQuantizer::~FaissIVFQuantizer() {
         delete quantizer;
         quantizer = nullptr;
     }
-    // else do nothing
 }
 
 #endif
