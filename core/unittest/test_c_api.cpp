@@ -7,178 +7,182 @@
 #include "dog_segment/segment_c.h"
 
 
-
-
 TEST(CApiTest, CollectionTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  DeleteCollection(collection);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    DeleteCollection(collection);
 }
 
 
 TEST(CApiTest, PartitonTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  DeleteCollection(collection);
-  DeletePartition(partition);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    DeleteCollection(collection);
+    DeletePartition(partition);
 }
 
 
 TEST(CApiTest, SegmentTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
 TEST(CApiTest, InsertTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  std::vector<char> raw_data;
-  std::vector<uint64_t> timestamps;
-  std::vector<int64_t> uids;
-  int N = 10000;
-  std::default_random_engine e(67);
-  for(int i = 0; i < N; ++i) {
-    uids.push_back(100000 + i);
-    timestamps.push_back(0);
-    // append vec
-    float vec[16];
-    for(auto &x: vec) {
-      x = e() % 2000 * 0.001 - 1.0;
+    std::vector<char> raw_data;
+    std::vector<uint64_t> timestamps;
+    std::vector<int64_t> uids;
+    int N = 10000;
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
+        // append vec
+        float vec[16];
+        for (auto &x: vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
+        int age = e() % 100;
+        raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
     }
-    raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-    int age = e() % 100;
-    raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-  }
 
-  auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto offset = PreInsert(segment, N);
+    auto offset = PreInsert(segment, N);
 
-  auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
 
-  assert(res == 0);
+    assert(res == 0);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
 TEST(CApiTest, DeleteTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  long delete_primary_keys[] = {100000, 100001, 100002};
-  unsigned long delete_timestamps[] = {0, 0, 0};
+    long delete_primary_keys[] = {100000, 100001, 100002};
+    unsigned long delete_timestamps[] = {0, 0, 0};
 
-  auto offset = PreDelete(segment, 3);
+    auto offset = PreDelete(segment, 3);
 
-  auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
-  assert(del_res == 0);
+    auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
+    assert(del_res == 0);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
-
 TEST(CApiTest, SearchTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  std::vector<char> raw_data;
-  std::vector<uint64_t> timestamps;
-  std::vector<int64_t> uids;
-  int N = 10000;
-  std::default_random_engine e(67);
-  for(int i = 0; i < N; ++i) {
-    uids.push_back(100000 + i);
-    timestamps.push_back(0);
-    // append vec
-    float vec[16];
-    for(auto &x: vec) {
-      x = e() % 2000 * 0.001 - 1.0;
+    std::vector<char> raw_data;
+    std::vector<uint64_t> timestamps;
+    std::vector<int64_t> uids;
+    int N = 10000;
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
+        // append vec
+        float vec[16];
+        for (auto &x: vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
+        int age = e() % 100;
+        raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
     }
-    raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-    int age = e() % 100;
-    raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-  }
 
-  auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-  auto offset = PreInsert(segment, N);
+    auto offset = PreInsert(segment, N);
 
-  auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-  assert(ins_res == 0);
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
+    assert(ins_res == 0);
 
-  long result_ids[10];
-  float result_distances[10];
-  auto sea_res = Search(segment, nullptr, 1, result_ids, result_distances);
-  assert(sea_res == 0);
+    long result_ids[10];
+    float result_distances[10];
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
+    std::vector<float> query_raw_data(16);
+    for (int i = 0; i < 16; i++) {
+        query_raw_data[i] = e() % 2000 * 0.001 - 1.0;
+    }
+
+    auto sea_res = Search(segment, query_json.data(), 1, query_raw_data.data(), 16, result_ids, result_distances);
+    assert(sea_res == 0);
+
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
 TEST(CApiTest, IsOpenedTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  auto is_opened = IsOpened(segment);
-  assert(is_opened);
+    auto is_opened = IsOpened(segment);
+    assert(is_opened);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
 TEST(CApiTest, CloseTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  auto status = Close(segment);
-  assert(status == 0);
+    auto status = Close(segment);
+    assert(status == 0);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
@@ -190,17 +194,17 @@ auto generate_data(int N) {
     std::default_random_engine er(42);
     std::uniform_real_distribution<> distribution(0.0, 1.0);
     std::default_random_engine ei(42);
-    for(int i = 0; i < N; ++i) {
+    for (int i = 0; i < N; ++i) {
         uids.push_back(10 * N + i);
         timestamps.push_back(0);
         // append vec
         float vec[16];
-        for(auto &x: vec) {
+        for (auto &x: vec) {
             x = distribution(er);
         }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
         int age = ei() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
@@ -217,10 +221,10 @@ TEST(CApiTest, TestQuery) {
 
 
     int N = 1000 * 1000;
-    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto[raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     auto offset = PreInsert(segment, N);
-    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
     assert(res == 0);
 
     auto row_count = GetRowCount(segment);
@@ -228,7 +232,9 @@ TEST(CApiTest, TestQuery) {
 
     std::vector<long> result_ids(10);
     std::vector<float> result_distances(10);
-    auto sea_res = Search(segment, nullptr, 1, result_ids.data(), result_distances.data());
+    auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
+    auto sea_res = Search(segment, query_json.data(), 1, (float *) raw_data.data(), 16, result_ids.data(),
+                          result_distances.data());
 
     ASSERT_EQ(sea_res, 0);
     ASSERT_EQ(result_ids[0], 10 * N);
@@ -236,7 +242,7 @@ TEST(CApiTest, TestQuery) {
 
     auto N_del = N / 2;
     std::vector<uint64_t> del_ts(N_del, 100);
-    auto pre_off = PreDelete(segment,  N_del);
+    auto pre_off = PreDelete(segment, N_del);
     Delete(segment, pre_off, N_del, uids.data(), del_ts.data());
 
     Close(segment);
@@ -245,19 +251,22 @@ TEST(CApiTest, TestQuery) {
 
     std::vector<long> result_ids2(10);
     std::vector<float> result_distances2(10);
-    sea_res = Search(segment, nullptr, 104, result_ids2.data(), result_distances2.data());
+
+    sea_res = Search(segment, query_json.data(), 104, (float *) raw_data.data(), 16, result_ids2.data(),
+                     result_distances2.data());
+//    sea_res = Search(segment, nullptr, 104, result_ids2.data(), result_distances2.data());
 
     std::cout << "case 1" << std::endl;
-    for(int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i) {
         std::cout << result_ids[i] << "->" << result_distances[i] << std::endl;
     }
     std::cout << "case 2" << std::endl;
-    for(int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i) {
         std::cout << result_ids2[i] << "->" << result_distances2[i] << std::endl;
     }
 
-    for(auto x: result_ids2) {
-        ASSERT_GE(x, 10 * N  + N_del);
+    for (auto x: result_ids2) {
+        ASSERT_GE(x, 10 * N + N_del);
         ASSERT_LT(x, 10 * N + N);
     }
 
@@ -281,28 +290,28 @@ TEST(CApiTest, TestQuery) {
 }
 
 TEST(CApiTest, GetDeletedCountTest) {
-  auto collection_name = "collection0";
-  auto schema_tmp_conf = "null_schema";
-  auto collection = NewCollection(collection_name, schema_tmp_conf);
-  auto partition_name = "partition0";
-  auto partition = NewPartition(collection, partition_name);
-  auto segment = NewSegment(partition, 0);
+    auto collection_name = "collection0";
+    auto schema_tmp_conf = "null_schema";
+    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto partition_name = "partition0";
+    auto partition = NewPartition(collection, partition_name);
+    auto segment = NewSegment(partition, 0);
 
-  long delete_primary_keys[] = {100000, 100001, 100002};
-  unsigned long delete_timestamps[] = {0, 0, 0};
+    long delete_primary_keys[] = {100000, 100001, 100002};
+    unsigned long delete_timestamps[] = {0, 0, 0};
 
-  auto offset = PreDelete(segment, 3);
+    auto offset = PreDelete(segment, 3);
 
-  auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
-  assert(del_res == 0);
+    auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
+    assert(del_res == 0);
 
-  // TODO: assert(deleted_count == len(delete_primary_keys))
-  auto deleted_count = GetDeletedCount(segment);
-  assert(deleted_count == 0);
+    // TODO: assert(deleted_count == len(delete_primary_keys))
+    auto deleted_count = GetDeletedCount(segment);
+    assert(deleted_count == 0);
 
-  DeleteCollection(collection);
-  DeletePartition(partition);
-  DeleteSegment(segment);
+    DeleteCollection(collection);
+    DeletePartition(partition);
+    DeleteSegment(segment);
 }
 
 
@@ -316,10 +325,10 @@ TEST(CApiTest, GetRowCountTest) {
 
 
     int N = 10000;
-    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto[raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     auto offset = PreInsert(segment, N);
-    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
     assert(res == 0);
 
     auto row_count = GetRowCount(segment);

@@ -85,6 +85,11 @@ ConfigMgr::ConfigMgr() {
                                                     "localhost", nullptr, nullptr)},
         {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,
                                                   6650, nullptr, nullptr)},
+        /* master */
+        {"master.address", CreateStringConfig("master.address", false, &config.master.address.value,
+                                              "localhost", nullptr, nullptr)},
+        {"master.port", CreateIntegerConfig("master.port", false, 0, 65535, &config.master.port.value,
+                                            6000, nullptr, nullptr)},
 
 
         /* log */

@@ -26,6 +26,7 @@
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
 #include "utils/Log.h"
+#include "server/MetaWrapper.h"
 
 namespace milvus {
 namespace server {
@@ -340,6 +341,10 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext *context, const ::mil
   CHECK_NULLPTR_RETURN(request);
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
+  Status status =  MetaWrapper::GetInstance().MetaClient()->CreateCollection(*request);
+
+  LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+  SET_RESPONSE(response, status, context)
   return ::grpc::Status::OK;
 }
 

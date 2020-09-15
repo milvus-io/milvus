@@ -1,0 +1,164 @@
+syntax = "proto3";
+package etcdserverpb;
+
+service Watch {
+  // Watch watches for events happening or that have happened. Both input and output
+  // are streams; the input stream is for creating and canceling watchers and the output
+  // stream sends events. One watch RPC can watch on multiple key ranges, streaming events
+  // for several watches at once. The entire event history can be watched starting from the
+  // last compaction revision.
+  rpc Watch(stream WatchRequest) returns (stream WatchResponse) {
+  }
+}
+
+message WatchRequest {
+  // request_union is a request to either create a new watcher or cancel an existing watcher.
+  oneof request_union {
+    WatchCreateRequest create_request = 1;
+    WatchCancelRequest cancel_request = 2;
+    WatchProgressRequest progress_request = 3;
+  }
+}
+
+message WatchCreateRequest {
+  // key is the key to register for watching.
+  bytes key = 1;
+
+  // range_end is the end of the range [key, range_end) to watch. If range_end is not given,
+  // only the key argument is watched. If range_end is equal to '\0', all keys greater than
+  // or equal to the key argument are watched.
+  // If the range_end is one bit larger than the given key,
+  // then all keys with the prefix (the given key) will be watched.
+  bytes range_end = 2;
+
+  // start_revision is an optional revision to watch from (inclusive). No start_revision is "now".
+  int64 start_revision = 3;
+
+  // progress_notify is set so that the etcd server will periodically send a WatchResponse with
+  // no events to the new watcher if there are no recent events. It is useful when clients
+  // wish to recover a disconnected watcher starting from a recent known revision.
+  // The etcd server may decide how often it will send notifications based on current load.
+  bool progress_notify = 4;
+
+  enum FilterType {
+    // filter out put event.
+    NOPUT = 0;
+    // filter out delete event.
+    NODELETE = 1;
+  }
+
+  // filters filter the events at server side before it sends back to the watcher.
+  repeated FilterType filters = 5;
+
+  // If prev_kv is set, created watcher gets the previous KV before the event happens.
+  // If the previous KV is already compacted, nothing will be returned.
+  bool prev_kv = 6;
+
+  // If watch_id is provided and non-zero, it will be assigned to this watcher.
+  // Since creating a watcher in etcd is not a synchronous operation,
+  // this can be used ensure that ordering is correct when creating multiple
+  // watchers on the same stream. Creating a watcher with an ID already in
+  // use on the stream will cause an error to be returned.
+  int64 watch_id = 7;
+
+  // fragment enables splitting large revisions into multiple watch responses.
+  bool fragment = 8;
+}
+
+message WatchCancelRequest {
+  // watch_id is the watcher id to cancel so that no more events are transmitted.
+  int64 watch_id = 1;
+}
+
+// Requests the a watch stream progress status be sent in the watch response stream as soon as
+// possible.
+message WatchProgressRequest {
+}
+
+message WatchResponse {
+  ResponseHeader header = 1;
+  // watch_id is the ID of the watcher that corresponds to the response.
+  int64 watch_id = 2;
+
+  // created is set to true if the response is for a create watch request.
+  // The client should record the watch_id and expect to receive events for
+  // the created watcher from the same stream.
+  // All events sent to the created watcher will attach with the same watch_id.
+  bool created = 3;
+
+  // canceled is set to true if the response is for a cancel watch request.
+  // No further events will be sent to the canceled watcher.
+  bool canceled = 4;
+
+  // compact_revision is set to the minimum index if a watcher tries to watch
+  // at a compacted index.
+  //
+  // This happens when creating a watcher at a compacted revision or the watcher cannot
+  // catch up with the progress of the key-value store.
+  //
+  // The client should treat the watcher as canceled and should not try to create any
+  // watcher with the same start_revision again.
+  int64 compact_revision = 5;
+
+  // cancel_reason indicates the reason for canceling the watcher.
+  string cancel_reason = 6;
+
+  // framgment is true if large watch response was split over multiple responses.
+  bool fragment = 7;
+
+  repeated Event events = 11;
+}
+
+message ResponseHeader {
+  // cluster_id is the ID of the cluster which sent the response.
+  uint64 cluster_id = 1;
+  // member_id is the ID of the member which sent the response.
+  uint64 member_id = 2;
+  // revision is the key-value store revision when the request was applied.
+  // For watch progress responses, the header.revision indicates progress. All future events
+  // recieved in this stream are guaranteed to have a higher revision number than the
+  // header.revision number.
+  int64 revision = 3;
+  // raft_term is the raft term when the request was applied.
+  uint64 raft_term = 4;
+}
+
+
+message KeyValue {
+  // key is the key in bytes. An empty key is not allowed.
+  bytes key = 1;
+  // create_revision is the revision of last creation on this key.
+  int64 create_revision = 2;
+  // mod_revision is the revision of last modification on this key.
+  int64 mod_revision = 3;
+  // version is the version of the key. A deletion resets
+  // the version to zero and any modification of the key
+  // increases its version.
+  int64 version = 4;
+  // value is the value held by the key, in bytes.
+  bytes value = 5;
+  // lease is the ID of the lease that attached to key.
+  // When the attached lease expires, the key will be deleted.
+  // If lease is 0, then no lease is attached to the key.
+  int64 lease = 6;
+}
+
+message Event {
+  enum EventType {
+    PUT = 0;
+    DELETE = 1;
+  }
+  // type is the kind of event. If type is a PUT, it indicates
+  // new data has been stored to the key. If type is a DELETE,
+  // it indicates the key was deleted.
+  EventType type = 1;
+  // kv holds the KeyValue for the event.
+  // A PUT event contains current kv pair.
+  // A PUT event with kv.Version=1 indicates the creation of a key.
+  // A DELETE/EXPIRE event contains the deleted key with
+  // its modification revision set to the revision of deletion.
+  KeyValue kv = 2;
+
+  // prev_kv holds the key-value pair before the event happens.
+  KeyValue prev_kv = 3;
+}

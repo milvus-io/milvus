@@ -40,8 +40,10 @@ PreDelete(CSegmentBase c_segment, long int size);
 
 int
 Search(CSegmentBase c_segment,
-           void* fake_query,
+           const char*  query_json,
            unsigned long timestamp,
+           float* query_raw_data,
+           int num_of_query_raw_data,
            long int* result_ids,
            float* result_distances);
 
@@ -49,6 +51,9 @@ Search(CSegmentBase c_segment,
 
 int
 Close(CSegmentBase c_segment);
+
+int
+BuildIndex(CSegmentBase c_segment);
 
 bool
 IsOpened(CSegmentBase c_segment);
