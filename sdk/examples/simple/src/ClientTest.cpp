@@ -339,6 +339,7 @@ ClientTest::Test() {
     GetCollectionInfo(collection_name);
     //    GetCollectionStats(collection_name);
     //
+    LoadCollection(COLLECTION_NAME);
     BuildVectors(NQ, COLLECTION_DIMENSION);
     //    GetEntityByID(collection_name, search_id_array_);
     SearchEntities(collection_name, TOP_K, NPROBE, "L2");
