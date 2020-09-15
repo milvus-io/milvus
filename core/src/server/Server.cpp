@@ -215,6 +215,7 @@ Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
     for (auto fd : fd_list_) {
+        LOG_SERVER_DEBUG_C << "close directory lock file descriptor: " << fd;
         close(fd);
     }
 

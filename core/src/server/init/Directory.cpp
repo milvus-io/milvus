@@ -35,12 +35,14 @@ Directory::Initialize(const std::string& storage_path, const std::string& wal_pa
 Status
 Directory::Lock(const std::string& storage_path, const std::string& wal_path, std::vector<int64_t>& fd_list) {
     try {
-        if (int64_t fd = lock(storage_path) > 0) {
-            fd_list.push_back(fd);
+        auto storage_fd = lock(storage_path);
+        if (storage_fd > 0) {
+            fd_list.push_back(storage_fd);
         }
 
-        if (int64_t fd = lock(wal_path) > 0) {
-            fd_list.push_back(fd);
+        auto wal_fd = lock(wal_path);
+        if (wal_fd > 0) {
+            fd_list.push_back(wal_fd);
         }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
