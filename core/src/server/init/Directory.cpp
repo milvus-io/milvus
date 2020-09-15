@@ -33,10 +33,15 @@ Directory::Initialize(const std::string& storage_path, const std::string& wal_pa
 }
 
 Status
-Directory::Lock(const std::string& storage_path, const std::string& wal_path) {
+Directory::Lock(const std::string& storage_path, const std::string& wal_path, std::vector<int64_t>& fd_list) {
     try {
-        lock(storage_path);
-        lock(wal_path);
+        if (int64_t fd = lock(storage_path) > 0) {
+            fd_list.push_back(fd);
+        }
+
+        if (int64_t fd = lock(wal_path) > 0) {
+            fd_list.push_back(fd);
+        }
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -72,10 +77,10 @@ Directory::init(const std::string& path) {
     }
 }
 
-void
+int64_t
 Directory::lock(const std::string& path) {
     if (path.empty()) {
-        return;
+        return -1;
     }
     std::string lock_path = path + "/lock";
     auto fd = open(lock_path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW, 0640);
@@ -113,6 +118,7 @@ Directory::lock(const std::string& path) {
         close(fd);
         throw std::runtime_error(msg);
     }
+    return fd;
 }
 
 void
