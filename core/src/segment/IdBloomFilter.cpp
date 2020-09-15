@@ -141,7 +141,6 @@ IdBloomFilter::Read(const storage::FSHandlerPtr& fs_ptr) {
     FreeBloomFilter();
 
     try {
-
         int64_t magic_num = 0;
         fs_ptr->reader_ptr_->Read(&magic_num, sizeof(magic_num));
         if (magic_num != BLOOM_FILE_MAGIC_NUM) {
