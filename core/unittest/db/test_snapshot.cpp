@@ -2122,6 +2122,7 @@ TEST_F(SnapshotTest, MultiSegmentsTest) {
         context.lsn = ++lsn;
         auto op = std::make_shared<DropPartitionOperation>(context, start_ss);
         ASSERT_TRUE(op->Push().ok());
+        ASSERT_TRUE(op->GetSnapshot(start_ss).ok());
     }
 
     auto multi_segments_task = [&]() {
@@ -2132,6 +2133,10 @@ TEST_F(SnapshotTest, MultiSegmentsTest) {
             oc.prev_partition = partitions[i];
             Segment::Ptr segment;
             auto status = op->CommitNewSegment(oc, segment);
+            if (status.code() == milvus::SS_STALE_ERROR) {
+                continue;
+            }
+
             ASSERT_TRUE(status.ok()) << status.ToString();
 
             SegmentFileContext sfc;
@@ -2156,7 +2161,7 @@ TEST_F(SnapshotTest, MultiSegmentsTest) {
     ScopedSnapshotT new_ss;
     auto status = Snapshots::GetInstance().GetSnapshot(new_ss, collection_name);
     ASSERT_TRUE(status.ok()) << status.ToString();
-    ASSERT_EQ(new_ss->GetCollectionCommit()->GetRowCount(), loop * 100);
+    ASSERT_EQ(new_ss->GetCollectionCommit()->GetRowCount(), (loop - r) * 100);
 }
 
 struct GCSchedule {

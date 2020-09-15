@@ -91,8 +91,7 @@ class MultiSegmentsOperation : public CompoundBaseOperation<MultiSegmentsOperati
 
     MultiSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
 
-    Status
-    DoExecute(StorePtr) override;
+    Status DoExecute(StorePtr) override;
 
     Status
     CommitNewSegment(const OperationContext& context, SegmentPtr&);

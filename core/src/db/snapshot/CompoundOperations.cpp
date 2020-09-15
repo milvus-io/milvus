@@ -28,7 +28,7 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-MultiSegmentsOperation::MultiSegmentsOperation(const OperationContext &context, ScopedSnapshotT prev_ss)
+MultiSegmentsOperation::MultiSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
 }
 
@@ -39,7 +39,7 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
     }
 
     for (auto iter : context_.new_segment_file_map) {
-        for (auto &new_file : iter.second) {
+        for (auto& new_file : iter.second) {
             auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
             update_ctx->AddAttr(SizeField::Name);
             AddStepWithLsn(*new_file, context_.lsn, update_ctx);
@@ -48,7 +48,7 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
 
     std::map<ID_TYPE, SegmentCommit::VecT> new_segment_commits;
     for (auto iter : new_segments_) {
-        for (auto & new_segment : iter.second) {
+        for (auto& new_segment : iter.second) {
             OperationContext context;
             context.new_segment = new_segment;
             // TODO(yhz): Why here get adjusted ss
@@ -92,11 +92,11 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
 }
 
 Status
-MultiSegmentsOperation::CommitNewSegment(const OperationContext &context, SegmentPtr &created) {
-//    if (context_.new_segment) {
-//        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
-//    }
-//    GetAdjustedSS()->GetPa
+MultiSegmentsOperation::CommitNewSegment(const OperationContext& context, SegmentPtr& created) {
+    //    if (context_.new_segment) {
+    //        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
+    //    }
+    //    GetAdjustedSS()->GetPa
     if (context.prev_partition == nullptr) {
         return Status(SS_INVALID_CONTEX_ERROR, "Unknown corresponding partition");
     }
@@ -120,11 +120,11 @@ MultiSegmentsOperation::CommitNewSegment(const OperationContext &context, Segmen
 }
 
 Status
-MultiSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext &context, SegmentFilePtr &created) {
+MultiSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext& context, SegmentFilePtr& created) {
     auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
     // TODO(yhz): May not depend on context_.new_segment
     if (!segment) {
-        for (auto & seg : context_.new_segments) {
+        for (auto& seg : context_.new_segments) {
             if (seg->GetID() == context.segment_id) {
                 segment = seg;
                 break;
@@ -153,7 +153,7 @@ MultiSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext &context, 
 Status
 MultiSegmentsOperation::CommitRowCount(ID_TYPE segment_id, SIZE_TYPE delta) {
     // TODO(yhz): may need check if segment exists
-    for (auto & seg : context_.new_segments) {
+    for (auto& seg : context_.new_segments) {
         if (seg->GetID() == segment_id) {
             new_segment_counts_[segment_id] = delta;
             return Status::OK();
