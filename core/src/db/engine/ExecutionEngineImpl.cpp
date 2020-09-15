@@ -250,7 +250,7 @@ Status
 ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
                                const query::VectorQueryPtr& vector_param, knowhere::VecIndexPtr& vec_index,
                                bool hybrid) {
-    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
+    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::VecSearch", "search", 0));
 
     if (vec_index == nullptr) {
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] ExecutionEngineImpl: index is null, failed to search", "search", 0);
@@ -293,12 +293,14 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     if (hybrid) {
         //        HybridUnset();
     }
+    rc.ElapseFromBegin("done");
 
     return Status::OK();
 }
 
 Status
 ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
+    TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
     try {
         ConCurrentBitsetPtr bitset;
         std::string vector_placeholder;
@@ -332,6 +334,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         if (!status.ok()) {
             return status;
         }
+        rc.RecordSection("Scalar field filtering");
 
         // Do And
         for (int64_t i = 0; i < entity_count_; i++) {
@@ -355,7 +358,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     } catch (std::exception& exception) {
         return Status{DB_ERROR, "Illegal search params"};
     }
-
+    rc.ElapseFromBegin("done");
     return Status::OK();
 }
 
