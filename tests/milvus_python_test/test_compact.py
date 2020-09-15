@@ -191,6 +191,8 @@ class TestCompactBase:
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
 
+    # TODO: enable
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_partition_delete_half_and_compact(self, connect, collection):
         '''
