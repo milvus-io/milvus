@@ -42,7 +42,7 @@ struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
-                             snapshot::IDS_TYPE& segment_ids);
+                             snapshot::IDS_TYPE& segment_ids, int64_t build_index_threshold);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;

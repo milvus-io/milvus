@@ -6,15 +6,11 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-dim = 128
-index_file_size = 10
 COMPACT_TIMEOUT = 180
 nprobe = 1
 top_k = 1
 tag = "1970_01_01"
-nb = 6000
 nq = 2
-segment_row_count = 5000
 entity = gen_entities(1)
 entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
@@ -240,6 +236,8 @@ class TestCompactBase:
         logging.getLogger().info(info["partitions"])
         assert not info["partitions"][0]["segments"]
 
+    # TODO: enable
+    @pytest.mark.level(2)
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_insert_partition_delete_half_and_compact(self, connect, collection):
         '''
@@ -253,8 +251,7 @@ class TestCompactBase:
         connect.flush([collection])
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
-
-        delete_ids = ids[:3000]
+        delete_ids = ids[:nb//2]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])
@@ -296,7 +293,7 @@ class TestCompactBase:
         # get collection info before compact
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
-        delete_ids = ids[:1500]
+        delete_ids = ids[:nb//2]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])

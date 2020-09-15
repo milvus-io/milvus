@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/merge/MergeManagerImpl.h"
+#include "db/SnapshotUtils.h"
 #include "db/merge/MergeLayerStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeTask.h"
@@ -79,11 +80,8 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
 
         // get row count per segment
         auto collection = latest_ss->GetCollection();
-        int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
-        const json params = collection->GetParams();
-        if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-            row_count_per_segment = params[PARAM_SEGMENT_ROW_COUNT];
-        }
+        int64_t row_count_per_segment = 0;
+        GetSegmentRowCount(collection, row_count_per_segment);
 
         // distribute segments to groups by some strategy
         SegmentGroups segment_groups;

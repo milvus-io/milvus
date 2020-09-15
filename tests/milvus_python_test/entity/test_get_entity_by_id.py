@@ -9,12 +9,9 @@ from threading import current_thread
 import pytest
 from utils import *
 
-dim = 128
-segment_row_count = 5000
 collection_id = "test_get"
 DELETE_TIMEOUT = 60
 tag = "1970_01_01"
-nb = 6000
 entity = gen_entities(1)
 binary_entity = gen_binary_entities(1)
 entities = gen_entities(nb)
@@ -576,7 +573,7 @@ class TestGetBase:
                 future.result()
 
     @pytest.mark.level(2)
-    def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
+    def test_get_entity_by_id_insert_multi_threads_2(self, connect, collection):
         '''
         target: test.get_entity_by_id
         method: thread do insert and get
@@ -603,7 +600,7 @@ class TestGetBase:
                     executor.submit(get, group_ids, group_entities)
 
             step = 100
-            vectors = gen_vectors(nb, dimension, False)
+            vectors = gen_vectors(nb, dim, False)
             group_vectors = [vectors[i:i + step] for i in range(0, len(vectors), step)]
             task = executor.submit(insert, group_vectors)
             task.result()

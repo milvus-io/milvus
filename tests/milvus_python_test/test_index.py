@@ -8,14 +8,11 @@ import pytest
 import sklearn.preprocessing
 from utils import *
 
-nb = 6000
-dim = 128
-index_file_size = 10
 BUILD_TIMEOUT = 300
 nprobe = 1
 top_k = 5
 tag = "1970_01_01"
-NLIST = 4046
+NLIST = 128
 INVALID_NLIST = 100000000
 field_name = "float_vector"
 binary_field_name = "binary_vector"
@@ -26,7 +23,7 @@ entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 query, query_vecs = gen_query_vectors(field_name, entities, top_k, 1)
-default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
+default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
 class TestIndexBase:
@@ -46,7 +43,7 @@ class TestIndexBase:
         params=[
             1,
             10,
-            1500
+            1111
         ],
     )
     def get_nq(self, request):
@@ -526,7 +523,7 @@ class TestIndexBinary:
         params=[
             1,
             10,
-            1500
+            1111
         ],
     )
     def get_nq(self, request):
@@ -768,6 +765,19 @@ class TestIndexAsync:
         res = future.result()
         # TODO:
         logging.getLogger().info(res)
+
+    @pytest.mark.timeout(BUILD_TIMEOUT)
+    def test_create_index_drop(self, connect, collection, get_simple_index):
+        '''
+        target: test create index interface
+        method: create collection and add entities in it, create index
+        expected: return search success
+        '''
+        ids = connect.insert(collection, entities)
+        logging.getLogger().info("start index")
+        future = connect.create_index(collection, field_name, get_simple_index, _async=True)
+        logging.getLogger().info("DROP")
+        connect.drop_collection(collection)
 
     def test_create_index_with_invalid_collectionname(self, connect):
         collection_name = " "

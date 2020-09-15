@@ -7,10 +7,9 @@ import threading
 from multiprocessing import Process
 from utils import *
 
-nb = 1000
 collection_id = "info"
 default_fields = gen_default_fields() 
-segment_row_count = 5000
+segment_row_count = 1000
 field_name = "float_vector"
 
 
