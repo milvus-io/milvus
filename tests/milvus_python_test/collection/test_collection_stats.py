@@ -137,6 +137,8 @@ class TestStatsBase:
         assert stats["partitions"][0]["row_count"] == nb -2
         assert stats["partitions"][0]["segments"][0]["data_size"] > 0
 
+    # TODO: enable
+    @pytest.mark.level(2)
     def test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
         target: get row count with collection_stats
