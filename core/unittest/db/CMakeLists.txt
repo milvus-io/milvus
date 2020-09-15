@@ -32,6 +32,12 @@ add_executable( test_db
                 # ${server_init_files}
                 )
 
+add_executable( test_segment
+                ${SCHEDULER_FILES}
+                ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
+                )
+
 target_link_libraries( test_db  ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
@@ -43,5 +49,18 @@ target_link_libraries( test_db  ${UNITTEST_LIBS}
                                  query
                                  log
                                 )
+
+target_link_libraries( test_segment
+        ${UNITTEST_LIBS}
+        server
+        milvus_engine
+        metrics
+        config
+        stdc++
+        utils
+        tracing
+        query
+        log
+        )
 
 install( TARGETS test_db DESTINATION unittest )
