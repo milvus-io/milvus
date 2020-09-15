@@ -69,7 +69,7 @@ GetResPath<PartitionCommit>(const std::string& root, const PartitionCommit::Ptr&
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
-    ss << PARTITION_PREFIX << res_ptr->GetID() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
     ss << *(ids.begin()) << MAP_SUFFIX;
 
     return ss.str();
