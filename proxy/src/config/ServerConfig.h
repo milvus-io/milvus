@@ -76,6 +76,11 @@ struct ServerConfig {
         Integer port{6650};
     }pulsar;
 
+    struct Master{
+      String address{"localhost"};
+      Integer  port{6000};
+    }master;
+
 
     struct Engine {
         Integer build_index_threshold{4096};

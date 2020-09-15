@@ -32,6 +32,12 @@ proxy/milvus/*
 proxy/suvlim/
 proxy/suvlim/*
 
+# sdk
+sdk/cmake_build
+sdk/cmake-build-debug
+sdk/cmake-build-release
+
+
 # Compiled source
 *.a
 *.so

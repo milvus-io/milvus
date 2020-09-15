@@ -49,6 +49,9 @@ Insert(CSegmentBase c_segment,
   dataChunk.count = count;
 
   auto res = segment->Insert(reserved_offset, size, primary_keys, timestamps, dataChunk);
+
+  // TODO: delete print
+  // std::cout << "do segment insert, sizeof_per_row = " << sizeof_per_row << std::endl;
   return res.code();
 }
 
@@ -58,7 +61,7 @@ PreInsert(CSegmentBase c_segment, long int size) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
 
   // TODO: delete print
-  std::cout << "PreInsert segment " << std::endl;
+  // std::cout << "PreInsert segment " << std::endl;
   return segment->PreInsert(size);
 }
 
@@ -81,21 +84,36 @@ PreDelete(CSegmentBase c_segment, long int size) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
 
   // TODO: delete print
-  std::cout << "PreDelete segment " << std::endl;
+  // std::cout << "PreDelete segment " << std::endl;
   return segment->PreDelete(size);
 }
 
 
 int
 Search(CSegmentBase c_segment,
-           void* fake_query,
+           const char*  query_json,
            unsigned long timestamp,
+           float* query_raw_data,
+           int num_of_query_raw_data,
            long int* result_ids,
            float* result_distances) {
   auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
   milvus::dog_segment::QueryResult query_result;
 
-  auto res = segment->Query(nullptr, timestamp, query_result);
+  // parse query param json
+  auto query_param_json_string = std::string(query_json);
+  auto query_param_json = nlohmann::json::parse(query_param_json_string);
+
+  // construct QueryPtr
+  auto query_ptr = std::make_shared<milvus::query::Query>();
+  query_ptr->num_queries = query_param_json["num_queries"];
+  query_ptr->topK = query_param_json["topK"];
+  query_ptr->field_name = query_param_json["field_name"];
+
+  query_ptr->query_raw_data.resize(num_of_query_raw_data);
+  memcpy(query_ptr->query_raw_data.data(), query_raw_data, num_of_query_raw_data * sizeof(float));
+
+  auto res = segment->Query(query_ptr, timestamp, query_result);
 
   // result_ids and result_distances have been allocated memory in goLang,
   // so we don't need to malloc here.

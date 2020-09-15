@@ -30,7 +30,7 @@ storage:
   secretkey:  dd
 
 pulsar:
-  address: 0.0.0.0
+  address: localhost
   port: 6650
 
 proxy:

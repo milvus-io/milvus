@@ -43,7 +43,7 @@ set( GRPC_SERVER_FILES ${GRPC_IMPL_FILES}
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/server/context               SERVER_CONTEXT_FILES )
 
-add_library( server STATIC MessageWrapper.cpp MessageWrapper.h)
+add_library( server STATIC)
 target_sources( server
                 PRIVATE ${GRPC_SERVER_FILES}
                         ${GRPC_SERVICE_FILES}
