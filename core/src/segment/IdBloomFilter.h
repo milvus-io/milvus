@@ -19,38 +19,51 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 
+#include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
+#include "db/Types.h"
+#include "storage/FSHandler.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace segment {
 
-using doc_id_t = int64_t;
+constexpr int64_t DEFAULT_BLOOM_FILTER_CAPACITY = 500000;
 
-class IdBloomFilter {
+class IdBloomFilter;
+using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
+
+class IdBloomFilter : public cache::DataObj {
  public:
-    explicit IdBloomFilter(scaling_bloom_t* bloom_filter);
+    explicit IdBloomFilter(int64_t capacity = DEFAULT_BLOOM_FILTER_CAPACITY);
 
     ~IdBloomFilter();
 
-    scaling_bloom_t*
-    GetBloomFilter();
-
     bool
-    Check(doc_id_t uid);
+    Check(engine::idx_t uid);
 
     Status
-    Add(doc_id_t uid);
+    Add(engine::idx_t uid);
 
     Status
-    Remove(doc_id_t uid);
+    Remove(engine::idx_t uid);
 
-    size_t
-    Size();
+    int64_t
+    Size() override;
 
-    //    const std::string&
-    //    GetName() const;
+    double
+    ErrorRate() const;
+
+    Status
+    Write(const storage::FSHandlerPtr& fs_ptr);
+
+    Status
+    Read(const storage::FSHandlerPtr& fs_ptr);
+
+    Status
+    Clone(IdBloomFilterPtr& target);
 
     // No copy and move
     IdBloomFilter(const IdBloomFilter&) = delete;
@@ -62,12 +75,16 @@ class IdBloomFilter {
     operator=(IdBloomFilter&&) = delete;
 
  private:
-    scaling_bloom_t* bloom_filter_;
-    //    const std::string name_ = "bloom_filter";
-    std::mutex mutex_;
-};
+    scaling_bloom_t*
+    GetBloomFilter();
 
-using IdBloomFilterPtr = std::shared_ptr<IdBloomFilter>;
+    void
+    FreeBloomFilter();
+
+ private:
+    scaling_bloom_t* bloom_filter_ = nullptr;
+    int64_t capacity_ = 0;
+};
 
 }  // namespace segment
 }  // namespace milvus

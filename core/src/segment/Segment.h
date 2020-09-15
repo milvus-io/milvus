@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "db/Types.h"
+#include "db/snapshot/Resources.h"
 #include "segment/DeletedDocs.h"
 #include "segment/IdBloomFilter.h"
 
@@ -31,8 +32,25 @@ namespace engine {
 
 extern const char* COLLECTIONS_FOLDER;
 
+class Segment;
+using SegmentPtr = std::shared_ptr<Segment>;
+
 class Segment {
  public:
+    // copy raw data to a new segment, ignore the index data, delete docs and bloom filter
+    Status
+    CopyOutRawData(SegmentPtr& target);
+
+    // share raw data to a new DataChunk
+    Status
+    ShareToChunkData(DataChunkPtr& chunk_ptr);
+
+    Status
+    SetFields(int64_t collection_id);
+
+    Status
+    AddField(const snapshot::FieldPtr& field);
+
     Status
     AddField(const std::string& field_name, DataType field_type, int64_t field_width = 0);
 
@@ -42,8 +60,17 @@ class Segment {
     Status
     AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
+    // reserve chunk data capacity to specify count
+    // this method should only be used on an empty segment
     Status
-    DeleteEntity(int64_t offset);
+    Reserve(const std::vector<std::string>& field_names, int64_t count);
+
+    // copy part of chunk data into this segment and append to tail
+    Status
+    AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
+
+    Status
+    DeleteEntity(std::vector<offset_t>& offsets);
 
     Status
     GetFieldType(const std::string& field_name, DataType& type);
@@ -53,6 +80,9 @@ class Segment {
 
     Status
     GetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
+
+    Status
+    SetFixedFieldData(const std::string& field_name, BinaryDataPtr& data);
 
     Status
     GetVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index);
@@ -126,8 +156,6 @@ class Segment {
     segment::DeletedDocsPtr deleted_docs_ptr_ = nullptr;
     segment::IdBloomFilterPtr id_bloom_filter_ptr_ = nullptr;
 };
-
-using SegmentPtr = std::shared_ptr<Segment>;
 
 }  // namespace engine
 }  // namespace milvus

@@ -19,7 +19,6 @@
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 
 namespace milvus {
@@ -57,8 +56,6 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
         result = device_index->CopyGpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFSQ>(index)) {
         result = cpu_index->CopyCpuToGpu(device_id, config);
-    } else if (auto cpu_index = std::dynamic_pointer_cast<IVFSQNR_NM>(index)) {
-        result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFPQ>(index)) {
         result = cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVF>(index)) {
@@ -68,8 +65,9 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
     } else {
         KNOWHERE_THROW_MSG("this index type not support transfer to gpu");
     }
-
-    CopyIndexData(result, index);
+    if (result != nullptr) {
+        CopyIndexData(result, index);
+    }
     return result;
 }
 

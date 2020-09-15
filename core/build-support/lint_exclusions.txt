@@ -1,11 +1,7 @@
 *cmake-build-debug*
 *cmake-build-release*
 *cmake_build*
-*src/index/thirdparty*
 *thirdparty*
-*easylogging++*
-*SqliteMetaImpl.cpp
 *src/grpc*
-*thirdparty*
 *milvus/include*
-*unittest/server/test_web.cpp
+*unittest*

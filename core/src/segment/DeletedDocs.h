@@ -20,21 +20,22 @@
 #include <memory>
 #include <vector>
 
+#include "cache/DataObj.h"
+#include "db/Types.h"
+
 namespace milvus {
 namespace segment {
 
-using offset_t = int32_t;
-
-class DeletedDocs {
+class DeletedDocs : public cache::DataObj {
  public:
-    explicit DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets);
+    explicit DeletedDocs(const std::vector<engine::offset_t>& deleted_doc_offsets);
 
     DeletedDocs() = default;
 
     void
-    AddDeletedDoc(offset_t offset);
+    AddDeletedDoc(engine::offset_t offset);
 
-    const std::vector<offset_t>&
+    const std::vector<engine::offset_t>&
     GetDeletedDocs() const;
 
     //    // TODO
@@ -42,7 +43,10 @@ class DeletedDocs {
     //    GetName() const;
 
     size_t
-    GetSize() const;
+    GetCount() const;
+
+    int64_t
+    Size() override;
 
     //    void
     //    GetBitset(faiss::ConcurrentBitsetPtr& bitset);
@@ -57,7 +61,7 @@ class DeletedDocs {
     operator=(DeletedDocs&&) = delete;
 
  private:
-    std::vector<offset_t> deleted_doc_offsets_;
+    std::vector<engine::offset_t> deleted_doc_offsets_;
     //    faiss::ConcurrentBitsetPtr bitset_;
     //    const std::string name_ = "deleted_docs";
 };

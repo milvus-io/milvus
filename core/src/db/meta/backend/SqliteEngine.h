@@ -16,7 +16,6 @@
 
 #include <sqlite3.h>
 
-#include "db/Options.h"
 #include "db/meta/backend/MetaEngine.h"
 #include "utils/Status.h"
 
@@ -25,8 +24,7 @@ namespace milvus::engine::meta {
 class SqliteEngine : public MetaEngine {
  public:
     explicit SqliteEngine(const DBMetaOptions& options);
-
-    ~SqliteEngine();
+    virtual ~SqliteEngine();
 
  public:
     Status

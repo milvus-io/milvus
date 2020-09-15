@@ -14,7 +14,7 @@
 #include "Utils.h"
 #include "config/ServerConfig.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <set>
 #include <string>
 #include <utility>
@@ -102,6 +102,7 @@ StopSchedulerService() {
     JobMgrInst::GetInstance()->Stop();
     SchedInst::GetInstance()->Stop();
     ResMgrInst::GetInstance()->Stop();
+    OptimizerInst::GetInstance()->Stop();
 }
 
 }  // namespace scheduler

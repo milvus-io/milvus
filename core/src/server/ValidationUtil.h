@@ -30,16 +30,10 @@ extern Status
 ValidateFieldName(const std::string& field_name);
 
 extern Status
-ValidateIndexName(const std::string& index_name);
-
-extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
-ValidateIndexType(const std::string& index_type);
-
-extern Status
-ValidateVectorDimension(int64_t dimension, const std::string& metric_type);
+ValidateIndexType(std::string& index_type);
 
 extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
@@ -48,15 +42,21 @@ extern Status
 ValidateSegmentRowCount(int64_t segment_row_count);
 
 extern Status
-ValidateIndexMetricType(const std::string& metric_type);
+ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type);
+
+extern Status
+ValidateSearchMetricType(const std::string& metric_type, bool is_binary);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);
 
 extern Status
-ValidatePartitionName(const std::string& partition_name);
+ValidatePartitionTags(const std::vector<std::string>& partition_tags);
 
 extern Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags);
+ValidateInsertDataSize(const engine::DataChunkPtr& data);
+
+extern Status
+ValidateCompactThreshold(double threshold);
 }  // namespace server
 }  // namespace milvus

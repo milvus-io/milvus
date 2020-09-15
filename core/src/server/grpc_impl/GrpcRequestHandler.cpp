@@ -11,7 +11,7 @@
 
 #include "server/grpc_impl/GrpcRequestHandler.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -137,16 +137,16 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
 
     std::vector<float> float_array(float_data_size, 0.0f);
     std::vector<uint8_t> binary_array(binary_data_size, 0);
-    int64_t float_offset = 0, binary_offset = 0;
+    int64_t offset = 0;
     if (float_data_size > 0) {
         for (auto& record : grpc_records) {
-            memcpy(&float_array[float_offset], record.float_data().data(), record.float_data_size() * sizeof(float));
-            float_offset += record.float_data_size();
+            memcpy(&float_array[offset], record.float_data().data(), record.float_data_size() * sizeof(float));
+            offset += record.float_data_size();
         }
     } else if (binary_data_size > 0) {
         for (auto& record : grpc_records) {
-            memcpy(&binary_array[binary_offset], record.binary_data().data(), record.binary_data().size());
-            binary_offset += record.binary_data().size();
+            memcpy(&binary_array[offset], record.binary_data().data(), record.binary_data().size());
+            offset += record.binary_data().size();
         }
     }
 
@@ -168,7 +168,7 @@ void
 DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::BooleanQueryPtr& boolean_clause,
                 query::QueryPtr& query_ptr) {
     if (general_query.has_boolean_query()) {
-        boolean_clause->SetOccur((query::Occur)general_query.boolean_query().occur());
+        boolean_clause->SetOccur(static_cast<query::Occur>(general_query.boolean_query().occur()));
         for (uint64_t i = 0; i < general_query.boolean_query().general_query_size(); ++i) {
             if (general_query.boolean_query().general_query(i).has_boolean_query()) {
                 query::BooleanQueryPtr query = std::make_shared<query::BooleanQuery>();
@@ -217,8 +217,9 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     CopyRowRecords(query.vector_query().records(),
                                    google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
-                    vector_query->query_vector.float_data = vectors.float_data_;
-                    vector_query->query_vector.binary_data = vectors.binary_data_;
+                    vector_query->query_vector.vector_count = vectors.vector_count_;
+                    vector_query->query_vector.float_data.swap(vectors.float_data_);
+                    vector_query->query_vector.binary_data.swap(vectors.binary_data_);
 
                     vector_query->boost = query.vector_query().query_boost();
                     vector_query->field_name = query.vector_query().field_name();
@@ -272,21 +273,11 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
 
         // judge whether data exists
         engine::BinaryDataPtr data = data_chunk->fixed_fields_[name];
-        if (data == nullptr || data->data_.empty())
-            continue;
-
-        auto single_size = data->data_.size() / id_size;
-
-        if (name == engine::DEFAULT_UID_NAME) {
-            int64_t int64_value;
-            auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
-            for (int i = 0; i < id_size; i++) {
-                auto offset = i * single_size;
-                memcpy(&int64_value, data->data_.data() + offset, single_size);
-                response->add_ids(int64_value);
-            }
+        if (data == nullptr || data->data_.empty()) {
             continue;
         }
+
+        auto single_size = (id_size != 0) ? (data->data_.size() / id_size) : 0;
 
         auto field_value = response->add_fields();
         auto vector_record = field_value->mutable_vector_record();
@@ -326,7 +317,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             if (type == engine::DataType::INT32) {
                 // add int32 data
                 int32_t int32_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(int32_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&int32_value, data->data_.data() + offset, single_size);
@@ -335,7 +325,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::INT64) {
                 // add int64 data
                 int64_t int64_value;
-                auto int64_size = single_size * sizeof(int8_t) / sizeof(int64_t);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&int64_value, data->data_.data() + offset, single_size);
@@ -344,7 +333,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::DOUBLE) {
                 // add double data
                 double double_value;
-                auto int32_size = single_size * sizeof(int8_t) / sizeof(double);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&double_value, data->data_.data() + offset, single_size);
@@ -353,7 +341,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
             } else if (type == engine::DataType::FLOAT) {
                 // add float data
                 float float_value;
-                auto float_size = single_size * sizeof(int8_t) / sizeof(float);
                 for (int i = 0; i < id_size; i++) {
                     auto offset = i * single_size;
                     memcpy(&float_value, data->data_.data() + offset, single_size);
@@ -381,12 +368,12 @@ ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::v
 
     std::string vector_field_name;
     bool set_valid_row = false;
-    for (auto field_name : field_names) {
+    for (const auto& field_name : field_names) {
         if (!attrs.empty()) {
             if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
                 auto grpc_field = response->add_fields();
                 grpc_field->set_field_name(field_name);
-                grpc_field->set_type((::milvus::grpc::DataType)attrs[0].attr_type_.at(field_name));
+                grpc_field->set_type(static_cast<::milvus::grpc::DataType>(attrs[0].attr_type_.at(field_name)));
                 auto grpc_attr_data = grpc_field->mutable_attr_record();
 
                 std::vector<int32_t> int32_data;
@@ -740,8 +727,14 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     for (int i = 0; i < request->fields_size(); ++i) {
         const auto& field = request->fields(i);
 
+        if (fields.find(field.name()) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field name");
+            SET_RESPONSE(response, status, context)
+            return ::grpc::Status::OK;
+        }
+
         FieldSchema field_schema;
-        field_schema.field_type_ = (engine::DataType)field.type();
+        field_schema.field_type_ = static_cast<engine::DataType>(field.type());
 
         // Currently only one extra_param
         if (field.extra_params_size() != 0) {
@@ -813,7 +806,9 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::
     for (int i = 0; i < request->extra_params_size(); i++) {
         const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
         if (extra.key() == EXTRA_PARAM_KEY) {
-            json_params = json::parse(extra.value());
+            json_params[EXTRA_PARAM_KEY] = json::parse(extra.value());
+        } else {
+            json_params[extra.key()] = extra.value();
         }
     }
 
@@ -887,6 +882,10 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
 
+    for (auto it : vector_ids) {
+        response->add_ids(it);
+    }
+
     int valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
@@ -895,9 +894,7 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
         }
     }
 
-    if (valid_size > 0) {
-        CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
-    }
+    CopyDataChunkToEntity(data_chunk, field_mappings, valid_size, response);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
@@ -1031,12 +1028,15 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
 
         response->set_collection_name(request->collection_name());
         for (auto& field_kv : collection_schema.fields_) {
+            if (field_kv.first == engine::FIELD_UID) {
+                continue;
+            }
             auto field = response->add_fields();
             auto& field_name = field_kv.first;
             auto& field_schema = field_kv.second;
 
             field->set_name(field_name);
-            field->set_type((milvus::grpc::DataType)field_schema.field_type_);
+            field->set_type(static_cast<milvus::grpc::DataType>(field_schema.field_type_));
 
             auto grpc_field_param = field->add_extra_params();
             grpc_field_param->set_key(EXTRA_PARAM_KEY);
@@ -1045,7 +1045,11 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext* context, const ::m
             for (auto& item : field_schema.index_params_.items()) {
                 auto grpc_index_param = field->add_index_params();
                 grpc_index_param->set_key(item.key());
-                grpc_index_param->set_value(item.value());
+                if (item.value().is_object()) {
+                    grpc_index_param->set_value(item.value().dump());
+                } else {
+                    grpc_index_param->set_value(item.value());
+                }
             }
         }
 
@@ -1134,7 +1138,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Co
             auto request_str = RequestMap(iter.second->GetReqType()) + "-" + iter.second->ReqID();
             requests.emplace_back(request_str);
         }
-        nlohmann::json reply_json;
+        milvus::json reply_json;
         reply_json["requests"] = requests;
         reply = reply_json.dump();
         response->set_string_reply(reply);
@@ -1255,6 +1259,7 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     std::vector<std::string> collection_names;
+    collection_names.reserve(collection_names.size());
     for (int32_t i = 0; i < request->collection_name_array().size(); i++) {
         collection_names.push_back(request->collection_name_array(i));
     }
@@ -1267,13 +1272,12 @@ GrpcRequestHandler::Flush(::grpc::ServerContext* context, const ::milvus::grpc::
 }
 
 ::grpc::Status
-GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+GrpcRequestHandler::Compact(::grpc::ServerContext* context, const ::milvus::grpc::CompactParam* request,
                             ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
-    Status status = req_handler_.Compact(GetContext(context), request->collection_name(), compact_threshold);
+    Status status = req_handler_.Compact(GetContext(context), request->collection_name(), request->threshold());
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
     SET_RESPONSE(response, status, context);
@@ -1291,6 +1295,16 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+
+    engine::IDNumbers vector_ids;
+    vector_ids.reserve(request->entity_id_array_size());
+    for (int i = 0; i < request->entity_id_array_size(); i++) {
+        if (request->entity_id_array(i) < 0) {
+            auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
+            SET_RESPONSE(response->mutable_status(), status, context);
+            return ::grpc::Status::OK;
+        }
+    }
 
     auto field_size = request->fields_size();
 
@@ -1320,7 +1334,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         auto grpc_float_size = request->fields(i).attr_record().float_value_size();
         auto grpc_double_size = request->fields(i).attr_record().double_value_size();
         const auto& field = request->fields(i);
-        auto field_name = field.field_name();
+        auto& field_name = field.field_name();
 
         std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
@@ -1362,7 +1376,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         int64_t size = request->entity_id_array_size() * sizeof(int64_t);
         std::vector<uint8_t> temp_data(size, 0);
         memcpy(temp_data.data(), request->entity_id_array().data(), size);
-        chunk_data.insert(std::make_pair(engine::DEFAULT_UID_NAME, temp_data));
+        chunk_data.insert(std::make_pair(engine::FIELD_UID, temp_data));
     }
 
     std::string collection_name = request->collection_name();
@@ -1374,7 +1388,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     }
 
     // return generated ids
-    auto pair = chunk_data.find(engine::DEFAULT_UID_NAME);
+    auto pair = chunk_data.find(engine::FIELD_UID);
     if (pair != chunk_data.end()) {
         response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size() / sizeof(int64_t)), 0);
         memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
@@ -1446,8 +1460,7 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
 
 #if 0
 Status
-ParseTermQuery(const nlohmann::json& term_json,
-               std::unordered_map<std::string, engine::DataType> field_type,
+ParseTermQuery(const milvus::json& term_json, std::unordered_map<std::string, engine::DataType> field_type,
                query::TermQueryPtr& term_query) {
     std::string field_name = term_json["field"].get<std::string>();
     auto term_value_json = term_json["values"];
@@ -1514,7 +1527,7 @@ ParseTermQuery(const nlohmann::json& term_json,
 }
 
 Status
-ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_query) {
+ParseRangeQuery(const milvus::json& range_json, query::RangeQueryPtr& range_query) {
     std::string field_name = range_json["field"];
     range_query->field_name = field_name;
 
@@ -1560,43 +1573,51 @@ ParseRangeQuery(const nlohmann::json& range_json, query::RangeQueryPtr& range_qu
 #endif
 
 Status
-GrpcRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query,
+GrpcRequestHandler::ProcessLeafQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& query,
                                          std::string& field_name) {
-    auto status = Status::OK();
-    if (json.contains("term")) {
+    if (query_json.contains("term")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto term_query = std::make_shared<query::TermQuery>();
-        nlohmann::json json_obj = json["term"];
+        milvus::json json_obj = query_json["term"];
+        JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         term_query->json_obj = json_obj;
-        nlohmann::json::iterator json_it = json_obj.begin();
+        milvus::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
 
         leaf_query->term_query = term_query;
         query->AddLeafQuery(leaf_query);
-    } else if (json.contains("range")) {
+    } else if (query_json.contains("range")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
         auto range_query = std::make_shared<query::RangeQuery>();
-        nlohmann::json json_obj = json["range"];
+        milvus::json json_obj = query_json["range"];
+        JSON_NULL_CHECK(json_obj);
+        JSON_OBJECT_CHECK(json_obj);
         range_query->json_obj = json_obj;
-        nlohmann::json::iterator json_it = json_obj.begin();
+        milvus::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
 
         leaf_query->range_query = range_query;
         query->AddLeafQuery(leaf_query);
-    } else if (json.contains("vector")) {
+    } else if (query_json.contains("vector")) {
         auto leaf_query = std::make_shared<query::LeafQuery>();
-        auto vector_json = json["vector"];
+        auto vector_json = query_json["vector"];
+        JSON_NULL_CHECK(vector_json);
 
         leaf_query->vector_placeholder = vector_json.get<std::string>();
         query->AddLeafQuery(leaf_query);
+    } else {
+        return Status{SERVER_INVALID_ARGUMENT, "Leaf query get wrong key"};
     }
-    return status;
+    return Status::OK();
 }
 
 Status
-GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+GrpcRequestHandler::ProcessBooleanQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& boolean_query,
                                             query::QueryPtr& query_ptr) {
-    auto status = Status::OK();
+    if (query_json.empty()) {
+        return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
+    }
     for (auto& el : query_json.items()) {
         if (el.key() == "must") {
             boolean_query->SetOccur(query::Occur::MUST);
@@ -1662,12 +1683,12 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, qu
                 }
             }
         } else {
-            std::string msg = "Must json string doesnot include right query";
+            std::string msg = "BoolQuery json string does not include bool query";
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         }
     }
 
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -1675,26 +1696,35 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
     const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params, const std::string& dsl_string,
     query::BooleanQueryPtr& boolean_query, query::QueryPtr& query_ptr) {
     try {
-        nlohmann::json dsl_json = json::parse(dsl_string);
+        milvus::json dsl_json = json::parse(dsl_string);
 
+        if (dsl_json.empty()) {
+            return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
+        }
         auto status = Status::OK();
+        if (vector_params.empty()) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+        }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
-            nlohmann::json vector_json = json::parse(vector_string);
-            json::iterator it = vector_json.begin();
+            milvus::json vector_json = json::parse(vector_string);
+            milvus::json::iterator it = vector_json.begin();
             std::string placeholder = it.key();
 
             auto vector_query = std::make_shared<query::VectorQuery>();
-            json::iterator vector_param_it = it.value().begin();
+            milvus::json::iterator vector_param_it = it.value().begin();
             if (vector_param_it != it.value().end()) {
-                std::string field_name = vector_param_it.key();
+                const std::string& field_name = vector_param_it.key();
                 vector_query->field_name = field_name;
-                int64_t topk = vector_param_it.value()["topk"];
-                status = server::ValidateSearchTopk(topk);
-                if (!status.ok()) {
-                    return status;
-                }
+                milvus::json param_json = vector_param_it.value();
+                int64_t topk = param_json["topk"];
+                STATUS_CHECK(server::ValidateSearchTopk(topk));
                 vector_query->topk = topk;
+                if (param_json.contains("metric_type")) {
+                    std::string metric_type = param_json["metric_type"];
+                    vector_query->metric_type = metric_type;
+                    query_ptr->metric_types.insert({field_name, param_json["metric_type"]});
+                }
                 if (!vector_param_it.value()["params"].empty()) {
                     vector_query->extra_params = vector_param_it.value()["params"];
                 }
@@ -1704,21 +1734,25 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             engine::VectorsData vector_data;
             CopyRowRecords(vector_param.row_record().records(),
                            google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
-            vector_query->query_vector.binary_data = vector_data.binary_data_;
-            vector_query->query_vector.float_data = vector_data.float_data_;
+            vector_query->query_vector.vector_count = vector_data.vector_count_;
+            vector_query->query_vector.binary_data.swap(vector_data.binary_data_);
+            vector_query->query_vector.float_data.swap(vector_data.float_data_);
 
             query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
         }
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
+            JSON_NULL_CHECK(boolean_query_json);
             status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
             if (!status.ok()) {
-                return status;
+                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
             }
+        } else {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
         }
-        return status;
+        return Status::OK();
     } catch (std::exception& e) {
-        return Status{SERVER_INVALID_DSL_PARAMETER, e.what()};
+        return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
 }
 

@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 #include <thread>
 
@@ -58,7 +58,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto binaryset = index_->Serialize();
+    auto binaryset = index_->Serialize(conf);
     {
         // copy cpu to gpu
         auto cpu_idx = std::make_shared<milvus::knowhere::IVFSQHybrid>(DEVICEID);

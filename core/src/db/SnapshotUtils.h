@@ -13,6 +13,7 @@
 
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
+#include "db/snapshot/Snapshot.h"
 #include "utils/Json.h"
 
 #include <string>
@@ -46,8 +47,26 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
 bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
+bool
+IsVectorField(engine::DataType type);
+
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
+
+Status
+GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count);
+
+Status
+GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count);
+
+Status
+ClearCollectionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root);
+
+Status
+ClearPartitionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, snapshot::ID_TYPE partition_id);
+
+Status
+ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, const std::string& field_name);
 
 }  // namespace engine
 }  // namespace milvus

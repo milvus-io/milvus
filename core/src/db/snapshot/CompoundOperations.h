@@ -49,7 +49,7 @@ class CompoundBaseOperation : public Operations {
         // TODO
         if (GetContextLsn() == 0) {
             SetContextLsn(GetStartedSS()->GetMaxLsn());
-        } else if (GetContextLsn() <= GetStartedSS()->GetMaxLsn()) {
+        } else if (GetContextLsn() < GetStartedSS()->GetMaxLsn()) {
             return Status(SS_INVALID_CONTEX_ERROR, "Invalid LSN found in operation");
         }
         return Status::OK();
@@ -94,6 +94,9 @@ class CompoundSegmentsOperation : public CompoundBaseOperation<CompoundSegmentsO
     Status DoExecute(StorePtr) override;
 
     Status
+    AddStaleSegmentFile(const SegmentFilePtr&);
+
+    Status
     CommitNewSegment(const OperationContext& context, SegmentPtr&);
 
     Status
@@ -101,6 +104,10 @@ class CompoundSegmentsOperation : public CompoundBaseOperation<CompoundSegmentsO
 
     Status
     CommitRowCountDelta(ID_TYPE segment_id, SIZE_TYPE delta, bool sub = true);
+
+ protected:
+    bool
+    StaleSegmentFilesModified();
 
  protected:
     std::map<ID_TYPE, std::pair<SIZE_TYPE, bool>> delta_;
@@ -168,6 +175,19 @@ class NewSegmentOperation : public CompoundBaseOperation<NewSegmentOperation> {
 
  protected:
     SIZE_TYPE row_cnt_ = 0;
+};
+
+class DropSegmentOperation : public CompoundBaseOperation<DropSegmentOperation> {
+ public:
+    using BaseT = CompoundBaseOperation<DropSegmentOperation>;
+    static constexpr const char* Name = "DS";
+
+    DropSegmentOperation(const OperationContext& context, ScopedSnapshotT prev_ss);
+
+    Status DoExecute(StorePtr) override;
+
+    //    Status
+    //    AddStaleSegment();
 };
 
 class MergeOperation : public CompoundBaseOperation<MergeOperation> {

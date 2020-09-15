@@ -13,18 +13,13 @@
 
 #include <ctime>
 #include <string>
+#include <vector>
 
-#include "Options.h"
 #include "db/Types.h"
 #include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
-namespace snapshot {
-class Segment;
-class Partition;
-class Collection;
-}  // namespace snapshot
 namespace utils {
 
 int64_t
@@ -36,11 +31,11 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 bool
 IsBinaryMetricType(const std::string& metric_type);
 
-engine::DateT
+engine::date_t
 GetDate(const std::time_t& t, int day_delta = 0);
-engine::DateT
+engine::date_t
 GetDate();
-engine::DateT
+engine::date_t
 GetDateWithDelta(int day_delta);
 
 struct MetaUriInfo {
@@ -57,6 +52,21 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
 void
 SendExitSignal();
+
+void
+GetIDFromChunk(const engine::DataChunkPtr& chunk, engine::IDNumbers& ids);
+
+int64_t
+GetSizeOfChunk(const engine::DataChunkPtr& chunk);
+
+Status
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks);
+
+bool
+RequireRawFile(const std::string& index_type);
+
+bool
+RequireCompressFile(const std::string& index_type);
 
 }  // namespace utils
 }  // namespace engine

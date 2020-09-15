@@ -14,14 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
----
-Checks:          'clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-alpha*,google-*,modernize-*,readability-*'
-# produce HeaderFilterRegex from cpp/build-support/lint_exclusions.txt with:
-# echo -n '^('; sed -e 's/*/\.*/g' cpp/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
-HeaderFilterRegex: '^(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*src/core/thirdparty.*|.*thirdparty.*|.*easylogging++.*|.*SqliteMetaImpl.cpp|.*src/grpc.*|.*src/core.*|.*src/wrapper.*)$'
+
+# The checks defined here will be run and will display by default as warnings.
+Checks: >
+    -*, clang-diagnostic-*, -clang-diagnostic-error,
+    clang-analyzer-*, -clang-analyzer-alpha*,
+    google-*, -google-runtime-references, -google-readability-todo,
+    modernize-*, -modernize-pass-by-value, -modernize-use-equals-default,
+    performance-faster-string-find, performance-for-range-copy,
+    performance-implicit-conversion-in-loop, performance-inefficient-algorithm,
+    performance-trivially-destructible, performance-inefficient-vector-operation,
+    performance-move-const-arg, performance-move-constructor-init,
+    performance-noexcept-move-constructor, performance-no-automatic-move,
+    performance-type-promotion-in-math-fn
+
+# produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
+# echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
+HeaderFilterRegex: '^?!(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*thirdparty.*|.*src/grpc.*|.*milvus/include.*|.*unittest.*)$'
 AnalyzeTemporaryDtors: true
-ChainedConditionalReturn: 1
-ChainedConditionalAssignment: 1
 CheckOptions:
   - key:             google-readability-braces-around-statements.ShortStatementLines
     value:           '1'

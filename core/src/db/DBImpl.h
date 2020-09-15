@@ -25,7 +25,6 @@
 
 #include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
-#include "wal/WalManager.h"
 
 namespace milvus {
 namespace engine {
@@ -37,16 +36,16 @@ class DBImpl : public DB, public ConfigObserver {
     ~DBImpl();
 
     Status
-    Start();
+    Start() override;
 
     Status
-    Stop();
+    Stop() override;
 
     Status
     CreateCollection(const snapshot::CreateCollectionContext& context) override;
 
     Status
-    DropCollection(const std::string& name) override;
+    DropCollection(const std::string& collection_name) override;
 
     Status
     HasCollection(const std::string& collection_name, bool& has_or_not) override;
@@ -81,13 +80,15 @@ class DBImpl : public DB, public ConfigObserver {
                 const std::string& field_name, const CollectionIndex& index) override;
 
     Status
-    DropIndex(const std::string& collection_name, const std::string& field_name = "") override;
+    DropIndex(const std::string& collection_name, const std::string& field_name) override;
 
     Status
     DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) override;
 
+    // Note: the data_chunk will be consumed with this method, and only return id field to client
     Status
-    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk) override;
+    Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
+           idx_t op_id) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
@@ -95,7 +96,7 @@ class DBImpl : public DB, public ConfigObserver {
                   DataChunkPtr& data_chunk) override;
 
     Status
-    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers entity_ids) override;
+    DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) override;
 
     Status
     Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) override;
@@ -103,9 +104,10 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) override;
 
+    // Note: if the input field_names is empty, will load all fields of this collection
     Status
     LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
-                   const std::vector<std::string>& field_names, bool force = false) override;
+                   const std::vector<std::string>& field_names, bool force) override;
 
     Status
     Flush(const std::string& collection_name) override;
@@ -113,15 +115,20 @@ class DBImpl : public DB, public ConfigObserver {
     Status
     Flush() override;
 
+    // Note: the threshold is percent of deleted entities that trigger compact action,
+    // default is 0.0, means compact will create a new segment even only one entity is deleted
     Status
-    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold = 0.0) override;
+    Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
     void
     ConfigUpdate(const std::string& name) override;
 
+    bool
+    IsBuildingIndex() override;
+
  private:
     void
-    InternalFlush(const std::string& collection_name = "");
+    InternalFlush(const std::string& collection_name = "", bool merge = true);
 
     void
     TimingFlushThread();
@@ -133,7 +140,7 @@ class DBImpl : public DB, public ConfigObserver {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask(const std::vector<std::string>& collection_names);
+    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times);
 
     void
     BackgroundBuildIndexTask(std::vector<std::string> collection_names);
@@ -145,16 +152,10 @@ class DBImpl : public DB, public ConfigObserver {
     WaitBuildIndexFinish();
 
     void
-    TimingWalThread();
-
-    Status
-    ExecWalRecord(const wal::MXLogRecord& record);
+    StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all = false);
 
     void
-    StartMergeTask(const std::set<std::string>& collection_names, bool force_merge_all = false);
-
-    void
-    BackgroundMerge(std::set<std::string> collection_names, bool force_merge_all);
+    BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all);
 
     void
     WaitMergeFileFinish();
@@ -165,6 +166,18 @@ class DBImpl : public DB, public ConfigObserver {
     void
     ResumeIfLast();
 
+    void
+    IncreaseLiveBuildTaskNum();
+
+    void
+    DecreaseLiveBuildTaskNum();
+
+    void
+    MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
+
+    void
+    IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids);
+
  private:
     DBOptions options_;
     std::atomic<bool> initialized_;
@@ -172,14 +185,10 @@ class DBImpl : public DB, public ConfigObserver {
     MemManagerPtr mem_mgr_;
     MergeManagerPtr merge_mgr_ptr_;
 
-    //    std::shared_ptr<wal::WalManager> wal_mgr_;
-    std::thread bg_wal_thread_;
-
     std::thread bg_flush_thread_;
     std::thread bg_metric_thread_;
     std::thread bg_index_thread_;
 
-    SimpleWaitNotify swn_wal_;
     SimpleWaitNotify swn_flush_;
     SimpleWaitNotify swn_metric_;
     SimpleWaitNotify swn_index_;
@@ -195,12 +204,20 @@ class DBImpl : public DB, public ConfigObserver {
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
 
+    using SegmentIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, int64_t>;
+    using CollectionIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, SegmentIndexRetryMap>;
+    CollectionIndexRetryMap index_retry_map_;
+    std::mutex index_retry_mutex_;
+
     std::mutex build_index_mutex_;
 
     std::mutex flush_merge_compact_mutex_;
 
     int64_t live_search_num_ = 0;
     std::mutex suspend_build_mutex_;
+
+    int64_t live_build_num_ = 0;
+    std::mutex live_build_count_mutex_;
 };  // SSDBImpl
 
 using DBImplPtr = std::shared_ptr<DBImpl>;

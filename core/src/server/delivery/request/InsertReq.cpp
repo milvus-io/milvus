@@ -18,7 +18,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -59,12 +59,14 @@ InsertReq::OnExecute() {
                           "The vector field is empty, Make sure you have entered vector records"};
         }
 
+        // step 1: check collection existence
         bool exist = false;
-        auto status = DBWrapper::DB()->HasCollection(collection_name_, exist);
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
         }
 
+        // step 2: construct insert data
         engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
         data_chunk->count_ = row_count_;
         for (auto& pair : chunk_data_) {
@@ -72,12 +74,27 @@ InsertReq::OnExecute() {
             bin->data_.swap(pair.second);
             data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
         }
+
+        // step 3: check insert data limitation
+        auto status = ValidateInsertDataSize(data_chunk);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
+        // step 4: insert data into db
         status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "Insert", 0, status.message().c_str());
             return status;
         }
-        chunk_data_[engine::DEFAULT_UID_NAME] = data_chunk->fixed_fields_[engine::DEFAULT_UID_NAME]->data_;
+
+        // step 5: return entity id to client
+        auto iter = data_chunk->fixed_fields_.find(engine::FIELD_UID);
+        if (iter == data_chunk->fixed_fields_.end() || iter->second == nullptr) {
+            return Status(SERVER_UNEXPECTED_ERROR, "Insert action return empty id array");
+        }
+        chunk_data_[engine::FIELD_UID] = iter->second->data_;
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

@@ -51,8 +51,14 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
 
-    static void
-    GetValidMList(int64_t dimension, std::vector<int64_t>& resset);
+    static bool
+    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
+
+    static bool
+    GetValidGPUM(int64_t dimension, int64_t m);
+
+    static bool
+    GetValidCPUM(int64_t dimension, int64_t m);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
@@ -94,7 +100,7 @@ class ANNOYConfAdapter : public ConfAdapter {
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
-class HNSWSQ8NRConfAdapter : public ConfAdapter {
+class RHNSWFlatConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
@@ -103,10 +109,40 @@ class HNSWSQ8NRConfAdapter : public ConfAdapter {
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
-class IVFSQ8NRConfAdapter : public IVFConfAdapter {
+class RHNSWPQConfAdapter : public ConfAdapter {
  public:
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class RHNSWSQConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class NGTPANNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class NGTONNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
 
 }  // namespace knowhere

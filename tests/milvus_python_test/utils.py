@@ -16,6 +16,8 @@ epsilon = 0.000001
 default_flush_interval = 1
 big_flush_interval = 1000
 dimension = 128
+nb = 6000
+top_k = 10
 segment_row_count = 5000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
@@ -34,18 +36,17 @@ all_index_types = [
     "BIN_IVF_FLAT"
 ]
 
-
 default_index_params = [
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024},
-    {"nlist": 1024, "m": 16},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128},
+    {"nlist": 128, "m": 16},
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
-    {"n_trees": 4},
-    {"nlist": 1024},
-    {"nlist": 1024}
+    {"n_trees": 50},
+    {"nlist": 128},
+    {"nlist": 128}
 ]
 
 
@@ -63,6 +64,14 @@ def delete_support():
 
 def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
+
+
+def binary_metrics():
+    return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+
+
+def structure_metrics():
+    return ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
 def l2(x, y):
@@ -129,7 +138,7 @@ def gen_inaccuracy(num):
     return num / 255.0
 
 
-def gen_vectors(num, dim, is_normal=False):
+def gen_vectors(num, dim, is_normal=True):
     vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
@@ -172,7 +181,7 @@ def gen_binary_super_vectors(vectors, length):
     dim = len(vectors[0])
     for i in range(length):
         cnt_1 = np.count_nonzero(vectors[i])
-        raw_vector = [1 for i in range(dim)] 
+        raw_vector = [1 for i in range(dim)]
         raw_vectors.append(raw_vector)
         binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
     return raw_vectors, binary_vectors
@@ -207,14 +216,28 @@ def gen_single_vector_fields():
     return fields
 
 
-def gen_default_fields():
+def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}}
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
         ],
-        "segment_row_count": segment_row_count
+        "segment_row_count": segment_row_count,
+        "auto_id" : auto_id 
+    }
+    return default_fields
+
+
+def gen_binary_default_fields(auto_id=True):
+    default_fields = {
+        "fields": [
+            {"field": "int64", "type": DataType.INT64},
+            {"field": "float", "type": DataType.FLOAT},
+            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
+        ],
+        "segment_row_count": segment_row_count,
+        "auto_id" : auto_id 
     }
     return default_fields
 
@@ -259,26 +282,20 @@ def assert_equal_entity(a, b):
     pass
 
 
-def gen_query_vectors_inside_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
-    query_vectors = entities[-1]["values"][:nq]
+def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
+                      metric_type="L2", replace_vecs=None):
+    if rand_vector is True:
+        dimension = len(entities[-1]["values"][0])
+        query_vectors = gen_vectors(nq, dimension)
+    else:
+        query_vectors = entities[-1]["values"][:nq]
+    if replace_vecs:
+        query_vectors = replace_vecs
+    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
-        }
-    }
-    return query, query_vectors
-
-
-def gen_query_vectors_rand_entities(field_name, entities, top_k, nq, search_params={"nprobe": 10, "metric_type": "L2"}):
-    dimension = len(entities[-1]["values"][0])
-    query_vectors = gen_vectors(nq, dimension)
-    query = {
-        "bool": {
-            "must": [
-                {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
-            ]
+            "must": [must_param]
         }
     }
     return query, query_vectors
@@ -293,37 +310,100 @@ def update_query_expr(src_query, keep_old=True, expr=None):
     return tmp_query
 
 
-def gen_default_term_expr(values=None):
+def gen_default_vector_expr(default_query):
+    return default_query["bool"]["must"][0]
+
+
+def gen_default_term_expr(keyword="term", field="int64", values=None):
     if values is None:
-        values = [i for i in range(nb/2)]
-    expr = {"term": {"int64": {"values": values}}}
+        values = [i for i in range(nb // 2)]
+    expr = {keyword: {field: {"values": values}}}
     return expr
 
 
-def gen_default_range_expr(ranges=None):
+def update_term_expr(src_term, terms):
+    tmp_term = copy.deepcopy(src_term)
+    for term in terms:
+        tmp_term["term"].update(term)
+    return tmp_term
+
+
+def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     if ranges is None:
-        ranges = {"GT": 1, "LT": nb/2}
-    expr = {"range": {"int64": {"ranges": ranges}}}
+        ranges = {"GT": 1, "LT": nb // 2}
+    expr = {keyword: {field: ranges}}
     return expr
 
 
+def update_range_expr(src_range, ranges):
+    tmp_range = copy.deepcopy(src_range)
+    for range in ranges:
+        tmp_range["range"].update(range)
+    return tmp_range
 
-def add_field(entities):
-    nb = len(entities[0]["values"])
+
+def gen_invalid_range():
+    range = [
+        {"range": 1},
+        {"range": {}},
+        {"range": []},
+        {"range": {"range": {"int64": {"GT": 0, "LT": nb // 2}}}}
+    ]
+    return range
+
+
+def gen_valid_ranges():
+    ranges = [
+        {"GT": 0, "LT": nb//2},
+        {"GT": nb // 2, "LT": nb*2},
+        {"GT": 0},
+        {"LT": nb},
+        {"GT": -1, "LT": top_k},
+    ]
+    return ranges
+
+
+def gen_invalid_term():
+    terms = [
+        {"term": 1},
+        {"term": []},
+        {"term": {}},
+        {"term": {"term": {"int64": {"values": [i for i in range(nb // 2)]}}}}
+    ]
+    return terms
+
+
+def add_field_default(default_fields, type=DataType.INT64, field_name=None):
+    tmp_fields = copy.deepcopy(default_fields)
+    if field_name is None:
+        field_name = gen_unique_str()
     field = {
-        "field": gen_unique_str(), 
-        "type": DataType.INT64, 
-        "values": [1 for i in range(nb)]
+        "field": field_name,
+        "type": type
     }
-    entities.append(field)
-    return entities
+    tmp_fields["fields"].append(field)
+    return tmp_fields
+
+
+def add_field(entities, field_name=None):
+    nb = len(entities[0]["values"])
+    tmp_entities = copy.deepcopy(entities)
+    if field_name is None:
+        field_name = gen_unique_str()
+    field = {
+        "field": field_name,
+        "type": DataType.INT64,
+        "values": [i for i in range(nb)]
+    }
+    tmp_entities.append(field)
+    return tmp_entities
 
 
 def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
     vectors = gen_vectors(nb, dimension, is_normal)
     field = {
-        "field": gen_unique_str(), 
+        "field": gen_unique_str(),
         "type": DataType.FLOAT_VECTOR,
         "values": vectors
     }
@@ -352,25 +432,28 @@ def remove_vector_field(entities):
 
 
 def update_field_name(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["field"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_type(entities, old_name, new_name):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["field"] == old_name:
             item["type"] = new_name
-    return entities
+    return tmp_entities
 
 
 def update_field_value(entities, old_type, new_value):
-    for item in entities:
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
         if item["type"] == old_type:
-            for i in item["values"]:
-                item["values"][i] = new_value
-    return entities
+            for index, value in enumerate(item["values"]):
+                item["values"][index] = new_value
+    return tmp_entities
 
 
 def add_vector_field(nb, dimension=dimension):
@@ -381,34 +464,34 @@ def add_vector_field(nb, dimension=dimension):
         "values": gen_vectors(nb, dimension)
     }
     return field_name
-        
+
 
 def gen_segment_row_counts():
     sizes = [
-            1,
-            2,
-            1024,
-            4096
+        1,
+        2,
+        1024,
+        4096
     ]
     return sizes
 
 
 def gen_invalid_ips():
     ips = [
-            # "255.0.0.0",
-            # "255.255.0.0",
-            # "255.255.255.0",
-            # "255.255.255.255",
-            "127.0.0",
-            # "123.0.0.2",
-            "12-s",
-            " ",
-            "12 s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "中文",
-            "a".join("a" for _ in range(256))
+        # "255.0.0.0",
+        # "255.255.0.0",
+        # "255.255.255.0",
+        # "255.255.255.255",
+        "127.0.0",
+        # "123.0.0.2",
+        "12-s",
+        " ",
+        "12 s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "中文",
+        "a".join("a" for _ in range(256))
     ]
     return ips
 
@@ -416,147 +499,132 @@ def gen_invalid_ips():
 def gen_invalid_uris():
     ip = None
     uris = [
-            " ",
-            "中文",
-            # invalid protocol
-            # "tc://%s:%s" % (ip, port),
-            # "tcp%s:%s" % (ip, port),
+        " ",
+        "中文",
+        # invalid protocol
+        # "tc://%s:%s" % (ip, port),
+        # "tcp%s:%s" % (ip, port),
 
-            # # invalid port
-            # "tcp://%s:100000" % ip,
-            # "tcp://%s: " % ip,
-            # "tcp://%s:19540" % ip,
-            # "tcp://%s:-1" % ip,
-            # "tcp://%s:string" % ip,
+        # # invalid port
+        # "tcp://%s:100000" % ip,
+        # "tcp://%s: " % ip,
+        # "tcp://%s:19540" % ip,
+        # "tcp://%s:-1" % ip,
+        # "tcp://%s:string" % ip,
 
-            # invalid ip
-            "tcp:// :19530",
-            # "tcp://123.0.0.1:%s" % port,
-            "tcp://127.0.0:19530",
-            # "tcp://255.0.0.0:%s" % port,
-            # "tcp://255.255.0.0:%s" % port,
-            # "tcp://255.255.255.0:%s" % port,
-            # "tcp://255.255.255.255:%s" % port,
-            "tcp://\n:19530",
+        # invalid ip
+        "tcp:// :19530",
+        # "tcp://123.0.0.1:%s" % port,
+        "tcp://127.0.0:19530",
+        # "tcp://255.0.0.0:%s" % port,
+        # "tcp://255.255.0.0:%s" % port,
+        # "tcp://255.255.255.0:%s" % port,
+        # "tcp://255.255.255.255:%s" % port,
+        "tcp://\n:19530",
     ]
     return uris
 
 
 def gen_invalid_strs():
     strings = [
-            1,
-            [1],
-            None,
-            "12-s",
-            " ",
-            # "",
-            # None,
-            "12 s",
-            "BB。A",
-            "c|c",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        1,
+        [1],
+        None,
+        "12-s",
+        " ",
+        # "",
+        # None,
+        "12 s",
+        "BB。A",
+        "c|c",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return strings
 
 
 def gen_invalid_field_types():
     field_types = [
-            # 1,
-            "=c",
-            # 0,
-            None,
-            "",
-            "a".join("a" for i in range(256))
+        # 1,
+        "=c",
+        # 0,
+        None,
+        "",
+        "a".join("a" for i in range(256))
     ]
     return field_types
 
 
 def gen_invalid_metric_types():
     metric_types = [
-            1,
-            "=c",
-            0,
-            None,
-            "",
-            "a".join("a" for i in range(256))
+        1,
+        "=c",
+        0,
+        None,
+        "",
+        "a".join("a" for i in range(256))
     ]
     return metric_types
 
 
 # TODO:
 def gen_invalid_ints():
-    top_ks = [
-            # 1.0,
-            None,
-            "stringg",
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+    int_values = [
+        # 1.0,
+        None,
+        [1, 2, 3],
+        " ",
+        "",
+        -1,
+        "String",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
-    return top_ks
+    return int_values
 
 
 def gen_invalid_params():
     params = [
-            9999999999,
-            -1,
-            # None,
-            [1,2,3],
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文"
+        9999999999,
+        -1,
+        # None,
+        [1, 2, 3],
+        " ",
+        "",
+        "String",
+        "中文"
     ]
     return params
 
 
 def gen_invalid_vectors():
     invalid_vectors = [
-            "1*2",
-            [],
-            [1],
-            [1,2],
-            [" "],
-            ['a'],
-            [None],
-            None,
-            (1,2),
-            {"a": 1},
-            " ",
-            "",
-            "String",
-            "12-s",
-            "BB。A",
-            " siede ",
-            "(mn)",
-            "pip+",
-            "=c",
-            "中文",
-            "a".join("a" for i in range(256))
+        "1*2",
+        [],
+        [1],
+        [1, 2],
+        [" "],
+        ['a'],
+        [None],
+        None,
+        (1, 2),
+        {"a": 1},
+        " ",
+        "",
+        "String",
+        "12-s",
+        "BB。A",
+        " siede ",
+        "(mn)",
+        "pip+",
+        "=c",
+        "中文",
+        "a".join("a" for i in range(256))
     ]
     return invalid_vectors
 
@@ -607,23 +675,23 @@ def gen_invalid_index():
     for search_length in gen_invalid_params():
         index_param = {"index_type": "NSG",
                        "params": {"search_length": search_length, "out_degree": 40, "candidate_pool_size": 50,
-                                       "knng": 100}}
+                                  "knng": 100}}
         index_params.append(index_param)
     for out_degree in gen_invalid_params():
         index_param = {"index_type": "NSG",
                        "params": {"search_length": 100, "out_degree": out_degree, "candidate_pool_size": 50,
-                                       "knng": 100}}
+                                  "knng": 100}}
         index_params.append(index_param)
     for candidate_pool_size in gen_invalid_params():
         index_param = {"index_type": "NSG", "params": {"search_length": 100, "out_degree": 40,
-                                                                     "candidate_pool_size": candidate_pool_size,
-                                                                     "knng": 100}}
+                                                       "candidate_pool_size": candidate_pool_size,
+                                                       "knng": 100}}
         index_params.append(index_param)
     index_params.append({"index_type": "IVF_FLAT", "params": {"invalid_key": 1024}})
     index_params.append({"index_type": "HNSW", "params": {"invalid_key": 16, "efConstruction": 100}})
     index_params.append({"index_type": "NSG",
                          "params": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
-                                         "knng": 100}})
+                                    "knng": 100}})
     for invalid_n_trees in gen_invalid_params():
         index_params.append({"index_type": "ANNOY", "params": {"n_trees": invalid_n_trees}})
 
@@ -650,8 +718,8 @@ def gen_index():
             index_params.extend(ivf_params)
         elif index_type == "IVF_PQ":
             IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
-                        for nlist in nlists \
-                        for m in pq_ms]
+                            for nlist in nlists \
+                            for m in pq_ms]
             index_params.extend(IVFPQ_params)
         elif index_type == "HNSW":
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
@@ -677,7 +745,7 @@ def gen_simple_index():
         if all_index_types[i] in binary_support():
             continue
         dic = {"index_type": all_index_types[i], "metric_type": "L2"}
-        dic.update(default_index_params[i])
+        dic.update({"params": default_index_params[i]})
         index_params.append(dic)
     return index_params
 
@@ -687,21 +755,21 @@ def gen_binary_index():
     for i in range(len(all_index_types)):
         if all_index_types[i] in binary_support():
             dic = {"index_type": all_index_types[i]}
-            dic.update(default_index_params[i])
+            dic.update({"params": default_index_params[i]})
             index_params.append(dic)
     return index_params
 
 
-def get_search_param(index_type):
-    search_params = {"metric_type": "L2"}
+def get_search_param(index_type, metric_type="L2"):
+    search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
-        search_params.update({"nprobe": 32})
+        search_params.update({"nprobe": 64})
     elif index_type == "HNSW":
         search_params.update({"ef": 64})
     elif index_type == "NSG":
         search_params.update({"search_length": 100})
     elif index_type == "ANNOY":
-        search_params.update({"search_k": 100})
+        search_params.update({"search_k": 1000})
     else:
         logging.getLogger().error("Invalid index_type.")
         raise Exception("Invalid index_type.")

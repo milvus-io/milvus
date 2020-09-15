@@ -119,8 +119,9 @@ set(THIRDPARTY_DIR "${INDEX_SOURCE_DIR}/thirdparty")
 
 string(TOUPPER ${CMAKE_BUILD_TYPE} UPPERCASE_BUILD_TYPE)
 
-set(EP_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}}")
-set(EP_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}}")
+set(FAISS_FLAGS "-DELPP_THREAD_SAFE -fopenmp -Werror=return-type")
+set(EP_CXX_FLAGS "${FAISS_FLAGS} ${CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}}")
+set(EP_C_FLAGS   "${FAISS_FLAGS} ${CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}}")
 
 if (NOT MSVC)
     # Set -fPIC on all external projects
@@ -169,7 +170,7 @@ if ("${MAKE}" STREQUAL "")
     endif ()
 endif ()
 
-set(MAKE_BUILD_ARGS "-j8")
+set(MAKE_BUILD_ARGS "-j6")
 
 
 # ----------------------------------------------------------------------
@@ -455,7 +456,8 @@ macro(build_gtest)
 
 endmacro()
 
-if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
+# if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
+if ( NOT TARGET gtest AND KNOWHERE_BUILD_TESTS )
     resolve_dependency(GTest)
 
     if (NOT GTEST_VENDORED)
@@ -512,8 +514,24 @@ macro(build_faiss)
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
+    if (CCACHE_FOUND)
+        set(FAISS_C_COMPILER "${CCACHE_FOUND} ${CMAKE_C_COMPILER}")
+        if (MILVUS_GPU_VERSION)
+            set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+            set(FAISS_CUDA_COMPILER "${CCACHE_FOUND} ${CMAKE_CUDA_COMPILER}")
+        else ()
+            set(FAISS_CXX_COMPILER "${CCACHE_FOUND} ${CMAKE_CXX_COMPILER}")
+        endif()
+    else ()
+        set(FAISS_C_COMPILER "${CMAKE_C_COMPILER}")
+        set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif()
+
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
+            "CC=${FAISS_C_COMPILER}"
+            "CXX=${FAISS_CXX_COMPILER}"
+            "NVCC=${FAISS_CUDA_COMPILER}"
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS} -mf16c -O3"
             --without-python)
@@ -535,7 +553,7 @@ macro(build_faiss)
     endif ()
 
     if (MILVUS_GPU_VERSION)
-        if (MILVUS_CUDA_ARCH STREQUAL "DEFAULT")
+        if (NOT MILVUS_CUDA_ARCH OR MILVUS_CUDA_ARCH STREQUAL "DEFAULT")
             set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
                 "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75"
@@ -635,3 +653,5 @@ if (KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
 endif ()
+
+add_subdirectory(thirdparty/NGT)

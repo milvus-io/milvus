@@ -13,12 +13,14 @@
 #include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
+#include "server/DBWrapper.h"
 #include "src/version.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -43,7 +45,12 @@ CmdReq::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "status") {
-        result_ = "OK";
+        json resp;
+        resp["require_restart"] = ConfigMgr::GetInstance().RequireRestart();
+        resp["indexing"] = DBWrapper::DB()->IsBuildingIndex();
+        resp["uptime"] = uptime();
+        resp["server_time"] = now();
+        result_ = resp.dump();
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
     } else if (cmd_ == "mode") {
@@ -57,14 +64,18 @@ CmdReq::OnExecute() {
         sys_info_inst.GetSysInfoJsonStr(result_);
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
+    } else if (cmd_ == "get_milvus_config") {
+        result_ = ConfigMgr::GetInstance().JsonDump();
     } else if (cmd_.substr(0, 3) == "get") {
         try {
             auto words = split(cmd_, ' ');
             if (words.size() == 2) {
                 result_ = ConfigMgr::GetInstance().Get(words[1]);
+            } else {
+                stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
-        } catch (ConfigStatus& cs) {
-            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (std::exception& ex) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         } catch (...) {
             stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on GET command.");
         }
@@ -73,9 +84,11 @@ CmdReq::OnExecute() {
             auto words = split(cmd_, ' ');
             if (words.size() == 3) {
                 ConfigMgr::GetInstance().Set(words[1], words[2]);
+            } else {
+                stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }
-        } catch (ConfigStatus& cs) {
-            stat = Status(SERVER_UNEXPECTED_ERROR, cs.message);
+        } catch (std::exception& ex) {
+            stat = Status(SERVER_UNEXPECTED_ERROR, ex.what());
         } catch (...) {
             stat = Status(SERVER_UNEXPECTED_ERROR, "Unknown exception happened on SET command.");
         }
@@ -101,6 +114,19 @@ std::string
 CmdReq::tolower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
     return s;
+}
+
+int64_t
+CmdReq::now() {
+    auto d = std::chrono::system_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
+}
+
+int64_t CmdReq::start_time = CmdReq::now();
+
+int64_t
+CmdReq::uptime() {
+    return now() - start_time;
 }
 
 }  // namespace server

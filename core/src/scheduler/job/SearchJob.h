@@ -72,6 +72,11 @@ class SearchJob : public Job {
         return segment_ids_;
     }
 
+    std::mutex&
+    mutex() {
+        return mutex_;
+    }
+
  protected:
     void
     OnCreateTasks(JobTasks& tasks) override;

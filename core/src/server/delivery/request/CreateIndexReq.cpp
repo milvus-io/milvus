@@ -17,7 +17,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -67,9 +67,9 @@ CreateIndexReq::OnExecute() {
 
         // pick up field
         engine::snapshot::FieldPtr field;
-        for (auto field_it = fields_schema.begin(); field_it != fields_schema.end(); field_it++) {
-            if (field_it->first->GetName() == field_name_) {
-                field = field_it->first;
+        for (auto& field_it : fields_schema) {
+            if (field_it.first->GetName() == field_name_) {
+                field = field_it.first;
                 break;
             }
         }
@@ -77,34 +77,30 @@ CreateIndexReq::OnExecute() {
             return Status(SERVER_INVALID_FIELD_NAME, "Invalid field name");
         }
 
+        // validate index type
+        std::string index_type;
+        if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
+            index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
+        }
+        STATUS_CHECK(ValidateIndexType(index_type));
+
         engine::CollectionIndex index;
         if (engine::IsVectorField(field)) {
-            int32_t field_type = field->GetFtype();
             auto params = field->GetParams();
-            int64_t dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
-
-            // validate index type
-            std::string index_type;
-            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
-                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
-            }
-            status = ValidateIndexType(index_type);
-            if (!status.ok()) {
-                return status;
-            }
+            auto dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
             // validate metric type
             std::string metric_type;
             if (json_params_.contains(engine::PARAM_INDEX_METRIC_TYPE)) {
                 metric_type = json_params_[engine::PARAM_INDEX_METRIC_TYPE].get<std::string>();
             }
-            status = ValidateIndexMetricType(metric_type);
+            status = ValidateIndexMetricType(metric_type, index_type);
             if (!status.ok()) {
                 return status;
             }
 
             // validate index parameters
-            status = ValidateIndexParams(json_params_, dimension, index_type);
+            status = ValidateIndexParams(json_params_[engine::PARAM_INDEX_EXTRA_PARAMS], dimension, index_type);
             if (!status.ok()) {
                 return status;
             }
@@ -119,10 +115,6 @@ CreateIndexReq::OnExecute() {
             }
         } else {
             index.index_name_ = index_name_;
-            std::string index_type;
-            if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
-                index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
-            }
             index.index_type_ = index_type;
         }
 

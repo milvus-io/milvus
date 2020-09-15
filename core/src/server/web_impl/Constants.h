@@ -21,13 +21,16 @@ namespace web {
 extern const char* NAME_ENGINE_TYPE_FLAT;
 extern const char* NAME_ENGINE_TYPE_IVFFLAT;
 extern const char* NAME_ENGINE_TYPE_IVFSQ8;
-extern const char* NAME_ENGINE_TYPE_IVFSQ8NR;
 extern const char* NAME_ENGINE_TYPE_IVFSQ8H;
 extern const char* NAME_ENGINE_TYPE_RNSG;
 extern const char* NAME_ENGINE_TYPE_IVFPQ;
 extern const char* NAME_ENGINE_TYPE_HNSW;
-extern const char* NAME_ENGINE_TYPE_HNSW_SQ8NM;
 extern const char* NAME_ENGINE_TYPE_ANNOY;
+extern const char* NAME_ENGINE_TYPE_RHNSWFLAT;
+extern const char* NAME_ENGINE_TYPE_RHNSWPQ;
+extern const char* NAME_ENGINE_TYPE_RHNSWSQ;
+extern const char* NAME_ENGINE_TYPE_NGTPANNG;
+extern const char* NAME_ENGINE_TYPE_NGTONNG;
 
 extern const char* NAME_METRIC_TYPE_L2;
 extern const char* NAME_METRIC_TYPE_IP;
@@ -45,6 +48,7 @@ extern const char* VALUE_INDEX_INDEX_TYPE_DEFAULT;
 extern const int64_t VALUE_INDEX_NLIST_DEFAULT;
 extern const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
 extern const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
+extern const char* NAME_ID;
 
 /////////////////////////////////////////////////////
 

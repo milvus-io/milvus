@@ -48,8 +48,8 @@ StorageTest::SetUp() {
     config_path += CONFIG_FILE;
     WriteToFile(config_path, CONFIG_STR);
 
-    milvus::server::Config& config = milvus::server::Config::GetInstance();
-    ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
+    // milvus::server::Config& config = milvus::server::Config::GetInstance();
+    // ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
 }
 
 void

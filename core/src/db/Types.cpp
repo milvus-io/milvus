@@ -15,21 +15,22 @@
 namespace milvus {
 namespace engine {
 
-const char* DEFAULT_UID_NAME = "_uid";
-const char* PARAM_UID_AUTOGEN = "auto_increment";
+const char* FIELD_UID = "_id";
 
-const char* DEFAULT_RAW_DATA_NAME = "_raw";
-const char* DEFAULT_BLOOM_FILTER_NAME = "_blf";
-const char* DEFAULT_DELETED_DOCS_NAME = "_del";
-const char* DEFAULT_INDEX_COMPRESS_NAME = "_compress";
+const char* ELEMENT_RAW_DATA = "_raw";
+const char* ELEMENT_BLOOM_FILTER = "_blf";
+const char* ELEMENT_DELETED_DOCS = "_del";
+const char* ELEMENT_INDEX_COMPRESS = "_compress";
 
-const char* DEFAULT_STRUCTURED_INDEX_NAME = "SORTED";  // this string should be defined in knowhere::IndexEnum
-
+const char* PARAM_UID_AUTOGEN = "auto_id";
 const char* PARAM_DIMENSION = knowhere::meta::DIM;
 const char* PARAM_INDEX_TYPE = "index_type";
 const char* PARAM_INDEX_METRIC_TYPE = knowhere::Metric::TYPE;
 const char* PARAM_INDEX_EXTRA_PARAMS = "params";
 const char* PARAM_SEGMENT_ROW_COUNT = "segment_row_count";
+
+const char* DEFAULT_STRUCTURED_INDEX = "SORTED";  // this string should be defined in knowhere::IndexEnum
+const char* DEFAULT_PARTITON_TAG = "_default";
 
 }  // namespace engine
 }  // namespace milvus

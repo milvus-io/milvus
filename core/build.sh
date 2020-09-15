@@ -16,14 +16,15 @@ PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
-FAISS_ROOT="" #FAISS root path
-FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
-FIU_ENABLE="OFF"
 CUDA_ARCH="DEFAULT"
+CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "p:d:t:f:s:ulrcghzmei" arg; do
+while getopts "p:d:t:s:f:ulrcghzme" arg; do
   case $arg in
+  f)
+    CUSTOM_THIRDPARTY_PATH=$OPTARG
+    ;;
   p)
     INSTALL_PREFIX=$OPTARG
     ;;
@@ -32,10 +33,6 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
     ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
-    ;;
-  f)
-    FAISS_ROOT=$OPTARG
-    FAISS_SOURCE="AUTO"
     ;;
   u)
     echo "Build and run unittest cases"
@@ -46,7 +43,6 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
     ;;
   r)
     if [[ -d ${BUILD_OUTPUT_DIR} ]]; then
-      rm ./${BUILD_OUTPUT_DIR} -r
       MAKE_CLEAN="ON"
     fi
     ;;
@@ -62,9 +58,6 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
   e)
     WITH_PROMETHEUS="OFF"
     ;;
-  i)
-    FIU_ENABLE="ON"
-    ;;
   s)
     CUDA_ARCH=$OPTARG
     ;;
@@ -72,12 +65,10 @@ while getopts "p:d:t:f:s:ulrcghzmei" arg; do
     echo "
 
 parameter:
+-f: custom paths of thirdparty downloaded files(default: NULL)
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
 -t: build type(default: Debug)
--f: FAISS root path(default: empty). The path should be an absolute path
-    containing the pre-installed lib/ and include/ directory of FAISS. If they can't be found,
-    we will build the original FAISS from source instead.
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -r: remove previous build directory(default: OFF)
@@ -85,12 +76,11 @@ parameter:
 -z: profiling(default: OFF)
 -g: build GPU version(default: OFF)
 -e: build without prometheus(default: OFF)
--i: build FIU_ENABLE(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -f \${FAISS_ROOT} -s \${CUDA_ARCH}[-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -111,12 +101,17 @@ cd ${BUILD_OUTPUT_DIR}
 # force update the variables each time
 make rebuild_cache >/dev/null 2>&1
 
+
+if [[ ${MAKE_CLEAN} == "ON" ]]; then
+  echo "Runing make clean in ${BUILD_OUTPUT_DIR} ..."
+  make clean
+  exit 0
+fi
+
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
--DFAISS_ROOT=${FAISS_ROOT} \
--DFAISS_SOURCE=${FAISS_SOURCE} \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
@@ -124,15 +119,12 @@ CMAKE_CMD="cmake \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
--DMILVUS_WITH_FIU=${FIU_ENABLE} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+-DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
 
-if [[ ${MAKE_CLEAN} == "ON" ]]; then
-  make clean
-fi
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   # cpplint check
@@ -143,7 +135,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   fi
   echo "cpplint check passed!"
 
-  clang-format check
+  # clang-format check
   make check-clang-format
   if [ $? -ne 0 ]; then
     echo "ERROR! clang-format check failed"
@@ -151,15 +143,14 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   fi
   echo "clang-format check passed!"
 
-#    # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+  # clang-tidy check
+  make check-clang-tidy
+  if [ $? -ne 0 ]; then
+      echo "ERROR! clang-tidy check failed"
+      exit 1
+  fi
+  echo "clang-tidy check passed!"
 else
-
   # compile and build
   make -j ${jobs} install || exit 1
 fi

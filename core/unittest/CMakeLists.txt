@@ -38,6 +38,7 @@ set( SCHEDULER_FILES  ${SCHEDULER_MAIN_FILES}
                       ${SCHEDULER_SELECTOR_FILES}
                       ${SCHEDULER_RESOURCE_FILES}
                       ${SCHEDULER_TASK_FILES}
+
                       )
 
 set( ENTRY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp )
@@ -51,10 +52,11 @@ set( UNITTEST_LIBS  sqlite
                     gmock
                     gtest_main
                     gmock_main
+                    libstdc++fs.a
                     pthread
                     gfortran
-                    opentracing
-                    opentracing_mocktracer
+                    opentracing::opentracing
+                    opentracing::mocktracer
                     fiu
                     dl
                     z
@@ -68,9 +70,7 @@ if ( MILVUS_GPU_VERSION )
 endif()
 
 if ( MILVUS_WITH_AWS )
-    set( S3_CLIENT_LIB  aws-cpp-sdk-s3
-                        aws-cpp-sdk-core
-                        )
+    set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3 )
 
     list( APPEND UNITTEST_LIBS  ${S3_CLIENT_LIB}
                                 curl
@@ -79,7 +79,8 @@ if ( MILVUS_WITH_AWS )
 endif ()
 
 add_subdirectory(db)
+add_subdirectory(server)
 #add_subdirectory(metrics)
 #add_subdirectory(scheduler)
 #add_subdirectory(thirdparty)
-#add_subdirectory(storage)
+add_subdirectory(storage)

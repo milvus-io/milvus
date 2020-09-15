@@ -12,9 +12,6 @@
 #pragma once
 
 #include "MemManager.h"
-#include "db/Options.h"
-
-#include <memory>
 
 namespace milvus {
 namespace engine {

@@ -13,7 +13,7 @@
 
 #include <utility>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "config/ServerConfig.h"
 #include "utils/Log.h"
@@ -24,7 +24,9 @@ namespace cache {
 CpuCacheMgr::CpuCacheMgr() {
     cache_ = std::make_shared<Cache<DataObjPtr>>(config.cache.cache_size(), 1UL << 32, "[CACHE CPU]");
 
-    cache_->set_freemem_percent(config.cache.cpu_cache_threshold());
+    if (config.cache.cpu_cache_threshold() > 0.0) {
+        cache_->set_freemem_percent(config.cache.cpu_cache_threshold());
+    }
     ConfigMgr::GetInstance().Attach("cache.cache_size", this);
 }
 
@@ -36,17 +38,6 @@ CpuCacheMgr&
 CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
     return s_mgr;
-}
-
-DataObjPtr
-CpuCacheMgr::GetDataObj(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-CpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    CacheMgr<DataObjPtr>::InsertItem(key, data);
 }
 
 void

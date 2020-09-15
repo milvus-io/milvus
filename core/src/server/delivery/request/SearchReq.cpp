@@ -17,7 +17,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -52,6 +52,9 @@ SearchReq::OnExecute() {
         std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
         TimeRecorder rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
+        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
+
         // step 2: check table existence
         // only process root table, ignore partition table
         engine::snapshot::CollectionPtr collection;
@@ -66,16 +69,34 @@ SearchReq::OnExecute() {
             }
         }
 
-        int64_t dimension = 0;
-
         // step 4: Get field info
         std::unordered_map<std::string, engine::DataType> field_types;
         for (auto& schema : fields_schema) {
             auto field = schema.first;
-            field_types.insert(std::make_pair(field->GetName(), (engine::DataType)field->GetFtype()));
-            if (field->GetFtype() == (int)engine::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == (int)engine::DataType::VECTOR_BINARY) {
-                dimension = field->GetParams()[engine::PARAM_DIMENSION];
+            field_types.insert(std::make_pair(field->GetName(), field->GetFtype()));
+            if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
+                field->GetFtype() == engine::DataType::VECTOR_BINARY) {
+                // check dim
+                int64_t dimension = field->GetParams()[engine::PARAM_DIMENSION];
+                auto vector_query = query_ptr_->vectors.begin()->second;
+                if (!vector_query->query_vector.binary_data.empty()) {
+                    if (vector_query->query_vector.binary_data.size() !=
+                        vector_query->query_vector.vector_count * dimension / 8) {
+                        return Status(SERVER_INVALID_ARGUMENT, "query vector dim not match");
+                    }
+                } else if (!vector_query->query_vector.float_data.empty()) {
+                    if (vector_query->query_vector.float_data.size() !=
+                        vector_query->query_vector.vector_count * dimension) {
+                        return Status(SERVER_INVALID_ARGUMENT, "query vector dim not match");
+                    }
+                }
+
+                // validate search metric type and DataType match
+                bool is_binary = (field->GetFtype() == engine::DataType::VECTOR_FLOAT) ? false : true;
+                if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
+                    auto metric_type = query_ptr_->metric_types.at(field->GetName());
+                    STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
+                }
             }
         }
 
@@ -117,11 +138,7 @@ SearchReq::OnExecute() {
         fiu_do_on("SearchReq.OnExecute.empty_result_ids", result_->result_ids_.clear());
         if (result_->result_ids_.empty()) {
             auto vector_query = query_ptr_->vectors.begin()->second;
-            if (!vector_query->query_vector.binary_data.empty()) {
-                result_->row_num_ = vector_query->query_vector.binary_data.size() * 8 / dimension;
-            } else if (!vector_query->query_vector.float_data.empty()) {
-                result_->row_num_ = vector_query->query_vector.float_data.size() / dimension;
-            }
+            result_->row_num_ = vector_query->query_vector.vector_count;
             return Status::OK();  // empty table
         }
 

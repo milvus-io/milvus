@@ -304,8 +304,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    Compact(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-            ::milvus::grpc::Status* response);
+    Compact(::grpc::ServerContext* context, const ::milvus::grpc::CompactParam* request,
+            ::milvus::grpc::Status* response) override;
 
     /*******************************************New Interface*********************************************/
 
@@ -324,11 +324,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                                query::QueryPtr& query_ptr);
 
     Status
-    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+    ProcessBooleanQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& boolean_query,
                             query::QueryPtr& query_ptr);
 
     Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& query, std::string& field_name);
+    ProcessLeafQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
     ReqHandler req_handler_;

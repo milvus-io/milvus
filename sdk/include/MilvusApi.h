@@ -40,8 +40,11 @@ enum class IndexType {
     SPTAGBKT = 8,
     HNSW = 11,
     ANNOY = 12,
-    IVFSQ8NR = 13,
-    HNSW_SQ8NM = 14,
+    RHNSWFLAT = 13,
+    RHNSWPQ = 14,
+    RHNSWSQ = 15,
+    NGTPANNG = 16,
+    NGTONNG = 17,
 };
 
 enum class MetricType {
@@ -123,8 +126,7 @@ using TopKQueryResult = std::vector<QueryResult>;  ///< Topk hybrid query result
 struct IndexParam {
     std::string collection_name;  ///< Collection name for create index
     std::string field_name;       ///< Field name
-    std::string index_name;       ///< Index name
-    std::string extra_params;     ///< Extra parameters according to different index type, must be json format
+    std::string index_params;     ///< Extra parameters according to different index type, must be json format
 };
 
 /**
@@ -474,7 +476,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                     std::vector<int64_t>& id_array) = 0;
 
     /**
@@ -507,11 +509,12 @@ class Connection {
      * This method is used to compact collection
      *
      * @param collection_name, target collection's name.
+     * @param threshold
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    Compact(const std::string& collection_name) = 0;
+    Compact(const std::string& collection_name, const double& threshold) = 0;
 };
 
 }  // namespace milvus

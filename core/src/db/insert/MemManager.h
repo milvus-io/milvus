@@ -27,13 +27,10 @@ namespace engine {
 class MemManager {
  public:
     virtual Status
-    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) = 0;
+    InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) = 0;
 
     virtual Status
-    DeleteEntity(int64_t collection_id, IDNumber vector_id, uint64_t lsn) = 0;
-
-    virtual Status
-    DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* vector_ids, uint64_t lsn) = 0;
+    DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) = 0;
 
     virtual Status
     Flush(int64_t collection_id) = 0;
@@ -55,7 +52,7 @@ class MemManager {
 
     virtual size_t
     GetCurrentMem() = 0;
-};  // MemManagerAbstract
+};
 
 using MemManagerPtr = std::shared_ptr<MemManager>;
 

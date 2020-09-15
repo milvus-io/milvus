@@ -16,15 +16,19 @@
 #include "knowhere/index/vector_index/IndexAnnoy.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexBinaryIVF.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_offset_index/IndexHNSW_NM.h"
-#include "knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.h"
-#include "knowhere/index/vector_offset_index/IndexIVFSQNR_NM.h"
+#include "knowhere/index/vector_index/IndexNGTONNG.h"
+#include "knowhere/index/vector_index/IndexNGTPANNG.h"
+#include "knowhere/index/vector_index/IndexRHNSWFlat.h"
+#include "knowhere/index/vector_index/IndexRHNSWPQ.h"
+#include "knowhere/index/vector_index/IndexRHNSWSQ.h"
 #include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
 #include "knowhere/index/vector_offset_index/IndexNSG_NM.h"
+
 #ifdef MILVUS_SUPPORT_SPTAG
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 #endif
@@ -37,7 +41,6 @@
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.h"
 #include "knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.h"
 #endif
 
@@ -46,7 +49,9 @@ namespace knowhere {
 
 VecIndexPtr
 VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
+#ifdef MILVUS_GPU_VERSION
     auto gpu_device = -1;  // TODO: remove hardcode here, get from invoker
+#endif
     if (type == IndexEnum::INDEX_FAISS_IDMAP) {
         return std::make_shared<knowhere::IDMAP>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFFLAT) {
@@ -87,13 +92,19 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::CPUSPTAGRNG>("BKT");
 #endif
     } else if (type == IndexEnum::INDEX_HNSW) {
-        return std::make_shared<knowhere::IndexHNSW_NM>();
+        return std::make_shared<knowhere::IndexHNSW>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
         return std::make_shared<knowhere::IndexAnnoy>();
-    } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8NR) {
-        return std::make_shared<knowhere::IVFSQNR_NM>();
-    } else if (type == IndexEnum::INDEX_HNSW_SQ8NM) {
-        return std::make_shared<knowhere::IndexHNSW_SQ8NM>();
+    } else if (type == IndexEnum::INDEX_RHNSWFlat) {
+        return std::make_shared<knowhere::IndexRHNSWFlat>();
+    } else if (type == IndexEnum::INDEX_RHNSWPQ) {
+        return std::make_shared<knowhere::IndexRHNSWPQ>();
+    } else if (type == IndexEnum::INDEX_RHNSWSQ) {
+        return std::make_shared<knowhere::IndexRHNSWSQ>();
+    } else if (type == IndexEnum::INDEX_NGTPANNG) {
+        return std::make_shared<knowhere::IndexNGTPANNG>();
+    } else if (type == IndexEnum::INDEX_NGTONNG) {
+        return std::make_shared<knowhere::IndexNGTONNG>();
     } else {
         return nullptr;
     }

@@ -16,15 +16,18 @@ namespace server {
 namespace web {
 
 const char* NAME_ENGINE_TYPE_FLAT = "FLAT";
-const char* NAME_ENGINE_TYPE_IVFFLAT = "IVFFLAT";
-const char* NAME_ENGINE_TYPE_IVFSQ8 = "IVFSQ8";
-const char* NAME_ENGINE_TYPE_IVFSQ8H = "IVFSQ8H";
+const char* NAME_ENGINE_TYPE_IVFFLAT = "IVF_FLAT";
+const char* NAME_ENGINE_TYPE_IVFSQ8 = "IVF_SQ8";
+const char* NAME_ENGINE_TYPE_IVFSQ8H = "IVF_SQ8H";
 const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
-const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
+const char* NAME_ENGINE_TYPE_IVFPQ = "IVF_PQ";
 const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
 const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
-const char* NAME_ENGINE_TYPE_IVFSQ8NR = "IVFSQ8NR";
-const char* NAME_ENGINE_TYPE_HNSWSQ8NM = "HNSWSQ8NM";
+const char* NAME_ENGINE_TYPE_RHNSWFLAT = "RHNSW_FLAT";
+const char* NAME_ENGINE_TYPE_RHNSWPQ = "RHNSW_PQ";
+const char* NAME_ENGINE_TYPE_RHNSWSQ8 = "RHNSW_SQ8";
+const char* NAME_ENGINE_TYPE_NGTPANNG = "NGTPANNG";
+const char* NAME_ENGINE_TYPE_NGTONNG = "NGTONNG";
 
 const char* NAME_METRIC_TYPE_L2 = "L2";
 const char* NAME_METRIC_TYPE_IP = "IP";
@@ -45,6 +48,8 @@ const int64_t VALUE_INDEX_NLIST_DEFAULT = 16384;
 
 const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT = 4;
 const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT = false;
+
+const char* NAME_ID = "__id";
 
 /////////////////////////////////////////////////////
 

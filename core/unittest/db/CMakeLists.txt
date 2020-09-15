@@ -15,10 +15,10 @@ set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_meta.cpp
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_job.cpp
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_task.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_meta.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_transcript.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
                 )
 
 add_executable( test_db

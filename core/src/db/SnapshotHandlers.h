@@ -20,34 +20,12 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace milvus {
 namespace engine {
-
-struct LoadVectorFieldElementHandler : public snapshot::FieldElementIterator {
-    using ResourceT = snapshot::FieldElement;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldElementHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
-                                  const snapshot::FieldPtr& field);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-    const snapshot::FieldPtr field_;
-};
-
-struct LoadVectorFieldHandler : public snapshot::FieldIterator {
-    using ResourceT = snapshot::Field;
-    using BaseT = snapshot::IterateHandler<ResourceT>;
-    LoadVectorFieldHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss);
-
-    Status
-    Handle(const typename ResourceT::Ptr&) override;
-
-    const server::ContextPtr context_;
-};
 
 struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
@@ -71,6 +49,7 @@ struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
 
     std::string field_name_;
     snapshot::IDS_TYPE& segment_ids_;
+    int64_t build_index_threshold_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -84,15 +63,37 @@ struct GetEntityByIdSegmentHandler : public snapshot::SegmentIterator {
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
+    Status
+    PostIterate() override;
+
     const server::ContextPtr context_;
     const std::string dir_root_;
     const engine::IDNumbers ids_;
     const std::vector<std::string> field_names_;
     engine::DataChunkPtr data_chunk_;
     std::vector<bool>& valid_row_;
+
+ private:
+    engine::IDNumbers ids_left_;
+    using IDChunkMap = std::unordered_map<idx_t, std::pair<engine::DataChunkPtr, int64_t>>;
+    IDChunkMap result_map_;  // record id in which chunk, and its position within the chunk
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+struct LoadCollectionHandler : public snapshot::SegmentIterator {
+    using ResourceT = snapshot::Segment;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    LoadCollectionHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss, const std::string& dir_root,
+                          const std::vector<std::string>& field_names, bool force);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    const server::ContextPtr context_;
+    const std::string dir_root_;
+    std::vector<std::string> field_names_;
+    bool force_;
+};
 
 }  // namespace engine
 }  // namespace milvus

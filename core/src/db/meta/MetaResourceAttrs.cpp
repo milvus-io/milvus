@@ -26,6 +26,7 @@ const char* F_COLLECTON_ID = snapshot::CollectionIdField::Name;
 const char* F_SCHEMA_ID = snapshot::SchemaIdField::Name;
 const char* F_NUM = snapshot::NumField::Name;
 const char* F_FTYPE = snapshot::FtypeField::Name;
+const char* F_FETYPE = snapshot::FEtypeField::Name;
 const char* F_FIELD_ID = snapshot::FieldIdField::Name;
 const char* F_FIELD_ELEMENT_ID = snapshot::FieldElementIdField::Name;
 const char* F_PARTITION_ID = snapshot::PartitionIdField::Name;
@@ -66,14 +67,14 @@ ResourceAttrMapOf(const std::string& table, std::vector<std::string>& attrs) {
          {F_SCHEMA_ID, F_PARTITION_ID, F_SEGMENT_ID, F_MAPPINGS, F_ROW_COUNT, F_SIZE, F_ID, F_LSN, F_STATE,
           F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::SegmentFile::Name,
-         {F_COLLECTON_ID, F_PARTITION_ID, F_SEGMENT_ID, F_FIELD_ELEMENT_ID, F_FTYPE, F_ROW_COUNT, F_SIZE, F_ID, F_LSN,
+         {F_COLLECTON_ID, F_PARTITION_ID, F_SEGMENT_ID, F_FIELD_ELEMENT_ID, F_FETYPE, F_ROW_COUNT, F_SIZE, F_ID, F_LSN,
           F_STATE, F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::SchemaCommit::Name, {F_COLLECTON_ID, F_MAPPINGS, F_ID, F_LSN, F_STATE, F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::Field::Name, {F_NAME, F_NUM, F_FTYPE, F_PARAMS, F_ID, F_LSN, F_STATE, F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::FieldCommit::Name,
          {F_COLLECTON_ID, F_FIELD_ID, F_MAPPINGS, F_ID, F_LSN, F_STATE, F_CREATED_ON, F_UPDATED_ON}},
         {snapshot::FieldElement::Name,
-         {F_COLLECTON_ID, F_FIELD_ID, F_NAME, F_FTYPE, F_TYPE_NAME, F_PARAMS, F_ID, F_LSN, F_STATE, F_CREATED_ON,
+         {F_COLLECTON_ID, F_FIELD_ID, F_NAME, F_FETYPE, F_TYPE_NAME, F_PARAMS, F_ID, F_LSN, F_STATE, F_CREATED_ON,
           F_UPDATED_ON}},
     };
 

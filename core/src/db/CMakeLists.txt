@@ -18,6 +18,7 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/db/insert        DB_INSERT_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/merge         DB_MERGE_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/wal           DB_WAL_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/snapshot      DB_SNAPSHOT_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/transcript    DB_TRANSCRIPT_FILES )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta          DB_META_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend  DB_META_BACKEND_FILES )
@@ -42,6 +43,7 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_MERGE_FILES}
                     ${DB_WAL_FILES}
                     ${DB_SNAPSHOT_FILES}
+                    ${DB_TRANSCRIPT_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
                     )
@@ -63,15 +65,14 @@ target_include_directories( milvus_engine
 
 # **************************** Libraries to be linked with target Engine ****************************
 set( ENGINE_LIBS    pthread
+                    libstdc++fs.a
                     libgomp.a
                     libgfortran.a
                     )
 
-set( GRPC_LIB   grpcpp_channelz
+set( GRPC_LIB   libprotobuf
+                grpc++_reflection
                 grpc++
-                grpc
-                grpc_protobuf
-                grpc_protoc
                 )
 
 set( BOOST_LIB  libboost_system.a
@@ -79,24 +80,16 @@ set( BOOST_LIB  libboost_system.a
                 libboost_serialization.a
                 )
 
-set( PROMETHEUS_LIB prometheus-cpp-push
-                    prometheus-cpp-pull
-                    prometheus-cpp-core
-                    curl
-                    )
-
 set( THIRD_PARTY_LIBS   sqlite
                         yaml-cpp # log
                         mysqlpp
-                        zlib
                         fiu
                         ${BOOST_LIB}
                         ${GRPC_LIB}
                         )
 
-set( S3_CLIENT_LIB  aws-cpp-sdk-s3
-                    aws-cpp-sdk-core
-                    )
+set( S3_CLIENT_LIB  AWS::aws-cpp-sdk-s3
+                    AWS::aws-cpp-sdk-core )
 
 if ( MILVUS_GPU_VERSION )
     set( CUDA_LIB   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
@@ -109,20 +102,9 @@ if ( MILVUS_GPU_VERSION )
     target_sources( milvus_engine PUBLIC ${WRAPPER_GPU_FILES} )
 endif ()
 
-# cannot be enabled together with ENABLE_CPU_PROFILING
-if ( ENABLE_MEM_PROFILING )
-    list( APPEND THIRD_PARTY_LIBS tcmalloc )
-endif ()
-
 if ( ENABLE_CPU_PROFILING )
     list( APPEND THIRD_PARTY_LIBS
-                 PUBLIC  gperftools
-                         libunwind
-                         )
-endif ()
-
-if ( MILVUS_WITH_PROMETHEUS )
-    list( APPEND THIRD_PARTY_LIBS ${PROMETHEUS_LIB} )
+                 PUBLIC  gperftools )
 endif ()
 
 if ( MILVS_WITH_AWS )
@@ -141,10 +123,12 @@ endif ()
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
                PUBLIC  knowhere
+                       server
                        segment
                        cache
-                       storage
                        codecs
+                       storage
+                       tracing
                        ${THIRD_PARTY_LIBS}
                        ${ENGINE_LIBS}
                        )

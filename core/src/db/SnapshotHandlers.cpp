@@ -10,6 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotHandlers.h"
+
+#include "config/ServerConfig.h"
+#include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -23,53 +26,6 @@
 
 namespace milvus {
 namespace engine {
-
-LoadVectorFieldElementHandler::LoadVectorFieldElementHandler(const std::shared_ptr<server::Context>& context,
-                                                             snapshot::ScopedSnapshotT ss,
-                                                             const snapshot::FieldPtr& field)
-    : BaseT(ss), context_(context), field_(field) {
-}
-
-Status
-LoadVectorFieldElementHandler::Handle(const snapshot::FieldElementPtr& field_element) {
-    if (field_->GetFtype() != engine::DataType::VECTOR_FLOAT && field_->GetFtype() != engine::DataType::VECTOR_BINARY) {
-        return Status(DB_ERROR, "Should be VECTOR field");
-    }
-    if (field_->GetID() != field_element->GetFieldId()) {
-        return Status::OK();
-    }
-    // SS TODO
-    return Status::OK();
-}
-
-LoadVectorFieldHandler::LoadVectorFieldHandler(const std::shared_ptr<server::Context>& context,
-                                               snapshot::ScopedSnapshotT ss)
-    : BaseT(ss), context_(context) {
-}
-
-Status
-LoadVectorFieldHandler::Handle(const snapshot::FieldPtr& field) {
-    if (field->GetFtype() != engine::DataType::VECTOR_FLOAT && field->GetFtype() != engine::DataType::VECTOR_BINARY) {
-        return Status::OK();
-    }
-    if (context_ && context_->IsConnectionBroken()) {
-        LOG_ENGINE_DEBUG_ << "Client connection broken, stop load collection";
-        return Status(DB_ERROR, "Connection broken");
-    }
-
-    // SS TODO
-    auto element_handler = std::make_shared<LoadVectorFieldElementHandler>(context_, ss_, field);
-    element_handler->Iterate();
-
-    auto status = element_handler->GetStatus();
-    if (!status.ok()) {
-        return status;
-    }
-
-    // SS TODO: Do Load
-
-    return status;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
@@ -86,11 +42,13 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
                                                    snapshot::IDS_TYPE& segment_ids)
     : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
+    build_index_threshold_ = config.engine.build_index_threshold();
 }
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    if (segment_commit->GetRowCount() < engine::BUILD_INDEX_THRESHOLD) {
+    if (segment_commit->GetRowCount() < build_index_threshold_) {
+        // LOG_ENGINE_DEBUG_ << "Segment is too small, not to build index, row count " << segment_commit->GetRowCount();
         return Status::OK();
     }
 
@@ -123,6 +81,7 @@ GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<m
                                                          const std::vector<std::string>& field_names,
                                                          std::vector<bool>& valid_row)
     : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names), valid_row_(valid_row) {
+    ids_left_ = ids_;
 }
 
 Status
@@ -144,19 +103,20 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     segment::DeletedDocsPtr deleted_docs_ptr;
     STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
 
+    std::vector<idx_t> ids_in_this_segment;
     std::vector<int64_t> offsets;
-    int i = 0;
-    for (auto id : ids_) {
+    for (auto it = ids_left_.begin(); it != ids_left_.end();) {
+        idx_t id = *it;
         // fast check using bloom filter
         if (!id_bloom_filter_ptr->Check(id)) {
-            i++;
+            ++it;
             continue;
         }
 
         // check if id really exists in uids
         auto found = std::find(uids.begin(), uids.end(), id);
         if (found == uids.end()) {
-            i++;
+            ++it;
             continue;
         }
 
@@ -166,21 +126,116 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
             if (deleted != deleted_docs.end()) {
-                i++;
+                ++it;
                 continue;
             }
         }
-        valid_row_[i] = true;
+
+        ids_in_this_segment.push_back(id);
         offsets.push_back(offset);
-        i++;
+        ids_left_.erase(it);
     }
 
-    STATUS_CHECK(segment_reader.LoadFieldsEntities(field_names_, offsets, data_chunk_));
+    if (offsets.empty()) {
+        return Status::OK();
+    }
+
+    engine::DataChunkPtr data_chunk;
+    STATUS_CHECK(segment_reader.LoadFieldsEntities(field_names_, offsets, data_chunk));
+
+    // record id in which chunk, and its position within the chunk
+    for (int64_t i = 0; i < ids_in_this_segment.size(); ++i) {
+        auto pair = std::make_pair(data_chunk, i);
+        result_map_.insert(std::make_pair(ids_in_this_segment[i], pair));
+    }
+
+    return Status::OK();
+}
+
+Status
+GetEntityByIdSegmentHandler::PostIterate() {
+    // construct result
+    // Note: makesure the result sequence is according to input ids
+    // for example:
+    // No.1, No.3, No.5 id are in segment_1
+    // No.2, No.4, No.6 id are in segment_2
+    // After iteration, we got two DataChunk,
+    // the chunk_1 for No.1, No.3, No.5 entities, the chunk_2 for No.2, No.4, No.6 entities
+    // now we combine chunk_1 and chunk_2 into one DataChunk, and the entities sequence is 1,2,3,4,5,6
+    Segment temp_segment;
+    auto& fields = ss_->GetResources<snapshot::Field>();
+    for (auto& kv : fields) {
+        const snapshot::FieldPtr& field = kv.second.Get();
+        STATUS_CHECK(temp_segment.AddField(field));
+    }
+
+    temp_segment.Reserve(field_names_, result_map_.size());
+
+    valid_row_.clear();
+    valid_row_.reserve(ids_.size());
+    for (auto id : ids_) {
+        auto iter = result_map_.find(id);
+        if (iter == result_map_.end()) {
+            valid_row_.push_back(false);
+        } else {
+            valid_row_.push_back(true);
+
+            auto pair = iter->second;
+            temp_segment.AppendChunk(pair.first, pair.second, pair.second);
+        }
+    }
+
+    data_chunk_ = std::make_shared<engine::DataChunk>();
+    data_chunk_->count_ = temp_segment.GetRowCount();
+    data_chunk_->fixed_fields_.swap(temp_segment.GetFixedFields());
+    data_chunk_->variable_fields_.swap(temp_segment.GetVariableFields());
 
     return Status::OK();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+LoadCollectionHandler::LoadCollectionHandler(const server::ContextPtr& context, snapshot::ScopedSnapshotT ss,
+                                             const std::string& dir_root, const std::vector<std::string>& field_names,
+                                             bool force)
+    : BaseT(ss), context_(context), dir_root_(dir_root), field_names_(field_names), force_(force) {
+}
+
+Status
+LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
+    auto seg_visitor = engine::SegmentVisitor::Build(ss_, segment->GetID());
+    segment::SegmentReaderPtr segment_reader = std::make_shared<segment::SegmentReader>(dir_root_, seg_visitor);
+
+    SegmentPtr segment_ptr;
+    segment_reader->GetSegment(segment_ptr);
+
+    // if the input field_names is empty, will load all fields of this collection
+    if (field_names_.empty()) {
+        field_names_ = ss_->GetFieldNames();
+    }
+
+    // SegmentReader will load data into cache
+    for (auto& field_name : field_names_) {
+        DataType ftype = DataType::NONE;
+        segment_ptr->GetFieldType(field_name, ftype);
+
+        knowhere::IndexPtr index_ptr;
+        if (IsVectorField(ftype)) {
+            knowhere::VecIndexPtr vec_index_ptr;
+            segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
+            index_ptr = vec_index_ptr;
+        } else {
+            segment_reader->LoadStructuredIndex(field_name, index_ptr);
+        }
+
+        // if index doesn't exist, load the raw file
+        if (index_ptr == nullptr) {
+            engine::BinaryDataPtr raw;
+            segment_reader->LoadField(field_name, raw);
+        }
+    }
+
+    return Status::OK();
+}
 
 }  // namespace engine
 }  // namespace milvus

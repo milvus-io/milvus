@@ -13,6 +13,7 @@
 
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 
 if (MILVUS_SUPPORT_SPTAG)
     include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
@@ -63,15 +64,20 @@ set(vector_index_srcs
         knowhere/index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
+        knowhere/index/vector_index/IndexRHNSW.cpp
+        knowhere/index/vector_index/IndexHNSW.cpp
+        knowhere/index/vector_index/IndexRHNSWFlat.cpp
+        knowhere/index/vector_index/IndexRHNSWSQ.cpp
+        knowhere/index/vector_index/IndexRHNSWPQ.cpp
+        knowhere/index/vector_index/IndexNGT.cpp
+        knowhere/index/vector_index/IndexNGTPANNG.cpp
+        knowhere/index/vector_index/IndexNGTONNG.cpp
         )
 
 set(vector_offset_index_srcs
         knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
         knowhere/index/vector_offset_index/IndexIVF_NM.cpp
-        knowhere/index/vector_offset_index/IndexIVFSQNR_NM.cpp
-        knowhere/index/vector_offset_index/IndexHNSW_NM.cpp
         knowhere/index/vector_offset_index/IndexNSG_NM.cpp
-        knowhere/index/vector_offset_index/IndexHNSW_SQ8NM.cpp
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -88,6 +94,8 @@ set(depend_libs
         gomp
         gfortran
         pthread
+        fiu
+        ngt
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -121,7 +129,6 @@ if (MILVUS_GPU_VERSION)
 
     set(vector_offset_index_srcs ${vector_offset_index_srcs}
             knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.cpp
-            knowhere/index/vector_offset_index/gpu/IndexGPUIVFSQNR_NM.cpp
             )
 endif ()
 

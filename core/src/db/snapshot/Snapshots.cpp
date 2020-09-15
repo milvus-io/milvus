@@ -10,13 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshots.h"
+
+#include "config/ServerConfig.h"
+#include "db/Constants.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
+#include "db/snapshot/OperationExecutor.h"
+#include "utils/CommonUtil.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 /* Status */
 /* Snapshots::DropAll() { */
@@ -25,18 +28,14 @@ namespace snapshot {
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
-    auto status = GetSnapshot(ss, collection_id);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(GetSnapshot(ss, collection_id));
     return DoDropCollection(ss, lsn);
 }
 
 Status
 Snapshots::DropCollection(const std::string& name, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
-    auto status = GetSnapshot(ss, name);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(GetSnapshot(ss, name));
     return DoDropCollection(ss, lsn);
 }
 
@@ -58,25 +57,15 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
 Status
 Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
-    auto status = GetSnapshot(ss, collection_id);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(GetSnapshot(ss, collection_id));
 
     PartitionContext context;
     context.id = partition_id;
     context.lsn = lsn;
 
     auto op = std::make_shared<DropPartitionOperation>(context, ss);
-    status = op->Push();
-    if (!status.ok()) {
-        return status;
-    }
-
-    status = op->GetSnapshot(ss);
-    if (!status.ok()) {
-        return status;
-    }
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetSnapshot(ss));
 
     return op->GetStatus();
 }
@@ -84,31 +73,22 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 Status
 Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
-    auto status = LoadHolder(store, collection_id, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Load(store, ss, id, scoped);
-    return status;
+    STATUS_CHECK(LoadHolder(store, collection_id, holder));
+    return holder->Load(store, ss, id, scoped);
 }
 
 Status
 Snapshots::GetSnapshot(ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
-    auto status = GetHolder(collection_id, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Get(ss, id, scoped);
-    return status;
+    STATUS_CHECK(GetHolder(collection_id, holder));
+    return holder->Get(ss, id, scoped);
 }
 
 Status
 Snapshots::GetSnapshot(ScopedSnapshotT& ss, const std::string& name, ID_TYPE id, bool scoped) const {
     SnapshotHolderPtr holder;
-    auto status = GetHolder(name, holder);
-    if (!status.ok())
-        return status;
-    status = holder->Get(ss, id, scoped);
-    return status;
+    STATUS_CHECK(GetHolder(name, holder));
+    return holder->Get(ss, id, scoped);
 }
 
 Status
@@ -151,7 +131,7 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 Status
 Snapshots::Init(StorePtr store) {
     auto event = std::make_shared<InActiveResourcesGCEvent>();
-    EventExecutor::GetInstance().Submit(event);
+    EventExecutor::GetInstance().Submit(event, true);
     STATUS_CHECK(event->WaitToFinish());
     auto op = std::make_shared<GetCollectionIDsOperation>();
     STATUS_CHECK((*op)(store));
@@ -175,7 +155,8 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
     emsg << "\"" << name << "\""
          << " not found";
-    return Status(SS_NOT_FOUND_ERROR, emsg.str());
+    LOG_ENGINE_DEBUG_ << emsg.str();
+    return Status(SS_NOT_FOUND_ERROR, "Collection " + name + " not found.");
 }
 
 Status
@@ -189,25 +170,21 @@ Snapshots::GetHolder(const ID_TYPE& collection_id, SnapshotHolderPtr& holder) co
 
 Status
 Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHolderPtr& holder) {
-    Status status;
     {
         std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-        status = GetHolderNoLock(collection_id, holder);
-        if (status.ok() && holder)
+        auto status = GetHolderNoLock(collection_id, holder);
+        if (status.ok() && holder) {
             return status;
+        }
     }
-    status = LoadNoLock(store, collection_id, holder);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(LoadNoLock(store, collection_id, holder));
 
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     holders_[collection_id] = holder;
     ScopedSnapshotT ss;
-    status = holder->Load(store, ss);
-    if (!status.ok())
-        return status;
+    STATUS_CHECK(holder->Load(store, ss));
     name_id_map_[ss->GetName()] = collection_id;
-    return status;
+    return Status::OK();
 }
 
 Status
@@ -236,10 +213,34 @@ void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
-    std::cout << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed"
-              << std::endl;
+    LOG_ENGINE_DEBUG_ << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed";
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+Status
+Snapshots::StartService() {
+    auto meta_path = config.storage.path() + DB_FOLDER;
+
+    // create db root path
+    auto s = CommonUtil::CreateDirectory(meta_path);
+    if (!s.ok()) {
+        std::cerr << "Error: Failed to create database primary path: " << meta_path
+                  << ". Possible reason: db_config.primary_path is wrong in milvus.yaml or not available." << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    snapshot::OperationExecutor::Init(store);
+    snapshot::OperationExecutor::GetInstance().Start();
+    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::GetInstance().Start();
+    return snapshot::Snapshots::GetInstance().Init(store);
+}
+
+Status
+Snapshots::StopService() {
+    snapshot::EventExecutor::GetInstance().Stop();
+    snapshot::OperationExecutor::GetInstance().Stop();
+    return Status::OK();
+}
+
+}  // namespace milvus::engine::snapshot

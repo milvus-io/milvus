@@ -26,7 +26,7 @@ LogOut(const char* pattern, ...) {
 
     va_list vl;
     va_start(vl, pattern);
-    vsnprintf(str_p.get(), len, pattern, vl);
+    vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
     va_end(vl);
 
     return std::string(str_p.get());
@@ -34,6 +34,7 @@ LogOut(const char* pattern, ...) {
 
 void
 SetThreadName(const std::string& name) {
+    // Note: the name cannot exceed 16 bytes
     pthread_setname_np(pthread_self(), name.c_str());
 }
 

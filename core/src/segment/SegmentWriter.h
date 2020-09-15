@@ -43,9 +43,6 @@ class SegmentWriter {
     AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to);
 
     Status
-    CreateBloomFilter(const std::string& file_path, IdBloomFilterPtr& bloom_filter_ptr);
-
-    Status
     WriteBloomFilter(const std::string& file_path, const IdBloomFilterPtr& bloom_filter_ptr);
 
     Status
@@ -59,6 +56,9 @@ class SegmentWriter {
 
     size_t
     RowCount();
+
+    Status
+    LoadUids(std::vector<engine::idx_t>& uids);
 
     Status
     SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);

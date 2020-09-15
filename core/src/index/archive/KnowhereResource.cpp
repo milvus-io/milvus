@@ -13,14 +13,17 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+#include <faiss/Clustering.h>
+#include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
 #include "scheduler/Utils.h"
+#include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <map>
 #include <set>
 #include <string>
@@ -60,11 +63,41 @@ KnowhereResource::Initialize() {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }
 
+    // engine config
+    int64_t omp_thread = config.engine.omp_thread_num();
+
+    if (omp_thread > 0) {
+        omp_set_num_threads(omp_thread);
+        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
+    } else {
+        int64_t sys_thread_cnt = 8;
+        if (milvus::server::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
+            omp_set_num_threads(omp_thread);
+        }
+    }
+
+    // init faiss global variable
+    int64_t use_blas_threshold = config.engine.use_blas_threshold();
+    faiss::distance_compute_blas_threshold = use_blas_threshold;
+
+    int64_t clustering_type = config.engine.clustering_type();
+    switch (clustering_type) {
+        case ClusteringType::K_MEANS:
+        default:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS;
+            break;
+        case ClusteringType::K_MEANS_PLUS_PLUS:
+            faiss::clustering_type = faiss::ClusteringType::K_MEANS_PLUS_PLUS;
+            break;
+    }
+
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
-    if (not enable_gpu)
+    if (!enable_gpu) {
         return Status::OK();
+    }
 
     struct GpuResourceSetting {
         int64_t pinned_memory = 256 * M_BYTE;
@@ -89,11 +122,11 @@ KnowhereResource::Initialize() {
     }
 
     // init gpu resources
-    for (auto iter = gpu_resources.begin(); iter != gpu_resources.end(); ++iter) {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first, iter->second.pinned_memory,
-                                                                iter->second.temp_memory, iter->second.resource_num);
+    for (auto& gpu_resource : gpu_resources) {
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(gpu_resource.first, gpu_resource.second.pinned_memory,
+                                                                gpu_resource.second.temp_memory,
+                                                                gpu_resource.second.resource_num);
     }
-
 #endif
 
     return Status::OK();

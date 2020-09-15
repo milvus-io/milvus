@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 #include <string>
@@ -132,8 +132,8 @@ TEST_F(SnapshotTest, ResourceHoldersTest) {
     auto prev_cnt = collection->ref_count();
     {
         auto collection_2 = CollectionsHolder::GetInstance().GetResource(collection_id, false);
-        ASSERT_EQ(collection->GetID(), collection_id);
-        ASSERT_EQ(collection->ref_count(), prev_cnt);
+        ASSERT_EQ(collection_2->GetID(), collection_id);
+        ASSERT_EQ(collection_2->ref_count(), prev_cnt);
     }
 
     {
@@ -229,11 +229,13 @@ TEST_F(SnapshotTest, CreateCollectionOperationTest) {
     ASSERT_FALSE(status.ok());
 
     status = Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name);
+    ASSERT_TRUE(status.ok());
     ASSERT_TRUE(latest_ss);
     ASSERT_TRUE(latest_ss->GetName() == collection_name);
 
     IDS_TYPE ids;
     status = Snapshots::GetInstance().GetCollectionIds(ids);
+    ASSERT_TRUE(status.ok());
     ASSERT_EQ(ids.size(), 6);
     ASSERT_EQ(ids.back(), latest_ss->GetCollectionId());
 
@@ -440,7 +442,7 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_EQ(lsn, ss->GetMaxLsn());
 
     OperationContext context;
-    context.lsn = lsn;
+    context.lsn = lsn - 1;
     auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss);
     std::string partition_name("p1");
     PartitionContext p_ctx;
@@ -454,7 +456,73 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_TRUE(partition->HasAssigned());
 
     status = cp_op->Push();
-    ASSERT_FALSE(status.ok());
+    ASSERT_FALSE(status.ok()) << status.ToString();
+}
+
+TEST_F(SnapshotTest, DropSegmentTest){
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+    auto collection_name = "test";
+    ScopedSnapshotT ss;
+    ss = CreateCollection(collection_name, ++lsn);
+
+
+    milvus::Status status;
+
+    PartitionContext pp_ctx;
+    std::stringstream p_name_stream;
+
+    auto num = RandomInt(3, 5);
+    for (auto i = 0; i < num; ++i) {
+        p_name_stream.str("");
+        p_name_stream << "partition_" << i;
+        pp_ctx.name = p_name_stream.str();
+        ss = CreatePartition(ss->GetName(), pp_ctx, next_lsn());
+        ASSERT_TRUE(ss);
+    }
+
+    ASSERT_EQ(ss->NumberOfPartitions(), num + 1);
+
+    auto total_row_cnt = 0;
+    auto partitions = ss->GetResources<Partition>();
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    for (auto& kv : partitions) {
+        num = RandomInt(2, 5);
+        auto row_cnt = 1024;
+        for (auto i = 0; i < num; ++i) {
+            ASSERT_TRUE(CreateSegment(ss, kv.first, next_lsn(), sf_context, row_cnt).ok());
+            total_row_cnt += row_cnt;
+        }
+    }
+
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(total_row_cnt, ss->GetCollectionCommit()->GetRowCount());
+
+    OperationContext drop_seg_context;
+    auto segments = ss->GetResources<Segment>();
+    auto prev_partitions = ss->GetResources<Partition>();
+    ASSERT_TRUE(!prev_partitions.empty());
+    ASSERT_TRUE(!segments.empty());
+    for (auto kv:segments){
+        milvus::engine::snapshot::ID_TYPE segment_id = kv.first;
+        auto seg = ss->GetResource<milvus::engine::snapshot::Segment>(segment_id);
+        drop_seg_context.prev_segment = seg;
+        auto drop_op = std::make_shared<milvus::engine::snapshot::DropSegmentOperation>(drop_seg_context, ss);
+        status = drop_op->Push();
+        ASSERT_TRUE(status.ok());
+    }
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok());
+    auto result_segments = ss->GetResources<Segment>();
+    auto result_partitions = ss->GetResources<Partition>();
+    ASSERT_TRUE(!result_partitions.empty());
+    ASSERT_TRUE(result_segments.empty());
+
 }
 
 TEST_F(SnapshotTest, IndexTest) {
@@ -628,7 +696,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
 TEST_F(SnapshotTest, OperationTest) {
     std::string to_string;
-    LSN_TYPE lsn;
+    LSN_TYPE lsn = 0;
     Status status;
 
     /* ID_TYPE collection_id; */
@@ -997,7 +1065,7 @@ TEST_F(SnapshotTest, OperationTest2) {
         ASSERT_TRUE(seg_file);
 
         auto prev_segment_commit = ss->GetSegmentCommitBySegmentId(seg_file->GetSegmentId());
-        auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
+        // auto prev_segment_commit_mappings = prev_segment_commit->GetMappings();
         ASSERT_FALSE(prev_segment_commit->ToString().empty());
 
         auto new_size = RandomInt(1000, 20000);
@@ -1928,11 +1996,11 @@ TEST_F(SnapshotTest, CompoundTest2) {
 }
 
 struct GCSchedule {
-    static constexpr const char* Name = "GCSchedule";
+    // static constexpr const char* Name = "GCSchedule";
 };
 
 struct FlushSchedule {
-    static constexpr const char* Name = "FlushSchedule";
+    // static constexpr const char* Name = "FlushSchedule";
 };
 
 using IEventHandler = milvus::engine::snapshot::IEventHandler;

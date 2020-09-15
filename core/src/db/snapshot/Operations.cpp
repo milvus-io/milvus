@@ -21,9 +21,7 @@
 #include "db/snapshot/ResourceGCEvent.h"
 #include "db/snapshot/Snapshots.h"
 
-namespace milvus {
-namespace engine {
-namespace snapshot {
+namespace milvus::engine::snapshot {
 
 static ID_TYPE UID = 1;
 
@@ -39,6 +37,9 @@ Operations::Operations(const OperationContext& context, ScopedSnapshotT prev_ss,
       uid_(UID++),
       status_(SS_OPERATION_PENDING, "Operation Pending"),
       type_(type) {
+    if (prev_ss_ && context_.lsn == 0) {
+        context_.lsn = prev_ss_->GetMaxLsn();
+    }
 }
 
 std::string
@@ -114,7 +115,7 @@ Operations::Done(StorePtr store) {
         /*                 context_.new_collection_commit->GetCollectionId(), holder.rbegin()->GetID()); */
         /*     } */
         /* } */
-        std::cout << ToString() << std::endl;
+        LOG_ENGINE_DEBUG_ << ToString();
     }
     finish_cond_.notify_all();
 }
@@ -255,7 +256,7 @@ Operations::OnApplyTimeoutCallback(StorePtr store) {
 
     auto status = store->ApplyOperation(*this, context);
     while (status.code() == SS_TIMEOUT && !HasAborted()) {
-        std::cout << GetName() << " Timeout! Try " << ++try_times << std::endl;
+        LOG_ENGINE_WARNING_ << GetName() << " Timeout! Try " << ++try_times;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         status = store->ApplyOperation(*this, context);
     }
@@ -290,7 +291,7 @@ ApplyRollBack(std::set<std::shared_ptr<ResourceContext<ResourceT>>>& step_contex
         auto res = step_context->Resource();
         auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
         EventExecutor::GetInstance().Submit(evt_ptr);
-        std::cout << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID() << std::endl;
+        LOG_ENGINE_DEBUG_ << "Rollback " << typeid(ResourceT).name() << ": " << res->GetID();
     }
 }
 
@@ -305,6 +306,4 @@ Operations::~Operations() {
     }
 }
 
-}  // namespace snapshot
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine::snapshot

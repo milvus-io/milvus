@@ -44,7 +44,7 @@ using Graph = std::vector<std::vector<node_t>>;
 class NsgIndex {
  public:
     enum Metric_Type {
-        Metric_Type_L2,
+        Metric_Type_L2 = 0,
         Metric_Type_IP,
     };
 

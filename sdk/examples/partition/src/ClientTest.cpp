@@ -47,7 +47,7 @@ milvus::PartitionParam
 BuildPartitionParam(int32_t index) {
     std::string tag = std::to_string(index);
     std::string partition_name = std::string(COLLECTION_NAME) + "_" + tag;
-    milvus::PartitionParam partition_param = {COLLECTION_NAME, tag};
+    milvus::PartitionParam partition_param = {partition_name, tag};
     return partition_param;
 }
 

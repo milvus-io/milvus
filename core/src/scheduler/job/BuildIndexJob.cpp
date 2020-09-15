@@ -29,11 +29,11 @@ WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, engine::sn
     engine::TargetFields structured_fields;
     for (auto& field_name : field_names) {
         auto field = snapshot->GetField(field_name);
-        engine::DataType ftype = static_cast<engine::DataType>(field->GetFtype());
+        auto ftype = static_cast<engine::DataType>(field->GetFtype());
         bool is_vector = (ftype == engine::DataType::VECTOR_FLOAT || ftype == engine::DataType::VECTOR_BINARY);
         auto elements = snapshot->GetFieldElementsByField(field_name);
         for (auto& element : elements) {
-            if (element->GetFtype() != engine::FieldElementType::FET_INDEX) {
+            if (element->GetFEtype() != engine::FieldElementType::FET_INDEX) {
                 continue;  // only check index element
             }
 

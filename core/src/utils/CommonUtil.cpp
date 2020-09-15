@@ -13,7 +13,7 @@
 #include "utils/Log.h"
 
 #include <dirent.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -74,17 +74,17 @@ namespace {
 void
 RemoveDirectory(const std::string& path) {
     DIR* dir = nullptr;
-    struct dirent* dmsg;
     const int32_t buf_size = 256;
     char file_name[buf_size];
 
     std::string folder_name = path + "/%s";
     if ((dir = opendir(path.c_str())) != nullptr) {
+        struct dirent* dmsg;
         while ((dmsg = readdir(dir)) != nullptr) {
             if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);
                 std::string tmp = file_name;
-                if (tmp.find(".") == std::string::npos) {
+                if (tmp.find('.') == std::string::npos) {
                     RemoveDirectory(file_name);
                 }
                 remove(file_name);
@@ -174,6 +174,26 @@ CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm&
     time_integer = mktime(&time_struct);
 
     return true;
+}
+
+void
+CommonUtil::GetCurrentTimeStr(std::string& time_str) {
+    auto t = std::time(nullptr);
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+
+    time_str = "";
+    time_str += std::to_string(ltm.tm_year + 1900);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mon + 1);
+    time_str += "-";
+    time_str += std::to_string(ltm.tm_mday);
+    time_str += "_";
+    time_str += std::to_string(ltm.tm_hour);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_min);
+    time_str += ":";
+    time_str += std::to_string(ltm.tm_sec);
 }
 
 void

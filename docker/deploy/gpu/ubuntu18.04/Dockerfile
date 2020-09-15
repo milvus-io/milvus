@@ -27,11 +27,13 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
-COPY --from=openblas /usr/lib/libopenblas*.so* /var/lib/milvus/lib/
+COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/
+RUN ln -s /var/lib/milvus/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/libopenblas.so.0 && \
+    ln -s /var/lib/milvus/lib/libopenblas.so.0 /var/lib/milvus/lib/libopenblas.so
 
 WORKDIR /var/lib/milvus
 
-CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/server_config.yaml" ]
+CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
 
 EXPOSE 19530
 

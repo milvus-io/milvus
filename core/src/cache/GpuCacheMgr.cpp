@@ -13,7 +13,7 @@
 #include "config/ServerConfig.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <sstream>
 #include <utility>
 
@@ -24,15 +24,13 @@ namespace cache {
 std::mutex GpuCacheMgr::global_mutex_;
 std::unordered_map<int64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
-namespace {
-constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
-}
-
 GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
     cache_ = std::make_shared<Cache<DataObjPtr>>(config.gpu.cache_size(), 1UL << 32, header);
 
-    cache_->set_freemem_percent(config.gpu.cache_threshold());
+    if (config.gpu.cache_threshold() > 0.0) {
+        cache_->set_freemem_percent(config.gpu.cache_threshold());
+    }
     ConfigMgr::GetInstance().Attach("gpu.cache_threshold", this);
 }
 
@@ -49,22 +47,6 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
         }
     }
     return instance_[gpu_id];
-}
-
-DataObjPtr
-GpuCacheMgr::GetDataObj(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    return obj;
-}
-
-void
-GpuCacheMgr::SetDataObj(const std::string& key, const milvus::cache::DataObjPtr& data) {
-    CacheMgr<DataObjPtr>::InsertItem(key, data);
-}
-
-bool
-GpuCacheMgr::Reserve(const int64_t size) {
-    return CacheMgr<DataObjPtr>::Reserve(size);
 }
 
 void

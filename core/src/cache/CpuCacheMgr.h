@@ -31,12 +31,6 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
     static CpuCacheMgr&
     GetInstance();
 
-    DataObjPtr
-    GetDataObj(const std::string& key);
-
-    void
-    SetDataObj(const std::string& key, const DataObjPtr& data);
-
  public:
     void
     ConfigUpdate(const std::string& name) override;

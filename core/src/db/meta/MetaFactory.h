@@ -11,13 +11,12 @@
 
 #pragma once
 
-#include <string>
-
-#include "db/Options.h"
+#include "db/Types.h"
 #include "db/meta/MetaAdapter.h"
 
-namespace milvus {
-namespace engine {
+#include <string>
+
+namespace milvus::engine {
 
 class MetaFactory {
  public:
@@ -28,5 +27,4 @@ class MetaFactory {
     Build(const DBMetaOptions& meta_options);
 };
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine

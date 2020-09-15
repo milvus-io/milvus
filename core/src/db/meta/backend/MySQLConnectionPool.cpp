@@ -13,7 +13,7 @@
 
 #include <thread>
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 #include "utils/Log.h"
 
@@ -31,7 +31,19 @@ MySQLConnectionPool::grab() {
         full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
         ++conns_in_use_;
     }
+    full_.notify_one();
     return mysqlpp::ConnectionPool::grab();
+}
+
+mysqlpp::Connection*
+MySQLConnectionPool::safe_grab() {
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        full_.wait(lock, [this] { return conns_in_use_ < max_pool_size_; });
+        ++conns_in_use_;
+    }
+    full_.notify_one();
+    return mysqlpp::ConnectionPool::safe_grab();
 }
 
 // Other half of in-use conn count limit
@@ -67,8 +79,8 @@ MySQLConnectionPool::create() {
         auto conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
         conn->set_option(new mysqlpp::ConnectTimeoutOption(5));
-        conn->connect(db_name_.empty() ? 0 : db_name_.c_str(), server_.empty() ? 0 : server_.c_str(),
-                      user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);
+        conn->connect(db_name_.empty() ? nullptr : db_name_.c_str(), server_.empty() ? nullptr : server_.c_str(),
+                      user_.empty() ? nullptr : user_.c_str(), password_.empty() ? nullptr : password_.c_str(), port_);
         return conn;
     } catch (const mysqlpp::ConnectionFailed& er) {
         LOG_ENGINE_ERROR_ << "Failed to connect to database server"

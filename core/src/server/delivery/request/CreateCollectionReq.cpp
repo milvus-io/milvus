@@ -16,7 +16,8 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
+#include <set>
 
 namespace milvus {
 namespace server {
@@ -61,6 +62,7 @@ CreateCollectionReq::OnExecute() {
         // step 2: create snapshot collection context
         engine::snapshot::CreateCollectionContext create_collection_context;
         auto collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
+
         create_collection_context.collection = collection_schema;
         for (auto& field_kv : fields_) {
             auto& field_name = field_kv.first;
@@ -78,7 +80,7 @@ CreateCollectionReq::OnExecute() {
             }
 
             // validate id field
-            if (field_name == engine::DEFAULT_UID_NAME) {
+            if (field_name == engine::FIELD_UID) {
                 if (field_type != engine::DataType::INT64) {
                     return Status(DB_ERROR, "Field '_id' data type must be int64");
                 }

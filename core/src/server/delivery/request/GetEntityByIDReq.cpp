@@ -82,16 +82,19 @@ GetEntityByIDReq::OnExecute() {
 
         if (field_names_.empty()) {
             for (const auto& schema : field_mappings) {
+                if (schema.first->GetName() == engine::FIELD_UID) {
+                    continue;
+                }
+                field_mappings_.insert(schema);
                 field_names_.emplace_back(schema.first->GetName());
             }
-            field_mappings_ = field_mappings;
         } else {
             for (const auto& name : field_names_) {
                 bool find_field_name = false;
-                for (const auto& kv : field_mappings) {
-                    if (name == kv.first->GetName()) {
+                for (const auto& schema : field_mappings) {
+                    if (name == schema.first->GetName()) {
                         find_field_name = true;
-                        field_mappings_.insert(kv);
+                        field_mappings_.insert(schema);
                         break;
                     }
                 }

@@ -1,7 +1,7 @@
 import logging
 import pytest
 
-__version__ = '0.10.0'
+__version__ = '0.11.0'
 
 
 class TestPing:
@@ -21,7 +21,7 @@ class TestPing:
         expected: status returned should be ok
         '''
         msg = connect.server_status()
-        assert msg == "OK"
+        assert msg 
 
     def test_server_cmd_with_params_version(self, connect):
         '''
@@ -117,7 +117,8 @@ class TestPingDisconnect:
         with pytest.raises(Exception) as e:
             res = dis_connect.server_status()
 
-    def test_server_version_with_timeout(self, connect):
+    @pytest.mark.level(2)
+    def test_server_version_with_timeout(self, dis_connect):
         '''
         target: test get the server status with timeout settings after disconnect
         method: call the server_status method after connected

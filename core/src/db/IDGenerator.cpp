@@ -12,8 +12,7 @@
 #include "db/IDGenerator.h"
 #include "utils/Log.h"
 
-#include <assert.h>
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <chrono>
 #include <iostream>
 #include <string>
@@ -25,7 +24,7 @@ IDGenerator::~IDGenerator() = default;
 
 constexpr size_t SimpleIDGenerator::MAX_IDS_PER_MICRO;
 
-IDNumber
+idx_t
 SimpleIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
@@ -61,7 +60,7 @@ SimpleIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
     return Status::OK();
 }
 
-IDNumber
+idx_t
 SafeIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();

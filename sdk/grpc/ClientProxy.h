@@ -95,7 +95,7 @@ class ClientProxy : public Connection {
              BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
-    ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                     std::vector<int64_t>& id_array) override;
 
     Status
@@ -105,7 +105,7 @@ class ClientProxy : public Connection {
     Flush(const std::vector<std::string>& collection_name_array) override;
 
     Status
-    Compact(const std::string& collection_name) override;
+    Compact(const std::string& collection_name, const double& threshold) override;
 
  private:
     std::shared_ptr<::grpc::Channel> channel_;

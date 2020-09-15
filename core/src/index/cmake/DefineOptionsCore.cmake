@@ -64,6 +64,8 @@ define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "BUNDLED"
         "SYSTEM")
 
+define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
+
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
@@ -107,7 +109,7 @@ macro(config_summary)
     message(STATUS "  Source directory: ${CMAKE_CURRENT_SOURCE_DIR}")
     if (${CMAKE_EXPORT_COMPILE_COMMANDS})
         message(
-                STATUS "  Compile commands: ${INDEX_BINARY_DIR}/compile_commands.json")
+                STATUS "  Compile commands: ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json")
     endif ()
 
     foreach (category ${KNOWHERE_OPTION_CATEGORIES})

@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "config/ConfigMgr.h"
-#include "db/insert/VectorSource.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
 #include "segment/SegmentWriter.h"
@@ -24,6 +26,13 @@
 
 namespace milvus {
 namespace engine {
+
+class MemAction {
+ public:
+    idx_t op_id_ = 0;
+    std::unordered_set<idx_t> delete_ids_;
+    DataChunkPtr insert_data_;
+};
 
 class MemSegment {
  public:
@@ -33,48 +42,47 @@ class MemSegment {
 
  public:
     Status
-    Add(const VectorSourcePtr& source);
+    Add(const DataChunkPtr& chunk, idx_t op_id);
 
     Status
-    Delete(segment::doc_id_t doc_id);
+    Delete(const std::vector<idx_t>& ids, idx_t op_id);
+
+    int64_t
+    GetCurrentMem() const {
+        return current_mem_;
+    }
+
+    int64_t
+    GetCurrentRowCount() const {
+        return total_row_count_;
+    }
 
     Status
-    Delete(const std::vector<segment::doc_id_t>& doc_ids);
-
-    int64_t
-    GetCurrentMem();
-
-    int64_t
-    GetMemLeft();
-
-    bool
-    IsFull();
-
-    Status
-    Serialize(uint64_t wal_lsn);
-
-    int64_t
-    GetSegmentId() const;
+    Serialize();
 
  private:
     Status
-    CreateSegment();
+    CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
+                     segment::SegmentWriterPtr& writer, idx_t max_op_id);
 
     Status
-    GetSingleEntitySize(int64_t& single_size);
+    ApplyDeleteToMem();
+
+    Status
+    PutChunksToWriter(const segment::SegmentWriterPtr& writer);
 
  private:
     int64_t collection_id_;
     int64_t partition_id_;
 
-    std::shared_ptr<snapshot::NewSegmentOperation> operation_;
-    snapshot::SegmentPtr segment_;
     DBOptions options_;
-    int64_t current_mem_;
+    int64_t current_mem_ = 0;
 
-    //    ExecutionEnginePtr execution_engine_;
-    segment::SegmentWriterPtr segment_writer_ptr_;
-};  // SSMemTableFile
+    using ActionArray = std::vector<MemAction>;
+    ActionArray actions_;  // the actions array mekesure insert/delete actions executed one by one
+
+    int64_t total_row_count_ = 0;
+};
 
 using MemSegmentPtr = std::shared_ptr<MemSegment>;
 

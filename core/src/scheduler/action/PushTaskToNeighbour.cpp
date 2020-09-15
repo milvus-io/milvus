@@ -24,8 +24,9 @@ get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node;
-        if (not node)
+        if (not node) {
             continue;
+        }
 
         auto resource = std::static_pointer_cast<Resource>(node);
         //        if (not resource->HasExecutor()) continue;

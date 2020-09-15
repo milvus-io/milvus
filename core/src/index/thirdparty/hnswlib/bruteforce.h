@@ -4,7 +4,7 @@
 #include <mutex>
 #include <algorithm>
 
-namespace hnswlib_nm {
+namespace hnswlib {
 
 template<typename dist_t>
 class BruteforceSearch : public AlgorithmInterface<dist_t> {

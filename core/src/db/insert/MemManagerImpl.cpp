@@ -11,10 +11,9 @@
 
 #include "db/insert/MemManagerImpl.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <thread>
 
-#include "VectorSource.h"
 #include "db/Constants.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -36,15 +35,15 @@ MemManagerImpl::GetMemByCollection(int64_t collection_id) {
 }
 
 Status
-MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, uint64_t lsn) {
+MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id) {
     auto status = ValidateChunk(collection_id, chunk);
     if (!status.ok()) {
         return status;
     }
 
-    VectorSourcePtr source = std::make_shared<VectorSource>(chunk);
-    std::unique_lock<std::mutex> lock(mutex_);
-    return InsertEntitiesNoLock(collection_id, partition_id, source, lsn);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    MemCollectionPtr mem = GetMemByCollection(collection_id);
+    return mem->Add(partition_id, chunk, op_id);
 }
 
 Status
@@ -76,7 +75,7 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
         size_t data_size = iter->second->data_.size();
 
         snapshot::FieldPtr field = ss->GetField(name);
-        DataType ftype = static_cast<DataType>(field->GetFtype());
+        auto ftype = static_cast<DataType>(field->GetFtype());
         std::string err_msg = "Illegal data size for chunk field: ";
         switch (ftype) {
             case DataType::BOOL:
@@ -131,6 +130,8 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 
                 break;
             }
+            default:
+                break;
         }
     }
 
@@ -138,42 +139,11 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 }
 
 Status
-MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id,
-                                     const milvus::engine::VectorSourcePtr& source, uint64_t lsn) {
-    MemCollectionPtr mem = GetMemByCollection(collection_id);
-    mem->SetLSN(lsn);
-
-    auto status = mem->Add(partition_id, source);
-    return status;
-}
-
-Status
-MemManagerImpl::DeleteEntity(int64_t collection_id, IDNumber engity_id, uint64_t lsn) {
-    std::unique_lock<std::mutex> lock(mutex_);
+MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) {
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 
-    mem->SetLSN(lsn);
-    IDNumbers ids = {engity_id};
-    auto status = mem->Delete(ids);
-    if (status.ok()) {
-        return status;
-    }
-
-    return Status::OK();
-}
-
-Status
-MemManagerImpl::DeleteEntities(int64_t collection_id, int64_t length, const IDNumber* engity_ids, uint64_t lsn) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    MemCollectionPtr mem = GetMemByCollection(collection_id);
-
-    mem->SetLSN(lsn);
-
-    IDNumbers ids;
-    ids.resize(length);
-    memcpy(ids.data(), engity_ids, length * sizeof(IDNumber));
-
-    auto status = mem->Delete(ids);
+    auto status = mem->Delete(entity_ids, op_id);
     if (!status.ok()) {
         return status;
     }
@@ -185,91 +155,94 @@ Status
 MemManagerImpl::Flush(int64_t collection_id) {
     ToImmutable(collection_id);
 
-    MemList temp_immutable_list;
-    {
-        std::unique_lock<std::mutex> lock(mutex_);
-        immu_mem_list_.swap(temp_immutable_list);
-    }
-
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
-    auto max_lsn = GetMaxLSN(temp_immutable_list);
-    for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
-        auto status = mem->Serialize(max_lsn);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
-            return status;
-        }
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
-    }
-
-    return Status::OK();
+    std::set<int64_t> collection_ids;
+    return InternalFlush(collection_ids);
 }
 
 Status
 MemManagerImpl::Flush(std::set<int64_t>& collection_ids) {
     ToImmutable();
 
+    return InternalFlush(collection_ids);
+}
+
+Status
+MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
     MemList temp_immutable_list;
     {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         immu_mem_list_.swap(temp_immutable_list);
     }
 
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
-    collection_ids.clear();
-    auto max_lsn = GetMaxLSN(temp_immutable_list);
+    std::lock_guard<std::mutex> lock(flush_mtx_);
     for (auto& mem : temp_immutable_list) {
-        LOG_ENGINE_DEBUG_ << "Flushing collection: " << mem->GetCollectionId();
-        auto status = mem->Serialize(max_lsn);
+        int64_t collection_id = mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushing collection: " << collection_id;
+        auto status = mem->Serialize();
         if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << "Flush collection " << mem->GetCollectionId() << " failed";
+            LOG_ENGINE_ERROR_ << "Flush collection " << collection_id << " failed";
             return status;
         }
-        collection_ids.insert(mem->GetCollectionId());
-        LOG_ENGINE_DEBUG_ << "Flushed collection: " << mem->GetCollectionId();
+        LOG_ENGINE_DEBUG_ << "Flushed collection: " << collection_id;
+        collection_ids.insert(collection_id);
     }
-
-    // TODO: global lsn?
-    //    meta_->SetGlobalLastLSN(max_lsn);
 
     return Status::OK();
 }
 
 Status
 MemManagerImpl::ToImmutable(int64_t collection_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    MemList temp_immutable_list;
 
-    auto mem_collection = mem_map_.find(collection_id);
-    if (mem_collection != mem_map_.end()) {
-        immu_mem_list_.push_back(mem_collection->second);
-        mem_map_.erase(mem_collection);
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        auto mem_collection = mem_map_.find(collection_id);
+        if (mem_collection != mem_map_.end()) {
+            temp_immutable_list.push_back(mem_collection->second);
+            mem_map_.erase(mem_collection);
+        }
     }
 
-    return Status::OK();
+    return ToImmutable(temp_immutable_list);
 }
 
 Status
 MemManagerImpl::ToImmutable() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    MemList temp_immutable_list;
 
-    for (auto& mem_collection : mem_map_) {
-        immu_mem_list_.push_back(mem_collection.second);
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        for (auto& pair : mem_map_) {
+            temp_immutable_list.push_back(pair.second);
+        }
+        mem_map_.clear();
     }
-    mem_map_.clear();
+
+    return ToImmutable(temp_immutable_list);
+}
+
+Status
+MemManagerImpl::ToImmutable(MemList& mem_list) {
+    // don't use swp() here, since muti-threads could call ToImmutable at same time
+    // there will be several 'temp_immutable_list' need to combine into immu_mem_list_
+    std::lock_guard<std::mutex> lock(immu_mem_mtx_);
+    for (auto& mem : mem_list) {
+        immu_mem_list_.push_back(mem);
+    }
+    mem_list.clear();
 
     return Status::OK();
 }
 
 Status
 MemManagerImpl::EraseMem(int64_t collection_id) {
-    {  // erase MemVector from rapid-insert cache
-        std::unique_lock<std::mutex> lock(mutex_);
+    {  // erase from rapid-insert cache
+        std::lock_guard<std::mutex> lock(mem_mutex_);
         mem_map_.erase(collection_id);
     }
 
-    {  // erase MemVector from serialize cache
-        std::unique_lock<std::mutex> lock(serialization_mtx_);
+    {  // erase from serialize cache
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
             if (mem->GetCollectionId() != collection_id) {
@@ -284,19 +257,21 @@ MemManagerImpl::EraseMem(int64_t collection_id) {
 
 Status
 MemManagerImpl::EraseMem(int64_t collection_id, int64_t partition_id) {
-    {  // erase MemVector from rapid-insert cache
-        std::unique_lock<std::mutex> lock(mutex_);
+    {  // erase from rapid-insert cache
+        std::lock_guard<std::mutex> lock(mem_mutex_);
         auto mem_collection = mem_map_.find(collection_id);
         if (mem_collection != mem_map_.end()) {
             mem_collection->second->EraseMem(partition_id);
         }
     }
 
-    {  // erase MemVector from serialize cache
-        std::unique_lock<std::mutex> lock(serialization_mtx_);
+    {  // erase from serialize cache
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
-            mem->EraseMem(partition_id);
+            if (mem->GetCollectionId() == collection_id) {
+                mem->EraseMem(partition_id);
+            }
         }
     }
 
@@ -306,7 +281,7 @@ MemManagerImpl::EraseMem(int64_t collection_id, int64_t partition_id) {
 size_t
 MemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     for (auto& mem_collection : mem_map_) {
         total_mem += mem_collection.second->GetCurrentMem();
     }
@@ -316,7 +291,7 @@ MemManagerImpl::GetCurrentMutableMem() {
 size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    std::lock_guard<std::mutex> lock(immu_mem_mtx_);
     for (auto& mem_collection : immu_mem_list_) {
         total_mem += mem_collection->GetCurrentMem();
     }
@@ -326,18 +301,6 @@ MemManagerImpl::GetCurrentImmutableMem() {
 size_t
 MemManagerImpl::GetCurrentMem() {
     return GetCurrentMutableMem() + GetCurrentImmutableMem();
-}
-
-uint64_t
-MemManagerImpl::GetMaxLSN(const MemList& collections) {
-    uint64_t max_lsn = 0;
-    for (auto& collection : collections) {
-        auto cur_lsn = collection->GetLSN();
-        if (collection->GetLSN() > max_lsn) {
-            max_lsn = cur_lsn;
-        }
-    }
-    return max_lsn;
 }
 
 }  // namespace engine

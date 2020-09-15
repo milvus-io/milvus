@@ -11,7 +11,7 @@ segment_row_count = 5000
 nprobe = 1
 top_k = 1
 epsilon = 0.0001
-tag = "1970-01-01"
+tag = "1970_01_01"
 nb = 6000
 nlist = 1024
 collection_id = "collection_stats"
@@ -49,7 +49,7 @@ class TestStatsBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_simple_index()
+        params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
         logging.getLogger().info(request.param)
@@ -69,7 +69,6 @@ class TestStatsBase:
         with pytest.raises(Exception) as e:
             stats = connect.get_collection_stats(collection_name)
 
-    @pytest.mark.level(2)
     def test_get_collection_stats_name_invalid(self, connect, get_collection_name):
         '''
         target: get collection stats where collection name is invalid
@@ -106,20 +105,6 @@ class TestStatsBase:
         assert stats["partitions"][0]["tag"] == "_default"
         assert stats["partitions"][0]["row_count"] == nb
 
-    def test_get_collection_stats_batch_ip(self, connect, ip_collection):
-        '''
-        target: get row count with collection_stats
-        method: add entities, check count in collection info
-        expected: count as expected
-        '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
-        stats = connect.get_collection_stats(ip_collection)
-        assert stats["row_count"] == nb
-        assert len(stats["partitions"]) == 1
-        assert stats["partitions"][0]["tag"] == "_default"
-        assert stats["partitions"][0]["row_count"] == nb
-
     def test_get_collection_stats_single(self, connect, collection):
         '''
         target: get row count with collection_stats
@@ -149,8 +134,8 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == nb - 2
+        assert stats["partitions"][0]["row_count"] == nb -2
         assert stats["partitions"][0]["segments"][0]["data_size"] > 0
-        assert stats["partitions"][0]["segments"][0]["index_name"] == "FLAT"
 
     def test_get_collection_stats_after_compact_parts(self, connect, collection):
         '''
@@ -171,7 +156,6 @@ class TestStatsBase:
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
         compact_after = stats["partitions"][0]["segments"][0]["data_size"]
-        # pdb.set_trace()
         assert compact_before > compact_after
 
     def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
@@ -187,11 +171,11 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
+        compact_before = stats["partitions"][0]["row_count"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
+        compact_after = stats["partitions"][0]["row_count"]
         # pdb.set_trace()
         assert compact_before == compact_after
 
@@ -243,38 +227,45 @@ class TestStatsBase:
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
-    def test_get_collection_stats_after_index_created_ip(self, connect, ip_collection, get_simple_index):
+    def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
         target: test collection info after index created
         method: create collection, add vectors, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(ip_collection, entities)
-        connect.flush([ip_collection])
+        get_simple_index["metric_type"] = "IP"
+        ids = connect.insert(collection, entities)
+        connect.flush([collection])
         get_simple_index.update({"metric_type": "IP"})
-        connect.create_index(ip_collection, field_name, get_simple_index)
-        stats = connect.get_collection_stats(ip_collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        assert stats["partitions"][0]["segments"][0]["index_name"] == get_simple_index["index_type"]
+        connect.create_index(collection, field_name, get_simple_index)
+        stats = connect.get_collection_stats(collection)
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
-    def test_get_collection_stats_after_index_created_jac(self, connect, jac_collection, get_jaccard_index):
+    def test_get_collection_stats_after_index_created_jac(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test collection info after index created
         method: create collection, add binary entities, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(jac_collection, binary_entities)
-        connect.flush([jac_collection])
-        connect.create_index(jac_collection, "binary_vector", get_jaccard_index)
-        stats = connect.get_collection_stats(jac_collection)
-        logging.getLogger().info(stats)
-        assert stats["partitions"][0]["segments"][0]["row_count"] == nb
-        assert stats["partitions"][0]["segments"][0]["index_name"] == get_jaccard_index["index_type"]
+        ids = connect.insert(binary_collection, binary_entities)
+        connect.flush([binary_collection])
+        connect.create_index(binary_collection, "binary_vector", get_jaccard_index)
+        stats = connect.get_collection_stats(binary_collection)
+        assert stats["row_count"] == nb
+        for file in stats["partitions"][0]["segments"][0]["files"]:
+            if file["field"] == field_name and file["name"] != "_raw":
+                assert file["data_size"] > 0
+                assert file["index_type"] == get_simple_index["index_type"]
 
     def test_get_collection_stats_after_create_different_index(self, connect, collection):
         '''
@@ -285,11 +276,13 @@ class TestStatsBase:
         ids = connect.insert(collection, entities)
         connect.flush([collection])
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
-            connect.create_index(collection, field_name, {"index_type": index_type, "nlist": 1024, "metric_type": "L2"})
+            connect.create_index(collection, field_name, {"index_type": index_type, "params":{"nlist": 1024}, "metric_type": "L2"})
             stats = connect.get_collection_stats(collection)
-            logging.getLogger().info(stats)
-            assert stats["partitions"][0]["segments"][0]["index_name"] == index_type
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            assert stats["row_count"] == nb
+            for file in stats["partitions"][0]["segments"][0]["files"]:
+                if file["field"] == field_name and file["name"] != "_raw":
+                    assert file["data_size"] > 0
+                    assert file["index_type"] == index_type
 
     def test_collection_count_multi_collections(self, connect):
         '''
@@ -308,9 +301,10 @@ class TestStatsBase:
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
+            assert stats["partitions"][0]["row_count"] == nb
             connect.drop_collection(collection_list[i])
 
+    @pytest.mark.level(2)
     def test_collection_count_multi_collections_indexed(self, connect):
         '''
         target: test collection rows_count is correct or not with multiple collections of L2
@@ -327,14 +321,17 @@ class TestStatsBase:
             res = connect.insert(collection_name, entities)
             connect.flush(collection_list)
             if i % 2:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "nlist": 1024, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_SQ8", "params":{"nlist": 1024}, "metric_type": "L2"})
             else:
-                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT", "nlist": 1024, "metric_type": "L2"})
+                connect.create_index(collection_name, field_name, {"index_type": "IVF_FLAT","params":{ "nlist": 1024}, "metric_type": "L2"})
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
-            assert stats["partitions"][0]["segments"][0]["row_count"] == nb
             if i % 2:
-                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_SQ8"
+                for file in stats["partitions"][0]["segments"][0]["files"]:
+                    if file["field"] == field_name and file["name"] != "_raw":
+                        assert file["index_type"] == "IVF_SQ8"
             else:
-                assert stats["partitions"][0]["segments"][0]["index_name"] == "IVF_FLAT"
+                for file in stats["partitions"][0]["segments"][0]["files"]:
+                    if file["field"] == field_name and file["name"] != "_raw":
+                        assert file["index_type"] == "IVF_FLAT"
             connect.drop_collection(collection_list[i])

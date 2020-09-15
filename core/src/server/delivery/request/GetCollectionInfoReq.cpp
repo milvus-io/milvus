@@ -52,20 +52,22 @@ GetCollectionInfoReq::OnExecute() {
         for (auto& field_kv : field_mappings) {
             auto field = field_kv.first;
 
+            FieldSchema field_schema;
             milvus::json field_index_param;
             auto field_elements = field_kv.second;
             for (const auto& element : field_elements) {
-                if (element->GetFtype() == (engine::snapshot::FTYPE_TYPE)engine::FieldElementType::FET_INDEX) {
+                if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
                     field_index_param = element->GetParams();
+                    auto type = element->GetTypeName();
+                    field_schema.index_params_ = field_index_param;
+                    field_schema.index_params_[engine::PARAM_INDEX_TYPE] = element->GetTypeName();
                     break;
                 }
             }
 
             auto field_name = field->GetName();
-            FieldSchema field_schema;
-            field_schema.field_type_ = (engine::DataType)field->GetFtype();
+            field_schema.field_type_ = field->GetFtype();
             field_schema.field_params_ = field->GetParams();
-            field_schema.index_params_ = field_index_param;
 
             collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));
         }

@@ -12,7 +12,7 @@ index_file_size = 10
 collection_id = "test_flush"
 DELETE_TIMEOUT = 60
 nprobe = 1
-tag = "1970-01-01"
+tag = "1970_01_01"
 top_k = 1
 nb = 6000
 tag = "partition_tag"
@@ -25,8 +25,7 @@ default_fields = gen_default_fields()
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),
-                                     "params": {"nprobe": 10}}}}
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim), "metric_type":"L2","params": {"nprobe": 10}}}}
         ]
     }
 }
@@ -87,63 +86,64 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
-    def test_add_partition_flush(self, connect, collection):
+    def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
         expected: the length of ids and the collection row count
         '''
         # vector = gen_vector(nb, dim)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
-        res_count = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         assert len(ids) == nb
-        connect.flush([collection])
-        res_count = connect.count_entities(collection)
+        connect.flush([id_collection])
+        res_count = connect.count_entities(id_collection)
         assert res_count == nb * 2
 
-    def test_add_partitions_flush(self, connect, collection):
+    def test_add_partitions_flush(self, connect, id_collection):
         '''
         method: add entities into partitions in collection, flush one
         expected: the length of ids and the collection row count
         '''
         # vectors = gen_vectors(nb, dim)
         tag_new = gen_unique_str()
-        connect.create_partition(collection, tag)
-        connect.create_partition(collection, tag_new)
+        connect.create_partition(id_collection, tag)
+        connect.create_partition(id_collection, tag_new)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
-        connect.flush([collection])
-        ids = connect.insert(collection, entities, ids, partition_tag=tag_new)
-        connect.flush([collection])
-        res = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        connect.flush([id_collection])
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag_new)
+        connect.flush([id_collection])
+        res = connect.count_entities(id_collection)
         assert res == 2 * nb
 
-    def test_add_collections_flush(self, connect, collection):
+    def test_add_collections_flush(self, connect, id_collection):
         '''
         method: add entities into collections, flush one
         expected: the length of ids and the collection row count
         '''
         collection_new = gen_unique_str()
+        default_fields = gen_default_fields(False)
         connect.create_collection(collection_new, default_fields)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         connect.create_partition(collection_new, tag)
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         ids = connect.insert(collection_new, entities, ids, partition_tag=tag)
-        connect.flush([collection])
+        connect.flush([id_collection])
         connect.flush([collection_new])
-        res = connect.count_entities(collection)
+        res = connect.count_entities(id_collection)
         assert res == nb
         res = connect.count_entities(collection_new)
         assert res == nb
 
-    def test_add_collections_fields_flush(self, connect, collection, get_filter_field, get_vector_field):
+    def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
         expected: the length of ids and the collection row count
@@ -154,25 +154,25 @@ class TestFlushBase:
         collection_new = gen_unique_str("test_flush")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count
+            "segment_row_count": segment_row_count,
+            "auto_id": False
         }
         connect.create_collection(collection_new, fields)
-        connect.create_partition(collection, tag)
+        connect.create_partition(id_collection, tag)
         connect.create_partition(collection_new, tag)
         # vectors = gen_vectors(nb, dim)
         entities_new = gen_entities_by_fields(fields["fields"], nb_new, dim)
         ids = [i for i in range(nb)]
         ids_new = [i for i in range(nb_new)]
-        ids = connect.insert(collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
         ids = connect.insert(collection_new, entities_new, ids_new, partition_tag=tag)
-        connect.flush([collection])
+        connect.flush([id_collection])
         connect.flush([collection_new])
-        res = connect.count_entities(collection)
+        res = connect.count_entities(id_collection)
         assert res == nb
         res = connect.count_entities(collection_new)
         assert res == nb_new
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_add_flush_multiable_times(self, connect, collection):
         '''
         method: add entities, flush serveral times
@@ -189,20 +189,19 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO: stable case
-    def test_add_flush_auto(self, connect, collection):
+    def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
         expected: no error raised
         '''
         # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(collection, entities, ids)
-        timeout = 10
+        ids = connect.insert(id_collection, entities, ids)
+        timeout = 20
         start_time = time.time()
         while (time.time() - start_time < timeout):
             time.sleep(1)
-            res = connect.count_entities(collection)
+            res = connect.count_entities(id_collection)
             if res == nb:
                 break
         if time.time() - start_time > timeout:
@@ -218,7 +217,7 @@ class TestFlushBase:
     def same_ids(self, request):
         yield request.param
 
-    def test_add_flush_same_ids(self, connect, collection, same_ids):
+    def test_add_flush_same_ids(self, connect, id_collection, same_ids):
         '''
         method: add entities, with same ids, count(same ids) < 15, > 15
         expected: the length of ids and the collection row count
@@ -228,12 +227,11 @@ class TestFlushBase:
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        ids = connect.insert(collection, entities, ids)
-        connect.flush([collection])
-        res = connect.count_entities(collection)
+        ids = connect.insert(id_collection, entities, ids)
+        connect.flush([id_collection])
+        res = connect.count_entities(id_collection)
         assert res == nb
 
-    @pytest.mark.skip(reason="search not support yet")
     def test_delete_flush_multiable_times(self, connect, collection):
         '''
         method: delete entities, flush serveral times
@@ -250,37 +248,33 @@ class TestFlushBase:
         logging.getLogger().debug(res)
         assert res
 
-    # TODO: CI fail, LOCAL pass
-    def _test_collection_count_during_flush(self, connect, args):
+    # TODO: unable to set config 
+    @pytest.mark.level(2)
+    def _test_collection_count_during_flush(self, connect, collection, args):
         '''
         method: flush collection at background, call `count_entities`
-        expected: status ok
+        expected: no timeout
         '''
-        collection = gen_unique_str("test_flush")
-        # param = {'collection_name': collection,
-        #          'dimension': dim,
-        #          'index_file_size': index_file_size,
-        #          'metric_type': MetricType.L2}
-        milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-        milvus.create_collection(collection, default_fields)
-        # vectors = gen_vector(nb, dim)
-        ids = milvus.insert(collection, entities, ids=[i for i in range(nb)])
-
-        def flush(collection_name):
+        ids = []
+        for i in range(5):
+            tmp_ids = connect.insert(collection, entities)
+            connect.flush([collection])
+            ids.extend(tmp_ids)
+        disable_flush(connect)
+        status = connect.delete_entity_by_id(collection, ids)
+        def flush():
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            status = milvus.delete_entity_by_id(collection_name, [i for i in range(nb)])
-            with pytest.raises(Exception) as e:
-                milvus.flush([collection_name])
-
-
-        p = Process(target=flush, args=(collection,))
+            logging.error("start flush")
+            milvus.flush([collection])
+            logging.error("end flush")
+    
+        p = threading.Thread(target=flush, args=())
         p.start()
-        res = milvus.count_entities(collection)
-        assert res == nb
+        time.sleep(0.2)
+        logging.error("start count")
+        res = connect.count_entities(collection, timeout = 10)
         p.join()
-        res = milvus.count_entities(collection)
-        assert res == nb
-        logging.getLogger().info(res)
+        res = connect.count_entities(collection)
         assert res == 0
 
 
@@ -313,8 +307,7 @@ class TestFlushAsync:
         future = connect.flush([collection], _async=True)
         status = future.result()
 
-    # TODO:
-    def _test_flush_async(self, connect, collection):
+    def test_flush_async(self, connect, collection):
         nb = 100000
         vectors = gen_vectors(nb, dim)
         connect.insert(collection, entities)

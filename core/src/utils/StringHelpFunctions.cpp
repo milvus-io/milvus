@@ -11,7 +11,7 @@
 
 #include "utils/StringHelpFunctions.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <algorithm>
 #include <regex>
 #include <string>
@@ -42,9 +42,9 @@ StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::s
         return;
     }
 
-    size_t prev = 0, pos = 0;
+    size_t prev = 0;
     while (true) {
-        pos = str.find_first_of(delimeter, prev);
+        size_t pos = str.find_first_of(delimeter, prev);
         if (pos == std::string::npos) {
             result.emplace_back(str.substr(prev));
             break;

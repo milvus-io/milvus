@@ -11,7 +11,7 @@
 
 #include "scheduler/task/BuildIndexTask.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 #include <memory>
 #include <utility>
 
@@ -55,8 +55,9 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
             stat = execution_engine_->Load(context);
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-            stat = execution_engine_->CopyToGpu(device_id);
-            type_str = "CPU2GPU:" + std::to_string(device_id);
+            // no need to copy flat to gpu,
+            //            stat = execution_engine_->CopyToGpu(device_id);
+            //            type_str = "CPU2GPU:" + std::to_string(device_id);
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -79,6 +80,10 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         }
 
         LOG_ENGINE_ERROR_ << s.message();
+
+        auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
+        build_job->FailedSegments().push_back(segment_id_);
+
         return s;
     }
 
@@ -93,10 +98,20 @@ BuildIndexTask::OnExecute() {
         return Status(DB_ERROR, "execution engine is null");
     }
 
-    auto status = execution_engine_->BuildIndex();
+    Status status;
+    try {
+        status = execution_engine_->BuildIndex();
+    } catch (std::exception& e) {
+        status = Status(DB_ERROR, e.what());
+    }
+
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to build index: " << status.ToString();
         execution_engine_ = nullptr;
+
+        auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
+        build_job->FailedSegments().push_back(segment_id_);
+
         return status;
     }
 

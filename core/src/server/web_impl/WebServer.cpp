@@ -65,13 +65,10 @@ WebServer::StartService() {
             }
 
             server.stop();
-            OATPP_COMPONENT(std::shared_ptr<oatpp::network::ClientConnectionProvider>, client_provider);
-            client_provider->getConnection();
         });
 
         // start synchronously
         server.run();
-        connection_handler->stop();
         stop_thread.join();
     }
     oatpp::base::Environment::destroy();

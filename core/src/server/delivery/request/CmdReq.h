@@ -38,10 +38,18 @@ class CmdReq : public BaseReq {
     static std::string
     tolower(std::string s);
 
+    static int64_t
+    now();
+
+    static int64_t
+    uptime();
+
  private:
     const std::string origin_cmd_;
     const std::string cmd_;
     std::string& result_;
+
+    static int64_t start_time;
 };
 
 }  // namespace server

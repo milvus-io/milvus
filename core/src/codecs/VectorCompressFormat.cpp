@@ -17,8 +17,11 @@
 
 #include <boost/filesystem.hpp>
 #include <memory>
+#include <unordered_map>
 
+#include "codecs/ExtraFileInfo.h"
 #include "codecs/VectorCompressFormat.h"
+#include "db/Utils.h"
 #include "knowhere/common/BinarySet.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
@@ -35,52 +38,74 @@ VectorCompressFormat::FilePostfix() {
     return str;
 }
 
-void
+Status
 VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                            knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("VectorCompressFormat::Read");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    if (!fs_ptr->reader_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+    if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
+        return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress file: " + full_file_path);
     }
+    CHECK_MAGIC_VALID(fs_ptr);
+    CHECK_SUM_VALID(fs_ptr);
 
-    int64_t length = fs_ptr->reader_ptr_->length();
+    int64_t length = fs_ptr->reader_ptr_->Length() - MAGIC_SIZE - HEADER_SIZE - SUM_SIZE;
     if (length <= 0) {
-        LOG_ENGINE_ERROR_ << "Invalid vector compress length: " << full_file_path;
-        return;
+        return Status(SERVER_UNEXPECTED_ERROR, "Invalid vector compress length: " + full_file_path);
     }
 
+    compress = std::make_shared<knowhere::Binary>();
     compress->data = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
     compress->size = length;
 
-    fs_ptr->reader_ptr_->seekg(0);
-    fs_ptr->reader_ptr_->read(compress->data.get(), length);
-    fs_ptr->reader_ptr_->close();
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(compress->data.get(), length);
+    fs_ptr->reader_ptr_->Close();
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
     LOG_ENGINE_DEBUG_ << "VectorCompressFormat::Read(" << full_file_path << ") rate " << rate << "MB/s";
+
+    return Status::OK();
 }
 
-void
+Status
 VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             const knowhere::BinaryPtr& compress) {
     milvus::TimeRecorder recorder("VectorCompressFormat::Write");
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
-    if (!fs_ptr->writer_ptr_->open(full_file_path)) {
-        LOG_ENGINE_ERROR_ << "Fail to open vector compress: " << full_file_path;
-        return;
+
+    if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
+        return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress: " + full_file_path);
     }
 
-    fs_ptr->writer_ptr_->write(compress->data.get(), compress->size);
-    fs_ptr->writer_ptr_->close();
+    try {
+        // TODO: add extra info
+        WRITE_MAGIC(fs_ptr);
+        HeaderMap maps;
+        std::string header = HeaderWrapper(maps);
+        WRITE_HEADER(fs_ptr, header);
 
-    double span = recorder.RecordSection("End");
-    double rate = compress->size * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "SVectorCompressFormat::Write(" << full_file_path << ") rate " << rate << "MB/s";
+        fs_ptr->writer_ptr_->Write(compress->data.get(), compress->size);
+
+        WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(compress->data.get()), compress->size);
+
+        fs_ptr->writer_ptr_->Close();
+
+        double span = recorder.RecordSection("End");
+        double rate = compress->size * 1000000.0 / span / 1024 / 1024;
+        LOG_ENGINE_DEBUG_ << "SVectorCompressFormat::Write(" << full_file_path << ") rate " << rate << "MB/s";
+    } catch (std::exception& ex) {
+        std::string err_msg = "Failed to write compress data: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+
+        engine::utils::SendExitSignal();
+        return Status(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    return Status::OK();
 }
 
 }  // namespace codec

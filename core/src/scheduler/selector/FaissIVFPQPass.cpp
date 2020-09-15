@@ -12,13 +12,15 @@
 #include "scheduler/selector/FaissIVFPQPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
+#include "faiss/gpu/utils/DeviceUtils.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
-#include <fiu-local.h>
+#include <fiu/fiu-local.h>
 
 namespace milvus {
 namespace scheduler {
@@ -47,18 +49,24 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
+    if (search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        return false;
+    }
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: gpu disable, specify cpu to search!", "search", 0);
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->nq() < (uint64_t)threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!",
-                                    "search", 0);
+    } else if (search_task->nq() < threshold_) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!");
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() >
+               faiss::gpu::getMaxKSelection()) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFFlatPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
-        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
-                                    "search", 0, search_gpus_[idx_]);
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPQPass: nq >= gpu_search_threshold, specify gpu %d to search!",
+                                    search_gpus_[idx_]);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }

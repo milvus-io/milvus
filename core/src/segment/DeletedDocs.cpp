@@ -20,15 +20,16 @@
 namespace milvus {
 namespace segment {
 
-DeletedDocs::DeletedDocs(const std::vector<offset_t>& deleted_doc_offsets) : deleted_doc_offsets_(deleted_doc_offsets) {
+DeletedDocs::DeletedDocs(const std::vector<engine::offset_t>& deleted_doc_offsets)
+    : deleted_doc_offsets_(deleted_doc_offsets) {
 }
 
 void
-DeletedDocs::AddDeletedDoc(offset_t offset) {
+DeletedDocs::AddDeletedDoc(engine::offset_t offset) {
     deleted_doc_offsets_.emplace_back(offset);
 }
 
-const std::vector<offset_t>&
+const std::vector<engine::offset_t>&
 DeletedDocs::GetDeletedDocs() const {
     return deleted_doc_offsets_;
 }
@@ -39,8 +40,13 @@ DeletedDocs::GetDeletedDocs() const {
 //}
 
 size_t
-DeletedDocs::GetSize() const {
+DeletedDocs::GetCount() const {
     return deleted_doc_offsets_.size();
+}
+
+int64_t
+DeletedDocs::Size() {
+    return deleted_doc_offsets_.size() * sizeof(engine::offset_t);
 }
 
 }  // namespace segment
