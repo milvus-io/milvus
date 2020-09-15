@@ -1,11 +1,21 @@
 package reader
 
-func startQueryNode() {
-	qn := NewQueryNode(0, 0)
-	qn.InitQueryNodeCollection()
-	//go qn.SegmentService()
-	qn.StartMessageClient()
+import (
+	"github.com/czs007/suvlim/reader/message_client"
+	"sync"
+)
 
-	go qn.RunSearch()
-	qn.RunInsertDelete()
+func StartQueryNode(pulsarURL string) {
+	mc := message_client.MessageClient{}
+	mc.InitClient(pulsarURL)
+
+	mc.ReceiveMessage()
+	qn := CreateQueryNode(0, 0, &mc)
+	qn.InitQueryNodeCollection()
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go qn.RunInsertDelete(&wg)
+	go qn.RunSearch(&wg)
+	wg.Wait()
+	qn.Close()
 }

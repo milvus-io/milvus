@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/czs007/suvlim/pkg/message"
+	pb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 	"sort"
+	"sync"
 )
 
 const ReadStopFlagEnd int64 = 0
@@ -24,9 +25,10 @@ type TimeSyncMsg struct {
 	Timestamp    uint64
 	NumRecorders int64
 }
-type ReaderTimeSyncOption func(*readerTimeSyncCfg)
 
-type readerTimeSyncCfg struct {
+type ReaderTimeSyncOption func(*ReaderTimeSyncCfg)
+
+type ReaderTimeSyncCfg struct {
 	pulsarClient pulsar.Client
 
 	timeSyncConsumer pulsar.Consumer
@@ -40,6 +42,7 @@ type readerTimeSyncCfg struct {
 	interval             int
 	proxyIdList          []int64
 	readerQueueSize      int
+	TestData             int
 
 	revTimesyncFromReader map[uint64]int
 
@@ -81,7 +84,7 @@ func NewReaderTimeSync(
 			return nil, fmt.Errorf("there are two proxies have the same id = %d", proxyIdList[i])
 		}
 	}
-	r := &readerTimeSyncCfg{
+	r := &ReaderTimeSyncCfg{
 		interval:    interval,
 		proxyIdList: proxyIdList,
 	}
@@ -147,7 +150,7 @@ func NewReaderTimeSync(
 	return r, nil
 }
 
-func (r *readerTimeSyncCfg) Close() {
+func (r *ReaderTimeSyncCfg) Close() {
 	r.cancel()
 	r.timeSyncConsumer.Close()
 	r.readerConsumer.Close()
@@ -157,25 +160,29 @@ func (r *readerTimeSyncCfg) Close() {
 	r.pulsarClient.Close()
 }
 
-func (r *readerTimeSyncCfg) Start() error {
+func (r *ReaderTimeSyncCfg) Start() error {
 	go r.startReadTopics()
 	go r.startTimeSync()
 	return r.ctx.Err()
 }
 
-func (r *readerTimeSyncCfg) InsertOrDelete() <-chan *pb.InsertOrDeleteMsg {
+func (r *ReaderTimeSyncCfg) InsertOrDelete() <-chan *pb.InsertOrDeleteMsg {
 	return r.insertOrDeleteChan
 }
 
-func (r *readerTimeSyncCfg) TimeSync() <-chan TimeSyncMsg {
+func (r *ReaderTimeSyncCfg) TimeSync() <-chan TimeSyncMsg {
 	return r.timesyncMsgChan
 }
 
-func (r *readerTimeSyncCfg) IsInsertDeleteChanFull() bool {
+func (r *ReaderTimeSyncCfg) TimeSyncChanLen() int {
+	return len(r.timesyncMsgChan)
+}
+
+func (r *ReaderTimeSyncCfg) IsInsertDeleteChanFull() bool {
 	return len(r.insertOrDeleteChan) == len(r.readerProducer)*r.readerQueueSize
 }
 
-func (r *readerTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
+func (r *ReaderTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMsg {
 	if len(r.proxyIdList) > 1 {
 		if len(ts) > 1 {
 			for i := 1; i < len(r.proxyIdList); i++ {
@@ -204,7 +211,7 @@ func (r *readerTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMs
 	return ts
 }
 
-func (r *readerTimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncMsg, n int) ([]*pb.TimeSyncMsg, error) {
+func (r *ReaderTimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncMsg, n int) ([]*pb.TimeSyncMsg, error) {
 	for i := 0; i < n; i++ {
 		select {
 		case <-ctx.Done():
@@ -213,11 +220,13 @@ func (r *readerTimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncM
 			if ok == false {
 				return nil, fmt.Errorf("timesync consumer closed")
 			}
+
 			msg := cm.Message
 			var tsm pb.TimeSyncMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
 				return nil, err
 			}
+
 			ts = append(ts, &tsm)
 			r.timeSyncConsumer.AckID(msg.ID())
 		}
@@ -225,11 +234,20 @@ func (r *readerTimeSyncCfg) readTimeSync(ctx context.Context, ts []*pb.TimeSyncM
 	return ts, nil
 }
 
-func (r *readerTimeSyncCfg) startTimeSync() {
+func (r *ReaderTimeSyncCfg) sendEOFMsg(ctx context.Context, msg *pulsar.ProducerMessage, index int, wg *sync.WaitGroup) {
+	if _, err := r.readerProducer[index].Send(ctx, msg); err != nil {
+		//TODO, log error
+		log.Printf("Send timesync flag error %v", err)
+	}
+	wg.Done()
+}
+
+func (r *ReaderTimeSyncCfg) startTimeSync() {
 	tsm := make([]*pb.TimeSyncMsg, 0, len(r.proxyIdList)*2)
 	ctx, _ := context.WithCancel(r.ctx)
 	var err error
 	for {
+		//var start time.Time
 		for len(tsm) != len(r.proxyIdList) {
 			tsm = r.alignTimeSync(tsm)
 			tsm, err = r.readTimeSync(ctx, tsm, len(r.proxyIdList)-len(tsm))
@@ -256,21 +274,21 @@ func (r *readerTimeSyncCfg) startTimeSync() {
 			//TODO log error
 			log.Printf("Marshal timesync flag error %v", err)
 		} else {
-			for _, p := range r.readerProducer {
-				if _, err := p.Send(ctx, &pulsar.ProducerMessage{Payload: payload}); err != nil {
-					//TODO, log error
-					log.Printf("Send timesync flag error %v", err)
-				}
+			wg := sync.WaitGroup{}
+			wg.Add(len(r.readerProducer))
+			for index := range r.readerProducer {
+				go r.sendEOFMsg(ctx, &pulsar.ProducerMessage{Payload: payload}, index, &wg)
 			}
+			wg.Wait()
 		}
 	}
 }
 
-func (r *readerTimeSyncCfg) isReadStopFlag(imsg *pb.InsertOrDeleteMsg) bool {
+func (r *ReaderTimeSyncCfg) isReadStopFlag(imsg *pb.InsertOrDeleteMsg) bool {
 	return imsg.ClientId < ReadStopFlagEnd
 }
 
-func (r *readerTimeSyncCfg) startReadTopics() {
+func (r *ReaderTimeSyncCfg) startReadTopics() {
 	ctx, _ := context.WithCancel(r.ctx)
 	tsm := TimeSyncMsg{Timestamp: 0, NumRecorders: 0}
 	for {
@@ -317,7 +335,7 @@ func (r *readerTimeSyncCfg) startReadTopics() {
 }
 
 func WithReaderQueueSize(size int) ReaderTimeSyncOption {
-	return func(r *readerTimeSyncCfg) {
+	return func(r *ReaderTimeSyncCfg) {
 		r.readerQueueSize = size
 	}
 }

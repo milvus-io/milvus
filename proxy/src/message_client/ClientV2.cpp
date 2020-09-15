@@ -175,7 +175,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request, uin
     }
   }
   for (auto &stat : stats) {
-    if (stat == pulsar::ResultOk) {
+    if (stat != pulsar::ResultOk) {
       return Status(DB_ERROR, pulsar::strResult(stat));
     }
   }
@@ -201,7 +201,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     }
   }
   for (auto &stat : stats) {
-    if (stat == pulsar::ResultOk) {
+    if (stat != pulsar::ResultOk) {
       return Status(DB_ERROR, pulsar::strResult(stat));
     }
   }

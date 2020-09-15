@@ -17,10 +17,10 @@ import (
 	"fmt"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/czs007/suvlim/reader/message_client"
+	"github.com/stretchr/testify/assert"
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 type InsertData struct {
@@ -58,7 +58,8 @@ type QueryNode struct {
 	QueryNodeId          uint64
 	Collections          []*Collection
 	SegmentsMap          map[int64]*Segment
-	messageClient        message_client.MessageClient
+	messageClient        *message_client.MessageClient
+	//mc                   *message_client.MessageClient
 	queryNodeTimeSync    *QueryNodeTime
 	buffer               QueryNodeDataBuffer
 	deletePreprocessData DeletePreprocessData
@@ -69,6 +70,38 @@ type QueryNode struct {
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 	mc := message_client.MessageClient{}
 
+	queryNodeTimeSync := &QueryNodeTime{
+		ReadTimeSyncMin: timeSync,
+		ReadTimeSyncMax: timeSync,
+		WriteTimeSync:   timeSync,
+		SearchTimeSync:  timeSync,
+		TSOTimeSync:     timeSync,
+	}
+
+	segmentsMap := make(map[int64]*Segment)
+
+	buffer := QueryNodeDataBuffer{
+		InsertDeleteBuffer:      make([]*msgPb.InsertOrDeleteMsg, 0),
+		SearchBuffer:            make([]*msgPb.SearchMsg, 0),
+		validInsertDeleteBuffer: make([]bool, 0),
+		validSearchBuffer:       make([]bool, 0),
+	}
+
+	return &QueryNode{
+		QueryNodeId:          queryNodeId,
+		Collections:          nil,
+		SegmentsMap:          segmentsMap,
+		messageClient:        &mc,
+		queryNodeTimeSync:    queryNodeTimeSync,
+		buffer:               buffer,
+	}
+}
+
+func (node *QueryNode) Close() {
+	node.messageClient.Close()
+}
+
+func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.MessageClient) *QueryNode {
 	queryNodeTimeSync := &QueryNodeTime{
 		ReadTimeSyncMin: timeSync,
 		ReadTimeSyncMax: timeSync,
@@ -141,14 +174,13 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) PrepareBatchMsg() []int {
-	var msgLen = node.messageClient.PrepareBatchMsg()
+	var msgLen= node.messageClient.PrepareBatchMsg()
 	return msgLen
 }
 
-func (node *QueryNode) StartMessageClient() {
+func (node *QueryNode) StartMessageClient(pulsarURL string) {
 	// TODO: add consumerMsgSchema
-	node.messageClient.InitClient("pulsar://192.168.2.28:6650")
-
+	node.messageClient.InitClient(pulsarURL)
 	go node.messageClient.ReceiveMessage()
 }
 
@@ -164,122 +196,124 @@ func (node *QueryNode) InitQueryNodeCollection() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-func (node *QueryNode) RunInsertDelete() {
-	var count = 0
-	var start time.Time
+func (node *QueryNode) RunInsertDelete(wg * sync.WaitGroup) {
 	for {
-		//time.Sleep(2 * 1000 * time.Millisecond)
-		node.QueryNodeDataInit()
 		// TODO: get timeRange from message client
-		var timeRange = TimeRange{0, 0}
 		var msgLen = node.PrepareBatchMsg()
-		//fmt.Println("PrepareBatchMsg Done, Insert len = ", msgLen[0])
-		if msgLen[0] == 0 {
-			//fmt.Println("0 msg found")
+		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+
+		if msgLen[1] == 0 {
 			continue
 		}
-		if count == 0 {
-			start = time.Now()
-		}
-		count+=msgLen[0]
+
+		node.QueryNodeDataInit()
 		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-		//fmt.Println("MessagesPreprocess Done")
+		fmt.Println("MessagesPreprocess Done")
 		node.WriterDelete()
 		node.PreInsertAndDelete()
-		//fmt.Println("PreInsertAndDelete Done")
+		fmt.Println("PreInsertAndDelete Done")
 		node.DoInsertAndDelete()
-		//fmt.Println("DoInsertAndDelete Done")
+		fmt.Println("DoInsertAndDelete Done")
 		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-		//fmt.Print("UpdateSearchTimeSync Done\n\n\n")
-		if count == 100000 - 1 {
-			elapsed := time.Since(start)
-			fmt.Println("Query node insert 10 × 10000 time:", elapsed)
-		}
 	}
+	wg.Done()
 }
 
-func (node *QueryNode) RunSearch() {
+func (node *QueryNode) TestInsertDelete(timeRange TimeRange) {
+	node.QueryNodeDataInit()
+	node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+	fmt.Println("MessagesPreprocess Done")
+	node.WriterDelete()
+	node.PreInsertAndDelete()
+	fmt.Println("PreInsertAndDelete Done")
+	node.DoInsertAndDelete()
+	fmt.Println("DoInsertAndDelete Done")
+	node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+	fmt.Print("UpdateSearchTimeSync Done\n\n\n")
+}
+
+func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 	for {
-		//time.Sleep(2 * 1000 * time.Millisecond)
-
-		start := time.Now()
-
-		if len(node.messageClient.GetSearchChan()) <= 0 {
-			//fmt.Println("null Search")
-			continue
+		msg, ok := <-node.messageClient.GetSearchChan()
+		if ok {
+			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
+			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
+			fmt.Println("Do Search...")
+			node.Search(node.messageClient.SearchMsg)
 		}
-		node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
-		msg := <-node.messageClient.GetSearchChan()
-		node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
-		fmt.Println("Do Search...")
-		node.Search(node.messageClient.SearchMsg)
-
-		elapsed := time.Since(start)
-		fmt.Println("Query node search time:", elapsed)
 	}
+	wg.Done()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOrDeleteMsg, timeRange TimeRange) msgPb.Status {
-	//var tMax = timeRange.timestampMax
+	var tMax = timeRange.timestampMax
 
 	// 1. Extract messages before readTimeSync from QueryNodeDataBuffer.
 	//    Set valid bitmap to false.
 	for i, msg := range node.buffer.InsertDeleteBuffer {
-		//if msg.Timestamp < tMax {
-		if msg.Op == msgPb.OpType_INSERT {
-			if msg.RowsData == nil {
-				continue
+		if msg.Timestamp < tMax {
+			if msg.Op == msgPb.OpType_INSERT {
+				if msg.RowsData == nil {
+					continue
+				}
+				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
+				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
+				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == msgPb.OpType_DELETE {
+				var r = DeleteRecord{
+					entityID:  msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
+				atomic.AddInt32(&node.deletePreprocessData.count, 1)
 			}
-			node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
-			node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-			node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
-		} else if msg.Op == msgPb.OpType_DELETE {
-			var r = DeleteRecord{
-				entityID:  msg.Uid,
-				timestamp: msg.Timestamp,
-			}
-			node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
-			atomic.AddInt32(&node.deletePreprocessData.count, 1)
+			node.buffer.validInsertDeleteBuffer[i] = false
 		}
-		node.buffer.validInsertDeleteBuffer[i] = false
-		//}
 	}
 
 	// 2. Remove invalid messages from buffer.
-	for i, isValid := range node.buffer.validInsertDeleteBuffer {
-		if !isValid {
+	bufferLen := len(node.buffer.validInsertDeleteBuffer)
+	assert.Equal(nil, len(node.buffer.validInsertDeleteBuffer), len(node.buffer.InsertDeleteBuffer))
+	for i:= 0; i < bufferLen - 2; i++ {
+		if !node.buffer.validInsertDeleteBuffer[i] {
 			copy(node.buffer.InsertDeleteBuffer[i:], node.buffer.InsertDeleteBuffer[i+1:])                          // Shift a[i+1:] left one index.
 			node.buffer.InsertDeleteBuffer[len(node.buffer.InsertDeleteBuffer)-1] = nil                             // Erase last element (write zero value).
 			node.buffer.InsertDeleteBuffer = node.buffer.InsertDeleteBuffer[:len(node.buffer.InsertDeleteBuffer)-1] // Truncate slice.
 		}
 	}
 
+	node.buffer.validInsertDeleteBuffer = node.buffer.validInsertDeleteBuffer[:len(node.buffer.InsertDeleteBuffer)]
+	for i := range node.buffer.validInsertDeleteBuffer {
+		node.buffer.validInsertDeleteBuffer[i] = true
+	}
+
 	// 3. Extract messages before readTimeSync from current messageClient.
 	//    Move massages after readTimeSync to QueryNodeDataBuffer.
 	//    Set valid bitmap to true.
 	for _, msg := range insertDeleteMessages {
-		//if msg.Timestamp < tMax {
-		if msg.Op == msgPb.OpType_INSERT {
-			if msg.RowsData == nil {
-				continue
+		if msg.Timestamp < tMax {
+			if msg.Op == msgPb.OpType_INSERT {
+				if msg.RowsData == nil {
+					continue
+				}
+				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
+				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
+				node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+			} else if msg.Op == msgPb.OpType_DELETE {
+				var r = DeleteRecord{
+					entityID:  msg.Uid,
+					timestamp: msg.Timestamp,
+				}
+				node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
+				atomic.AddInt32(&node.deletePreprocessData.count, 1)
 			}
-			node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
-			node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-			node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
-		} else if msg.Op == msgPb.OpType_DELETE {
-			var r = DeleteRecord{
-				entityID:  msg.Uid,
-				timestamp: msg.Timestamp,
-			}
-			node.deletePreprocessData.deleteRecords = append(node.deletePreprocessData.deleteRecords, &r)
-			atomic.AddInt32(&node.deletePreprocessData.count, 1)
+		} else {
+			fmt.Println("msg timestamp:= ", msg.Timestamp>>18)
+			node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
+			node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
 		}
-		//} else {
-		//	node.buffer.InsertDeleteBuffer = append(node.buffer.InsertDeleteBuffer, msg)
-		//	node.buffer.validInsertDeleteBuffer = append(node.buffer.validInsertDeleteBuffer, true)
-		//}
 	}
 
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
@@ -364,6 +398,7 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 }
 
 func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.WaitGroup) msgPb.Status {
+	fmt.Println("Doing insert..., len = ", len(node.insertData.insertIDs[segmentID]))
 	var targetSegment, err = node.GetSegmentBySegmentID(segmentID)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -427,17 +462,20 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		var timestamp = msg.Timestamp
 		var vector = msg.Records
+		// We now only the first Json is valid.
+		var queryJson = msg.Json[0]
 
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
-		//if timestamp > node.queryNodeTimeSync.SearchTimeSync {
-		//	return msgPb.Status{ErrorCode: 1}
-		//}
+		if timestamp > node.queryNodeTimeSync.SearchTimeSync {
+			fmt.Println("Invalid query time, timestamp = ", timestamp, ", SearchTimeSync = ", node.queryNodeTimeSync.SearchTimeSync)
+			return msgPb.Status{ErrorCode: 1}
+		}
 
 		// 2. Do search in all segments
 		for _, partition := range targetCollection.Partitions {
 			for _, openSegment := range partition.OpenedSegments {
-				var res, err = openSegment.SegmentSearch("", timestamp, vector)
+				var res, err = openSegment.SegmentSearch(queryJson, timestamp, vector)
 				if err != nil {
 					fmt.Println(err.Error())
 					return msgPb.Status{ErrorCode: 1}
@@ -448,7 +486,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				}
 			}
 			for _, closedSegment := range partition.ClosedSegments {
-				var res, err = closedSegment.SegmentSearch("", timestamp, vector)
+				var res, err = closedSegment.SegmentSearch(queryJson, timestamp, vector)
 				if err != nil {
 					fmt.Println(err.Error())
 					return msgPb.Status{ErrorCode: 1}
@@ -468,6 +506,9 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			Ids: make([]int64, 0),
 		}
 		var results = msgPb.QueryResult{
+			Status: &msgPb.Status{
+				ErrorCode: 0,
+			},
 			Entities:  &entities,
 			Distances: make([]float32, 0),
 			QueryId:   msg.Uid,

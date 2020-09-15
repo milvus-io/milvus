@@ -4,29 +4,30 @@ import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	timesync "github.com/czs007/suvlim/timesync"
 	"github.com/golang/protobuf/proto"
 	"log"
+	"strconv"
 )
 
 type MessageClient struct {
+	// timesync
+	timeSyncCfg *timesync.ReaderTimeSyncCfg
 
 	//message channel
-	insertOrDeleteChan chan *msgpb.InsertOrDeleteMsg
-	searchByIdChan     chan *msgpb.EntityIdentity
-	timeSyncChan       chan *msgpb.TimeSyncMsg
+	searchByIdChan chan *msgpb.EntityIdentity
 
 	// pulsar
-	client                 pulsar.Client
-	key2segProducer        pulsar.Producer
-	insertOrDeleteConsumer pulsar.Consumer
-	searchByIdConsumer     pulsar.Consumer
-	timeSyncConsumer       pulsar.Consumer
+	client          pulsar.Client
+	key2segProducer pulsar.Producer
+	searchByIdConsumer pulsar.Consumer
 
 	// batch messages
-	InsertMsg     []*msgpb.InsertOrDeleteMsg
-	DeleteMsg     []*msgpb.InsertOrDeleteMsg
-	SearchByIdMsg []*msgpb.EntityIdentity
-	TimeSyncMsg   []*msgpb.TimeSyncMsg
+	InsertMsg           []*msgpb.InsertOrDeleteMsg
+	DeleteMsg           []*msgpb.InsertOrDeleteMsg
+	timestampBatchStart uint64
+	timestampBatchEnd   uint64
+	batchIDLen          int
 }
 
 func (mc *MessageClient) Send(ctx context.Context, msg msgpb.Key2SegMsg) {
@@ -38,20 +39,15 @@ func (mc *MessageClient) Send(ctx context.Context, msg msgpb.Key2SegMsg) {
 	}
 }
 
-func (mc *MessageClient) ReceiveInsertOrDeleteMsg() {
-	for {
-		insetOrDeleteMsg := msgpb.InsertOrDeleteMsg{}
-		msg, err := mc.insertOrDeleteConsumer.Receive(context.Background())
-		err = proto.Unmarshal(msg.Payload(), &insetOrDeleteMsg)
-		if err != nil {
-			log.Fatal(err)
-		}
-		mc.insertOrDeleteChan <- &insetOrDeleteMsg
-		mc.insertOrDeleteConsumer.Ack(msg)
-	}
+func (mc *MessageClient) TimeSync() uint64 {
+	return mc.timestampBatchEnd
 }
 
-func (mc *MessageClient) ReceiveSearchByIdMsg() {
+func (mc *MessageClient) SearchByIdChan() chan *msgpb.EntityIdentity {
+	return mc.searchByIdChan
+}
+
+func (mc *MessageClient) receiveSearchByIdMsg() {
 	for {
 		searchByIdMsg := msgpb.EntityIdentity{}
 		msg, err := mc.searchByIdConsumer.Receive(context.Background())
@@ -64,26 +60,16 @@ func (mc *MessageClient) ReceiveSearchByIdMsg() {
 	}
 }
 
-func (mc *MessageClient) ReceiveTimeSyncMsg() {
-	for {
-		timeSyncMsg := msgpb.TimeSyncMsg{}
-		msg, err := mc.timeSyncConsumer.Receive(context.Background())
-		err = proto.Unmarshal(msg.Payload(), &timeSyncMsg)
-		if err != nil {
-			log.Fatal(err)
-		}
-		mc.timeSyncChan <- &timeSyncMsg
-		mc.timeSyncConsumer.Ack(msg)
-	}
-}
 
 func (mc *MessageClient) ReceiveMessage() {
-	go mc.ReceiveInsertOrDeleteMsg()
-	go mc.ReceiveSearchByIdMsg()
-	go mc.ReceiveTimeSyncMsg()
+	err := mc.timeSyncCfg.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+	go mc.receiveSearchByIdMsg()
 }
 
-func (mc *MessageClient) CreatProducer(topicName string) pulsar.Producer {
+func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 	producer, err := mc.client.CreateProducer(pulsar.ProducerOptions{
 		Topic: topicName,
 	})
@@ -94,10 +80,10 @@ func (mc *MessageClient) CreatProducer(topicName string) pulsar.Producer {
 	return producer
 }
 
-func (mc *MessageClient) CreateConsumer(topicName string) pulsar.Consumer {
+func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "multi-topic-sub",
+		SubscriptionName: "writer",
 	})
 
 	if err != nil {
@@ -106,7 +92,7 @@ func (mc *MessageClient) CreateConsumer(topicName string) pulsar.Consumer {
 	return consumer
 }
 
-func (mc *MessageClient) CreateClient(url string) pulsar.Client {
+func (mc *MessageClient) createClient(url string) pulsar.Client {
 	// create client
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL: url,
@@ -120,41 +106,50 @@ func (mc *MessageClient) CreateClient(url string) pulsar.Client {
 
 func (mc *MessageClient) InitClient(url string) {
 	//create client
-	mc.client = mc.CreateClient(url)
+	mc.client = mc.createClient(url)
 
 	//create producer
-	mc.key2segProducer = mc.CreatProducer("Key2Seg")
+	mc.key2segProducer = mc.creatProducer("Key2Seg")
 
 	//create consumer
-	mc.insertOrDeleteConsumer = mc.CreateConsumer("InsertOrDelete")
-	mc.searchByIdConsumer = mc.CreateConsumer("SearchById")
-	mc.timeSyncConsumer = mc.CreateConsumer("TimeSync")
+	mc.searchByIdConsumer = mc.createConsumer("SearchById")
 
-	// init channel
-	mc.insertOrDeleteChan = make(chan *msgpb.InsertOrDeleteMsg, 1000)
-	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, 1000)
-	mc.timeSyncChan = make(chan *msgpb.TimeSyncMsg, 1000)
+	//init channel
+	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, 10000)
 
-	mc.InsertMsg = make([]*msgpb.InsertOrDeleteMsg, 1000)
-	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 1000)
-	mc.SearchByIdMsg = make([]*msgpb.EntityIdentity, 1000)
-	mc.TimeSyncMsg = make([]*msgpb.TimeSyncMsg, 1000)
+	//init msg slice
+	mc.InsertMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
+	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
+
+	//init timesync
+	URL := "pulsar://localhost:6650"
+	timeSyncTopic := "TimeSync"
+	timeSyncSubName := "writer"
+	readTopics := make([]string, 0, 1024)
+	for i := 0; i < 1024; i++ {
+		str := "InsertOrDelete-partition-"
+		str = str + strconv.Itoa(i)
+		readTopics = append(readTopics, str)
+	}
+	readSubName := "writer"
+	proxyIdList := []int64{0}
+	timeSync, err := timesync.NewReaderTimeSync(URL, timeSyncTopic, timeSyncSubName, readTopics, readSubName, proxyIdList, 400, -1, timesync.WithReaderQueueSize(1024))
+	if err != nil {
+		log.Fatal(err)
+	}
+	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
+
+	mc.timestampBatchStart = 0
+	mc.timestampBatchEnd = 0
+	mc.batchIDLen = 0
 }
 
 func (mc *MessageClient) Close() {
-	defer mc.client.Close()
-	defer mc.key2segProducer.Close()
-	defer mc.insertOrDeleteConsumer.Close()
-	defer mc.searchByIdConsumer.Close()
-	defer mc.timeSyncConsumer.Close()
+	mc.client.Close()
+	mc.key2segProducer.Close()
+	mc.searchByIdConsumer.Close()
+	mc.timeSyncCfg.Close()
 }
-
-type JobType int
-
-const (
-	OpInQueryNode JobType = 0
-	OpInWriteNode JobType = 1
-)
 
 type MessageType int
 
@@ -171,42 +166,40 @@ func (mc *MessageClient) PrepareMsg(messageType MessageType, msgLen int) {
 	switch messageType {
 	case InsertOrDelete:
 		for i := 0; i < msgLen; i++ {
-			msg := <-mc.insertOrDeleteChan
+			msg := <-mc.timeSyncCfg.InsertOrDelete()
 			if msg.Op == msgpb.OpType_INSERT {
 				mc.InsertMsg = append(mc.InsertMsg, msg)
 			} else {
 				mc.DeleteMsg = append(mc.DeleteMsg, msg)
 			}
 		}
-	case SearchById:
-		for i := 0; i < msgLen; i++ {
-			msg := <-mc.searchByIdChan
-			mc.SearchByIdMsg = append(mc.SearchByIdMsg, msg)
-		}
 	case TimeSync:
+		mc.timestampBatchStart = mc.timestampBatchEnd
+		mc.batchIDLen = 0
 		for i := 0; i < msgLen; i++ {
-			msg := <-mc.timeSyncChan
-			mc.TimeSyncMsg = append(mc.TimeSyncMsg, msg)
+			msg := <-mc.timeSyncCfg.TimeSync()
+			if i == msgLen-1 {
+				mc.timestampBatchEnd = msg.Timestamp
+			}
+			mc.batchIDLen += int(msg.NumRecorders)
 		}
 	}
 }
 
-func (mc *MessageClient) PrepareBatchMsg() []int {
+func (mc *MessageClient) PrepareBatchMsg() int {
 	// assume the channel not full
 	mc.InsertMsg = mc.InsertMsg[:0]
 	mc.DeleteMsg = mc.DeleteMsg[:0]
-	mc.SearchByIdMsg = mc.SearchByIdMsg[:0]
-	mc.TimeSyncMsg = mc.TimeSyncMsg[:0]
+	mc.batchIDLen = 0
 
 	// get the length of every channel
-	insertOrDeleteLen := len(mc.insertOrDeleteChan)
-	searchLen := len(mc.searchByIdChan)
-	timeLen := len(mc.timeSyncChan)
+	timeLen := len(mc.timeSyncCfg.TimeSync())
 
 	// get message from channel to slice
-	mc.PrepareMsg(InsertOrDelete, insertOrDeleteLen)
-	mc.PrepareMsg(SearchById, searchLen)
-	mc.PrepareMsg(TimeSync, timeLen)
-
-	return []int{insertOrDeleteLen, searchLen, timeLen}
+	if timeLen > 0 {
+		mc.PrepareMsg(TimeSync, timeLen)
+		mc.PrepareMsg(InsertOrDelete, mc.batchIDLen)
+	}
+	//return []int{insertOrDeleteLen, searchLen, timeLen}
+	return mc.batchIDLen
 }

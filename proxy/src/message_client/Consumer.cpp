@@ -30,6 +30,7 @@ Result MsgConsumer::receive(milvus::grpc::QueryResult &res) {
   if (result == pulsar::ResultOk) {
     res.ParseFromString(msg.getDataAsString());
   }
+  consumer_.acknowledge(msg);
   return result;
 }
 
@@ -39,6 +40,7 @@ Result MsgConsumer::receive(milvus::grpc::Entities &res) {
   if (result == pulsar::ResultOk) {
     res.ParseFromString(msg.getDataAsString());
   }
+  consumer_.acknowledge(msg);
   return result;
 }
 
@@ -48,6 +50,7 @@ Result MsgConsumer::receive(milvus::grpc::EntityIds &res) {
   if (result == pulsar::ResultOk) {
     res.ParseFromString(msg.getDataAsString());
   }
+  consumer_.acknowledge(msg);
   return result;
 }
 
@@ -57,6 +60,7 @@ Result MsgConsumer::receive(milvus::grpc::Status &res) {
   if (result == pulsar::ResultOk) {
     res.ParseFromString(msg.getDataAsString());
   }
+  consumer_.acknowledge(msg);
   return result;
 }
 

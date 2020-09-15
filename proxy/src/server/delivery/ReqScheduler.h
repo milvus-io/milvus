@@ -66,7 +66,7 @@ class ReqScheduler {
 
     // for time synchronous
     std::mutex time_syc_mtx_;
-    int64_t latest_req_time_;
+    int64_t latest_req_time_ = 0;
     bool sending_;
 
     std::map<std::string, ReqQueuePtr> req_groups_;

@@ -99,7 +99,7 @@ ReqScheduler::ExecuteReq(const BaseReqPtr& req_ptr) {
     }
 
     status = req_ptr->WaitToFinish();  // sync execution
-    if (!status.ok()) {
+    if (!status.ok()){
         return status;
     }
 
@@ -163,7 +163,10 @@ int64_t ReqScheduler::GetLatestDeliveredReqTime() {
   if (sending_){
     return latest_req_time_;
   }
-  return TSOracle::GetInstance().GetTimeStamp();
+  auto ts =  TSOracle::GetInstance().GetTimeStamp();
+  latest_req_time_ = ts;
+  assert(ts != 0);
+  return ts;
 }
 
 void ReqScheduler::UpdateLatestDeliveredReqTime(int64_t time) {

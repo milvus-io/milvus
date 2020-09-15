@@ -164,7 +164,9 @@ class Schema {
     const FieldMeta&
     operator[](const std::string& field_name) const {
         auto offset_iter = offsets_.find(field_name);
-        assert(offset_iter != offsets_.end());
+        if (offset_iter == offsets_.end()) {
+          throw std::runtime_error("Cannot found field_name: " + field_name);
+        }
         auto offset = offset_iter->second;
         return (*this)[offset];
     }
@@ -180,5 +182,6 @@ class Schema {
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
+using idx_t = int64_t;
 
 }  // namespace milvus::dog_segment
