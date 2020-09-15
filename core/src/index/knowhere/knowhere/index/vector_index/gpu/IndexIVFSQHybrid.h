@@ -18,18 +18,18 @@
 #include <utility>
 
 #include "knowhere/index/vector_index/gpu/IndexGPUIVFSQ.h"
-#include "knowhere/index/vector_index/gpu/Quantizer.h"
 
 namespace milvus {
 namespace knowhere {
 
 #ifdef MILVUS_GPU_VERSION
 
-struct FaissIVFQuantizer : public Quantizer {
+struct FaissIVFQuantizer {
     faiss::gpu::GpuIndexFlat* quantizer = nullptr;
     int64_t gpu_id;
+    int64_t size = -1;
 
-    ~FaissIVFQuantizer() override;
+    ~FaissIVFQuantizer();
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
 
@@ -64,17 +64,17 @@ class IVFSQHybrid : public GPUIVFSQ {
     VecIndexPtr
     CopyCpuToGpu(const int64_t, const Config&) override;
 
-    std::pair<VecIndexPtr, QuantizerPtr>
+    std::pair<VecIndexPtr, FaissIVFQuantizerPtr>
     CopyCpuToGpuWithQuantizer(const int64_t, const Config&);
 
     VecIndexPtr
-    LoadData(const knowhere::QuantizerPtr&, const Config&);
+    LoadData(const FaissIVFQuantizerPtr&, const Config&);
 
-    QuantizerPtr
+    FaissIVFQuantizerPtr
     LoadQuantizer(const Config& conf);
 
     void
-    SetQuantizer(const QuantizerPtr& q);
+    SetQuantizer(const FaissIVFQuantizerPtr& q);
 
     void
     UnsetQuantizer();
@@ -94,7 +94,7 @@ class IVFSQHybrid : public GPUIVFSQ {
 
  protected:
     int64_t gpu_mode_ = 0;  // 0: CPU, 1: Hybrid, 2: GPU
-    int64_t quantizer_gpu_id_ = -1;
+    FaissIVFQuantizerPtr quantizer_ = nullptr;
 };
 
 using IVFSQHybridPtr = std::shared_ptr<IVFSQHybrid>;

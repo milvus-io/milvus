@@ -6,7 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#3536 Release search task in time to avoid excessive memory usage
 -   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
--   \#3709 Remove check for topk in mishards
+-   \#3742 If the GPU cache is too small, IVF_SQ8H using multiple GPUs will cause to crash
 
 ## Feature
 -   \#3213 Allow users to specify a distance type at runtime for Flat index
