@@ -126,10 +126,10 @@ SearchTask::OnExecute() {
         auto segment_ptr = snapshot_->GetSegmentCommitBySegmentId(segment_id_);
         auto spec_k = segment_ptr->GetRowCount() < topk ? segment_ptr->GetRowCount() : topk;
         int64_t nq = vector_param->nq;
+
         if (spec_k == 0) {
             LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
                                           segment_ptr->GetID());
-            
         } else {
             //            std::unique_lock<std::mutex> lock(search_job->mutex());
             if (!search_job->query_result()) {
