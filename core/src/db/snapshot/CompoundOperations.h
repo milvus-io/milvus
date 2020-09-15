@@ -105,7 +105,6 @@ class MultiSegmentsOperation : public CompoundBaseOperation<MultiSegmentsOperati
 
  protected:
     std::map<ID_TYPE, Segment::VecT> new_segments_;
-    std::map<ID_TYPE, SegmentFile::VecT> new_segment_files_;
     std::map<ID_TYPE, SIZE_TYPE> new_segment_counts_;
 };
 

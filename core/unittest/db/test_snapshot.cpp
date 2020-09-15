@@ -2113,6 +2113,17 @@ TEST_F(SnapshotTest, MultiSegmentsTest) {
         partitions.push_back(partition);
     }
 
+    srand(time(nullptr));
+    auto r = rand() % 10;
+    for (size_t i = 0; i < r; i ++) {
+        PartitionContext context;
+        context.id = partitions[i]->GetID();
+        context.name = partitions[i]->GetName();
+        context.lsn = ++lsn;
+        auto op = std::make_shared<DropPartitionOperation>(context, start_ss);
+        ASSERT_TRUE(op->Push().ok());
+    }
+
     auto multi_segments_task = [&]() {
         OperationContext context;
         auto op = std::make_shared<MultiSegmentsOperation>(context, start_ss);
