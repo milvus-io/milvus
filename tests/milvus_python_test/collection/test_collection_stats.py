@@ -149,7 +149,7 @@ class TestStatsBase:
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
-        assert stats["row_count"] == nb - 1
+        assert stats["row_count"] == nb - 2
         compact_before = stats["partitions"][0]["segments"][1]["data_size"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
