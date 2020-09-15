@@ -9,7 +9,7 @@ from utils import *
 
 collection_id = "info"
 default_fields = gen_default_fields() 
-segment_row_count = 1000
+segment_row_limit = 1000
 field_name = "float_vector"
 
 
@@ -31,9 +31,9 @@ class TestInfoBase:
 
     @pytest.fixture(
         scope="function",
-        params=gen_segment_row_counts()
+        params=gen_segment_row_limits()
     )
-    def get_segment_row_count(self, request):
+    def get_segment_row_limit(self, request):
         yield request.param
 
     @pytest.fixture(
@@ -64,12 +64,12 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_count
+                "segment_row_limit": segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_limit'] == segment_row_count
+        assert res['segment_row_limit'] == segment_row_limit
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -78,19 +78,19 @@ class TestInfoBase:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
 
-    def test_create_collection_segment_row_count(self, connect, get_segment_row_count):
+    def test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_row_count
+        method: create collection with diff segment_row_limit
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_limit"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         # assert segment row count
         res = connect.get_collection_info(collection_name)
-        assert res['segment_row_limit'] == get_segment_row_count
+        assert res['segment_row_limit'] == get_segment_row_limit
 
     def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, field_name, get_simple_index)
@@ -163,7 +163,7 @@ class TestInfoBase:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_count
+                "segment_row_limit": segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, vector_field["params"]["dim"])
@@ -171,7 +171,7 @@ class TestInfoBase:
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_limit'] == segment_row_count
+        assert res['segment_row_limit'] == segment_row_limit
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -180,22 +180,22 @@ class TestInfoBase:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
 
-    def test_create_collection_segment_row_count_after_insert(self, connect, get_segment_row_count):
+    def test_create_collection_segment_row_limit_after_insert(self, connect, get_segment_row_limit):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_row_count
+        method: create collection with diff segment_row_limit
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_limit"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, fields["fields"][-1]["params"]["dim"])
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_limit'] == get_segment_row_count
+        assert res['segment_row_limit'] == get_segment_row_limit
 
 
 class TestInfoInvalid(object):
