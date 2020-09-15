@@ -49,7 +49,7 @@ SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TY
     // force_build means client invoke create_index,
     // all segments whose row_count greater than config.build_index_threshold will be counted in.
     // else, only the segments whose row_count greater than segment_row_count will be counted in
-    int64_t build_index_threshold = config.engine.build_index_threshold.value;
+    int64_t build_index_threshold = config.engine.build_index_threshold();
     if (!force_build) {
         auto collection = ss_->GetCollection();
         GetSegmentRowCount(collection, build_index_threshold);
