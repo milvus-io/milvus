@@ -129,6 +129,7 @@ SearchTask::OnExecute() {
         if (spec_k == 0) {
             LOG_ENGINE_WARNING_ << LogOut("[%s][%ld] Searching in an empty segment. segment id = %d", "search", 0,
                                           segment_ptr->GetID());
+            
         } else {
             //            std::unique_lock<std::mutex> lock(search_job->mutex());
             if (!search_job->query_result()) {
