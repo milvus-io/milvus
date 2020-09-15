@@ -49,6 +49,7 @@ using AddFieldElementOperation = milvus::engine::snapshot::AddFieldElementOperat
 using DropAllIndexOperation = milvus::engine::snapshot::DropAllIndexOperation;
 using ChangeSegmentFileOperation = milvus::engine::snapshot::ChangeSegmentFileOperation;
 using CompoundSegmentsOperation = milvus::engine::snapshot::CompoundSegmentsOperation;
+using MultiSegmentsOperation = milvus::engine::snapshot::MultiSegmentsOperation;
 using MergeOperation = milvus::engine::snapshot::MergeOperation;
 using CreateCollectionOperation = milvus::engine::snapshot::CreateCollectionOperation;
 using NewSegmentOperation = milvus::engine::snapshot::NewSegmentOperation;

@@ -28,6 +28,129 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+MultiSegmentsOperation::MultiSegmentsOperation(const OperationContext &context, ScopedSnapshotT prev_ss)
+    : BaseT(context, prev_ss) {
+}
+
+Status
+MultiSegmentsOperation::DoExecute(StorePtr store) {
+    if (!context_.new_segment) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
+    }
+
+    for (auto iter : new_segment_files_) {
+        for (auto &new_file : iter.second) {
+            auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+            update_ctx->AddAttr(SizeField::Name);
+            AddStepWithLsn(*new_file, context_.lsn, update_ctx);
+        }
+    }
+
+    std::map<ID_TYPE, SegmentCommit::VecT> new_segment_commits;
+    for (auto iter : new_segments_) {
+        for (auto & new_segment : iter.second) {
+            OperationContext context;
+            context.new_segment = new_segment;
+            // TODO(yhz): Why here get adjusted ss
+            context.new_segment_files = new_segment_files_[new_segment->GetID()];
+            auto sc_op = SegmentCommitOperation(context, GetAdjustedSS());
+            STATUS_CHECK(sc_op(store));
+            SegmentCommit::Ptr sc;
+            STATUS_CHECK(sc_op.GetResource(sc));
+
+            sc->SetRowCount(new_segment_counts_[new_segment->GetID()]);
+
+            if (new_segment_commits.find(new_segment->GetPartitionId()) == new_segment_commits.end()) {
+                new_segment_commits[new_segment->GetPartitionId()] = SegmentCommit::VecT();
+            }
+            new_segment_commits[new_segment->GetPartitionId()].push_back(sc);
+            auto sc_ctx_p = ResourceContextBuilder<SegmentCommit>().SetOp(meta::oUpdate).CreatePtr();
+            sc_ctx_p->AddAttr(RowCountField::Name);
+            AddStepWithLsn(*sc, context.lsn, sc_ctx_p);
+        }
+    }
+
+    for (auto iter : new_segment_commits) {
+        auto& partition_id = iter.first;
+        auto context = context_;
+        context.new_segment_commits = iter.second;
+        PartitionCommitOperation pc_op(context, GetAdjustedSS());
+        STATUS_CHECK(pc_op(store));
+        STATUS_CHECK(pc_op.GetResource(context.new_partition_commit));
+        auto pc_ctx_p = ResourceContextBuilder<PartitionCommit>().SetOp(meta::oUpdate).CreatePtr();
+        AddStepWithLsn(*context.new_partition_commit, context.lsn, pc_ctx_p);
+        context_.new_partition_commits.push_back(context.new_partition_commit);
+    }
+
+    CollectionCommitOperation cc_op(context_, GetAdjustedSS());
+    STATUS_CHECK(cc_op(store));
+    STATUS_CHECK(cc_op.GetResource(context_.new_collection_commit));
+    auto cc_ctx_p = ResourceContextBuilder<CollectionCommit>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*context_.new_collection_commit, context_.lsn, cc_ctx_p);
+
+    return Status::OK();
+}
+
+Status
+MultiSegmentsOperation::CommitNewSegment(const OperationContext &context, SegmentPtr &created) {
+//    if (context_.new_segment) {
+//        return Status(SS_DUPLICATED_ERROR, "Only one new segment could be created");
+//    }
+//    GetAdjustedSS()->GetPa
+    if (context.prev_partition == nullptr) {
+        return Status(SS_INVALID_CONTEX_ERROR, "Unknown corresponding partition");
+    }
+
+    auto partition = GetAdjustedSS()->GetResource<Partition>(context.prev_partition->GetID());
+    if (partition == nullptr || partition->GetState() != ACTIVE) {
+        return Status(SS_STALE_ERROR, "partition of segment has been staled");
+    }
+
+    auto op = std::make_shared<SegmentOperation>(context, GetStartedSS());
+    STATUS_CHECK(op->Push());
+    STATUS_CHECK(op->GetResource(created));
+    new_segments_[context.prev_partition->GetID()].push_back(created);
+    auto s_ctx_p = ResourceContextBuilder<Segment>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, s_ctx_p);
+
+    context_.new_segments.push_back(created);
+
+    return Status::OK();
+}
+
+Status
+MultiSegmentsOperation::CommitNewSegmentFile(const SegmentFileContext &context, SegmentFilePtr &created) {
+    auto segment = GetStartedSS()->GetResource<Segment>(context.segment_id);
+    // TODO(yhz): May not depend on context_.new_segment
+    if (!segment) {
+        segment = context_.new_segment;
+    }
+
+    if (!segment || segment->GetID() != context.segment_id) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Invalid segment " << context.segment_id << " in context";
+        return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+
+    auto ctx = context;
+    ctx.partition_id = segment->GetPartitionId();
+    auto new_sf_op = std::make_shared<SegmentFileOperation>(ctx, GetStartedSS());
+    STATUS_CHECK(new_sf_op->Push());
+    STATUS_CHECK(new_sf_op->GetResource(created));
+    new_segment_files_[created->GetSegmentId()].push_back(created);
+    auto sf_ctx_p = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
+    AddStepWithLsn(*created, context_.lsn, sf_ctx_p);
+
+    return Status::OK();
+}
+
+Status
+MultiSegmentsOperation::CommitRowCount(ID_TYPE segment_id, SIZE_TYPE delta) {
+    // TODO(yhz): may need check if segment exists
+    new_segment_counts_[segment_id] = delta;
+    return Status::OK();
+}
+
 CompoundSegmentsOperation::CompoundSegmentsOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
     : BaseT(context, prev_ss) {
     for (auto& stale_segment_file : context_.stale_segment_files) {

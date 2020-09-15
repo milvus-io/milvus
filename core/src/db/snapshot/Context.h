@@ -55,6 +55,7 @@ struct OperationContext {
     ScopedSnapshotT latest_ss;
     ScopedSnapshotT prev_ss;
     SegmentPtr new_segment = nullptr;
+    Segment::VecT new_segments;
     SegmentCommitPtr new_segment_commit = nullptr;
     std::vector<SegmentCommitPtr> new_segment_commits;
     PartitionPtr new_partition = nullptr;
