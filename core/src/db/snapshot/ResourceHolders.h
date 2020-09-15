@@ -51,7 +51,8 @@ class SegmentFilesHolder : public ResourceHolder<SegmentFile, SegmentFilesHolder
 
 inline void
 InitAllHolders(bool readonly = false) {
-    if (!readonly) return;
+    if (!readonly)
+        return;
 
     CollectionsHolder::GetInstance().Init(true);
     SchemaCommitsHolder::GetInstance().Init(true);

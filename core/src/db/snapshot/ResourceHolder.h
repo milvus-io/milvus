@@ -30,7 +30,6 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-
 template <typename ResourceT, typename Derived>
 class ResourceHolder {
     using ResourcePtr = std::shared_ptr<ResourceT>;

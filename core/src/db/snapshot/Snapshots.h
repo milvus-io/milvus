@@ -62,7 +62,8 @@ class Snapshots {
     Status
     Reset();
 
-    Status Init(StorePtr, bool readonly = false);
+    Status
+    Init(StorePtr, bool readonly = false);
 
  public:
     Status
