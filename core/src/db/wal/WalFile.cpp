@@ -12,6 +12,7 @@
 #include "db/wal/WalFile.h"
 #include "db/Constants.h"
 #include "db/Types.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
 #include <experimental/filesystem>
@@ -46,11 +47,8 @@ WalFile::OpenFile(const std::string& path, OpenMode mode) {
 
         // makesure the parent path is created
         std::experimental::filesystem::path temp_path(path);
-        while (temp_path.has_parent_path()) {
-            auto parent_path = temp_path.parent_path();
-            std::experimental::filesystem::create_directory(parent_path);
-            temp_path = parent_path;
-        }
+        auto parent_path = temp_path.parent_path();
+        CommonUtil::CreateDirectory(parent_path.c_str());
 
         file_ = fopen(path.c_str(), str_mode.c_str());
         if (file_ == nullptr) {
