@@ -87,12 +87,12 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 	}
 
 	return &QueryNode{
-		QueryNodeId:       queryNodeId,
-		Collections:       nil,
-		SegmentsMap:       segmentsMap,
-		messageClient:     mc,
-		queryNodeTimeSync: queryNodeTimeSync,
-		buffer:            buffer,
+		QueryNodeId:          queryNodeId,
+		Collections:          nil,
+		SegmentsMap:          segmentsMap,
+		messageClient:        mc,
+		queryNodeTimeSync:    queryNodeTimeSync,
+		buffer:               buffer,
 	}
 }
 
@@ -145,9 +145,9 @@ func (node *QueryNode) PrepareBatchMsg() []int {
 	return msgLen
 }
 
-func (node *QueryNode) StartMessageClient(pulsarURL string) {
+func (node *QueryNode) StartMessageClient() {
 	// TODO: add consumerMsgSchema
-	node.messageClient.InitClient(pulsarURL)
+	node.messageClient.InitClient("pulsar://192.168.2.28:6650")
 
 	go node.messageClient.ReceiveMessage()
 }
@@ -181,7 +181,7 @@ func (node *QueryNode) RunInsertDelete() {
 		if count == 0 {
 			start = time.Now()
 		}
-		count += msgLen[0]
+		count+=msgLen[0]
 		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
 		//fmt.Println("MessagesPreprocess Done")
 		node.WriterDelete()
@@ -191,7 +191,7 @@ func (node *QueryNode) RunInsertDelete() {
 		//fmt.Println("DoInsertAndDelete Done")
 		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 		//fmt.Print("UpdateSearchTimeSync Done\n\n\n")
-		if count == 100000-1 {
+		if count == 100000 - 1 {
 			elapsed := time.Since(start)
 			fmt.Println("Query node insert 10 × 10000 time:", elapsed)
 		}
@@ -200,23 +200,19 @@ func (node *QueryNode) RunInsertDelete() {
 
 func (node *QueryNode) RunSearch() {
 	for {
-		time.Sleep(0.2 * 1000 * time.Millisecond)
+		//time.Sleep(2 * 1000 * time.Millisecond)
 
 		start := time.Now()
 
 		if len(node.messageClient.GetSearchChan()) <= 0 {
-			fmt.Println("null Search")
+			//fmt.Println("null Search")
 			continue
 		}
 		node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 		msg := <-node.messageClient.GetSearchChan()
 		node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 		fmt.Println("Do Search...")
-		var status = node.Search(node.messageClient.SearchMsg)
-		if status.ErrorCode != 0 {
-			fmt.Println("Search Failed")
-			node.PublishFailedSearchResult()
-		}
+		node.Search(node.messageClient.SearchMsg)
 
 		elapsed := time.Since(start)
 		fmt.Println("Query node search time:", elapsed)
@@ -431,8 +427,6 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		var timestamp = msg.Timestamp
 		var vector = msg.Records
-		// We now only the first Json is valid.
-		var queryJson = msg.Json[0]
 
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
@@ -443,7 +437,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// 2. Do search in all segments
 		for _, partition := range targetCollection.Partitions {
 			for _, openSegment := range partition.OpenedSegments {
-				var res, err = openSegment.SegmentSearch(queryJson, timestamp, vector)
+				var res, err = openSegment.SegmentSearch("", timestamp, vector)
 				if err != nil {
 					fmt.Println(err.Error())
 					return msgPb.Status{ErrorCode: 1}
@@ -454,7 +448,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				}
 			}
 			for _, closedSegment := range partition.ClosedSegments {
-				var res, err = closedSegment.SegmentSearch(queryJson, timestamp, vector)
+				var res, err = closedSegment.SegmentSearch("", timestamp, vector)
 				if err != nil {
 					fmt.Println(err.Error())
 					return msgPb.Status{ErrorCode: 1}
@@ -474,9 +468,6 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			Ids: make([]int64, 0),
 		}
 		var results = msgPb.QueryResult{
-			Status: &msgPb.Status{
-				ErrorCode: 0,
-			},
 			Entities:  &entities,
 			Distances: make([]float32, 0),
 			QueryId:   msg.Uid,

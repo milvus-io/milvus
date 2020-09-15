@@ -46,7 +46,6 @@ SearchReq::Create(const ContextPtr& context, const ::milvus::grpc::SearchParam *
 Status
 SearchReq::OnExecute() {
     auto message_wrapper = milvus::server::MessageWrapper::GetInstance();
-    message_wrapper.Init();
     auto client = message_wrapper.MessageClient();
 
     int64_t query_id;

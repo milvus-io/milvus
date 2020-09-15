@@ -26,30 +26,29 @@ using std::vector;
 using namespace milvus;
 
 namespace {
-template<int DIM>
-auto generate_data(int N) {
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    std::default_random_engine er(42);
-    std::uniform_real_distribution<> distribution(0.0, 1.0);
-    std::default_random_engine ei(42);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(10 * N + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[DIM];
-        for (auto &x: vec) {
-            x = distribution(er);
-        }
-        raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
+    template<int DIM>
+    auto generate_data(int N) {
+        std::vector<char> raw_data;
+        std::vector<uint64_t> timestamps;
+        std::vector<int64_t> uids;
+        std::default_random_engine er(42);
+        std::uniform_real_distribution<> distribution(0.0, 1.0);
+        std::default_random_engine ei(42);
+        for (int i = 0; i < N; ++i) {
+            uids.push_back(10 * N + i);
+            timestamps.push_back(0);
+            // append vec
+            float vec[DIM];
+            for (auto &x: vec) {
+                x = distribution(er);
+            }
+            raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
 //            int age = ei() % 100;
 //            raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
+        }
+        return std::make_tuple(raw_data, timestamps, uids);
     }
-    return std::make_tuple(raw_data, timestamps, uids);
 }
-}
-
 
 TEST(TestIndex, Naive) {
     constexpr int N = 100000;
@@ -70,59 +69,25 @@ TEST(TestIndex, Naive) {
             {milvus::knowhere::meta::DEVICEID,      0},
     };
 
-//    auto ds = knowhere::GenDataset(N, DIM, raw_data.data());
-//    auto ds2 = knowhere::GenDatasetWithIds(N / 2, DIM, raw_data.data() + sizeof(float[DIM]) * N / 2, uids.data() + N / 2);
+    auto ds = knowhere::GenDatasetWithIds(N / 2, DIM, raw_data.data(), uids.data());
+    auto ds2 = knowhere::GenDatasetWithIds(N / 2, DIM, raw_data.data() + sizeof(float[DIM]) * N / 2, uids.data() + N / 2);
     // NOTE: you must train first and then add
-//    index->Train(ds, conf);
-//    index->Train(ds2, conf);
-//    index->AddWithoutIds(ds, conf);
-//    index->Add(ds2, conf);
+    index->Train(ds, conf);
+    index->Train(ds2, conf);
+    index->Add(ds, conf);
+    index->Add(ds2, conf);
 
-
-
-    std::vector<knowhere::DatasetPtr> datasets;
-    std::vector<std::vector<float>> ftrashs;
-    for (int beg = 0; beg < N; beg += N) {
-        auto end = beg + N;
-        if (end > N) {
-            end = N;
-        }
-
-        std::vector<float> ft(raw_data.data() + DIM * beg, raw_data.data() + DIM * end);
-
-        auto ds = knowhere::GenDataset(end - beg, DIM, ft.data());
-        datasets.push_back(ds);
-        ftrashs.push_back(std::move(ft));
-
-        // // NOTE: you must train first and then add
-        // index->Train(ds, conf);
-        // index->Add(ds, conf);
-    }
-
-    for (auto &ds: datasets) {
-        index->Train(ds, conf);
-    }
-    for (auto &ds: datasets) {
-        index->AddWithoutIds(ds, conf);
-    }
-
-    auto bitmap = std::make_shared<faiss::ConcurrentBitset>(N);
-    // exclude the first
-    for (int i = 0; i < N / 2; ++i) {
-        bitmap->set(i);
-    }
-
-    index->SetBlacklist(bitmap);
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
-
     auto final = index->Query(query_ds, conf);
-    auto ids = final->Get<idx_t *>(knowhere::meta::IDS);
-    auto distances = final->Get<float *>(knowhere::meta::DISTANCE);
-    for (int i = 0; i < TOPK; ++i) {
-        if (ids[i] < N / 2) {
-            cout << "WRONG: ";
-        }
+    auto mmm = final->data();
+    cout << endl;
+    for(auto [k, v]: mmm) {
+        cout << k << endl;
+    }
+    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
+    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
+    for(int i = 0; i < TOPK; ++i) {
         cout << ids[i] << "->" << distances[i] << endl;
     }
-    int i = 1 + 1;
+    int i = 1+1;
 }

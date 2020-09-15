@@ -14,6 +14,7 @@
 #include "include/MilvusApi.h"
 #include "grpc/ClientProxy.h"
 #include "interface/ConnectionImpl.h"
+#include "utils/TimeRecorder.h"
 
 int main(int argc , char**argv) {
     auto client = milvus::ConnectionImpl();
@@ -50,25 +51,9 @@ int main(int argc , char**argv) {
 
     milvus::TopKQueryResult result;
 
-
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-//    for (int k = 0; k < 1000; ++k) {
+    milvus_sdk::TimeRecorder test_search("search");
     auto status = client.Search("collection1", partition_list, "dsl", vectorParam, result);
 
-//    }
-
-//    std::cout << "hahaha" << std::endl;
-//    if (result.size() > 0){
-//        std::cout << result[0].ids[0] << std::endl;
-//        std::cout << result[0].distances[0] << std::endl;
-//    } else {
-//        std::cout << "sheep is a shadiao";
-//    }
-    auto t2 = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-
-    std::cout << "Query run time: " << duration/1000.0 << "ms" << std::endl;
     return 0;
 }
 

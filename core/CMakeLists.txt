@@ -201,12 +201,3 @@ if ( NOT MILVUS_DB_PATH )
 endif ()
 
 set( GPU_ENABLE "false" )
-
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/dog_segment/
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/include
-        FILES_MATCHING PATTERN "*_c.h"
-)
-
-install(FILES ${CMAKE_BINARY_DIR}/src/dog_segment/libmilvus_dog_segment.so
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/lib)
