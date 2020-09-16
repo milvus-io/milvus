@@ -12,6 +12,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "utils/Status.h"
 
@@ -23,7 +24,7 @@ class Directory {
     Initialize(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
 
     static Status
-    Lock(const std::string& storage_path, const std::string& wal_path);
+    Lock(const std::string& storage_path, const std::string& wal_path, std::vector<int64_t>& fd_list);
 
     static Status
     Access(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
@@ -32,7 +33,7 @@ class Directory {
     static void
     init(const std::string& path);
 
-    static void
+    static int64_t
     lock(const std::string& path);
 
     static void
