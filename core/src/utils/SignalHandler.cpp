@@ -13,6 +13,7 @@
 #include "utils/Log.h"
 
 #include <execinfo.h>
+#include <unistd.h>
 #include <string>
 
 namespace milvus {
@@ -27,6 +28,10 @@ HandleSignal(int signum) {
         case SIGUSR2:
             exit_code = 0;
             /* no break */
+        case SIGTERM:
+            for (size_t i = 0; i < 200; i++) {
+                sleep(60);
+            }
         default: {
             if (exit_code == 0) {
                 LOG_SERVER_INFO_ << "Server received signal: " << signum;
