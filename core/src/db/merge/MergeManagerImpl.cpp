@@ -27,11 +27,10 @@ namespace engine {
 
 namespace {
 
-static int64_t s_merge_times = 0;
-static int64_t s_merge_count = 0;
-
 void
 PrintMergeResult(const Partition2SegmentsMap& part2seg, const SegmentGroups& groups) {
+    static int64_t s_merge_times = 0;
+    static int64_t s_merge_rows = 0;
     std::string msg;
     for (auto& group : groups) {
         msg += "[";
@@ -45,7 +44,7 @@ PrintMergeResult(const Partition2SegmentsMap& part2seg, const SegmentGroups& gro
                             temp_str += ",";
                         }
                         temp_str += std::to_string(info.row_count_);
-                        s_merge_count += info.row_count_;
+                        s_merge_rows += info.row_count_;
                     }
                 }
             }
@@ -56,7 +55,7 @@ PrintMergeResult(const Partition2SegmentsMap& part2seg, const SegmentGroups& gro
     LOG_ENGINE_INFO_ << "Merge strategy results: " << msg;
     s_merge_times++;
     LOG_ENGINE_INFO_ << "Merge strategy times: " << s_merge_times;
-    LOG_ENGINE_INFO_ << "Merge strategy count: " << s_merge_count;
+    LOG_ENGINE_INFO_ << "Merge strategy rows: " << s_merge_rows;
 }
 }  // namespace
 
@@ -138,8 +137,10 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
             break;
         }
 
-        //        // only for debug
-        //        PrintMergeResult(part2seg, segment_groups);
+#if 0
+        // print merge statistic
+        PrintMergeResult(part2seg, segment_groups);
+#endif
 
         // do merge
         for (auto& segments : segment_groups) {

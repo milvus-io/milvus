@@ -39,7 +39,8 @@ ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
         }
     }
 #else
-    const int64_t ratio = 5;
+    // construct layers according to row_count_per_segment
+    const int64_t ratio = 4;
     groups.insert(std::pair(row_count_per_segment, SegmentInfoList()));
     int64_t quarter = row_count_per_segment / ratio;
     while (quarter > 1024) {
@@ -130,10 +131,12 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
             }
         }
 
-        //        // only for debug
-        //        if (!groups.empty()) {
-        //            PrintLayers(layers);
-        //        }
+#if 0
+        // print merge statistic
+        if (!groups.empty()) {
+            PrintLayers(layers);
+        }
+#endif
     }
 
     return Status::OK();
