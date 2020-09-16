@@ -306,7 +306,7 @@ ValidationUtil::ValidateSearchParams(const milvus::json& search_params,
             break;
         }
         case (int32_t)engine::EngineType::HNSW: {
-            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 4096);
+            auto status = CheckParameterRange(search_params, knowhere::IndexParams::ef, topk, 32768);
             if (!status.ok()) {
                 return status;
             }
