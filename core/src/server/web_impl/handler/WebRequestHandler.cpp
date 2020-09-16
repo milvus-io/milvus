@@ -501,7 +501,7 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
 
     auto name = collection_name.get<std::string>();
 
-    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
+    double compact_threshold = json["threshold"].get<double>();  // compact trigger threshold: delete_counts/segment_counts
     auto status = req_handler_.Compact(context_ptr_, name, compact_threshold);
 
     if (status.ok()) {
