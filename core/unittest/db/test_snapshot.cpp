@@ -2080,6 +2080,90 @@ TEST_F(SnapshotTest, CompoundTest2) {
     // TODO: Check Total Segment Files Cnt
 }
 
+TEST_F(SnapshotTest, MultiSegmentsTest) {
+    const int64_t loop = 10;
+    std::string collection_name("c1");
+    LSN_TYPE lsn = 1;
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(ss->GetName(), collection_name);
+    ASSERT_EQ(ss->NumberOfPartitions(), 1);
+
+    Partition::VecT partitions;
+    auto start_ss = ss;
+    for (size_t i = 0; i < loop; i++) {
+        OperationContext context;
+        context.lsn = ++lsn;
+        auto op = std::make_shared<CreatePartitionOperation>(context, start_ss);
+        std::string partition_name = "p_" + std::to_string(i);
+        PartitionContext p_ctx;
+        p_ctx.name = partition_name;
+        PartitionPtr partition;
+        auto status = op->CommitNewPartition(p_ctx, partition);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(partition);
+        ASSERT_EQ(partition->GetName(), partition_name);
+        ASSERT_FALSE(partition->IsActive());
+        ASSERT_TRUE(partition->HasAssigned());
+
+        ASSERT_TRUE(op->Push().ok());
+        ASSERT_TRUE(op->GetSnapshot(start_ss).ok());
+        ASSERT_TRUE(start_ss);
+
+        partitions.push_back(partition);
+    }
+
+    srand(time(nullptr));
+    auto r = rand() % 10;
+    for (size_t i = 0; i < r; i ++) {
+        PartitionContext context;
+        context.id = partitions[i]->GetID();
+        context.name = partitions[i]->GetName();
+        context.lsn = ++lsn;
+        auto op = std::make_shared<DropPartitionOperation>(context, start_ss);
+        ASSERT_TRUE(op->Push().ok());
+        ASSERT_TRUE(op->GetSnapshot(start_ss).ok());
+    }
+
+    auto multi_segments_task = [&]() {
+        OperationContext context;
+        auto op = std::make_shared<MultiSegmentsOperation>(context, start_ss);
+        for (size_t i = 0; i < loop; i++) {
+            OperationContext oc;
+            oc.prev_partition = partitions[i];
+            Segment::Ptr segment;
+            auto status = op->CommitNewSegment(oc, segment);
+            if (status.code() == milvus::SS_STALE_ERROR) {
+                continue;
+            }
+
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            SegmentFileContext sfc;
+            sfc.field_name = "vector";
+            sfc.field_element_name = "ivfsq8";
+            sfc.segment_id = segment->GetID();
+            SegmentFile::Ptr sf;
+            status = op->CommitNewSegmentFile(sfc, sf);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            status = op->CommitRowCount(segment->GetID(), 100);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+        }
+
+        auto status = op->Push();
+        ASSERT_TRUE(status.ok()) << status.ToString();
+    };
+
+    auto multi_segments_thread = std::thread(multi_segments_task);
+    multi_segments_thread.join();
+
+    ScopedSnapshotT new_ss;
+    auto status = Snapshots::GetInstance().GetSnapshot(new_ss, collection_name);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(new_ss->GetCollectionCommit()->GetRowCount(), (loop - r) * 100);
+}
+
 struct GCSchedule {
     // static constexpr const char* Name = "GCSchedule";
 };
