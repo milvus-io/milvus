@@ -58,6 +58,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3132 Refine the implementation of hnsw in faiss and add support for hnsw-flat, hnsw-pq and hnsw-sq8
 -   \#3463 Restrict the content of partition_tag
 -   \#3502 Normalize http method in web sever
+-   \#3732 Add new operation supporting multi-segments
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
