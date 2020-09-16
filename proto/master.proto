@@ -23,6 +23,7 @@ message Segment {
   int32 channel_end=5;
   uint64 open_timestamp=6;
   uint64 close_timestamp=7;
+  string collection_name=8;
 }
 
 message SegmentStat {

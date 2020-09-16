@@ -42,12 +42,14 @@ type Segment struct {
 	ChannelEnd     int    `json:"channel_end"`
 	OpenTimeStamp  uint64 `json:"open_timestamp"`
 	CloseTimeStamp uint64 `json:"close_timestamp"`
+	CollectionName string `json:"collection_name"`
 }
 
-func NewSegment(id uuid.UUID, collectioID uuid.UUID, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
+func NewSegment(id uuid.UUID, collectioID uuid.UUID, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
 	return Segment{
 		SegmentID:      uint64(id.ID()),
 		CollectionID:   uint64(id.ID()),
+		CollectionName: cName,
 		PartitionTag:   ptag,
 		ChannelStart:   chStart,
 		ChannelEnd:     chEnd,

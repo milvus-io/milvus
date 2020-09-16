@@ -32,6 +32,7 @@ func TestSegmentMarshal(t *testing.T) {
 var Ts = Segment{
 	SegmentID:      uint64(101111),
 	CollectionID:   uint64(12010101),
+	CollectionName: "collection-test",
 	PartitionTag:   "default",
 	ChannelStart:   1,
 	ChannelEnd:     100,
