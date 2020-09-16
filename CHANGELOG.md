@@ -7,14 +7,15 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3536 Release search task in time to avoid excessive memory usage
 -   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
 -   \#3742 If the GPU cache is too small, IVF_SQ8H using multiple GPUs will cause to crash
+-   \#3760 After IVF_SQ8H querying, an CUDA error will occur when Milvus exits
 
 ## Feature
--   \#3213 Allow users to specify a distance type at runtime for Flat index
--   \#3254 Allow more choices for the parameter ‘m’ of CPU IVF_PQ
--   \#3606 Searching auto turn into CPU when the parameter 'nprobe' of IVF is larger than 2048
--   \#3639 Searching auto turn into CPU when the parameter 'topk' of index is larger than 2048 
 
 ## Improvement
+-   \#3213 Allow users to specify a distance type at runtime for Flat index
+-   \#3254 Allow more choices for the parameter ‘m’ of IVF_PQ
+-   \#3606 The supported parameter 'nprobe' of IVF is expanded to [1, 16384]
+-   \#3639 The supported parameter 'topk' of searching is expanded to [1, 16384]
 
 ## Task
 
