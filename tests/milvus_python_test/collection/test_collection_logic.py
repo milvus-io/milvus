@@ -6,9 +6,9 @@ from time import sleep
 from multiprocessing import Process
 from utils import *
 
-default_segment_row_count = 100000
+default_segment_row_limit = 100000
 drop_collection_interval_time = 3
-segment_row_count = 5000
+segment_row_limit = 5000
 collection_id = "logic"
 vectors = gen_vectors(100, dim)
 default_fields = gen_default_fields() 
