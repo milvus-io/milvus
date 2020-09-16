@@ -3,7 +3,7 @@ package reader
 import (
 	"encoding/binary"
 	"fmt"
-	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/stretchr/testify/assert"
 	"math"
 	"testing"
@@ -137,7 +137,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	for i := 0; i < 16; i ++ {
 		queryRawData = append(queryRawData, float32(i))
 	}
-	var vectorRecord = schema.VectorRowRecord {
+	var vectorRecord = msgPb.VectorRowRecord {
 		FloatData: queryRawData,
 	}
 	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[0], &vectorRecord)

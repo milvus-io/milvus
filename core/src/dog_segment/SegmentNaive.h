@@ -116,14 +116,14 @@ public:
     }
 
 private:
-    struct MutableRecord {
-        ConcurrentVector<uint64_t> uids_;
-        tbb::concurrent_vector<Timestamp> timestamps_;
-        std::vector<tbb::concurrent_vector<float>> entity_vecs_;
-
-        MutableRecord(int entity_size) : entity_vecs_(entity_size) {
-        }
-    };
+//    struct MutableRecord {
+//        ConcurrentVector<uint64_t> uids_;
+//        tbb::concurrent_vector<Timestamp> timestamps_;
+//        std::vector<tbb::concurrent_vector<float>> entity_vecs_;
+//
+//        MutableRecord(int entity_size) : entity_vecs_(entity_size) {
+//        }
+//    };
 
     struct Record {
         std::atomic<int64_t> reserved = 0;
@@ -146,6 +146,12 @@ private:
 
     Status
     QueryImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
+
+    Status
+    QuerySlowImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
+
+    Status
+    QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
 
     template<typename Type>
     knowhere::IndexPtr BuildVecIndexImpl(const IndexMeta::Entry &entry);

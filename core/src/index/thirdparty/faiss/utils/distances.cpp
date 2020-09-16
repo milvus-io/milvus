@@ -252,7 +252,7 @@ static void knn_L2sqr_sse (
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                ConcurrentBitsetPtr bitset = nullptr)
+                ConcurrentBitsetPtr bitset_base, uint64_t offset)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -279,7 +279,7 @@ static void knn_L2sqr_sse (
 
 #pragma omp parallel for schedule(static)
             for (size_t j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)) {
+                if(!bitset_base || !bitset_base->test(j + offset)) {
                     size_t thread_no = omp_get_thread_num();
                     const float *y_j = y + j * d;
                     const float *x_i = x + x_from * d;
@@ -343,7 +343,7 @@ static void knn_L2sqr_sse (
             }
 
             for (size_t j = 0; j < ny; j++) {
-                if (!bitset || !bitset->test(j)) {
+                if (!bitset_base || !bitset_base->test(j + offset)) {
                     float disij = fvec_L2sqr (x_i, y_j, d);
                     if (disij < val_[0]) {
                         maxheap_swap_top (k, val_, ids_, disij, j);
@@ -427,7 +427,7 @@ static void knn_L2sqr_blas (const float * x,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
         const DistanceCorrection &corr,
-        ConcurrentBitsetPtr bitset = nullptr)
+        ConcurrentBitsetPtr bitset_base, int64_t offset)
 {
     res->heapify ();
 
@@ -473,7 +473,7 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset_base || !bitset_base->test(j + offset)){
                         float ip = *ip_line;
                         float dis = x_norms[i] + y_norms[j] - 2 * ip;
 
@@ -609,13 +609,16 @@ void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                ConcurrentBitsetPtr bitset)
+                ConcurrentBitsetPtr bitset,
+                int64_t offset
+                )
+
 {
     if (nx < distance_compute_blas_threshold) {
-        knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
+        knn_L2sqr_sse (x, y, d, nx, ny, res, bitset, offset);
     } else {
         NopDistanceCorrection nop;
-        knn_L2sqr_blas (x, y, d, nx, ny, res, nop, bitset);
+        knn_L2sqr_blas (x, y, d, nx, ny, res, nop, bitset, offset);
     }
 }
 
@@ -649,7 +652,7 @@ void knn_L2sqr_base_shift (
          const float *base_shift)
 {
     BaseShiftDistanceCorrection corr = {base_shift};
-    knn_L2sqr_blas (x, y, d, nx, ny, res, corr);
+    knn_L2sqr_blas (x, y, d, nx, ny, res, corr, nullptr, 0);
 }
 
 

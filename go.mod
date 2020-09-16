@@ -15,7 +15,7 @@ require (
 	github.com/dvsekhvalnov/jose2go v0.0.0-20200901110807-248326c1351b // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/gogo/protobuf v1.3.1
-	github.com/golang/protobuf v1.4.2
+	github.com/golang/protobuf v1.3.3
 	github.com/google/btree v1.0.0
 	github.com/json-iterator/go v1.1.10
 	github.com/keybase/go-keychain v0.0.0-20200502122510-cda31fe0c86d // indirect

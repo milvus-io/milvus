@@ -16,10 +16,7 @@
  * small. More complex functions are implemented in Heaps.cpp
  *
  */
-
-
-#ifndef FAISS_Heap_h
-#define FAISS_Heap_h
+#pragma once
 
 #include <climits>
 #include <cstring>
@@ -540,4 +537,3 @@ void indirect_heap_push (size_t k,
 
 } // namespace faiss
 
-#endif  /* FAISS_Heap_h */

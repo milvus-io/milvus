@@ -13,6 +13,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <optional>
 
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
@@ -181,7 +182,7 @@ void knn_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        ConcurrentBitsetPtr bitset = nullptr);
+        ConcurrentBitsetPtr bitset = nullptr, int64_t offset = 0);
 
 void knn_jaccard (
         const float * x,
