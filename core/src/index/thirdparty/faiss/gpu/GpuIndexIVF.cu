@@ -173,7 +173,7 @@ GpuIndexIVF::copyFrom(faiss::IndexIVF* index, gpu::GpuIndexFlat *&qt, int64_t mo
     GpuIndexFlatConfig config = ivfConfig_.flatConfig;
     // FIXME: inherit our same device
     config.device = device_;
-    config.storeInCpu = true;
+    config.storeInCpu = false;
 
     if(qt == nullptr) {
         if (index->metric_type == faiss::METRIC_L2) {
