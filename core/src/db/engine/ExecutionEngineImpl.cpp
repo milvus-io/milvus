@@ -42,7 +42,6 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_index/gpu/Quantizer.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
