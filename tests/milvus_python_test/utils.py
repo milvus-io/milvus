@@ -18,7 +18,7 @@ big_flush_interval = 1000
 dim = 128
 nb = 1200
 top_k = 10
-segment_row_count = 1000
+segment_row_limit = 1000
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 namespace = "milvus"
@@ -228,7 +228,7 @@ def gen_default_fields(auto_id=True):
             {"field": "float", "type": DataType.FLOAT},
             {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dim}},
         ],
-        "segment_row_limit": segment_row_count,
+        "segment_row_limit": segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
@@ -241,7 +241,7 @@ def gen_binary_default_fields(auto_id=True):
             {"field": "float", "type": DataType.FLOAT},
             {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dim}}
         ],
-        "segment_row_limit": segment_row_count,
+        "segment_row_limit": segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
@@ -471,7 +471,7 @@ def add_vector_field(nb, dimension=dim):
     return field_name
 
 
-def gen_segment_row_counts():
+def gen_segment_row_limits():
     sizes = [
         1024,
         4096

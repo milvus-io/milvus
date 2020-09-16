@@ -148,6 +148,16 @@ class TestInsertBase:
         logging.getLogger().debug(res)
         assert res
 
+    def test_insert_segment_row_count(self, connect, collection):
+        nb = segment_row_count + 1
+        res_ids = connect.insert(collection, gen_entities(nb))
+        connect.flush([collection])
+        assert len(res_ids) == nb
+        stats = connect.get_collection_stats(collection)
+        assert len(stats['partitions'][0]['segments']) == 2
+        for segment in stats['partitions'][0]['segments']:
+            assert segment['row_count'] in [segment_row_count, 1]
+
     @pytest.fixture(
         scope="function",
         params=[
@@ -203,7 +213,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_limit": segment_row_count,
+            "segment_row_limit": segment_row_limit,
             "auto_id": True
         }
         connect.create_collection(collection_name, fields)
@@ -278,7 +288,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_limit": segment_row_count
+            "segment_row_limit": segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, dim)
@@ -522,7 +532,7 @@ class TestInsertBase:
         method: disable autoflush and insert, get entity
         expected: the count is equal to 0
         '''
-        delete_nums = 500;
+        delete_nums = 500
         disable_flush(connect)
         ids = connect.insert(collection, entities)
         res = connect.get_entity_by_id(collection, ids[:delete_nums])

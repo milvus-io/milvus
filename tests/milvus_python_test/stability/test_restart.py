@@ -219,7 +219,7 @@ class TestRestartBase:
         delete_length = 1000
         loop = 10
         for i in range(loop):
-            delete_ids = ids[i*loop:i*loop+delete_length]
+            delete_ids = ids[i*delete_length:(i+1)*delete_length]
             delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
