@@ -121,29 +121,31 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
 
 Status
 DeleteSnapshotIndex(const std::string& collection_name, const std::string& field_name) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
     // drop for all fields or drop for one field?
     std::vector<std::string> field_names;
     if (field_name.empty()) {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
         field_names = ss->GetFieldNames();
     } else {
         field_names.push_back(field_name);
     }
 
+    snapshot::OperationContext context;
     for (auto& name : field_names) {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
         std::vector<snapshot::FieldElementPtr> elements = ss->GetFieldElementsByField(name);
         for (auto& element : elements) {
             if (element->GetFEtype() == engine::FieldElementType::FET_INDEX ||
                 element->GetFEtype() == engine::FieldElementType::FET_COMPRESS) {
-                snapshot::OperationContext context;
                 context.stale_field_elements.push_back(element);
-                auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
-                STATUS_CHECK(op->Push());
             }
         }
+    }
+
+    if (!context.stale_field_elements.empty()) {
+        auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
+        STATUS_CHECK(op->Push());
     }
 
     return Status::OK();
