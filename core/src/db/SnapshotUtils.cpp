@@ -31,9 +31,10 @@ namespace engine {
 const char* JSON_ROW_COUNT = "row_count";
 const char* JSON_ID = "id";
 const char* JSON_PARTITIONS = "partitions";
+const char* JSON_PARTITION_COUNT = "partition_count";
 const char* JSON_SEGMENTS = "segments";
+const char* JSON_SEGMENT_COUNT = "segment_count";
 const char* JSON_FIELD = "field";
-const char* JSON_FIELD_ELEMENT = "field_element";
 const char* JSON_PARTITION_TAG = "tag";
 const char* JSON_FILES = "files";
 const char* JSON_NAME = "name";
@@ -171,7 +172,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     size_t total_row_count = 0;
     size_t total_data_size = 0;
 
-    // get partition information
+    // partition statistic
     std::unordered_map<snapshot::ID_TYPE, milvus::json> partitions;
     auto partition_names = ss->GetPartitionNames();
     for (auto& name : partition_names) {
@@ -204,6 +205,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             continue;
         }
 
+        // element files statistic
         milvus::json json_files;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, id);
         auto& field_visitors = seg_visitor->GetFieldVisitors();
@@ -216,27 +218,32 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     continue;
                 }
 
-                if (pair.second->GetFile()) {
-                    milvus::json json_file;
-                    json_file[JSON_DATA_SIZE] = pair.second->GetFile()->GetSize();
-                    json_file[JSON_PATH] =
-                        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
-                    json_file[JSON_FIELD] = field->GetName();
-
-                    // if the element is index, print index name/type
-                    // else print element name
-                    auto element = pair.second->GetElement();
-                    if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
-                        json_file[JSON_NAME] = element->GetName();
-                        json_file[JSON_INDEX_TYPE] = element->GetTypeName();
-                    } else {
-                        json_file[JSON_NAME] = element->GetName();
-                    }
-                    json_files.push_back(json_file);
+                // if the file doesn't exist, ignore it
+                auto file_ptr = pair.second->GetFile();
+                if (file_ptr == nullptr || file_ptr->GetSize() == 0) {
+                    continue;
                 }
+
+                // file statistic
+                milvus::json json_file;
+                json_file[JSON_DATA_SIZE] = file_ptr->GetSize();
+                json_file[JSON_PATH] = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file_ptr);
+                json_file[JSON_FIELD] = field->GetName();
+
+                // if the element is index, print index name/type
+                // else print element name
+                auto element = pair.second->GetElement();
+                if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
+                    json_file[JSON_NAME] = element->GetName();
+                    json_file[JSON_INDEX_TYPE] = element->GetTypeName();
+                } else {
+                    json_file[JSON_NAME] = element->GetName();
+                }
+                json_files.push_back(json_file);
             }
         }
 
+        // segment statistic
         milvus::json json_segment;
         json_segment[JSON_ID] = id;
         json_segment[JSON_ROW_COUNT] = segment_commit->GetRowCount();
@@ -254,12 +261,15 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             json_segments.push_back(json);
         }
         pair.second[JSON_SEGMENTS] = json_segments;
+        pair.second[JSON_SEGMENT_COUNT] = json_segments.size();
         json_partitions.push_back(pair.second);
     }
 
+    // general statistic
     json_info[JSON_ROW_COUNT] = total_row_count;
     json_info[JSON_DATA_SIZE] = total_data_size;
     json_info[JSON_PARTITIONS] = json_partitions;
+    json_info[JSON_PARTITION_COUNT] = json_partitions.size();
 
     return Status::OK();
 }
