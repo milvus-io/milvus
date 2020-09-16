@@ -438,9 +438,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
             vector_count_ = count;
 
-            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
-            for (auto& offset : deleted_docs) {
-                concurrent_bitset_ptr->set(offset);
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
+            if (!deleted_docs.empty()) {
+                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
+                for (auto& offset : deleted_docs) {
+                    concurrent_bitset_ptr->set(offset);
+                }
             }
 
             auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
@@ -488,11 +491,13 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     }
                     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                        std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-                    for (auto& offset : deleted_docs) {
-                        if (!concurrent_bitset_ptr->test(offset)) {
-                            concurrent_bitset_ptr->set(offset);
+                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
+                    if (!deleted_docs.empty()) {
+                        concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                        for (auto& offset : deleted_docs) {
+                            if (!concurrent_bitset_ptr->test(offset)) {
+                                concurrent_bitset_ptr->set(offset);
+                            }
                         }
                     }
 

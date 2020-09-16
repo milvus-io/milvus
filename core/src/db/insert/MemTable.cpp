@@ -278,10 +278,11 @@ MemTable::ApplyDeletes() {
             auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             if (index != nullptr) {
                 faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
-                if (blacklist != nullptr) {
-                    indexes.emplace_back(index);
-                    blacklists.emplace_back(blacklist);
+                if (blacklist == nullptr) {
+                    blacklist = std::make_shared<faiss::ConcurrentBitset>(index->Count());
                 }
+                indexes.emplace_back(index);
+                blacklists.emplace_back(blacklist);
             }
         }
 
@@ -306,7 +307,6 @@ MemTable::ApplyDeletes() {
 
         rec.RecordSection("Sorting " + std::to_string(ids_to_check.size()) + " ids");
 
-        size_t delete_count = 0;
         auto find_diff = std::chrono::duration<double>::zero();
         auto set_diff = std::chrono::duration<double>::zero();
 
@@ -321,18 +321,11 @@ MemTable::ApplyDeletes() {
             if (found) {
                 auto set_start = std::chrono::high_resolution_clock::now();
 
-                delete_count++;
-
                 deleted_docs->AddDeletedDoc(i);
-
-                if (id_bloom_filter_ptr->Check(uids[i])) {
-                    id_bloom_filter_ptr->Remove(uids[i]);
-                }
+                id_bloom_filter_ptr->Remove(uids[i]);
 
                 for (auto& blacklist : blacklists) {
-                    if (!blacklist->test(i)) {
-                        blacklist->set(i);
-                    }
+                    blacklist->set(i);
                 }
 
                 auto set_end = std::chrono::high_resolution_clock::now();
@@ -345,6 +338,11 @@ MemTable::ApplyDeletes() {
         LOG_ENGINE_DEBUG_ << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
 
         rec.RecordSection("Find uids and set deleted docs and bloom filter");
+
+        if (deleted_docs->GetSize() == 0) {
+            LOG_ENGINE_DEBUG_ << "deleted_docs does not need to be updated";
+            continue;
+        }
 
         for (size_t i = 0; i < indexes.size(); ++i) {
             indexes[i]->SetBlacklist(blacklists[i]);
@@ -372,7 +370,7 @@ MemTable::ApplyDeletes() {
                 segment_file.file_type_ == meta::SegmentSchema::TO_INDEX ||
                 segment_file.file_type_ == meta::SegmentSchema::INDEX ||
                 segment_file.file_type_ == meta::SegmentSchema::BACKUP) {
-                segment_file.row_count_ -= delete_count;
+                segment_file.row_count_ -= deleted_docs->GetSize();
                 files_to_update.emplace_back(segment_file);
             }
         }
