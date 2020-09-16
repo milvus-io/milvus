@@ -15,7 +15,7 @@ type MessageClient struct {
 	// timesync
 	timeSyncCfg *timesync.ReaderTimeSyncCfg
 
-	//message channel
+	// message channel
 	searchChan  chan *msgpb.SearchMsg
 	key2SegChan chan *msgpb.Key2SegMsg
 
@@ -32,6 +32,9 @@ type MessageClient struct {
 	timestampBatchStart uint64
 	timestampBatchEnd   uint64
 	batchIDLen          int
+
+	//
+	MessageClientID int
 }
 
 func (mc *MessageClient) TimeSyncStart() uint64 {
@@ -51,7 +54,7 @@ func (mc *MessageClient) Send(ctx context.Context, msg msgpb.QueryResult) {
 	}
 }
 
-func (mc *MessageClient) GetSearchChan() <- chan *msgpb.SearchMsg {
+func (mc *MessageClient) GetSearchChan() <-chan *msgpb.SearchMsg {
 	return mc.searchChan
 }
 
@@ -106,7 +109,7 @@ func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "reader",
+		SubscriptionName: "reader" + strconv.Itoa(mc.MessageClientID),
 	})
 
 	if err != nil {
@@ -127,7 +130,9 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 	return client
 }
 
-func (mc *MessageClient) InitClient(url string) {
+func (mc *MessageClient) InitClient(url string, numOfQueryNode int) {
+	const ChannelNum = 1024
+
 	//create client
 	mc.client = mc.createClient(url)
 
@@ -148,16 +153,16 @@ func (mc *MessageClient) InitClient(url string) {
 	//init timesync
 	URL := "pulsar://localhost:6650"
 	timeSyncTopic := "TimeSync"
-	timeSyncSubName := "reader"
-	readTopics := make([]string, 0, 1024)
-	for i := 0; i < 1024; i++ {
+	timeSyncSubName := "reader" + strconv.Itoa(mc.MessageClientID)
+	readTopics := make([]string, 0, ChannelNum)
+	for i := ChannelNum / numOfQueryNode * mc.MessageClientID; i < ChannelNum/numOfQueryNode*(mc.MessageClientID+1); i++ {
 		str := "InsertOrDelete-partition-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
-	readSubName := "reader"
+	readSubName := "reader" + strconv.Itoa(mc.MessageClientID)
 	proxyIdList := []int64{0}
-	timeSync, err := timesync.NewReaderTimeSync(URL, timeSyncTopic, timeSyncSubName, readTopics, readSubName, proxyIdList, 400, -2, timesync.WithReaderQueueSize(1024))
+	timeSync, err := timesync.NewReaderTimeSync(URL, timeSyncTopic, timeSyncSubName, readTopics, readSubName, proxyIdList, 400, -2, timesync.WithReaderQueueSize(ChannelNum))
 	if err != nil {
 		log.Fatal(err)
 	}
