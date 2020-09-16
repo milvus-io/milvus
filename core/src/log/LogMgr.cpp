@@ -124,11 +124,12 @@ LogMgr&
 LogMgr::Level(std::unordered_map<std::string, bool>& enables) {
     std::string logs_reg_path = logs_path_.rfind('/') == logs_path_.length() - 1 ? logs_path_ : logs_path_ + "/";
 
+    /* If want to output all logs to one file, uncomment this line below and comment other set_level lines */
+    // set_level(el_config_, el::Level::Global, true, logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log");
+
     fiu_do_on("LogMgr.Level.trace_enable_to_false", enables["trace"] = false);
     set_level(el_config_, el::Level::Trace, enables["trace"],
               logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log");
-
-    set_level(el_config_, el::Level::Global, true, logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log");
 
     fiu_do_on("LogMgr.Level.info_enable_to_false", enables["info"] = false);
     set_level(el_config_, el::Level::Info, enables["info"],
