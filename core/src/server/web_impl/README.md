@@ -1022,10 +1022,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 | Parameter  | Description                                                                                                                                                                                  | Required? |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `topk`     | The top k most similar results of each query vector.                                                                                                                                         | Yes       |
-| `tags`     | Tags of partitions that you need to search. You do not have to specify this value if the collection is not partitioned or you wish to search the whole collection.                           | No        |
-| `file_ids` | IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored. | No        |
-| `vectors`  | Vectors to query.                                                                                                                                                                            | Yes       |
+| `dsl`      | query dsl.                                                                                                                                                                            | Yes       |
 | `params`   | Extra params for search. Please refer to [Index and search parameters](#Index-and-search-parameters) to get more detail information.                                                                                        | Yes       |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
