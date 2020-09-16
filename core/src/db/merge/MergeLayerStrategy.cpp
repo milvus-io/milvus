@@ -40,7 +40,7 @@ ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
     }
 #else
     // construct layers according to row_count_per_segment
-    const int64_t ratio = 4;
+    const int64_t ratio = 5;
     groups.insert(std::pair(row_count_per_segment, SegmentInfoList()));
     int64_t quarter = row_count_per_segment / ratio;
     while (quarter > 1024) {
