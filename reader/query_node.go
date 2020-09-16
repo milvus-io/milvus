@@ -195,7 +195,7 @@ func (node *QueryNode) RunInsertDelete(wg * sync.WaitGroup) {
 		var msgLen = node.PrepareBatchMsg()
 		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
 
-		if msgLen[1] == 0 {
+		if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
 			continue
 		}
 
@@ -232,7 +232,11 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 			fmt.Println("Do Search...")
-			node.Search(node.messageClient.SearchMsg)
+			var status = node.Search(node.messageClient.SearchMsg)
+			if status.ErrorCode != 0 {
+				fmt.Println("Search Failed")
+				node.PublishFailedSearchResult()
+			}
 		}
 	}
 	wg.Done()
@@ -431,7 +435,8 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 }
 
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
-	var clientId = (*(searchMessages[0])).ClientId
+	// TODO: use client id to publish results to different clients
+	// var clientId = (*(searchMessages[0])).ClientId
 
 	type SearchResultTmp struct {
 		ResultId       int64
@@ -514,7 +519,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		results.RowNum = int64(len(results.Distances))
 
 		// 3. publish result to pulsar
-		node.PublishSearchResult(&results, clientId)
+		node.PublishSearchResult(&results)
 	}
 
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
