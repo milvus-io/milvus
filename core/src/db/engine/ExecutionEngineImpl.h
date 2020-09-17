@@ -69,12 +69,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     GetVectorByID(const int64_t id, uint8_t* vector, bool hybrid) override;
-#endif
 
     Status
     ExecBinaryQuery(query::GeneralQueryPtr general_query, faiss::ConcurrentBitsetPtr bitset,
                     std::unordered_map<std::string, DataType>& attr_type, uint64_t& nq, uint64_t& topk,
                     std::vector<float>& distances, std::vector<int64_t>& labels) override;
+#endif
 
     Status
     Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances, int64_t* labels,

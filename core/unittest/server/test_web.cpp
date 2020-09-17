@@ -561,6 +561,7 @@ TEST_F(WebControllerTest, CREATE_COLLECTION) {
     ASSERT_EQ(OStatus::CODE_400.code, response->getStatusCode());
 }
 
+#if 0
 TEST_F(WebControllerTest, HYBRID_TEST) {
     nlohmann::json create_json;
     create_json["collection_name"] = "test_hybrid";
@@ -646,6 +647,7 @@ TEST_F(WebControllerTest, HYBRID_TEST) {
     ASSERT_TRUE(result0_json.is_array());
     ASSERT_EQ(topk, result0_json.size());
 }
+#endif
 
 TEST_F(WebControllerTest, GET_COLLECTION_META) {
     OString collection_name = "web_test_create_collection" + OString(RandomName().c_str());
