@@ -26,19 +26,27 @@ namespace engine {
 // 1. SIMPLE
 //    merge in old way, merge segment one by one, stop merge until segment row count exceed segment_row_count
 // 2. LAYERED
-//    distribute segments to several groups according to segment row count
-//    firstly, define layers by row count: 4KB, 16KB, 64KB, 256KB, 1024KB
-//    if segment row count between 0KB~4KB, put it into layer "4096"
-//    if segment row count between 4KB~16KB, put it into layer "16384"
-//    if segment row count between 16KB~64KB, put it into layer "65536"
-//    if segment row count between 64KB~256KB, put it into layer "262144"
-//    if segment row count between 256KB~1024KB, put it into layer "1048576"
-//    file row count greater than 1024KB, put into layer MAX_SEGMENT_ROW_COUNT
+//    distribute segments to several groups according to segment_row_count
+//    assume segment_row_count = 100000
+//    firstly, define layers by row count: 100000, 20000, 4000
+//    if segment row count between 0~4000, put it into layer "4000"
+//    if segment row count between 4000~20000, put it into layer "20000"
+//    if segment row count between 20000~100000, put it into layer "100000"
+//    segment row count greater than 100000 will be ignored
 //    secondly, merge segments for each group
 //    third, if some segment's create time is 30 seconds ago, and it still un-merged, force merge with upper layer
+// 3. ADAPTIVE
+//    merge segments to fit the segment_row_count
+//    assume segment_row_count = 100000
+//    segment_1 row count = 80000
+//    segment_2 row count = 60000
+//    segment_3 row count = 30000
+//    segment_1 and segment_3 will be merged, since there row sum = 110000,
+//    that is much closer than row sum of segment_1 and segment_2, 140000
 enum class MergeStrategyType {
     SIMPLE = 1,
     LAYERED = 2,
+    ADAPTIVE = 3,
 };
 
 class MergeManager {
