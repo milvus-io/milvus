@@ -203,6 +203,9 @@ DBTest::TearDown() {
     db_->Stop();
     db_ = nullptr; // db must be stopped before JobMgr and Snapshot
 
+    //TODO: Clear GPU Cache if needed
+    milvus::cache::CpuCacheMgr::GetInstance().ClearCache();
+
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
     milvus::scheduler::CPUBuilderInst::GetInstance()->Stop();
@@ -322,6 +325,7 @@ EventTest::TearDown() {
 DBOptions
 WalTest::GetOptions() {
     DBOptions options;
+    options.meta_.path_ = "/tmp/milvus_ss/db";
     options.meta_.backend_uri_ = "mock://:@:/";
     options.wal_path_ = "/tmp/milvus_wal";
     options.wal_enable_ = true;

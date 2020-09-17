@@ -273,7 +273,6 @@ TEST_F(SnapshotTest, DropCollectionTest) {
 
     auto ss_2 = CreateCollection(collection_name, ++lsn);
     status = Snapshots::GetInstance().GetSnapshot(lss, collection_name);
-//    EXPECT_DEATH({assert(1 == 2);}, "nullptr")
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(ss_2->GetID(), lss->GetID());
     ASSERT_NE(prev_ss_id, ss_2->GetID());
@@ -442,7 +441,7 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_EQ(lsn, ss->GetMaxLsn());
 
     OperationContext context;
-    context.lsn = lsn;
+    context.lsn = lsn - 1;
     auto cp_op = std::make_shared<CreatePartitionOperation>(context, ss);
     std::string partition_name("p1");
     PartitionContext p_ctx;
@@ -456,7 +455,7 @@ TEST_F(SnapshotTest, PartitionTest2) {
     ASSERT_TRUE(partition->HasAssigned());
 
     status = cp_op->Push();
-    ASSERT_FALSE(status.ok());
+    ASSERT_FALSE(status.ok()) << status.ToString();
 }
 
 TEST_F(SnapshotTest, DropSegmentTest){
@@ -544,13 +543,15 @@ TEST_F(SnapshotTest, IndexTest) {
     SegmentFileContext sf_context;
     SFContextBuilder(sf_context, ss);
 
+    std::cout << ss->ToString() << std::endl;
+
     OperationContext context;
     context.lsn = next_lsn();
     context.prev_partition = ss->GetResource<Partition>(sf_context.partition_id);
     auto build_op = std::make_shared<ChangeSegmentFileOperation>(context, ss);
     SegmentFilePtr seg_file;
     status = build_op->CommitNewSegmentFile(sf_context, seg_file);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.ok()) << status.message();
     ASSERT_TRUE(seg_file);
     auto op_ctx = build_op->GetContext();
     ASSERT_EQ(seg_file, op_ctx.new_segment_files[0]);
@@ -696,7 +697,7 @@ TEST_F(SnapshotTest, IndexTest) {
 
 TEST_F(SnapshotTest, OperationTest) {
     std::string to_string;
-    LSN_TYPE lsn;
+    LSN_TYPE lsn = 0;
     Status status;
 
     /* ID_TYPE collection_id; */
@@ -1225,6 +1226,96 @@ TEST_F(SnapshotTest, OperationTest2) {
     }
 }
 
+TEST_F(SnapshotTest, DropTest) {
+    Status status;
+    std::atomic<LSN_TYPE> lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+        return ++lsn;
+    };
+
+    std::string collection_name("c1");
+    auto ss = CreateCollection(collection_name, next_lsn());
+    ASSERT_TRUE(ss);
+
+    SegmentFileContext sf_context;
+    SFContextBuilder(sf_context, ss);
+
+    {
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResources<Partition>().begin()->second.Get();
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(new_seg->ToString().empty());
+        SegmentFilePtr seg_file;
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+
+        status = Snapshots::GetInstance().DropCollection(ss->GetName(), next_lsn());
+        ASSERT_TRUE(status.ok());
+        status = op->Push();
+        ASSERT_FALSE(status.ok()) << status.message();
+    }
+
+    ss = CreateCollection(collection_name, next_lsn());
+    ASSERT_TRUE(ss);
+
+    {
+        PartitionContext pp_ctx;
+        pp_ctx.name = "p1";
+        ss = CreatePartition(ss->GetName(), pp_ctx, next_lsn());
+        ASSERT_TRUE(ss);
+
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetPartition(pp_ctx.name);
+        ASSERT_TRUE(context.prev_partition);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+        ASSERT_FALSE(new_seg->ToString().empty());
+        SegmentFilePtr seg_file;
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.collection_id = new_seg->GetCollectionId();
+        status = op->CommitNewSegmentFile(sf_context, seg_file);
+        ASSERT_TRUE(status.ok());
+
+        status = Snapshots::GetInstance().DropPartition(
+                context.prev_partition->GetCollectionId(), context.prev_partition->GetID(), next_lsn());
+        ASSERT_TRUE(status.ok());
+
+        status = op->Push();
+        ASSERT_FALSE(status.ok());
+
+        {
+            context.lsn = next_lsn();
+            auto c_op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            OperationContext new_seg_ctx;
+            new_seg_ctx.prev_partition = context.prev_partition;
+            status = c_op->CommitNewSegment(new_seg_ctx, new_seg);
+            ASSERT_TRUE(status.ok());
+            status = c_op->Push();
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+        {
+            status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+            ASSERT_TRUE(status.ok());
+            context.lsn = next_lsn();
+            auto c_op = std::make_shared<CompoundSegmentsOperation>(context, ss);
+            OperationContext new_seg_ctx;
+            new_seg_ctx.prev_partition = context.prev_partition;
+            status = c_op->CommitNewSegment(new_seg_ctx, new_seg);
+            ASSERT_FALSE(status.ok()) << status.ToString();
+        }
+
+    }
+}
+
 TEST_F(SnapshotTest, CompoundTest1) {
     Status status;
     std::atomic<LSN_TYPE> lsn = 0;
@@ -1346,12 +1437,6 @@ TEST_F(SnapshotTest, CompoundTest1) {
             lock.unlock();
             std::unique_lock<std::mutex> blk(built_mtx);
             std::cout << status.ToString() << std::endl;
-            /* for (auto id : built_segs) { */
-            /*     std::cout << "builted " << id << std::endl; */
-            /* } */
-            /* for (auto id : seg_ids) { */
-            /*     std::cout << "to_merge " << id << std::endl; */
-            /* } */
             bool stale_found = false;
             for (auto& seg_id : seg_ids) {
                 auto it = built_segs.find(seg_id);
@@ -1993,6 +2078,90 @@ TEST_F(SnapshotTest, CompoundTest2) {
     }
     ASSERT_EQ(final_segments, expect_segments);
     // TODO: Check Total Segment Files Cnt
+}
+
+TEST_F(SnapshotTest, MultiSegmentsTest) {
+    const int64_t loop = 10;
+    std::string collection_name("c1");
+    LSN_TYPE lsn = 1;
+    auto ss = CreateCollection(collection_name, ++lsn);
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(ss->GetName(), collection_name);
+    ASSERT_EQ(ss->NumberOfPartitions(), 1);
+
+    Partition::VecT partitions;
+    auto start_ss = ss;
+    for (size_t i = 0; i < loop; i++) {
+        OperationContext context;
+        context.lsn = ++lsn;
+        auto op = std::make_shared<CreatePartitionOperation>(context, start_ss);
+        std::string partition_name = "p_" + std::to_string(i);
+        PartitionContext p_ctx;
+        p_ctx.name = partition_name;
+        PartitionPtr partition;
+        auto status = op->CommitNewPartition(p_ctx, partition);
+        ASSERT_TRUE(status.ok());
+        ASSERT_TRUE(partition);
+        ASSERT_EQ(partition->GetName(), partition_name);
+        ASSERT_FALSE(partition->IsActive());
+        ASSERT_TRUE(partition->HasAssigned());
+
+        ASSERT_TRUE(op->Push().ok());
+        ASSERT_TRUE(op->GetSnapshot(start_ss).ok());
+        ASSERT_TRUE(start_ss);
+
+        partitions.push_back(partition);
+    }
+
+    srand(time(nullptr));
+    auto r = rand() % 10;
+    for (size_t i = 0; i < r; i ++) {
+        PartitionContext context;
+        context.id = partitions[i]->GetID();
+        context.name = partitions[i]->GetName();
+        context.lsn = ++lsn;
+        auto op = std::make_shared<DropPartitionOperation>(context, start_ss);
+        ASSERT_TRUE(op->Push().ok());
+        ASSERT_TRUE(op->GetSnapshot(start_ss).ok());
+    }
+
+    auto multi_segments_task = [&]() {
+        OperationContext context;
+        auto op = std::make_shared<MultiSegmentsOperation>(context, start_ss);
+        for (size_t i = 0; i < loop; i++) {
+            OperationContext oc;
+            oc.prev_partition = partitions[i];
+            Segment::Ptr segment;
+            auto status = op->CommitNewSegment(oc, segment);
+            if (status.code() == milvus::SS_STALE_ERROR) {
+                continue;
+            }
+
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            SegmentFileContext sfc;
+            sfc.field_name = "vector";
+            sfc.field_element_name = "ivfsq8";
+            sfc.segment_id = segment->GetID();
+            SegmentFile::Ptr sf;
+            status = op->CommitNewSegmentFile(sfc, sf);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+
+            status = op->CommitRowCount(segment->GetID(), 100);
+            ASSERT_TRUE(status.ok()) << status.ToString();
+        }
+
+        auto status = op->Push();
+        ASSERT_TRUE(status.ok()) << status.ToString();
+    };
+
+    auto multi_segments_thread = std::thread(multi_segments_task);
+    multi_segments_thread.join();
+
+    ScopedSnapshotT new_ss;
+    auto status = Snapshots::GetInstance().GetSnapshot(new_ss, collection_name);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(new_ss->GetCollectionCommit()->GetRowCount(), (loop - r) * 100);
 }
 
 struct GCSchedule {

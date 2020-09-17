@@ -631,9 +631,9 @@ void knn_jaccard (const float * x,
                   float_maxheap_array_t * res,
                   ConcurrentBitsetPtr bitset)
 {
-    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+    if (d % 4 != 0) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);
-        printf("jaccard sse not implemented!\n");
+        printf("dimension is not a multiple of 4!\n");
     } else {
         NopDistanceCorrection nop;
         knn_jaccard_blas (x, y, d, nx, ny, res, nop, bitset);

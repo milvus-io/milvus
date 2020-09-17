@@ -113,7 +113,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     field_ptr4->extra_params = extra_params_4.dump();
 
     JSON extra_params;
-    extra_params["segment_row_count"] = 1024;
+    extra_params["segment_row_limit"] = 10000;
     extra_params["auto_id"] = false;
     milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
 
@@ -281,7 +281,7 @@ ClientTest::LoadCollection(const std::string& collection_name) {
 void
 ClientTest::CompactCollection(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Compact");
-    milvus::Status stat = conn_->Compact(collection_name);
+    milvus::Status stat = conn_->Compact(collection_name, 0.1);
     std::cout << "CompactCollection function call status: " << stat.message() << std::endl;
 }
 
@@ -339,6 +339,7 @@ ClientTest::Test() {
     GetCollectionInfo(collection_name);
     //    GetCollectionStats(collection_name);
     //
+    LoadCollection(COLLECTION_NAME);
     BuildVectors(NQ, COLLECTION_DIMENSION);
     //    GetEntityByID(collection_name, search_id_array_);
     SearchEntities(collection_name, TOP_K, NPROBE, "L2");

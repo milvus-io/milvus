@@ -12,7 +12,10 @@
 #include "db/wal/WalFile.h"
 #include "db/Constants.h"
 #include "db/Types.h"
+#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
+#include <experimental/filesystem>
 #include <limits>
 
 namespace milvus {
@@ -41,15 +44,23 @@ WalFile::OpenFile(const std::string& path, OpenMode mode) {
             default:
                 return Status(DB_ERROR, "Unsupported file mode");
         }
+
+        // makesure the parent path is created
+        std::experimental::filesystem::path temp_path(path);
+        auto parent_path = temp_path.parent_path();
+        CommonUtil::CreateDirectory(parent_path.c_str());
+
         file_ = fopen(path.c_str(), str_mode.c_str());
         if (file_ == nullptr) {
             std::string msg = "Failed to create wal file: " + path;
+            LOG_ENGINE_ERROR_ << msg;
             return Status(DB_ERROR, msg);
         }
         file_path_ = path;
         mode_ = mode;
     } catch (std::exception& ex) {
         std::string msg = "Failed to create wal file, reason: " + std::string(ex.what());
+        LOG_ENGINE_ERROR_ << msg;
         return Status(DB_ERROR, msg);
     }
 

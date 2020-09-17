@@ -201,6 +201,12 @@ DBImpl::DropCollection(const std::string& collection_name) {
     // erase insert buffer of this collection
     mem_mgr_->EraseMem(ss->GetCollectionId());
 
+    // erase cache
+    ClearCollectionCache(ss, options_.meta_.path_);
+
+    // clear index failed retry map of this collection
+    ClearIndexFailedRecord(collection_name);
+
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
 
@@ -284,10 +290,13 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
-    // erase insert buffer of this partition
     auto partition = ss->GetPartition(partition_name);
     if (partition != nullptr) {
+        // erase insert buffer of this partition
         mem_mgr_->EraseMem(ss->GetCollectionId(), partition->GetID());
+
+        // erase cache
+        ClearPartitionCache(ss, options_.meta_.path_, partition->GetID());
     }
 
     snapshot::PartitionContext context;
@@ -338,42 +347,40 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     auto status = Flush();
     WaitMergeFileFinish();  // let merge file thread finish
 
-    // step 2: compare old index and new index
+    // step 2: compare old index and new index, drop old index, set new index
     CollectionIndex new_index = index;
     CollectionIndex old_index;
     STATUS_CHECK(GetSnapshotIndex(collection_name, field_name, old_index));
 
-    if (utils::IsSameIndex(old_index, new_index)) {
-        return Status::OK();  // same index
+    if (!utils::IsSameIndex(old_index, new_index)) {
+        DropIndex(collection_name, field_name);
+        WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
+
+        // create field element for new index
+        status = SetSnapshotIndex(collection_name, field_name, new_index);
+        if (!status.ok()) {
+            return status;
+        }
     }
 
-    // step 3: drop old index
-    DropIndex(collection_name, field_name);
-    WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
+    // clear index failed retry map of this collection
+    ClearIndexFailedRecord(collection_name);
 
-    // step 4: create field element for index
-    status = SetSnapshotIndex(collection_name, field_name, new_index);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 5: start background build index thread
-    std::vector<std::string> collection_names = {collection_name};
-    WaitBuildIndexFinish();
-    StartBuildIndexTask(collection_names, true);
-
-    // step 6: iterate segments need to be build index, wait until all segments are built
+    // step 3: iterate segments need to be build index, wait until all segments are built
     while (true) {
+        // start background build index thread
+        std::vector<std::string> collection_names = {collection_name};
+        StartBuildIndexTask(collection_names, true);
+
+        // check if all segments are built
         SnapshotVisitor ss_visitor(collection_name);
         snapshot::IDS_TYPE segment_ids;
-        ss_visitor.SegmentsToIndex(field_name, segment_ids);
+        ss_visitor.SegmentsToIndex(field_name, segment_ids, true);
         if (segment_ids.empty()) {
             break;  // all segments build index finished
         }
 
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
-        IgnoreIndexFailedSegments(ss->GetCollectionId(), segment_ids);
+        IgnoreIndexFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             break;  // some segments failed to build index, and ignored
         }
@@ -400,6 +407,9 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+    ClearIndexCache(ss, options_.meta_.path_, field_name);
+
     std::set<int64_t> collection_ids = {ss->GetCollectionId()};
     StartMergeTask(collection_ids, true);
 
@@ -513,10 +523,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // do insert
-    int64_t segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
-    }
+    int64_t segment_row_count = 0;
+    GetSegmentRowCount(ss->GetCollection(), segment_row_count);
 
     int64_t collection_id = ss->GetCollectionId();
     int64_t partition_id = partition->GetID();
@@ -529,7 +537,9 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         if (!status.ok()) {
             return status;
         }
-        if (mem_mgr_->GetCurrentMem() > options_.insert_buffer_size_) {
+
+        std::set<int64_t> collection_ids;
+        if (mem_mgr_->RequireFlush(collection_ids)) {
             LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
@@ -574,7 +584,20 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     }
 
     status = mem_mgr_->DeleteEntities(ss->GetCollectionId(), entity_ids, op_id);
-    return status;
+    if (!status.ok()) {
+        return status;
+    }
+
+    std::set<int64_t> collection_ids;
+    if (mem_mgr_->RequireFlush(collection_ids)) {
+        if (collection_ids.find(ss->GetCollectionId()) != collection_ids.end()) {
+            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "delete", 0)
+                              << "Delete count in buffer exceeds limit. Force flush";
+            InternalFlush(collection_name);
+        }
+    }
+
+    return Status::OK();
 }
 
 Status
@@ -634,9 +657,15 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
+
+    SuspendIfFirst();
+
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
+
+    ResumeIfLast();
+
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
     if (!job->status().ok()) {
@@ -947,7 +976,11 @@ DBImpl::TimingMetricThread() {
 }
 
 void
-DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times) {
+DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bool force_build) {
+    if (collection_names.empty()) {
+        return;  // no need to start thread
+    }
+
     // build index has been finished?
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
@@ -963,19 +996,14 @@ DBImpl::StartBuildIndexTask(const std::vector<std::string>& collection_names, bo
     {
         std::lock_guard<std::mutex> lck(index_result_mutex_);
         if (index_thread_results_.empty()) {
-            if (reset_retry_times) {
-                std::lock_guard<std::mutex> lock(index_retry_mutex_);
-                index_retry_map_.clear();  // reset index retry times
-            }
-
             index_thread_results_.push_back(
-                index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names));
+                index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndexTask, this, collection_names, force_build));
         }
     }
 }
 
 void
-DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
+DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool force_build) {
     SetThreadName("build_index");
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
@@ -989,14 +1017,13 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         SnapshotVisitor ss_visitor(latest_ss);
 
         snapshot::IDS_TYPE segment_ids;
-        ss_visitor.SegmentsToIndex("", segment_ids);
+        ss_visitor.SegmentsToIndex("", segment_ids, force_build);
         if (segment_ids.empty()) {
             continue;
         }
 
         // check index retry times
-        snapshot::ID_TYPE collection_id = latest_ss->GetCollectionId();
-        IgnoreIndexFailedSegments(collection_id, segment_ids);
+        IgnoreIndexFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             continue;
         }
@@ -1005,13 +1032,17 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names) {
         LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
         scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
+
+        IncreaseLiveBuildTaskNum();
         scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitFinish();
+        DecreaseLiveBuildTaskNum();
+
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         // record failed segments, avoid build index hang
         snapshot::IDS_TYPE& failed_ids = job->FailedSegments();
-        MarkIndexFailedSegments(collection_id, failed_ids);
+        MarkIndexFailedSegments(collection_name, failed_ids);
 
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
@@ -1053,6 +1084,10 @@ DBImpl::WaitBuildIndexFinish() {
 
 void
 DBImpl::StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all) {
+    if (collection_ids.empty()) {
+        return;  // no need to start thread
+    }
+
     // merge task has been finished?
     {
         std::lock_guard<std::mutex> lck(merge_result_mutex_);
@@ -1125,6 +1160,24 @@ DBImpl::ResumeIfLast() {
 }
 
 void
+DBImpl::IncreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    ++live_build_num_;
+}
+
+void
+DBImpl::DecreaseLiveBuildTaskNum() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    --live_build_num_;
+}
+
+bool
+DBImpl::IsBuildingIndex() {
+    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
+    return live_build_num_ > 0;
+}
+
+void
 DBImpl::ConfigUpdate(const std::string& name) {
     if (name == "storage.auto_flush_interval") {
         options_.auto_flush_interval_ = config.storage.auto_flush_interval();
@@ -1132,18 +1185,18 @@ DBImpl::ConfigUpdate(const std::string& name) {
 }
 
 void
-DBImpl::MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids) {
+DBImpl::MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids) {
     std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
     for (auto& id : failed_ids) {
         retry_map[id]++;
     }
 }
 
 void
-DBImpl::IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids) {
+DBImpl::IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids) {
     std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_id];
+    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
     snapshot::IDS_TYPE segment_ids_to_build;
     for (auto id : segment_ids) {
         if (retry_map[id] < BUILD_INEDX_RETRY_TIMES) {
@@ -1151,6 +1204,12 @@ DBImpl::IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS
         }
     }
     segment_ids.swap(segment_ids_to_build);
+}
+
+void
+DBImpl::ClearIndexFailedRecord(const std::string& collection_name) {
+    std::lock_guard<std::mutex> lock(index_retry_mutex_);
+    index_retry_map_.erase(collection_name);
 }
 
 }  // namespace engine

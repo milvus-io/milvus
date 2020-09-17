@@ -59,6 +59,18 @@ MemSegment::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
         return Status::OK();
     }
 
+    // previous action is delete? combine delete action
+    if (!actions_.empty()) {
+        MemAction& pre_action = *actions_.rbegin();
+        if (!pre_action.delete_ids_.empty()) {
+            for (auto& id : ids) {
+                pre_action.delete_ids_.insert(id);
+            }
+            return Status::OK();
+        }
+    }
+
+    // create new action
     MemAction action;
     action.op_id_ = op_id;
     for (auto& id : ids) {
@@ -86,9 +98,17 @@ MemSegment::Serialize() {
         return status;
     }
 
+    // get max op id
+    idx_t max_op_id = 0;
+    for (auto& action : actions_) {
+        if (action.op_id_ > max_op_id) {
+            max_op_id = action.op_id_;
+        }
+    }
+
     std::shared_ptr<snapshot::NewSegmentOperation> new_seg_operation;
     segment::SegmentWriterPtr segment_writer;
-    status = CreateNewSegment(ss, new_seg_operation, segment_writer);
+    status = CreateNewSegment(ss, new_seg_operation, segment_writer, max_op_id);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create new segment";
         return status;
@@ -119,12 +139,6 @@ MemSegment::Serialize() {
     LOG_ENGINE_DEBUG_ << "New segment " << seg_id << " of collection " << collection_id_ << " serialized";
 
     // notify wal the max operation id is done
-    idx_t max_op_id = 0;
-    for (auto& action : actions_) {
-        if (action.op_id_ > max_op_id) {
-            max_op_id = action.op_id_;
-        }
-    }
     WalManager::GetInstance().OperationDone(ss->GetName(), max_op_id);
 
     return Status::OK();
@@ -132,10 +146,11 @@ MemSegment::Serialize() {
 
 Status
 MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
-                             segment::SegmentWriterPtr& writer) {
+                             segment::SegmentWriterPtr& writer, idx_t max_op_id) {
     // create segment
     snapshot::SegmentPtr segment;
     snapshot::OperationContext context;
+    //    context.lsn = max_op_id;
     context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
     operation = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
     auto status = operation->CommitNewSegment(segment);

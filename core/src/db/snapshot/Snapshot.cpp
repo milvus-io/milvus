@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/Snapshot.h"
+#include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceHolders.h"
 #include "db/snapshot/Store.h"
 
@@ -51,6 +52,8 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
     AddResource<Collection>(collection);
 
+    auto base_path = GetResPath<Collection>(store->GetRootPath(), std::make_shared<Collection>(*collection));
+    collection_commit->LoadIds(base_path);
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
         auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);
@@ -58,6 +61,8 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         auto partition = partitions_holder.GetResource(store, partition_id, false);
         auto partition_name = partition->GetName();
         AddResource<PartitionCommit>(partition_commit);
+        base_path = GetResPath<Partition>(store->GetRootPath(), std::make_shared<Partition>(*partition));
+        partition_commit->LoadIds(base_path);
 
         p_pc_map_[partition_id] = partition_commit->GetID();
         AddResource<Partition>(partition);
@@ -229,9 +234,13 @@ Snapshot::ToString() const {
     ss << "\nCollection: id=" << GetCollectionId() << ",name=\"" << GetName() << "\"";
     ss << ", CollectionCommit: id=" << GetCollectionCommit()->GetID();
     ss << ",size=" << GetCollectionCommit()->GetSize();
-    ss << ",rows=" << GetCollectionCommit()->GetRowCount() << ",mappings=";
+    ss << ",rows=" << GetCollectionCommit()->GetRowCount();
+    ss << ",lsn=" << GetCollectionCommit()->GetLsn() << ",mappings=";
     auto& cc_m = GetCollectionCommit()->GetMappings();
     ss << to_matrix_string(cc_m, row_element_size, 2);
+    auto& cc_fids = GetCollectionCommit()->GetFlushIds();
+    ss << ",flushids=";
+    ss << to_matrix_string(cc_fids, row_element_size, 2);
 
     auto& schema_m = GetSchemaCommit()->GetMappings();
     ss << "\nSchemaCommit: id=" << GetSchemaCommit()->GetID() << ",mappings=";

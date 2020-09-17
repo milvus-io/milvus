@@ -19,7 +19,6 @@
 
 #include <experimental/filesystem>
 #include <memory>
-#include <utility>
 
 #include "cache/CpuCacheMgr.h"
 #include "codecs/Codec.h"
@@ -34,19 +33,22 @@
 #include "storage/disk/DiskIOWriter.h"
 #include "storage/disk/DiskOperation.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace segment {
 
-SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor)
+SegmentReader::SegmentReader(const std::string& dir_root, const engine::SegmentVisitorPtr& segment_visitor,
+                             bool initialize)
     : dir_root_(dir_root), segment_visitor_(segment_visitor) {
-    Initialize();
+    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
+    if (initialize) {
+        Initialize();
+    }
 }
 
 Status
 SegmentReader::Initialize() {
-    dir_collections_ = dir_root_ + engine::COLLECTIONS_FOLDER;
-
     std::string directory =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
 
@@ -104,9 +106,11 @@ SegmentReader::Load() {
 Status
 SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadField: " + field_name);
+
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
-            return Status::OK();  // alread exist
+            return Status::OK();  // already exist
         }
 
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
@@ -132,6 +136,8 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         segment_ptr_->SetFixedFieldData(field_name, raw);
+
+        recorder.RecordSection("read " + file_path);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -161,6 +167,8 @@ Status
 SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
                             engine::BinaryDataPtr& raw) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadEntities: " + field_name);
+
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         if (field_visitor == nullptr) {
             return Status(DB_ERROR, "Invalid field_name");
@@ -246,6 +254,8 @@ SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
 Status
 SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadVectorIndex: " + field_name);
+
         segment_ptr_->GetVectorIndex(field_name, index_ptr);
         if (index_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -264,10 +274,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(LoadUids(uids));
 
         // load deleted doc
-        auto& segment = segment_visitor_->GetSegment();
-
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids.size());
-
         segment::DeletedDocsPtr deleted_docs_ptr;
         STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
         if (deleted_docs_ptr != nullptr) {
@@ -276,6 +283,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 concurrent_bitset_ptr->set(offset);
             }
         }
+        recorder.RecordSection("prepare");
 
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
@@ -283,12 +291,9 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         // if index not specified, or index file not created, return a temp index(IDMAP type)
         auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
         if (flat || index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
-            auto temp_index_path = engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment);
-            temp_index_path += "/";
-            std::string temp_index_name = field_name + ".idmap";
-            temp_index_path += temp_index_name;
-
             // if the data is in cache, no need to read file
+            std::string temp_index_path;
+            GetTempIndexPath(field_name, temp_index_path);
             auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(temp_index_path);
             if (data_obj != nullptr) {
                 index_ptr = std::static_pointer_cast<knowhere::VecIndex>(data_obj);
@@ -323,6 +328,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
             }
 
+            recorder.RecordSection("create temp IDMAP index");
             return Status::OK();
         }
 
@@ -339,6 +345,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         }
 
         STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, index_file_path, index_data));
+        recorder.RecordSection("read index file: " + index_file_path);
 
         // for some kinds index(IVF), read raw file
         auto index_type = index_visitor->GetElement()->GetTypeName();
@@ -351,6 +358,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data));
+
+                recorder.RecordSection("read raw file: " + file_path);
             }
         }
 
@@ -360,6 +369,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data));
+
+                recorder.RecordSection("read compress file: " + file_path);
             }
         }
 
@@ -383,6 +394,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 Status
 SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadStructuredIndex");
+
         segment_ptr_->GetStructuredIndex(field_name, index_ptr);
         if (index_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -454,6 +467,8 @@ SegmentReader::LoadVectorIndice() {
 Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadBloomFilter");
+
         id_bloom_filter_ptr = segment_ptr_->GetBloomFilter();
         if (id_bloom_filter_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -478,8 +493,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
-            // TODO: disable cache for solving bloom filter ptr problem
-            // cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -492,6 +506,8 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 Status
 SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadDeletedDocs");
+
         deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
         if (deleted_docs_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -578,6 +594,117 @@ SegmentReader::GetSegmentPath() {
     std::string seg_path =
         engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment_visitor_->GetSegment());
     return seg_path;
+}
+
+Status
+SegmentReader::GetTempIndexPath(const std::string& field_name, std::string& path) {
+    if (segment_visitor_ == nullptr) {
+        return Status(DB_ERROR, "Segment visitor is null pointer");
+    }
+
+    auto segment = segment_visitor_->GetSegment();
+    path = engine::snapshot::GetResPath<engine::snapshot::Segment>(dir_collections_, segment);
+    path += "/";
+    std::string temp_index_name = field_name + ".idmap";
+    path += temp_index_name;
+
+    return Status::OK();
+}
+
+Status
+SegmentReader::ClearCache() {
+    TimeRecorderAuto recorder("SegmentReader::ClearCache");
+
+    if (segment_visitor_ == nullptr) {
+        return Status::OK();
+    }
+
+    const engine::SegmentVisitor::IdMapT& field_visitors = segment_visitor_->GetFieldVisitors();
+    auto segment = segment_visitor_->GetSegment();
+    if (segment == nullptr) {
+        return Status::OK();
+    }
+
+    // remove delete docs and bloom filter from cache
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
+    if (uid_field_visitor) {
+        if (auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER)) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
+            cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+        }
+
+        if (auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS)) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
+            cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+        }
+    }
+
+    // erase raw data and index data from cache
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        if (field_visitor == nullptr || field_visitor->GetField() == nullptr) {
+            continue;
+        }
+
+        // erase raw data from cache manager
+        if (auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW)) {
+            std::string file_path =
+                engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
+            cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+        }
+
+        // erase index data from cache manager
+        ClearFieldIndexCache(field_visitor);
+    }
+
+    cache::CpuCacheMgr::GetInstance().PrintInfo();
+    return Status::OK();
+}
+
+Status
+SegmentReader::ClearIndexCache(const std::string& field_name) {
+    TimeRecorderAuto recorder("SegmentReader::ClearIndexCache");
+
+    if (segment_visitor_ == nullptr) {
+        return Status::OK();
+    }
+
+    if (field_name.empty()) {
+        const engine::SegmentVisitor::IdMapT& field_visitors = segment_visitor_->GetFieldVisitors();
+        for (auto& pair : field_visitors) {
+            auto& field_visitor = pair.second;
+            ClearFieldIndexCache(field_visitor);
+        }
+    } else {
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        ClearFieldIndexCache(field_visitor);
+    }
+
+    return Status::OK();
+}
+
+Status
+SegmentReader::ClearFieldIndexCache(const engine::SegmentVisitor::FieldVisitorT& field_visitor) {
+    if (field_visitor == nullptr || field_visitor->GetField() == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
+    auto index_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    if (index_visitor == nullptr || index_visitor->GetFile() == nullptr) {
+        const engine::snapshot::FieldPtr& field = field_visitor->GetField();
+        // temp index
+        std::string file_path;
+        GetTempIndexPath(field->GetName(), file_path);
+        cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+    } else {
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, index_visitor->GetFile());
+        cache::CpuCacheMgr::GetInstance().EraseItem(file_path);
+    }
+
+    return Status::OK();
 }
 
 }  // namespace segment

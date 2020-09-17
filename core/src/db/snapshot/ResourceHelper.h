@@ -23,6 +23,7 @@ static const char* COLLECTION_PREFIX = "C_";
 static const char* PARTITION_PREFIX = "P_";
 static const char* SEGMENT_PREFIX = "S_";
 static const char* SEGMENT_FILE_PREFIX = "F_";
+static const char* MAP_SUFFIX = ".map";
 
 template <class ResourceT>
 inline std::string
@@ -36,6 +37,40 @@ GetResPath<Collection>(const std::string& root, const Collection::Ptr& res_ptr) 
     std::stringstream ss;
     ss << root << "/";
     ss << COLLECTION_PREFIX << res_ptr->GetID();
+
+    return ss.str();
+}
+
+template <>
+inline std::string
+GetResPath<CollectionCommit>(const std::string& root, const CollectionCommit::Ptr& res_ptr) {
+    auto& ids = res_ptr->GetFlushIds();
+    if (ids.size() == 0) {
+        return std::string();
+    }
+
+    std::stringstream ss;
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId();
+    ss << "/";
+    ss << *(ids.begin()) << MAP_SUFFIX;
+
+    return ss.str();
+}
+
+template <>
+inline std::string
+GetResPath<PartitionCommit>(const std::string& root, const PartitionCommit::Ptr& res_ptr) {
+    auto& ids = res_ptr->GetFlushIds();
+    if (ids.size() == 0) {
+        return std::string();
+    }
+
+    std::stringstream ss;
+    ss << root << "/";
+    ss << COLLECTION_PREFIX << res_ptr->GetCollectionId() << "/";
+    ss << PARTITION_PREFIX << res_ptr->GetPartitionId() << "/";
+    ss << *(ids.begin()) << MAP_SUFFIX;
 
     return ss.str();
 }

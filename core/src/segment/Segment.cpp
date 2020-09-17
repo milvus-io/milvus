@@ -19,6 +19,7 @@
 #include "db/SnapshotUtils.h"
 #include "db/snapshot/Snapshots.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "segment/Utils.h"
 #include "utils/Log.h"
 
 #include <algorithm>
@@ -29,6 +30,55 @@ namespace milvus {
 namespace engine {
 
 const char* COLLECTIONS_FOLDER = "/collections";
+
+Status
+Segment::CopyOutRawData(SegmentPtr& target) {
+    if (target == nullptr) {
+        target = std::make_shared<engine::Segment>();
+    }
+
+    target->field_types_ = this->field_types_;
+    target->fixed_fields_width_ = this->fixed_fields_width_;
+    target->row_count_ = this->row_count_;
+    target->fixed_fields_.clear();
+    target->variable_fields_.clear();
+
+    for (auto& pair : fixed_fields_) {
+        engine::BinaryDataPtr& raw_data = pair.second;
+        size_t data_size = raw_data->data_.size();
+        engine::BinaryDataPtr new_raw_data = std::make_shared<engine::BinaryData>();
+        new_raw_data->data_.resize(data_size);
+        memcpy(new_raw_data->data_.data(), raw_data->data_.data(), data_size);
+        target->fixed_fields_.insert(std::make_pair(pair.first, new_raw_data));
+    }
+
+    for (auto& pair : variable_fields_) {
+        engine::VaribleDataPtr& raw_data = pair.second;
+        size_t data_size = raw_data->data_.size();
+        size_t offset_size = raw_data->offset_.size();
+        engine::VaribleDataPtr new_raw_data = std::make_shared<engine::VaribleData>();
+        new_raw_data->data_.resize(data_size);
+        memcpy(new_raw_data->data_.data(), raw_data->data_.data(), data_size);
+        new_raw_data->offset_.resize(offset_size);
+        memcpy(new_raw_data->offset_.data(), raw_data->offset_.data(), offset_size);
+        target->variable_fields_.insert(std::make_pair(pair.first, new_raw_data));
+    }
+
+    return Status::OK();
+}
+
+Status
+Segment::ShareToChunkData(DataChunkPtr& chunk_ptr) {
+    if (chunk_ptr == nullptr) {
+        chunk_ptr = std::make_shared<engine::DataChunk>();
+    }
+
+    chunk_ptr->fixed_fields_ = this->fixed_fields_;
+    chunk_ptr->variable_fields_ = this->variable_fields_;
+    chunk_ptr->count_ = this->row_count_;
+
+    return Status::OK();
+}
 
 Status
 Segment::SetFields(int64_t collection_id) {
@@ -251,8 +301,11 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
     if (offsets.size() == 0) {
         return Status::OK();
     }
-    // sort offset in descendant
-    std::sort(offsets.begin(), offsets.end(), std::greater<>());
+
+    // calculate copy ranges
+    int64_t delete_count = 0;
+    segment::CopyRanges copy_ranges;
+    segment::CalcCopyRangesWithOffset(offsets, row_count_, copy_ranges, delete_count);
 
     // delete entity data from max offset to min offset
     for (auto& pair : fixed_fields_) {
@@ -262,20 +315,14 @@ Segment::DeleteEntity(std::vector<offset_t>& offsets) {
         }
 
         auto& data = pair.second;
-        for (auto offset : offsets) {
-            if (offset >= 0 && offset < row_count_) {
-                auto step = offset * width;
-                data->data_.erase(data->data_.begin() + step, data->data_.begin() + step + width);
-            }
-        }
+
+        std::vector<uint8_t> new_data;
+        segment::CopyDataWithRanges(data->data_, width, copy_ranges, new_data);
+        data->data_.swap(new_data);
     }
 
     // reset row count
-    for (auto offset : offsets) {
-        if (offset >= 0 && offset < row_count_) {
-            row_count_--;
-        }
-    }
+    row_count_ -= delete_count;
 
     return Status::OK();
 }

@@ -123,6 +123,9 @@ class DBImpl : public DB, public ConfigObserver {
     void
     ConfigUpdate(const std::string& name) override;
 
+    bool
+    IsBuildingIndex() override;
+
  private:
     void
     InternalFlush(const std::string& collection_name = "", bool merge = true);
@@ -137,10 +140,10 @@ class DBImpl : public DB, public ConfigObserver {
     TimingMetricThread();
 
     void
-    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool reset_retry_times);
+    StartBuildIndexTask(const std::vector<std::string>& collection_names, bool force_build);
 
     void
-    BackgroundBuildIndexTask(std::vector<std::string> collection_names);
+    BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool force_build);
 
     void
     TimingIndexThread();
@@ -164,10 +167,19 @@ class DBImpl : public DB, public ConfigObserver {
     ResumeIfLast();
 
     void
-    MarkIndexFailedSegments(snapshot::ID_TYPE collection_id, const snapshot::IDS_TYPE& failed_ids);
+    IncreaseLiveBuildTaskNum();
 
     void
-    IgnoreIndexFailedSegments(snapshot::ID_TYPE collection_id, snapshot::IDS_TYPE& segment_ids);
+    DecreaseLiveBuildTaskNum();
+
+    void
+    MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids);
+
+    void
+    IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids);
+
+    void
+    ClearIndexFailedRecord(const std::string& collection_name);
 
  private:
     DBOptions options_;
@@ -196,7 +208,7 @@ class DBImpl : public DB, public ConfigObserver {
     std::list<std::future<void>> index_thread_results_;
 
     using SegmentIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, int64_t>;
-    using CollectionIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, SegmentIndexRetryMap>;
+    using CollectionIndexRetryMap = std::unordered_map<std::string, SegmentIndexRetryMap>;
     CollectionIndexRetryMap index_retry_map_;
     std::mutex index_retry_mutex_;
 
@@ -206,6 +218,9 @@ class DBImpl : public DB, public ConfigObserver {
 
     int64_t live_search_num_ = 0;
     std::mutex suspend_build_mutex_;
+
+    int64_t live_build_num_ = 0;
+    std::mutex live_build_count_mutex_;
 };  // SSDBImpl
 
 using DBImplPtr = std::shared_ptr<DBImpl>;

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/ValidationUtil.h"
+#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
@@ -355,9 +356,11 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
 Status
 ValidateSegmentRowCount(int64_t segment_row_count) {
-    if (segment_row_count <= 0 || segment_row_count > engine::MAX_SEGMENT_ROW_COUNT) {
+    int64_t min = config.engine.build_index_threshold();
+    int max = engine::MAX_SEGMENT_ROW_COUNT;
+    if (segment_row_count < min || segment_row_count > max) {
         std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
-                          "Should be in range 1 ~ " + std::to_string(engine::MAX_SEGMENT_ROW_COUNT) + ".";
+                          "Should be in range " + std::to_string(min) + " ~ " + std::to_string(max) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
     }

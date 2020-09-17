@@ -217,8 +217,9 @@ DeSerialization(const ::milvus::grpc::GeneralQuery& general_query, query::Boolea
                     CopyRowRecords(query.vector_query().records(),
                                    google::protobuf::RepeatedField<google::protobuf::int64>(), vectors);
 
-                    vector_query->query_vector.float_data = vectors.float_data_;
-                    vector_query->query_vector.binary_data = vectors.binary_data_;
+                    vector_query->query_vector.vector_count = vectors.vector_count_;
+                    vector_query->query_vector.float_data.swap(vectors.float_data_);
+                    vector_query->query_vector.binary_data.swap(vectors.binary_data_);
 
                     vector_query->boost = query.vector_query().query_boost();
                     vector_query->field_name = query.vector_query().field_name();
@@ -266,6 +267,10 @@ void
 CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                       const engine::snapshot::FieldElementMappings& field_mappings, int64_t id_size,
                       ::milvus::grpc::Entities* response) {
+    if (data_chunk == nullptr) {
+        return;
+    }
+
     for (const auto& it : field_mappings) {
         auto type = it.first->GetFtype();
         std::string name = it.first->GetName();
@@ -726,6 +731,12 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext* context, const ::mil
     for (int i = 0; i < request->fields_size(); ++i) {
         const auto& field = request->fields(i);
 
+        if (fields.find(field.name()) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field name");
+            SET_RESPONSE(response, status, context)
+            return ::grpc::Status::OK;
+        }
+
         FieldSchema field_schema;
         field_schema.field_type_ = static_cast<engine::DataType>(field.type());
 
@@ -858,12 +869,12 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->id_array_size());
-    for (int i = 0; i < request->id_array_size(); i++) {
+    for (int64_t i = 0; i < request->id_array_size(); i++) {
         vector_ids.push_back(request->id_array(i));
     }
 
     std::vector<std::string> field_names(request->field_names_size());
-    for (int i = 0; i < request->field_names_size(); i++) {
+    for (int64_t i = 0; i < request->field_names_size(); i++) {
         field_names[i] = request->field_names(i);
     }
 
@@ -874,12 +885,11 @@ GrpcRequestHandler::GetEntityByID(::grpc::ServerContext* context, const ::milvus
 
     Status status = req_handler_.GetEntityByID(GetContext(context), request->collection_name(), vector_ids, field_names,
                                                valid_row, field_mappings, data_chunk);
-
     for (auto it : vector_ids) {
         response->add_ids(it);
     }
 
-    int valid_size = 0;
+    int64_t valid_size = 0;
     for (auto it : valid_row) {
         response->add_valid_row(it);
         if (it) {
@@ -1291,7 +1301,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
-    for (int i = 0; i < request->entity_id_array_size(); i++) {
+    for (int64_t i = 0; i < request->entity_id_array_size(); i++) {
         if (request->entity_id_array(i) < 0) {
             auto status = Status{SERVER_INVALID_ROWRECORD_ARRAY, "id can not be negative number"};
             SET_RESPONSE(response->mutable_status(), status, context);
@@ -1727,8 +1737,9 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             engine::VectorsData vector_data;
             CopyRowRecords(vector_param.row_record().records(),
                            google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
-            vector_query->query_vector.binary_data = vector_data.binary_data_;
-            vector_query->query_vector.float_data = vector_data.float_data_;
+            vector_query->query_vector.vector_count = vector_data.vector_count_;
+            vector_query->query_vector.binary_data.swap(vector_data.binary_data_);
+            vector_query->query_vector.float_data.swap(vector_data.float_data_);
 
             query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
         }

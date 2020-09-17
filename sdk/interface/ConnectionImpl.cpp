@@ -146,9 +146,9 @@ ConnectionImpl::SearchPB(const std::string& collection_name, const std::vector<s
 }
 
 Status
-ConnectionImpl::ListIDInSegment(const std::string& collection_name, const std::string& segment_name,
+ConnectionImpl::ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                                 std::vector<int64_t>& id_array) {
-    return client_proxy_->ListIDInSegment(collection_name, segment_name, id_array);
+    return client_proxy_->ListIDInSegment(collection_name, segment_id, id_array);
 }
 
 Status
@@ -162,8 +162,8 @@ ConnectionImpl::Flush(const std::vector<std::string>& collection_name_array) {
 }
 
 Status
-ConnectionImpl::Compact(const std::string& collection_name) {
-    return client_proxy_->Compact(collection_name);
+ConnectionImpl::Compact(const std::string& collection_name, const double& threshold) {
+    return client_proxy_->Compact(collection_name, threshold);
 }
 
 }  // namespace milvus

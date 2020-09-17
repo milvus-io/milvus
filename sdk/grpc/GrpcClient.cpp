@@ -319,23 +319,6 @@ GrpcClient::DeleteEntityByID(grpc::DeleteByIDParam& delete_by_id_param) {
 }
 
 Status
-GrpcClient::GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param) {
-    ClientContext context;
-    ::grpc::Status grpc_status = stub_->DescribeIndex(&context, collection_name, &index_param);
-
-    if (!grpc_status.ok()) {
-        std::cerr << "DescribeIndex rpc failed!" << std::endl;
-        return Status(StatusCode::RPCFailed, grpc_status.error_message());
-    }
-    if (index_param.status().error_code() != grpc::SUCCESS) {
-        std::cerr << index_param.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, index_param.status().reason());
-    }
-
-    return Status::OK();
-}
-
-Status
 GrpcClient::DropIndex(grpc::IndexParam& index_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
@@ -449,10 +432,10 @@ GrpcClient::Flush(const std::string& collection_name) {
 }
 
 Status
-GrpcClient::Compact(milvus::grpc::CollectionName& collection_name) {
+GrpcClient::Compact(milvus::grpc::CompactParam& compact_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->Compact(&context, collection_name, &response);
+    ::grpc::Status grpc_status = stub_->Compact(&context, compact_param, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "Compact gRPC failed!" << std::endl;

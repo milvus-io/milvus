@@ -12,7 +12,9 @@
 #pragma once
 
 #include <string>
-#include "config/ConfigMgr.h"
+#include <vector>
+
+#include "config/ServerConfig.h"
 #include "utils/Status.h"
 
 namespace milvus::server {
@@ -57,7 +59,8 @@ class Server {
     int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
-    // ConfigMgrPtr config_mgr_;
+    /* Used for lock work directory */
+    std::vector<int64_t> fd_list_;
 };  // Server
 
 }  // namespace milvus::server

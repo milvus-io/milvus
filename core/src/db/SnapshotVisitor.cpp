@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/SnapshotVisitor.h"
-#include <sstream>
-
+#include "config/ServerConfig.h"
 #include "db/SnapshotHandlers.h"
+#include "db/SnapshotUtils.h"
 #include "db/Types.h"
 #include "db/snapshot/Snapshots.h"
+
+#include <sstream>
 
 namespace milvus {
 namespace engine {
@@ -41,10 +43,34 @@ SnapshotVisitor::SegmentsToSearch(snapshot::IDS_TYPE& segment_ids) {
 }
 
 Status
-SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids) {
+SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids, bool force_build) {
     STATUS_CHECK(status_);
 
-    auto handler = std::make_shared<SegmentsToIndexCollector>(ss_, field_name, segment_ids);
+    // force_build means client invoke create_index,
+    // all segments whose row_count greater than config.build_index_threshold will be counted in.
+    // else, only the segments whose row_count greater than segment_row_count will be counted in
+    int64_t build_index_threshold = config.engine.build_index_threshold();
+    if (!force_build) {
+        auto collection = ss_->GetCollection();
+        GetSegmentRowCount(collection, build_index_threshold);
+    }
+
+    auto handler = std::make_shared<SegmentsToIndexCollector>(ss_, field_name, segment_ids, build_index_threshold);
+    handler->Iterate();
+
+    return handler->GetStatus();
+}
+
+Status
+SnapshotVisitor::SegmentsToMerge(snapshot::IDS_TYPE& segment_ids) {
+    STATUS_CHECK(status_);
+
+    // segment whose row count is less than segment_row_count will be counted in
+    int64_t segment_row_count = 0;
+    auto collection = ss_->GetCollection();
+    GetSegmentRowCount(collection, segment_row_count);
+
+    auto handler = std::make_shared<SegmentsToMergeCollector>(ss_, segment_ids, segment_row_count);
     handler->Iterate();
 
     return handler->GetStatus();

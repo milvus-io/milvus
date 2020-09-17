@@ -20,6 +20,7 @@
 
 #include <fiu/fiu-local.h>
 
+#include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "metrics/SystemInfo.h"
@@ -292,6 +293,7 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
         json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
     }
+    json_out["count"] = count;
     return Status::OK();
 }
 
@@ -367,6 +369,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const std
         real_offset = 0;
     }
     if (segment_ids.empty()) {
+        json_out["entities"] = json::array();
         return Status::OK();
     }
     std::vector<std::string> field_names;
@@ -533,11 +536,6 @@ WebRequestHandler::GetConfig(std::string& result_str) {
             }
         }
 #endif
-        // check if server require start
-        bool required = false;
-        // TODO: Use new cofnig mgr
-        // Config::GetInstance().GetServerRestartRequired(required);
-        j["restart_required"] = required;
         result_str = j.dump();
     }
 
@@ -558,9 +556,9 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
         std::ostringstream ss;
         if (evalue.is_string()) {
             std::string vle = evalue;
-            ss << "set_config " << el.key() << " " << vle;
+            ss << "set " << el.key() << " " << vle;
         } else {
-            ss << "set_config " << el.key() << " " << evalue;
+            ss << "set " << el.key() << " " << evalue;
         }
         cmds.emplace_back(ss.str());
     }
@@ -578,11 +576,6 @@ WebRequestHandler::SetConfig(const nlohmann::json& json, std::string& result_str
 
     nlohmann::json result;
     AddStatusToJson(result, StatusCode::SUCCESS, msg);
-
-    bool required = false;
-    // Config::GetInstance().GetServerRestartRequired(required);
-    result["restart_required"] = required;
-
     result_str = result.dump();
 
     return Status::OK();
@@ -644,12 +637,15 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
             if (param_json.contains("metric_type")) {
                 std::string metric_type = param_json["metric_type"];
                 vector_query->metric_type = metric_type;
-                query_ptr->metric_types.insert({vector_name, param_json["metric_type"]});
+                query_ptr->metric_types.insert({vector_name, metric_type});
             }
             if (!vector_param_it.value()["params"].empty()) {
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
-            for (auto& vector_records : vector_param_it.value()["values"]) {
+
+            auto& values = vector_param_it.value()["values"];
+            vector_query->query_vector.vector_count = values.size();
+            for (auto& vector_records : values) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
                     if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {
                         for (auto& data : vector_records) {
@@ -894,33 +890,35 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     return Status::OK();
 }
 
-Status
-WebRequestHandler::DeleteByIDs(const std::string& collection_name, const nlohmann::json& json,
-                               std::string& result_str) {
+StatusDtoT
+WebRequestHandler::DeleteByIDs(const OString& collection_name, const OString& payload, OString& response) {
+    auto json = nlohmann::json::parse(payload->std_str());
     std::vector<int64_t> entity_ids;
     if (!json.contains("ids")) {
-        return Status(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
     }
     auto ids = json["ids"];
     if (!ids.is_array()) {
-        return Status(BODY_FIELD_LOSS, R"("ids" must be an array)");
+        RETURN_STATUS_DTO(BODY_FIELD_LOSS, R"("ids" must be an array)");
     }
 
     for (auto& id : ids) {
         auto id_str = id.get<std::string>();
         if (!ValidateStringIsNumber(id_str).ok()) {
-            return Status(ILLEGAL_BODY, R"(Members in "ids" must be integer string)");
+            RETURN_STATUS_DTO(ILLEGAL_BODY, R"(Members in "ids" must be integer string)")
         }
         entity_ids.emplace_back(std::stol(id_str));
     }
 
-    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name, entity_ids);
+    auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name->std_str(), entity_ids);
 
     nlohmann::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
-    result_str = result_json.dump();
+    std::string result_str = result_json.dump();
 
-    return status;
+    response = status.ok() ? result_str.c_str() : "NULL";
+
+    ASSIGN_RETURN_STATUS_DTO(status);
 }
 
 Status
@@ -929,6 +927,11 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
     std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
     engine::snapshot::FieldElementMappings field_mappings;
+
+    if (ids.empty()) {
+        json_out["entities"] = {};
+        return Status::OK();
+    }
 
     auto status = req_handler_.GetEntityByID(context_ptr_, collection_name, ids, field_names, valid_row, field_mappings,
                                              data_chunk);
@@ -1232,6 +1235,11 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     for (auto& field : json_str["fields"]) {
         FieldSchema field_schema;
         std::string field_name = field["field_name"];
+
+        if (fields.find(field_name) != fields.end()) {
+            auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
+            ASSIGN_RETURN_STATUS_DTO(status)
+        }
 
         field_schema.field_params_ = field["extra_params"];
 
@@ -1748,7 +1756,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     ASSIGN_RETURN_STATUS_DTO(status)
 }
 
-StatusDtoT
+Status
 WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name,
                              const milvus::server::web::OQueryParams& query_params,
                              milvus::server::web::OString& response) {
@@ -1763,14 +1771,17 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
+            if (!status.ok()) {
+                json_out["entities"] = json::array();
+            }
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
-            ASSIGN_RETURN_STATUS_DTO(status);
+            return status;
         }
 
         auto query_ids = query_params.get("ids");
         if (query_ids == nullptr || query_ids.get() == nullptr) {
-            RETURN_STATUS_DTO(QUERY_PARAM_LOSS, "Query param ids is required.");
+            return Status(QUERY_PARAM_LOSS, "Query param ids is required.");
         }
 
         std::vector<std::string> ids;
@@ -1793,7 +1804,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
-            ASSIGN_RETURN_STATUS_DTO(status)
+            return status;
         }
 
         nlohmann::json json;
@@ -1805,26 +1816,38 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         }
         response = json.dump().c_str();
     } catch (std::exception& e) {
-        RETURN_STATUS_DTO(SERVER_UNEXPECTED_ERROR, e.what());
+        return Status(SERVER_UNEXPECTED_ERROR, e.what());
     }
 
-    ASSIGN_RETURN_STATUS_DTO(status);
+    return status;
 }
 
 StatusDtoT
-WebRequestHandler::EntityOp(const OString& collection_name, const OString& payload, OString& response) {
+WebRequestHandler::EntityOp(const OString& collection_name, const OQueryParams& query_params, const OString& payload,
+                            OString& response) {
     auto status = Status::OK();
     std::string result_str;
 
     try {
-        nlohmann::json payload_json = nlohmann::json::parse(payload->std_str());
-
-        if (payload_json.contains("delete")) {
-            status = DeleteByIDs(collection_name->std_str(), payload_json["delete"], result_str);
-        } else if (payload_json.contains("query")) {
-            status = Search(collection_name->c_str(), payload_json, result_str);
+        nlohmann::json payload_json;
+        if (!payload->std_str().empty()) {
+            payload_json = nlohmann::json::parse(payload->std_str());
+        }
+        if (query_params.get("offset") || query_params.get("page_size") || query_params.get("ids")) {
+            status = GetEntity(collection_name, query_params, response);
+            ASSIGN_RETURN_STATUS_DTO(status);
+        } else if (!payload_json.empty()) {
+            if (payload_json.contains("query")) {
+                status = Search(collection_name->c_str(), payload_json, result_str);
+            } else {
+                status = Status(ILLEGAL_BODY, "Unknown payload");
+            }
         } else {
-            status = Status(ILLEGAL_BODY, "Unknown body");
+            OQueryParams self_params;
+            self_params.put("offset", "0");
+            self_params.put("page_size", "10");
+            status = GetEntity(collection_name, self_params, response);
+            ASSIGN_RETURN_STATUS_DTO(status)
         }
     } catch (nlohmann::detail::parse_error& e) {
         std::string emsg = "json error: code=" + std::to_string(e.id) + ", reason=" + e.what();
@@ -1911,6 +1934,14 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
 
     response_str = status.ok() ? result_str.c_str() : "NULL";
 
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDtoT
+WebRequestHandler::ServerStatus(OString& response_str) {
+    std::string result_str;
+    auto status = CommandLine("status", result_str);
+    response_str = status.ok() ? result_str.c_str() : "NULL";
     ASSIGN_RETURN_STATUS_DTO(status);
 }
 

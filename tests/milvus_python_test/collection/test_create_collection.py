@@ -59,7 +59,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_count": segment_row_count
+                "segment_row_limit": segment_row_count
         }
         logging.getLogger().info(fields)
         connect.create_collection(collection_name, fields)
@@ -76,7 +76,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_count": segment_row_count
+                "segment_row_limit": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
@@ -89,11 +89,12 @@ class TestCreateCollection:
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_count"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_count
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
-    def test_create_collection_auto_flush_disabled(self, connect):
+    # TODO: set config invalid
+    def _test_create_collection_auto_flush_disabled(self, connect):
         '''
         target: test create normal collection, with large auto_flush_interval
         method: create collection with corrent params
@@ -223,7 +224,7 @@ class TestCreateCollectionInvalid(object):
     def test_create_collection_with_invalid_segment_row_count(self, connect, get_segment_row_count):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_count"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_count
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
@@ -291,11 +292,11 @@ class TestCreateCollectionInvalid(object):
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields.pop("segment_row_count")
+        fields.pop("segment_row_limit")
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res["segment_row_count"] == default_segment_row_count
+        assert res["segment_row_limit"] == default_segment_row_count
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):

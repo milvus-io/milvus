@@ -13,6 +13,7 @@
 #include "db/Utils.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 #include <map>
 #include <memory>
@@ -104,8 +105,8 @@ WalManager::DropCollection(const std::string& collection_name) {
     if (!path.empty()) {
         WalFile file;
         file.OpenFile(path, WalFile::OVER_WRITE);
-        bool del = true;
-        file.Write<bool>(&del);
+        idx_t op_id = id_gen_.GetNextIDNumber();
+        file.Write<idx_t>(&op_id);
 
         AddCleanupTask(collection_name);
         StartCleanupThread();
@@ -177,8 +178,14 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
 }
 
 Status
-WalManager::Recovery(const DBPtr& db) {
+WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     WaitCleanupFinish();
+
+    if (db == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
+    LOG_ENGINE_DEBUG_ << "Begin wal recovery";
 
     try {
         using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
@@ -205,6 +212,12 @@ WalManager::Recovery(const DBPtr& db) {
                 }
             }
 
+            auto iter = max_op_ids.find(collection_name);
+            if (iter != max_op_ids.end()) {
+                idx_t outer_max_id = iter->second;
+                max_op_id = outer_max_id > max_op_id ? outer_max_id : max_op_id;
+            }
+
             // id_files arrange id in assendent, we know which file should be read
             for (auto& pair : id_files) {
                 WalFilePtr file = std::make_shared<WalFile>();
@@ -229,10 +242,15 @@ WalManager::Recovery(const DBPtr& db) {
                 }
             }
         }
+
+        // flush to makesure data is serialized
+        return db->Flush();
     } catch (std::exception& ex) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
     }
+
+    LOG_ENGINE_DEBUG_ << "Wal recovery finished";
 
     return Status::OK();
 }
@@ -364,7 +382,6 @@ WalManager::ConstructFilePath(const std::string& collection_name, const std::str
     // typically, the wal file path is like: /xxx/milvus/wal/[collection_name]/xxxxxxxxxx
     std::experimental::filesystem::path full_path(wal_path_);
     full_path.append(collection_name);
-    std::experimental::filesystem::create_directory(full_path);
     full_path.append(file_name);
 
     std::string path(full_path.c_str());
@@ -453,10 +470,11 @@ WalManager::CleanupThread() {
             {
                 std::lock_guard<std::mutex> lock(file_map_mutex_);
                 file_map_.erase(target_collection);
-            }
 
-            // remove collection folder
-            std::experimental::filesystem::remove_all(collection_path);
+                // remove collection folder
+                // do this under the lock to avoid multi-thread conflict
+                std::experimental::filesystem::remove_all(collection_path);
+            }
 
             TakeCleanupTask(target_collection);
             continue;

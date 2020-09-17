@@ -41,8 +41,9 @@ MemManagerImpl::InsertEntities(int64_t collection_id, int64_t partition_id, cons
         return status;
     }
 
-    std::unique_lock<std::mutex> lock(mutex_);
-    return InsertEntitiesNoLock(collection_id, partition_id, chunk, op_id);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    MemCollectionPtr mem = GetMemByCollection(collection_id);
+    return mem->Add(partition_id, chunk, op_id);
 }
 
 Status
@@ -138,17 +139,8 @@ MemManagerImpl::ValidateChunk(int64_t collection_id, const DataChunkPtr& chunk) 
 }
 
 Status
-MemManagerImpl::InsertEntitiesNoLock(int64_t collection_id, int64_t partition_id, const DataChunkPtr& chunk,
-                                     idx_t op_id) {
-    MemCollectionPtr mem = GetMemByCollection(collection_id);
-
-    auto status = mem->Add(partition_id, chunk, op_id);
-    return status;
-}
-
-Status
 MemManagerImpl::DeleteEntities(int64_t collection_id, const std::vector<idx_t>& entity_ids, idx_t op_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     MemCollectionPtr mem = GetMemByCollection(collection_id);
 
     auto status = mem->Delete(entity_ids, op_id);
@@ -178,11 +170,14 @@ Status
 MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
     MemList temp_immutable_list;
     {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         immu_mem_list_.swap(temp_immutable_list);
+        if (temp_immutable_list.empty()) {
+            return Status::OK();
+        }
     }
 
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    std::lock_guard<std::mutex> lock(flush_mtx_);
     for (auto& mem : temp_immutable_list) {
         int64_t collection_id = mem->GetCollectionId();
         LOG_ENGINE_DEBUG_ << "Flushing collection: " << collection_id;
@@ -200,38 +195,57 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
 
 Status
 MemManagerImpl::ToImmutable(int64_t collection_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    MemList temp_immutable_list;
 
-    auto mem_collection = mem_map_.find(collection_id);
-    if (mem_collection != mem_map_.end()) {
-        immu_mem_list_.push_back(mem_collection->second);
-        mem_map_.erase(mem_collection);
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        auto mem_collection = mem_map_.find(collection_id);
+        if (mem_collection != mem_map_.end()) {
+            temp_immutable_list.push_back(mem_collection->second);
+            mem_map_.erase(mem_collection);
+        }
     }
 
-    return Status::OK();
+    return ToImmutable(temp_immutable_list);
 }
 
 Status
 MemManagerImpl::ToImmutable() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    MemList temp_immutable_list;
 
-    for (auto& mem_collection : mem_map_) {
-        immu_mem_list_.push_back(mem_collection.second);
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        for (auto& pair : mem_map_) {
+            temp_immutable_list.push_back(pair.second);
+        }
+        mem_map_.clear();
     }
-    mem_map_.clear();
+
+    return ToImmutable(temp_immutable_list);
+}
+
+Status
+MemManagerImpl::ToImmutable(MemList& mem_list) {
+    // don't use swp() here, since muti-threads could call ToImmutable at same time
+    // there will be several 'temp_immutable_list' need to combine into immu_mem_list_
+    std::lock_guard<std::mutex> lock(immu_mem_mtx_);
+    for (auto& mem : mem_list) {
+        immu_mem_list_.push_back(mem);
+    }
+    mem_list.clear();
 
     return Status::OK();
 }
 
 Status
 MemManagerImpl::EraseMem(int64_t collection_id) {
-    {  // erase MemVector from rapid-insert cache
-        std::unique_lock<std::mutex> lock(mutex_);
+    {  // erase from rapid-insert cache
+        std::lock_guard<std::mutex> lock(mem_mutex_);
         mem_map_.erase(collection_id);
     }
 
-    {  // erase MemVector from serialize cache
-        std::unique_lock<std::mutex> lock(serialization_mtx_);
+    {  // erase from serialize cache
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
             if (mem->GetCollectionId() != collection_id) {
@@ -246,29 +260,45 @@ MemManagerImpl::EraseMem(int64_t collection_id) {
 
 Status
 MemManagerImpl::EraseMem(int64_t collection_id, int64_t partition_id) {
-    {  // erase MemVector from rapid-insert cache
-        std::unique_lock<std::mutex> lock(mutex_);
+    {  // erase from rapid-insert cache
+        std::lock_guard<std::mutex> lock(mem_mutex_);
         auto mem_collection = mem_map_.find(collection_id);
         if (mem_collection != mem_map_.end()) {
             mem_collection->second->EraseMem(partition_id);
         }
     }
 
-    {  // erase MemVector from serialize cache
-        std::unique_lock<std::mutex> lock(serialization_mtx_);
+    {  // erase from serialize cache
+        std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         MemList temp_list;
         for (auto& mem : immu_mem_list_) {
-            mem->EraseMem(partition_id);
+            if (mem->GetCollectionId() == collection_id) {
+                mem->EraseMem(partition_id);
+            }
         }
     }
 
     return Status::OK();
 }
 
+bool
+MemManagerImpl::RequireFlush(std::set<int64_t>& collection_ids) {
+    bool require_flush = false;
+    if (GetCurrentMem() > options_.insert_buffer_size_) {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        for (auto& kv : mem_map_) {
+            collection_ids.insert(kv.first);
+        }
+        require_flush = true;
+    }
+
+    return require_flush;
+}
+
 size_t
 MemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mem_mutex_);
     for (auto& mem_collection : mem_map_) {
         total_mem += mem_collection.second->GetCurrentMem();
     }
@@ -278,7 +308,7 @@ MemManagerImpl::GetCurrentMutableMem() {
 size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
-    std::unique_lock<std::mutex> lock(serialization_mtx_);
+    std::lock_guard<std::mutex> lock(immu_mem_mtx_);
     for (auto& mem_collection : immu_mem_list_) {
         total_mem += mem_collection->GetCurrentMem();
     }

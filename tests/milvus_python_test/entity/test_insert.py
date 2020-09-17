@@ -207,7 +207,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count,
+            "segment_row_limit": segment_row_count,
             "auto_id": True
         }
         connect.create_collection(collection_name, fields)
@@ -282,7 +282,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_count": segment_row_count
+            "segment_row_limit": segment_row_count
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], nb, dim)
@@ -517,6 +517,19 @@ class TestInsertBase:
             th.join()
         res_count = milvus.count_entities(collection)
         assert res_count == thread_num * nb
+
+    # TODO: unable to set config
+    @pytest.mark.level(2)
+    def _test_insert_disable_auto_flush(self, connect, collection):
+        '''
+        target: test insert entities, with disable autoflush
+        method: disable autoflush and insert, get entity
+        expected: the count is equal to 0
+        '''
+        disable_flush(connect)
+        ids = connect.insert(collection, entities)
+        res = connect.get_entity_by_id(collection, ids[:500])
+        assert len(res) == 0
 
 
 class TestInsertAsync:
