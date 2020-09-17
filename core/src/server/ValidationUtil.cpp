@@ -235,12 +235,12 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }

@@ -26,8 +26,8 @@ namespace scheduler {
 
 class SpecResLabel : public TaskLabel {
  public:
-    explicit SpecResLabel(const ResourceWPtr& resource)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
+    explicit SpecResLabel(const ResourceWPtr& resource, bool hybrid = false)
+        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource), hybrid_(hybrid) {
     }
 
     inline ResourceWPtr&
@@ -40,8 +40,14 @@ class SpecResLabel : public TaskLabel {
         return resource_.lock()->name();
     }
 
+    bool
+    IsHybrid() {
+        return hybrid_;
+    }
+
  private:
     ResourceWPtr resource_;
+    bool hybrid_;
 };
 
 using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();

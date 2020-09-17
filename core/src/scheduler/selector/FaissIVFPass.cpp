@@ -12,12 +12,12 @@
 #include "scheduler/selector/FaissIVFPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
-#include "faiss/gpu/utils/DeviceUtils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "server/ValidationUtil.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -47,9 +47,9 @@ FaissIVFPass::Run(const TaskPtr& task) {
     }
 
     auto search_task = std::static_pointer_cast<SearchTask>(task);
-    if (search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IDMAP &&
-        search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFPQ &&
-        search_task->IndexType() != knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
+    auto index_type = search_task->IndexType();
+    if (index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT &&
+        index_type != knowhere::IndexEnum::INDEX_FAISS_IVFPQ && index_type != knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
         return false;
     }
 
@@ -60,11 +60,10 @@ FaissIVFPass::Run(const TaskPtr& task) {
     } else if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: nq < gpu_search_threshold, specify cpu to search! ");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->topk() > faiss::gpu::getMaxKSelection()) {
+    } else if (search_task->topk() > server::GPU_QUERY_MAX_TOPK) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: topk > gpu_max_topk_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() >
-               faiss::gpu::getMaxKSelection()) {
+    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() > server::GPU_QUERY_MAX_NPROBE) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
