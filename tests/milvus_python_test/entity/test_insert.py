@@ -148,15 +148,15 @@ class TestInsertBase:
         logging.getLogger().debug(res)
         assert res
 
-    def test_insert_segment_row_count(self, connect, collection):
-        nb = segment_row_count + 1
+    def test_insert_segment_row_limit(self, connect, collection):
+        nb = segment_row_limit + 1
         res_ids = connect.insert(collection, gen_entities(nb))
         connect.flush([collection])
         assert len(res_ids) == nb
         stats = connect.get_collection_stats(collection)
         assert len(stats['partitions'][0]['segments']) == 2
         for segment in stats['partitions'][0]['segments']:
-            assert segment['row_count'] in [segment_row_count, 1]
+            assert segment['row_count'] in [segment_row_limit, 1]
 
     @pytest.fixture(
         scope="function",
