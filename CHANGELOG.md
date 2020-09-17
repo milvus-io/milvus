@@ -16,6 +16,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3254 Allow more choices for the parameter ‘m’ of IVF_PQ
 -   \#3606 The supported parameter 'nprobe' of IVF is expanded to [1, 16384]
 -   \#3639 The supported parameter 'topk' of searching is expanded to [1, 16384]
+-   \#3784 Upgrade mishards up to v0.10.3
 
 ## Task
 
