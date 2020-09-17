@@ -156,7 +156,7 @@ GetAdaptiveGroups(const SegmentInfoList& info_list, int64_t row_per_segment, Seg
             if (found != best_group.end()) {
                 iter = infos.erase(iter);
             } else {
-                iter++;
+                ++iter;
             }
         }
 
