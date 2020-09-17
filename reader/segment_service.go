@@ -36,27 +36,31 @@ func (node *QueryNode) SegmentsManagement() {
 }
 
 func (node *QueryNode) SegmentManagementService() {
+	sleepMillisecondTime := 200
+	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		sleepMillisecondTime := 200
 		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
 		node.SegmentsManagement()
-		fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	}
 }
 
 func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 	var statisticData = make([]masterPb.SegmentStat, 0)
 
-	for segmentID, segment := range node.SegmentsMap {
-		currentMemSize := segment.GetMemSize()
-		memIncreaseRate := float32(currentMemSize-segment.LastMemSize) / (float32(sleepMillisecondTime) / 1000)
-		stat := masterPb.SegmentStat{
-			// TODO: set master pb's segment id type from uint64 to int64
-			SegmentId:  uint64(segmentID),
-			MemorySize: currentMemSize,
-			MemoryRate: memIncreaseRate,
+	for _, collection := range node.Collections {
+		for _, partition := range collection.Partitions {
+			for _, openedSegment := range partition.OpenedSegments {
+				currentMemSize := openedSegment.GetMemSize()
+				memIncreaseRate := float32((int64(currentMemSize))-(int64(openedSegment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
+				stat := masterPb.SegmentStat{
+					// TODO: set master pb's segment id type from uint64 to int64
+					SegmentId:  uint64(openedSegment.SegmentId),
+					MemorySize: currentMemSize,
+					MemoryRate: memIncreaseRate,
+				}
+				statisticData = append(statisticData, stat)
+			}
 		}
-		statisticData = append(statisticData, stat)
 	}
 
 	var status = node.PublicStatistic(&statisticData)
@@ -66,10 +70,10 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 }
 
 func (node *QueryNode) SegmentStatisticService() {
+	sleepMillisecondTime := 1000
+	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		sleepMillisecondTime := 1000
 		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
 		node.SegmentStatistic(sleepMillisecondTime)
-		fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	}
 }

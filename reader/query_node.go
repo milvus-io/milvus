@@ -359,6 +359,9 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 
 	// 3. Do PreDelete
 	for segmentID := range node.deleteData.deleteIDs {
+		if segmentID < 0 {
+			continue
+		}
 		var targetSegment, err = node.GetSegmentBySegmentID(segmentID)
 		if err != nil {
 			fmt.Println(err.Error())
