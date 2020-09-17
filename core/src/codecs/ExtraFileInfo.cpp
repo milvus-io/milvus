@@ -43,7 +43,7 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr) {
     fs_ptr->reader_ptr_->Read(magic.data(), MAGIC_SIZE);
 
     if (strncmp(magic.data(), MAGIC, MAGIC_SIZE)) {
-        LOG_ENGINE_DEBUG_ << "Check magic failed. Record is " << magic.data() << " while magic is Milvus";
+        LOG_ENGINE_ERROR_ << "Check magic failed. Record is " << magic.data() << " while magic is Milvus";
         fs_ptr->reader_ptr_->Close();
         return false;
     }
@@ -125,7 +125,7 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr) {
 
     uint32_t result = CalculateSum(fs_ptr, true);
     if (record != result) {
-        LOG_ENGINE_DEBUG_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result;
+        LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result;
         fs_ptr->reader_ptr_->Close();
         return false;
     }
