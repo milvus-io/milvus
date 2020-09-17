@@ -152,7 +152,7 @@ class DBImpl : public DB, public ConfigObserver {
     WaitBuildIndexFinish();
 
     void
-    StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all = false);
+    StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all);
 
     void
     BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all);

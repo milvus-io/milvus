@@ -363,10 +363,19 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         }
     }
 
+    // step 3: merge segments before create index, since there could be some small segments just flushed
+    {
+        snapshot::ScopedSnapshotT latest_ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
+        std::set<int64_t> collection_ids = {latest_ss->GetCollectionId()};
+        StartMergeTask(collection_ids, true);  // start force-merge task
+        WaitMergeFileFinish();                 // let force-merge file thread finish
+    }
+
     // clear index failed retry map of this collection
     ClearIndexFailedRecord(collection_name);
 
-    // step 3: iterate segments need to be build index, wait until all segments are built
+    // step 4: iterate segments need to be build index, wait until all segments are built
     while (true) {
         // start background build index thread
         std::vector<std::string> collection_names = {collection_name};
@@ -906,7 +915,7 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
     }
 
     if (merge) {
-        StartMergeTask(flushed_collection_ids);
+        StartMergeTask(flushed_collection_ids, false);
     }
 }
 
@@ -1117,7 +1126,7 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
     for (auto& collection_id : collection_ids) {
         const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
 
-        MergeStrategyType type = force_merge_all ? MergeStrategyType::SIMPLE : MergeStrategyType::LAYERED;
+        MergeStrategyType type = force_merge_all ? MergeStrategyType::ADAPTIVE : MergeStrategyType::LAYERED;
         auto status = merge_mgr_ptr_->MergeSegments(collection_id, type);
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to get merge files for collection id: " << collection_id
