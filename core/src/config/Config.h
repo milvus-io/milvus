@@ -268,7 +268,16 @@ class Config {
     CheckEngineConfigOmpThreadNum(const std::string& value);
     Status
     CheckEngineConfigSimdType(const std::string& value);
-
+#ifdef MILVUS_FPGA_VERSION
+    Status
+    GetFpgaResourceConfigCacheThreshold(float& value);
+    Status
+    CheckFpgaResourceConfigEnable(const std::string& value);
+    Status
+    GetFpgaResourceConfigCacheCapacity(int64_t& value);
+    Status
+    CheckFpgaResourceConfigCacheThreshold(const std::string& value);
+#endif
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
     Status
@@ -388,7 +397,13 @@ class Config {
     GetEngineConfigOmpThreadNum(int64_t& value);
     Status
     GetEngineConfigSimdType(std::string& value);
+#ifdef MILVUS_FPGA_VERSION
 
+    Status
+    GetFpgaResourceConfigEnable(bool& value);
+    Status
+    GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value);
+#endif
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
     Status

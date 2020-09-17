@@ -23,7 +23,9 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
-
+#ifdef MILVUS_FPGA_VERSION
+#include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
+#endif
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
@@ -60,6 +62,12 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
             return std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
+        }
+#endif
+#ifdef MILVUS_FPGA_VERSION
+         if (mode == IndexMode::MODE_FPGA) {
+            LOG_ENGINE_DEBUG_ << "jack :fpga enable indexmode::mode_fpga ";
+            return std::make_shared<knowhere::FPGAIVFPQ>();
         }
 #endif
         return std::make_shared<knowhere::IVFSQ>();

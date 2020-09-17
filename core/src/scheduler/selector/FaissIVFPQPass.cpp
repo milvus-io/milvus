@@ -8,9 +8,10 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#ifdef MILVUS_GPU_VERSION
 #include "scheduler/selector/FaissIVFPQPass.h"
+#ifdef MILVUS_GPU_VERSION
 #include "cache/GpuCacheMgr.h"
+#endif
 #include "config/Config.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
@@ -56,6 +57,7 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
 
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
+#ifdef MILVUS_GPU_VERSION
     if (!gpu_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: gpu disable, specify cpu to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
@@ -69,6 +71,23 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
+#endif
+#ifdef MILVUS_FPGA_VERSION
+    server::Config& config = server::Config::GetInstance();
+    bool fpga_enable_=false;
+    config.GetFpgaResourceConfigEnable(fpga_enable_);
+    if(fpga_enable_) {
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq >= fpga_search_threshold, specify fpga %d to search!",
+                                    "search", 0, 0);//OptimizerInst
+        res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::FPGA,0);    
+    }
+    else{
+        LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPQPass: nq < gpu_search_threshold, specify cpu to search!",
+                                    "search", 0);
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    }
+
+#endif
     auto label = std::make_shared<SpecResLabel>(res_ptr);
     task->label() = label;
     return true;
@@ -76,4 +95,4 @@ FaissIVFPQPass::Run(const TaskPtr& task) {
 
 }  // namespace scheduler
 }  // namespace milvus
-#endif
+

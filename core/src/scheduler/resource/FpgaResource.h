@@ -11,22 +11,26 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "resource/CpuResource.h"
-#include"resource/FpgaResource.h"
-#include "resource/DiskResource.h"
-#include "resource/GpuResource.h"
-#include "resource/Resource.h"
+#include "Resource.h"
 
 namespace milvus {
 namespace scheduler {
 
-class ResourceFactory {
+class FpgaResource : public Resource {
  public:
-    static std::shared_ptr<Resource>
-    Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_executor = true);
+    explicit FpgaResource(std::string name, uint64_t device_id, bool enable_executor);
+
+    friend std::ostream&
+    operator<<(std::ostream& out, const FpgaResource& resource);
+
+ protected:
+    void
+    LoadFile(TaskPtr task) override;
+
+    void
+    Process(TaskPtr task) override;
 };
 
 }  // namespace scheduler

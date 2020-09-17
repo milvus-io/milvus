@@ -61,7 +61,18 @@ KnowhereResource::Initialize() {
     } else {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }
+#ifdef MILVUS_FPGA_VERSION
+   bool enable_fpga=false;
+   STATUS_CHECK(config.GetFpgaResourceConfigEnable(enable_fpga));
+   fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_fpga = false);
+   if (not enable_fpga)
+        return Status::OK();
+    /*
+    fpga init
 
+    */
+
+#endif
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;
     STATUS_CHECK(config.GetGpuResourceConfigEnable(enable_gpu));

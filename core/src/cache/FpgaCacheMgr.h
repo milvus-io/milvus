@@ -14,20 +14,29 @@
 #include <memory>
 #include <string>
 
-#include "resource/CpuResource.h"
-#include"resource/FpgaResource.h"
-#include "resource/DiskResource.h"
-#include "resource/GpuResource.h"
-#include "resource/Resource.h"
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
+#include "config/handler/CacheConfigHandler.h"
 
 namespace milvus {
-namespace scheduler {
+namespace cache {
 
-class ResourceFactory {
+class FpgaCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
+ private:
+    FpgaCacheMgr();
+
  public:
-    static std::shared_ptr<Resource>
-    Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_executor = true);
+    // TODO(myh): use smart pointer instead
+    static FpgaCacheMgr*
+    GetInstance();
+
+    DataObjPtr
+    GetIndex(const std::string& key);
+
+ protected:
+    void
+    OnCpuCacheCapacityChanged(int64_t value) override;
 };
 
-}  // namespace scheduler
+}  // namespace cache
 }  // namespace milvus

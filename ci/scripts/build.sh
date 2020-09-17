@@ -32,13 +32,14 @@ Usage:
     -u or --tests             Build unittest case
     -p or --privileges        Install command with elevated privileges
     -v or --verbose           A level above ‘basic’; includes messages about which makefiles were parsed, prerequisites that did not need to be rebuilt
+    -a                        build FPGA(default: OFF)
     -h or --help              Print help information
 
 
 Use \"$0  --help\" for more information about a given command.
 "
 
-ARGS=`getopt -o "i:t:j::lngcupvh" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
+ARGS=`getopt -o "i:t:j::lngcupvah" -l "install_prefix::,build_type::,jobs::,with_mkl,with_fiu,coverage,tests,privileges,help" -n "$0" -- "$@"`
 
 eval set -- "${ARGS}"
 
@@ -69,6 +70,7 @@ while true ; do
                 -u|--tests) echo "Build unittest cases" ; BUILD_UNITTEST="ON" ; shift ;;
                 -n) echo "No build and install step" ; COMPILE_BUILD="OFF" ; shift ;;
                 -l) RUN_CPPLINT="ON" ; shift ;;
+                -a) echo "Build for FPGA" ; FPGA_VERSION="ON" ;;
                 -p|--privileges) PRIVILEGES="ON" ; shift ;;
                 -v|--verbose) VERBOSE="1" ; shift ;;
                 -h|--help) echo -e "${HELP}" ; exit 0 ;;
@@ -86,6 +88,7 @@ BUILD_UNITTEST=${BUILD_UNITTEST:="OFF"}
 BUILD_COVERAGE=${BUILD_COVERAGE:="OFF"}
 COMPILE_BUILD=${COMPILE_BUILD:="ON"}
 GPU_VERSION=${GPU_VERSION:="OFF"}
+FPGA_VERSION=${FPGA_VERSION:="OFF"}
 RUN_CPPLINT=${RUN_CPPLINT:="OFF"}
 WITH_MKL=${WITH_MKL:="OFF"}
 FIU_ENABLE=${FIU_ENABLE:="OFF"}
@@ -118,6 +121,7 @@ CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DMILVUS_FPGA_VERSION=${FPGA_VERSION} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DFAISS_WITH_MKL=${WITH_MKL} \

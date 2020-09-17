@@ -12,13 +12,14 @@ RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 WITH_MKL="OFF"
+FPGA_VERSION="OFF"
 FAISS_ROOT="" #FAISS root path
 FAISS_SOURCE="BUNDLED"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 BUILD_OPENBLAS="ON"
 
-while getopts "p:d:t:f:ulrcghzmei" arg; do
+while getopts "p:d:t:f:ulrcgahzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -63,6 +64,9 @@ while getopts "p:d:t:f:ulrcghzmei" arg; do
     ;;
   i)
     FIU_ENABLE="ON"
+    ;;
+  a)
+    FPGA_VERSION="ON"
     ;;
   h) # help
     echo "
@@ -119,6 +123,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DMILVUS_FPGA_VERSION=${FPGA_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \

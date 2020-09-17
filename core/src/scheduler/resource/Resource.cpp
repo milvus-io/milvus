@@ -38,6 +38,9 @@ ToString(ResourceType type) {
         case ResourceType::GPU: {
             return "GPU";
         }
+        case ResourceType::FPGA: {
+            return "FPGA";
+        }
         default: { return "UNKNOWN"; }
     }
 }

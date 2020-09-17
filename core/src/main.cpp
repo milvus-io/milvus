@@ -55,6 +55,11 @@ print_banner() {
 #else
     std::cout << "You are using Milvus CPU edition" << std::endl;
 #endif
+#ifdef  MILVUS_FPGA_VERSION
+    std::cout << "You are using Milvus FPGA edition" << std::endl;
+#else
+    std::cout << "You are using Milvus CPU edition" << std::endl;
+#endif
     std::cout << "Last commit id: " << LAST_COMMIT_ID << std::endl;
     std::cout << std::endl;
 }

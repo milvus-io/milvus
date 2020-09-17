@@ -72,6 +72,10 @@ ResourceMgr::Add(ResourcePtr&& resource) {
         case ResourceType::GPU: {
             gpu_resources_.emplace_back(ResourceWPtr(resource));
             break;
+        } case ResourceType::FPGA: {
+             LOG_ENGINE_DEBUG_ << "add fpga resource";
+            fpga_resources_.emplace_back(ResourceWPtr(resource));
+            break;
         }
         default: { break; }
     }
@@ -103,6 +107,7 @@ ResourceMgr::Clear() {
     disk_resources_.clear();
     cpu_resources_.clear();
     gpu_resources_.clear();
+    fpga_resources_.clear();
     resources_.clear();
 }
 
@@ -175,6 +180,7 @@ ResourceMgr::Dump() const {
         {"number_of_disk_resource", disk_resources_.size()},
         {"number_of_cpu_resource", cpu_resources_.size()},
         {"number_of_gpu_resource", gpu_resources_.size()},
+        {"number_of_fpga_resource", fpga_resources_.size()},
         {"resources", resources},
     };
     return ret;

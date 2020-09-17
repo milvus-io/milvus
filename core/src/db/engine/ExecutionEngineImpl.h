@@ -62,7 +62,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     CopyToCpu() override;
-
+    
+    Status
+    CopyToFpga() override;
+    
 #if 0
     Status
     GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
@@ -90,6 +93,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     Cache() override;
 
+    Status
+    FpgaCache() override;
+    
     Status
     Init() override;
 

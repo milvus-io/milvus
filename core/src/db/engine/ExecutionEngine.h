@@ -90,7 +90,10 @@ class ExecutionEngine {
 
     virtual Status
     Serialize() = 0;
-
+    
+     virtual Status
+    CopyToFpga()=0;
+    
     virtual Status
     Load(bool to_cache = true) = 0;
 
