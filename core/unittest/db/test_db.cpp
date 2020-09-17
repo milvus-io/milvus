@@ -21,6 +21,7 @@
 
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
+#include "db/merge/MergeAdaptiveStrategy.h"
 #include "db/merge/MergeLayerStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/snapshot/IterateHandler.h"
@@ -616,6 +617,20 @@ TEST(MergeTest, MergeStrategyTest) {
     part2segments.insert(std::make_pair(3, segmet_list_3));
 
     int64_t row_per_segment = 100000;
+    {
+        milvus::engine::SegmentGroups groups;
+        milvus::engine::MergeAdaptiveStrategy strategy;
+        auto status = strategy.RegroupSegments(part2segments, row_per_segment, groups);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(groups.size(), 4);
+        std::set<size_t> compare = {3, 2, 7, 5};
+        std::set<size_t> result;
+        for (auto& group : groups) {
+            result.insert(group.size());
+        }
+        ASSERT_EQ(compare, result);
+    }
+
     {
         milvus::engine::SegmentGroups groups;
         milvus::engine::MergeSimpleStrategy strategy;

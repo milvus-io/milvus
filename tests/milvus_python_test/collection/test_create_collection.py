@@ -12,7 +12,7 @@ from utils import *
 
 nb = 1
 collection_id = "create_collection"
-default_segment_row_count = 1024 * 512
+default_segment_row_limit = 1024 * 512
 drop_collection_interval_time = 3
 default_fields = gen_default_fields() 
 entities = gen_entities(nb)
@@ -40,9 +40,9 @@ class TestCreateCollection:
 
     @pytest.fixture(
         scope="function",
-        params=gen_segment_row_counts()
+        params=gen_segment_row_limits()
     )
-    def get_segment_row_count(self, request):
+    def get_segment_row_limit(self, request):
         yield request.param
 
     def test_create_collection_fields(self, connect, get_filter_field, get_vector_field):
@@ -57,7 +57,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_count
+                "segment_row_limit": segment_row_limit
         }
         logging.getLogger().info(fields)
         connect.create_collection(collection_name, fields)
@@ -74,20 +74,20 @@ class TestCreateCollection:
         collection_name = gen_unique_str(collection_id)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_count
+                "segment_row_limit": segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
         
-    def test_create_collection_segment_row_count(self, connect, get_segment_row_count):
+    def test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
         '''
         target: test create normal collection with different fields
-        method: create collection with diff segment_row_count
+        method: create collection with diff segment_row_limit
         expected: no exception raised
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_limit"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
@@ -204,7 +204,7 @@ class TestCreateCollectionInvalid(object):
         scope="function",
         params=gen_invalid_ints()
     )
-    def get_segment_row_count(self, request):
+    def get_segment_row_limit(self, request):
         yield request.param
 
     @pytest.fixture(
@@ -229,10 +229,10 @@ class TestCreateCollectionInvalid(object):
         yield request.param
 
     @pytest.mark.level(2)
-    def test_create_collection_with_invalid_segment_row_count(self, connect, get_segment_row_count):
+    def test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
-        fields["segment_row_limit"] = get_segment_row_count
+        fields["segment_row_limit"] = get_segment_row_limit
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
@@ -284,11 +284,11 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    def test_create_collection_no_segment_row_count(self, connect):
+    def test_create_collection_no_segment_row_limit(self, connect):
         '''
-        target: test create collection with no segment_row_count params
+        target: test create collection with no segment_row_limit params
         method: create collection with corrent params
-        expected: use default default_segment_row_count
+        expected: use default default_segment_row_limit
         '''
         collection_name = gen_unique_str(collection_id)
         fields = copy.deepcopy(default_fields)
@@ -296,7 +296,7 @@ class TestCreateCollectionInvalid(object):
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res["segment_row_limit"] == default_segment_row_count
+        assert res["segment_row_limit"] == default_segment_row_limit
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):

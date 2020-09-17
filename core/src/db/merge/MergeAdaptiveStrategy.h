@@ -14,30 +14,17 @@
 #include <string>
 #include <vector>
 
+#include "db/merge/MergeStrategy.h"
 #include "utils/Status.h"
 
-namespace milvus::server {
+namespace milvus {
+namespace engine {
 
-class Directory {
+class MergeAdaptiveStrategy : public MergeStrategy {
  public:
-    static Status
-    Initialize(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
+    Status
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) override;
+};  // MergeSimpleStrategy
 
-    static Status
-    Lock(const std::string& storage_path, const std::string& wal_path, std::vector<int64_t>& fd_list);
-
-    static Status
-    Access(const std::string& storage_path, const std::string& wal_path, const std::string& log_path);
-
- private:
-    static void
-    init(const std::string& path);
-
-    static int64_t
-    lock(const std::string& path);
-
-    static void
-    access_check(const std::string& path);
-};
-
-}  // namespace milvus::server
+}  // namespace engine
+}  // namespace milvus
