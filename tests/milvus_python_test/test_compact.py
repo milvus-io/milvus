@@ -252,7 +252,7 @@ class TestCompactBase:
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
         # delete one entity from both the first and second segment
-        delete_ids = ids[segment_row_count-1:segment_row_count+1]
+        delete_ids = ids[segment_row_limit-1:segment_row_limit+1]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status.OK()
         connect.flush([collection])
