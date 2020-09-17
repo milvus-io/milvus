@@ -348,8 +348,7 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
     assert(the_offset_opt.has_value());
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
-    std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
-    
+    throw std::runtime_error("unimplemented");
 }
 
 
@@ -508,6 +507,24 @@ SegmentNaive::BuildIndex() {
     }
     index_ready_ = true;
     return Status::OK();
+}
+
+int64_t
+SegmentNaive::GetMemoryUsageInBytes() {
+    int64_t total_bytes = 0;
+    if(index_ready_) {
+        auto& index_entries = index_meta_->get_entries();
+        for(auto [index_name, entry]: index_entries) {
+            assert(schema_->operator[](entry.field_name).is_vector());
+            auto vec_ptr = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_name]);
+            total_bytes += vec_ptr->IndexSize();
+        }
+    }
+    int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & (DefaultElementPerChunk - 1);
+    total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
+    int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & (DefaultElementPerChunk - 1);
+    total_bytes += del_n * (16 * 2);
+    return total_bytes;
 }
 
 }  // namespace milvus::dog_segment

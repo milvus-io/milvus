@@ -691,13 +691,11 @@ message InsertOrDeleteMsg {
 message SearchMsg {
     string collection_name = 1;
     VectorRowRecord records = 2;
-    repeated string partition_tag = 3;
+    string partition_tag = 3;
     int64 uid = 4;
     uint64 timestamp =5;
     int64 client_id = 6;
     repeated KeyValuePair extra_params = 7;
-    repeated string json = 8;
-    string dsl = 9;
 }
 
 enum SyncType {

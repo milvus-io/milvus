@@ -6,16 +6,19 @@
 #include <thread>
 #include <vector>
 
+#include <faiss/utils/distances.h>
 #include "dog_segment/ConcurrentVector.h"
 #include "dog_segment/SegmentBase.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include "dog_segment/SegmentBase.h"
 #include "dog_segment/AckResponder.h"
-
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <algorithm>
+
+#include <tbb/iterators.h>
 
 using std::cin;
 using std::cout;
@@ -51,6 +54,91 @@ auto generate_data(int N) {
 }
 
 
+
+void
+merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const float *new_distances, const int64_t *new_uids) {
+    for(int64_t qn = 0; qn < queries; ++qn) {
+        auto base = qn * topk;
+        auto dst_dis = distances + base;
+        auto dst_uids = uids + base;
+
+        auto src_dis = new_distances + base;
+        auto src_uids = new_uids + base;
+
+        std::vector<float> buf_dis(2*topk);
+        std::vector<int64_t> buf_uids(2*topk);
+
+        auto zip_src = tbb::make_zip_iterator(src_dis, src_uids);
+        auto zip_dst = tbb::make_zip_iterator(dst_dis, dst_uids);
+        auto zip_buf = tbb::make_zip_iterator(buf_dis.data(), buf_uids.data());
+        auto fuck = zip_src + 1;
+        std::merge(zip_dst, zip_dst + topk, zip_src, zip_src + topk, zip_buf);
+        std::copy_n(zip_buf, topk, zip_dst);
+    }
+}
+
+
+TEST(TestIndex, SmartBruteForce) {
+    // how to ?
+    // I'd know
+    constexpr int N = 100000;
+    constexpr int DIM = 16;
+    constexpr int TOPK = 10;
+
+    auto bitmap = std::make_shared<faiss::ConcurrentBitset>(N);
+    // exclude the first
+    for (int i = 0; i < N / 2; ++i) {
+        bitmap->set(i);
+    }
+
+    auto[raw_data, timestamps, uids] = generate_data<DIM>(N);
+    auto total_count = DIM * TOPK;
+    auto raw = (const float *) raw_data.data();
+
+
+    constexpr int64_t queries = 3;
+    auto heap = faiss::float_maxheap_array_t{};
+
+    auto query_data = raw;
+
+    vector<int64_t> final_uids(total_count);
+    vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+
+
+
+    for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
+        vector<int64_t> buf_uids(total_count, -1);
+        vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+
+        faiss::float_maxheap_array_t buf = {
+                queries, TOPK, buf_uids.data(), buf_dis.data()};
+
+        auto end = beg + DefaultElementPerChunk;
+        if (end > N) {
+            end = N;
+        }
+        auto nsize = end - beg;
+        auto src_data = raw + beg * DIM;
+
+        faiss::knn_L2sqr(query_data, src_data, DIM, queries, nsize, &buf, nullptr);
+        if(beg == 0) {
+            final_uids = buf_uids;
+            final_dis = buf_dis;
+        } else {
+            merge_into(queries, TOPK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        }
+    }
+
+    for (int qn = 0; qn < queries; ++qn) {
+        for (int kn = 0; kn < TOPK; ++kn) {
+            auto index = qn * TOPK + kn;
+            cout << final_uids[index] << "->" << final_dis[index] << endl;
+        }
+        cout << endl;
+    }
+}
+
+
 TEST(TestIndex, Naive) {
     constexpr int N = 100000;
     constexpr int DIM = 16;
@@ -82,13 +170,13 @@ TEST(TestIndex, Naive) {
 
     std::vector<knowhere::DatasetPtr> datasets;
     std::vector<std::vector<float>> ftrashs;
-    for (int beg = 0; beg < N; beg += N) {
-        auto end = beg + N;
+    auto raw = (const float *) raw_data.data();
+    for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
+        auto end = beg + DefaultElementPerChunk;
         if (end > N) {
             end = N;
         }
-
-        std::vector<float> ft(raw_data.data() + DIM * beg, raw_data.data() + DIM * end);
+        std::vector<float> ft(raw + DIM * beg, raw + DIM * end);
 
         auto ds = knowhere::GenDataset(end - beg, DIM, ft.data());
         datasets.push_back(ds);
@@ -112,7 +200,7 @@ TEST(TestIndex, Naive) {
         bitmap->set(i);
     }
 
-    index->SetBlacklist(bitmap);
+//    index->SetBlacklist(bitmap);
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
 
     auto final = index->Query(query_ds, conf);
