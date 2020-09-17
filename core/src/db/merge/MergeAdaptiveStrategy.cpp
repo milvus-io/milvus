@@ -151,7 +151,7 @@ GetAdaptiveGroups(const SegmentInfoList& info_list, int64_t row_per_segment, Seg
     while (!best_group.empty()) {
         groups.emplace_back(best_group);
 
-        for (SegmentInfoList::iterator iter = infos.begin(); iter != infos.end();) {
+        for (auto iter = infos.begin(); iter != infos.end();) {
             auto found = std::find(best_group.begin(), best_group.end(), (*iter).id_);
             if (found != best_group.end()) {
                 iter = infos.erase(iter);
