@@ -157,7 +157,7 @@ InitConfig() {
         /* engine */
         {"engine.build_index_threshold",
          CreateIntegerConfig("engine.build_index_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.build_index_threshold.value, 4096)},
+                             &config.engine.build_index_threshold.value, 100)},
         {"engine.search_combine_nq",
          CreateIntegerConfig("engine.search_combine_nq", 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.search_combine_nq.value, 64)},
