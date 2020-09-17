@@ -12,6 +12,7 @@
 #include "db/merge/MergeManagerImpl.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
+#include "db/merge/MergeAdaptiveStrategy.h"
 #include "db/merge/MergeLayerStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeTask.h"
@@ -71,6 +72,10 @@ MergeManagerImpl::CreateStrategy(MergeStrategyType type, MergeStrategyPtr& strat
         }
         case MergeStrategyType::LAYERED: {
             strategy = std::make_shared<MergeLayerStrategy>();
+            break;
+        }
+        case MergeStrategyType::ADAPTIVE: {
+            strategy = std::make_shared<MergeAdaptiveStrategy>();
             break;
         }
         default: {
