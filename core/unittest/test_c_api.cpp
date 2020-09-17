@@ -152,6 +152,64 @@ TEST(CApiTest, SearchTest) {
 }
 
 
+TEST(CApiTest, SearchSimpleTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  auto partition_name = "partition0";
+  auto partition = NewPartition(collection, partition_name);
+  auto segment = NewSegment(partition, 0);
+
+  std::vector<char> raw_data;
+  std::vector<uint64_t> timestamps;
+  std::vector<int64_t> uids;
+
+  int N = 3;
+  int DIM = 16;
+
+  std::vector<float> vec(DIM);
+  for (int i = 0; i < DIM; i++) {
+    vec[i] = i;
+  }
+
+  for (int i = 0; i < N; i++) {
+    uids.push_back(i);
+    timestamps.emplace_back(i);
+    // append vec
+
+    raw_data.insert(raw_data.end(), (const char *) &vec, ((const char *) &vec) + sizeof(float) * vec.size());
+    int age = i;
+    raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
+  }
+
+  auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
+
+  auto offset = PreInsert(segment, N);
+
+  auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
+  assert(ins_res == 0);
+
+  Close(segment);
+  BuildIndex(segment);
+
+  long result_ids[10];
+  float result_distances[10];
+
+  auto query_json = std::string(R"({"field_name":"fakevec","num_queries":1,"topK":10})");
+  std::vector<float> query_raw_data(DIM);
+  for (int i = 0; i < DIM; i++) {
+    query_raw_data[i] = i;
+  }
+
+  auto sea_res = Search(segment, query_json.data(), 1, query_raw_data.data(), DIM, result_ids, result_distances);
+  assert(sea_res == 0);
+
+  DeleteCollection(collection);
+  DeletePartition(partition);
+  DeleteSegment(segment);
+}
+
+
 TEST(CApiTest, IsOpenedTest) {
     auto collection_name = "collection0";
     auto schema_tmp_conf = "null_schema";
