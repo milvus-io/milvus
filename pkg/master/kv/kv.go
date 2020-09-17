@@ -7,4 +7,6 @@ type Base interface {
 	Save(key, value string) error
 	Remove(key string) error
 	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	LoadWithPrefix(key string) ( []string, []string)
 }

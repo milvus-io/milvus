@@ -2,9 +2,9 @@ package reader
 
 /*
 
-#cgo CFLAGS: -I../core/include
+#cgo CFLAGS: -I${SRCDIR}/../../core/include
 
-#cgo LDFLAGS: -L../core/lib -lmilvus_dog_segment -Wl,-rpath=../core/lib
+#cgo LDFLAGS: -L${SRCDIR}/../../core/lib -lmilvus_dog_segment -Wl,-rpath=${SRCDIR}/../../core/lib
 
 #include "collection_c.h"
 #include "partition_c.h"
@@ -13,9 +13,10 @@ package reader
 */
 import "C"
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/czs007/suvlim/errors"
-	schema "github.com/czs007/suvlim/pkg/master/grpc/message"
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"strconv"
 	"unsafe"
 )
@@ -74,6 +75,9 @@ func (s *Segment) Close() error {
 	if status != 0 {
 		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
 	}
+
+	// Build index after closing segment
+	s.buildIndex()
 	return nil
 }
 
@@ -169,24 +173,41 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *schema.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
 	/*C.Search
 	int
 	Search(CSegmentBase c_segment,
-	           const char* query_json,
-	           unsigned long timestamp,
-			   float* query_raw_data,
-			   int num_of_query_raw_data,
-	           long int* result_ids,
-	           float* result_distances);
+	       CQueryInfo  c_query_info,
+	       unsigned long timestamp,
+	       float* query_raw_data,
+	       int num_of_query_raw_data,
+	       long int* result_ids,
+	       float* result_distances);
 	*/
-	// TODO: get top-k's k from queryString
-	const TopK = 10
+	type QueryInfo struct {
+		NumQueries int64  `json:"num_queries"`
+		TopK       int    `json:"topK"`
+		FieldName  string `json:"field_name"`
+	}
 
-	resultIds := make([]int64, TopK)
-	resultDistances := make([]float32, TopK)
+	type CQueryInfo C.CQueryInfo
 
-	var cQueryJson = C.CString(queryJson)
+	var query QueryInfo
+	var err = json.Unmarshal([]byte(queryJson), &query)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(query)
+
+	cQuery := C.CQueryInfo{
+		num_queries: C.long(query.NumQueries),
+		topK:        C.int(query.TopK),
+		field_name:  C.CString(query.FieldName),
+	}
+
+	resultIds := make([]int64, query.TopK)
+	resultDistances := make([]float32, query.TopK)
+
 	var cTimestamp = C.ulong(timestamp)
 	var cResultIds = (*C.long)(&resultIds[0])
 	var cResultDistances = (*C.float)(&resultDistances[0])
@@ -202,7 +223,7 @@ func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord
 		cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))
 	}
 
-	var status = C.Search(s.SegmentPtr, cQueryJson, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
+	var status = C.Search(s.SegmentPtr, cQuery, cTimestamp, cQueryRawData, cQueryRawDataLength, cResultIds, cResultDistances)
 
 	if status != 0 {
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
