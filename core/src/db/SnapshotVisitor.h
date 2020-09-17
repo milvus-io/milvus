@@ -33,6 +33,9 @@ class SnapshotVisitor {
     Status
     SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids, bool force_build);
 
+    Status
+    SegmentsToMerge(snapshot::IDS_TYPE& segment_ids);
+
  protected:
     snapshot::ScopedSnapshotT ss_;
     Status status_;

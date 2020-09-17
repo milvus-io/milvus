@@ -29,7 +29,7 @@ struct MetaQueryContext {
 
 struct MetaApplyContext {
     std::string table_;
-    MetaContextOp op_;
+    MetaContextOp op_ = oAdd;
     int64_t id_ = 0;
     std::unordered_map<std::string, std::string> attrs_;
     std::unordered_map<std::string, std::string> filter_attrs_;

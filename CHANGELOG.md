@@ -49,6 +49,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3672 0.11.0 docker image is 200M larger due to the un-expected installation of openblas
 -   \#3689 Client get stuck if drop collection during creating index
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
+-   \#3741 Inconsistent parameter names
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -60,6 +61,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3132 Refine the implementation of hnsw in faiss and add support for hnsw-flat, hnsw-pq and hnsw-sq8
 -   \#3463 Restrict the content of partition_tag
 -   \#3502 Normalize http method in web sever
+-   \#3732 Add new operation supporting multi-segments
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
