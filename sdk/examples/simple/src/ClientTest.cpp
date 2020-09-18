@@ -25,7 +25,6 @@ namespace {
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
 constexpr int64_t COLLECTION_DIMENSION = 512;
-constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
 constexpr int64_t BATCH_ENTITY_COUNT = 10000;
 constexpr int64_t NQ = 5;
@@ -33,7 +32,6 @@ constexpr int64_t TOP_K = 10;
 constexpr int64_t NPROBE = 16;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
 constexpr int64_t ADD_ENTITY_LOOP = 10;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVFFLAT;
 constexpr int32_t NLIST = 1024;
 const char* PARTITION_TAG = "part";
 const char* DIMENSION = "dim";
