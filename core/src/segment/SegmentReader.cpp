@@ -37,6 +37,7 @@
 #include "storage/s3/S3IOWriter.h"
 #include "storage/s3/S3Operation.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace segment {
@@ -120,6 +121,8 @@ SegmentReader::Load() {
 Status
 SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadField: " + field_name);
+
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
             return Status::OK();  // already exist
@@ -148,6 +151,8 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         segment_ptr_->SetFixedFieldData(field_name, raw);
+
+        recorder.RecordSection("read " + file_path);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -177,6 +182,8 @@ Status
 SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int64_t>& offsets,
                             engine::BinaryDataPtr& raw) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadEntities: " + field_name);
+
         auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
         if (field_visitor == nullptr) {
             return Status(DB_ERROR, "Invalid field_name");
@@ -262,6 +269,8 @@ SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
 Status
 SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadVectorIndex: " + field_name);
+
         segment_ptr_->GetVectorIndex(field_name, index_ptr);
         if (index_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -289,6 +298,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 concurrent_bitset_ptr->set(offset);
             }
         }
+        recorder.RecordSection("prepare");
 
         knowhere::BinarySet index_data;
         knowhere::BinaryPtr raw_data, compress_data;
@@ -333,6 +343,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
             }
 
+            recorder.RecordSection("create temp IDMAP index");
             return Status::OK();
         }
 
@@ -349,6 +360,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         }
 
         STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadIndex(fs_ptr_, index_file_path, index_data));
+        recorder.RecordSection("read index file: " + index_file_path);
 
         // for some kinds index(IVF), read raw file
         auto index_type = index_visitor->GetElement()->GetTypeName();
@@ -361,6 +373,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadRaw(fs_ptr_, file_path, raw_data));
+
+                recorder.RecordSection("read raw file: " + file_path);
             }
         }
 
@@ -370,6 +384,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 auto file_path =
                     engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
                 STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ReadCompress(fs_ptr_, file_path, compress_data));
+
+                recorder.RecordSection("read compress file: " + file_path);
             }
         }
 
@@ -393,6 +409,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 Status
 SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadStructuredIndex");
+
         segment_ptr_->GetStructuredIndex(field_name, index_ptr);
         if (index_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -464,6 +482,8 @@ SegmentReader::LoadVectorIndice() {
 Status
 SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
+        TimeRecorderAuto recorder("SegmentReader::LoadBloomFilter");
+
         id_bloom_filter_ptr = segment_ptr_->GetBloomFilter();
         if (id_bloom_filter_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -501,6 +521,8 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 Status
 SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
+        TimeRecorder recorder("SegmentReader::LoadDeletedDocs");
+
         deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
         if (deleted_docs_ptr != nullptr) {
             return Status::OK();  // already exist
@@ -606,6 +628,8 @@ SegmentReader::GetTempIndexPath(const std::string& field_name, std::string& path
 
 Status
 SegmentReader::ClearCache() {
+    TimeRecorderAuto recorder("SegmentReader::ClearCache");
+
     if (segment_visitor_ == nullptr) {
         return Status::OK();
     }
@@ -656,6 +680,8 @@ SegmentReader::ClearCache() {
 
 Status
 SegmentReader::ClearIndexCache(const std::string& field_name) {
+    TimeRecorderAuto recorder("SegmentReader::ClearIndexCache");
+
     if (segment_visitor_ == nullptr) {
         return Status::OK();
     }

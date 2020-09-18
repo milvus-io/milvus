@@ -63,7 +63,7 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
 
     {  // create collection
         JSON extra_params;
-        extra_params["segment_size"] = 1024;
+        extra_params["segment_row_limit"] = 1024;
         stat = connection->CreateCollection(mapping, extra_params.dump());
         std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintCollectionParam(mapping);

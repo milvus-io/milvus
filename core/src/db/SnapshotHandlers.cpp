@@ -11,7 +11,6 @@
 
 #include "db/SnapshotHandlers.h"
 
-#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
@@ -40,15 +39,13 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
 
 ///////////////////////////////////////////////////////////////////////////////
 SegmentsToIndexCollector::SegmentsToIndexCollector(snapshot::ScopedSnapshotT ss, const std::string& field_name,
-                                                   snapshot::IDS_TYPE& segment_ids)
-    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids) {
-    build_index_threshold_ = config.engine.build_index_threshold();
+                                                   snapshot::IDS_TYPE& segment_ids, int64_t build_index_threshold)
+    : BaseT(ss), field_name_(field_name), segment_ids_(segment_ids), build_index_threshold_(build_index_threshold) {
 }
 
 Status
 SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
     if (segment_commit->GetRowCount() < build_index_threshold_) {
-        // LOG_ENGINE_DEBUG_ << "Segment is too small, not to build index, row count " << segment_commit->GetRowCount();
         return Status::OK();
     }
 
@@ -69,6 +66,37 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
         if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
             segment_ids_.push_back(segment_commit->GetSegmentId());
         }
+    }
+
+    return Status::OK();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+SegmentsToMergeCollector::SegmentsToMergeCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids,
+                                                   int64_t row_count_threshold)
+    : BaseT(ss), segment_ids_(segment_ids), row_count_threshold_(row_count_threshold) {
+}
+
+Status
+SegmentsToMergeCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
+    if (segment_commit->GetRowCount() >= row_count_threshold_) {
+        return Status::OK();
+    }
+
+    // if any field has build index, don't merge this segment
+    auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
+    auto field_visitors = segment_visitor->GetFieldVisitors();
+    bool has_index = false;
+    for (auto& kv : field_visitors) {
+        auto element_visitor = kv.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor != nullptr && element_visitor->GetFile() != nullptr) {
+            has_index = true;
+            break;
+        }
+    }
+
+    if (!has_index) {
+        segment_ids_.push_back(segment_commit->GetSegmentId());
     }
 
     return Status::OK();

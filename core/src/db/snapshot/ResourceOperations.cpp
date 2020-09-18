@@ -11,6 +11,7 @@
 
 #include "db/snapshot/ResourceOperations.h"
 #include <memory>
+#include "db/snapshot/ResourceHelper.h"
 
 namespace milvus {
 namespace engine {
@@ -21,6 +22,7 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto row_cnt = 0;
     auto size = 0;
+    bool flush_ids_changed = false;
     if (!prev_resource) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Cannot find prev collection commit resource";
@@ -35,16 +37,19 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
         auto prev_partition_commit = GetStartedSS()->GetPartitionCommitByPartitionId(pc->GetPartitionId());
         if (prev_partition_commit) {
             resource_->GetMappings().erase(prev_partition_commit->GetID());
+            flush_ids_changed = true;
             row_cnt -= prev_partition_commit->GetRowCount();
             size -= prev_partition_commit->GetSize();
         }
         resource_->GetMappings().insert(pc->GetID());
+        flush_ids_changed = true;
         row_cnt += pc->GetRowCount();
         size += pc->GetSize();
     };
 
     if (context_.stale_partition_commit) {
         resource_->GetMappings().erase(context_.stale_partition_commit->GetID());
+        flush_ids_changed = true;
         row_cnt -= context_.stale_partition_commit->GetRowCount();
         size -= context_.stale_partition_commit->GetSize();
     } else if (context_.new_partition_commit) {
@@ -57,6 +62,13 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
     if (context_.new_schema_commit) {
         resource_->SetSchemaId(context_.new_schema_commit->GetID());
     }
+
+    if (flush_ids_changed) {
+        resource_->UpdateFlushIds();
+        auto path = GetResPath<Collection>(store->GetRootPath(), GetStartedSS()->GetCollection());
+        resource_->FlushIds(path);
+    }
+
     resource_->SetID(0);
     resource_->SetRowCount(row_cnt);
     resource_->SetSize(size);
@@ -107,6 +119,8 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
     auto row_cnt = 0;
     auto size = 0;
+    bool flush_ids_changed = false;
+    PartitionPtr partition = nullptr;
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
         resource_->SetID(0);
@@ -120,6 +134,7 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
             auto prev_sc = GetStartedSS()->GetSegmentCommitBySegmentId(sc->GetSegmentId());
             if (prev_sc) {
                 resource_->GetMappings().erase(prev_sc->GetID());
+                flush_ids_changed = true;
                 row_cnt -= prev_sc->GetRowCount();
                 size -= prev_sc->GetSize();
             }
@@ -140,10 +155,12 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
                 }
                 auto stale_segment_commit = GetStartedSS()->GetSegmentCommitBySegmentId(stale_segment->GetID());
                 resource_->GetMappings().erase(stale_segment_commit->GetID());
+                flush_ids_changed = true;
                 row_cnt -= stale_segment_commit->GetRowCount();
                 size -= stale_segment_commit->GetSize();
             }
         }
+        partition = GetStartedSS()->GetResource<Partition>(prev_resource->GetPartitionId());
     } else {
         if (!context_.new_partition) {
             std::stringstream emsg;
@@ -152,19 +169,29 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
         }
         resource_ =
             std::make_shared<PartitionCommit>(GetStartedSS()->GetCollectionId(), context_.new_partition->GetID());
+        partition = context_.new_partition;
     }
 
     if (context_.new_segment_commit) {
         resource_->GetMappings().insert(context_.new_segment_commit->GetID());
+        flush_ids_changed = true;
         row_cnt += context_.new_segment_commit->GetRowCount();
         size += context_.new_segment_commit->GetSize();
     } else if (context_.new_segment_commits.size() > 0) {
         for (auto& sc : context_.new_segment_commits) {
             resource_->GetMappings().insert(sc->GetID());
+            flush_ids_changed = true;
             row_cnt += sc->GetRowCount();
             size += sc->GetSize();
         }
     }
+
+    if (flush_ids_changed) {
+        resource_->UpdateFlushIds();
+        auto path = GetResPath<Partition>(store->GetRootPath(), partition);
+        resource_->FlushIds(path);
+    }
+
     resource_->SetRowCount(row_cnt);
     resource_->SetSize(size);
     AddStep(*resource_, nullptr, false);
@@ -180,6 +207,11 @@ SegmentOperation::PreCheck() {
         std::stringstream emsg;
         emsg << GetRepr() << ". prev_partition should be specified in context";
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
+    }
+    if (!GetStartedSS()->GetResource<Partition>(context_.prev_partition->GetID())) {
+        std::stringstream emsg;
+        emsg << GetRepr() << ". Partition is stale";
+        return Status(SS_STALE_ERROR, emsg.str());
     }
     return Status::OK();
 }

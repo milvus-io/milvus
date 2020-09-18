@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <chrono>
+#include <experimental/filesystem>
 #include <memory>
 #include <mutex>
 #include <regex>
@@ -182,7 +183,7 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
     // no need to split chunk if chunk row count less than segment_row_count
     // if user specify a tiny segment_row_count(such as 1) , also no need to split,
     // use build_index_threshold(default is 4096) to avoid tiny segment_row_count
-    if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold.value) {
+    if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold()) {
         chunks.push_back(chunk);
         return Status::OK();
     }
@@ -260,6 +261,18 @@ RequireRawFile(const std::string& index_type) {
 bool
 RequireCompressFile(const std::string& index_type) {
     return index_type == knowhere::IndexEnum::INDEX_RHNSWSQ || index_type == knowhere::IndexEnum::INDEX_RHNSWPQ;
+}
+
+void
+ListFiles(const std::string& root_path, const std::string& prefix) {
+    std::experimental::filesystem::recursive_directory_iterator iter(root_path);
+    std::experimental::filesystem::recursive_directory_iterator end;
+    for (; iter != end; ++iter) {
+        if (std::experimental::filesystem::is_regular_file((*iter).path())) {
+            auto path = root_path + "/" + (*iter).path().filename().string();
+            std::cout << prefix << ": " << path << std::endl;
+        }
+    }
 }
 
 }  // namespace utils

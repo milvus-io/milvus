@@ -26,6 +26,7 @@ jobs:
   ubuntu:
     name: AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -79,6 +80,7 @@ jobs:
   centos:
     name: AMD64 CentOS ${{ matrix.centos }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

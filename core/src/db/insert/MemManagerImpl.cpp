@@ -172,6 +172,9 @@ MemManagerImpl::InternalFlush(std::set<int64_t>& collection_ids) {
     {
         std::lock_guard<std::mutex> lock(immu_mem_mtx_);
         immu_mem_list_.swap(temp_immutable_list);
+        if (temp_immutable_list.empty()) {
+            return Status::OK();
+        }
     }
 
     std::lock_guard<std::mutex> lock(flush_mtx_);
@@ -276,6 +279,20 @@ MemManagerImpl::EraseMem(int64_t collection_id, int64_t partition_id) {
     }
 
     return Status::OK();
+}
+
+bool
+MemManagerImpl::RequireFlush(std::set<int64_t>& collection_ids) {
+    bool require_flush = false;
+    if (GetCurrentMem() > options_.insert_buffer_size_) {
+        std::lock_guard<std::mutex> lock(mem_mutex_);
+        for (auto& kv : mem_map_) {
+            collection_ids.insert(kv.first);
+        }
+        require_flush = true;
+    }
+
+    return require_flush;
 }
 
 size_t

@@ -27,6 +27,8 @@ using LayerGroups = std::map<int64_t, SegmentInfoList>;
 void
 ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
     groups.clear();
+
+#if 0
     int64_t power = 12;
     while (true) {
         int64_t key = 1UL << power;
@@ -36,6 +38,26 @@ ConstructLayers(LayerGroups& groups, int64_t row_count_per_segment) {
             break;
         }
     }
+#else
+    // construct layers according to row_count_per_segment
+    const int64_t ratio = 5;
+    groups.insert(std::pair(row_count_per_segment, SegmentInfoList()));
+    int64_t quarter = row_count_per_segment / ratio;
+    while (quarter > 1024) {
+        groups.insert(std::pair(quarter, SegmentInfoList()));
+        quarter /= ratio;
+    }
+#endif
+}
+
+void
+PrintLayers(LayerGroups& groups) {
+    std::string msg;
+    for (auto& pair : groups) {
+        msg += std::to_string(pair.first);
+        msg += ",";
+    }
+    LOG_ENGINE_INFO_ << "Merge strategy layers: " << msg;
 }
 }  // namespace
 
@@ -108,6 +130,13 @@ MergeLayerStrategy::RegroupSegments(const Partition2SegmentsMap& part2segment, i
                 groups.push_back(ids);
             }
         }
+
+#if 0
+        // print merge statistic
+        if (!groups.empty()) {
+            PrintLayers(layers);
+        }
+#endif
     }
 
     return Status::OK();
