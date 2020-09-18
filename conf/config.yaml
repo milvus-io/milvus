@@ -15,8 +15,8 @@ master:
 
 etcd:
   address: localhost
-  port: 0
-  rootpath: a
+  port: 2379
+  rootpath: suvlim
   segthreshold: 10000
 
 timesync: 

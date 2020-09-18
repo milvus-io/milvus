@@ -1,9 +1,11 @@
 package reader
 
 import (
-	"github.com/czs007/suvlim/reader/message_client"
+	"context"
 	"log"
 	"sync"
+
+	"github.com/czs007/suvlim/reader/message_client"
 )
 
 func StartQueryNode(pulsarURL string, numOfQueryNode int, messageClientID int) {
@@ -29,6 +31,19 @@ func StartQueryNode(pulsarURL string, numOfQueryNode int, messageClientID int) {
 	wg.Add(2)
 	go qn.RunInsertDelete(&wg)
 	go qn.RunSearch(&wg)
+	wg.Wait()
+	qn.Close()
+}
+
+func StartQueryNode2() {
+	ctx := context.Background()
+	qn := CreateQueryNode(0, 0, nil)
+	//qn.InitQueryNodeCollection()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	//go qn.RunInsertDelete(&wg)
+	//go qn.RunSearch(&wg)
+	go qn.RunMetaService(ctx, &wg)
 	wg.Wait()
 	qn.Close()
 }

@@ -18,7 +18,6 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <algorithm>
 
-#include <tbb/iterators.h>
 
 using std::cin;
 using std::cout;
@@ -59,22 +58,32 @@ void
 merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const float *new_distances, const int64_t *new_uids) {
     for(int64_t qn = 0; qn < queries; ++qn) {
         auto base = qn * topk;
-        auto dst_dis = distances + base;
-        auto dst_uids = uids + base;
+        auto src2_dis = distances + base;
+        auto src2_uids = uids + base;
 
-        auto src_dis = new_distances + base;
-        auto src_uids = new_uids + base;
+        auto src1_dis = new_distances + base;
+        auto src1_uids = new_uids + base;
 
-        std::vector<float> buf_dis(2*topk);
-        std::vector<int64_t> buf_uids(2*topk);
+        std::vector<float> buf_dis(topk);
+        std::vector<int64_t> buf_uids(topk);
 
-        auto zip_src = tbb::make_zip_iterator(src_dis, src_uids);
-        auto zip_dst = tbb::make_zip_iterator(dst_dis, dst_uids);
-        auto zip_buf = tbb::make_zip_iterator(buf_dis.data(), buf_uids.data());
-        auto fuck = zip_src + 1;
-        std::merge(zip_dst, zip_dst + topk, zip_src, zip_src + topk, zip_buf);
-        std::copy_n(zip_buf, topk, zip_dst);
-    }
+        auto it1 = 0;
+        auto it2 = 0;
+
+        for(auto buf = 0; buf < topk; ++buf){
+            if(src1_dis[it1] <= src2_dis[it2]) {
+                buf_dis[buf] = src1_dis[it1];
+                buf_uids[buf] = src1_uids[it1];
+                ++it1;
+            } else {
+                buf_dis[buf] = src2_dis[it2];
+                buf_uids[buf] = src2_uids[it2];
+                ++it2;
+            }
+        }
+        std::copy_n(buf_dis.data(), topk, src2_dis);
+        std::copy_n(buf_uids.data(), topk, src2_uids);
+   }
 }
 
 
