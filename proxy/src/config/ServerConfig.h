@@ -65,6 +65,7 @@ struct ServerConfig {
     using Floating = ConfigValue<double>;
 
     String timezone{"unknown"};
+    Integer query_node_num{1};
 
     struct Network {
         String address{"unknown"};
