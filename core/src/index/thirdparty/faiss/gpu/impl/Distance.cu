@@ -441,16 +441,13 @@ void runDistance(bool computeL2,
   auto streams = resources->getAlternateStreamsCurrentDevice();
   streamWait(streams, {defaultStream});
 
-  printf("tileCols: %d,  tileRows: %d\n", tileCols, tileRows);
 
   int curStream = 0;
   bool interrupt = false;
 
   // Tile over the input queries
-  // 把i分成 tileRow个
   for (int i = 0; i < numQueries; i += tileRows) {
     if (interrupt || InterruptCallback::is_interrupted()) {
-      printf("Int\n");
 
       interrupt = true;
       break;
@@ -535,16 +532,13 @@ void runDistance(bool computeL2,
           if (!ignoreOutDistances) {
             // expand (query id) to (query id, k) by duplicating along rows
             // top-k ||c||^2 - 2qc + ||q||^2 in the form (query id, k)
-            printf("start sum along rows ");
             runSumAlongRows(queryNormNiew,
                             outDistanceView,
                             true, // L2 distances should not go below zero due
                                   // to roundoff error
                             streams[curStream]);
-            printf("End sum along rows\n");
           }
         } else {
-          printf("tileCols not Equal numCen !!!!\n");
           auto centroidNormsView = centroidNorms->narrow(0, j, curCentroidSize);
 
           // Write into our intermediate output
@@ -589,7 +583,6 @@ void runDistance(bool computeL2,
     // As we're finished with processing a full set of centroids, perform the
     // final k-selection
     if (tileCols != numCentroids) {
-      printf("runBlockSelectParir   hhhhhhhhh\n");
       // The indices are tile-relative; for each tile of k, we need to add
       // tileCols to the index
       runIncrementIndex(outIndexBufRowView, k, tileCols, streams[curStream]);
@@ -655,7 +648,6 @@ void runL2Distance(GpuResources* resources,
                     Tensor<uint8_t, 1, true>& bitset)
                    
                    {
-                     printf("run Distance....\n");
                      runDistance(true, // L2
                       resources,
                       centroids,
@@ -675,7 +667,6 @@ void runL2Distance(GpuResources* resources,
                       
                       false,
                       bitset);
-                      //暂时把ignoreOutDistances 屏蔽掉
                 }
 
 

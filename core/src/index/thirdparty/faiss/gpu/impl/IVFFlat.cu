@@ -434,9 +434,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // These are caught at a higher level
   FAISS_ASSERT(nprobe <= GPU_MAX_SELECTION_K);
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
-//取nlist 和 用户定义的nprobe间的最小值
-  printf("quantizer_->getSize(): %d\n", quantizer_->getSize());
- // float* tmp_d = new float[queries.getSize(0)*k];
 
   nprobe = std::min(nprobe, quantizer_->getSize());
 
@@ -446,8 +443,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   FAISS_ASSERT(outIndices.getSize(0) == queries.getSize(0));
 
   // Reserve space for the quantized information
-
-  //从这里开始分批
   const int nprobeTile = 8;
   int nprobeBatch = nprobe/nprobeTile;
   float* coarseDis_h = new float[queries.getSize(0)*nprobe];
@@ -468,7 +463,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
     int curTile = min(nprobeTile, nprobe-i);
    
-   //每次查询curTile个probe最后合并
    quantizer_->query(queries,
                     curTile,
                     metric_,
@@ -482,7 +476,7 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                     nprobe,
                     false,
                     bitset);
-  printf("end query ");
+
         runIVFFlatScan(queries,
                  coarseIndices,
                  bitset,
@@ -499,12 +493,10 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                  outDistances,
                  outIndices,
                  resources_);
-        printf("end scan\n");
         
         fromDevice<float,2>(outDistances, tmp_d, defaultStream);
         fromDevice<long,2>(outIndices, tmp_i, defaultStream);
    
-        //如果不是第一批，就需要和之前的进行比较
         if(i) {
           for(int d=0;d<queries.getSize(0);d++) {
             for(int m = 0;m<k;m++) {
@@ -524,32 +516,17 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
            }
         }
   }
-  printf("start copy");
+
   for(int d=0;d<queries.getSize(0);d++) {
       for(int m = 0;m<k;m++) {
           tmp_d[d*k+m] = outDistances_h[d*2*k+m];
           tmp_i[d*k+m] = outIndices_h[d*2*k+m];
-          //printf("%.2f : %lld   ",  tmp_d[d*k+m], tmp_i[d*k+m]);
       }
-      //printf("\n");
     }
-  printf("end of copy");
 
-  //printf("tmp_d addr: %p\n", tmp_d);
-  //printf("resources: %d\n", resources_);
-  //printf("getDeviceForAddress(distances): %d\n", getDeviceForAddress(distances));
-  //printf("Pre outDistances.data: %p\n", outDistances.data());
 
   outIndices.copyFrom(hostOutIndices, defaultStream);
   outDistances.copyFrom(hostOutDistances, defaultStream);
-  printf("end of file IVFFlat");
-  // printf("outDistances.data: %p\n", outDistances.data());
-  // printf("prev distance addr: %p\n", (*distances)    );
-
-  // (*distances) = outDistances.data();
-  //  (*labels) = outIndices.data();
-
-  //printf("distances addr: %p\n", *distances);
 
   return;
 }

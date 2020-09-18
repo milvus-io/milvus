@@ -456,34 +456,26 @@ void runL2SelectMin(float* outDis_h,
       FAISS_ASSERT(false);
     }
 
-    //写最后结果
     
     float* tmp_d = new float[outDistances.getSize(0)*outDistances.getSize(1)];
     int* tmp_i = new int[outDistances.getSize(0)*outDistances.getSize(1)];
     fromDevice<float,2>(outDistances,tmp_d, stream);
     fromDevice<int,2>(outIndices, tmp_i, stream);
-    // printf("tmp_res: \n");
-   printf("startPos: %d  curQuerySize: %d  k: %d  outDistances: %d  %d\n", \ 
-    startPos,curQuerySize, k, outDistances.getSize(0), outDistances.getSize(1));
 
     for(int j=0;j<curQuerySize;j++) {
       for(int m=0;m<k;m++) {
         outDis_h[(startPos+j)*nprobe+i+m] = tmp_d[k*j+m];
         outInd_h[(startPos+j)*nprobe+i+m] = tmp_i[k*j+m];
-        // printf("%.2f: %d  ", outDis_h[j*nprobe+i+m], outInd_h[j*nprobe+i+m]);
       }
-        // printf("\n");
     }
 
     delete [] tmp_d;
     delete [] tmp_i;
-    
-  //printf("end write\n");
 
 
   }
 
-  //CUDA_TEST_ERROR();
+  CUDA_TEST_ERROR();
 }
 
 void runL2SelectMin(float* outDis_h,

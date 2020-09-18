@@ -115,11 +115,9 @@ void bfKnnOnDevice(GpuResources* resources,
 
                    bool ignoreOutDistances, 
                    Tensor<uint8_t, 1, true>& bitset) {
-                     //暂时只考虑L2的情况()
                      if ((metric == faiss::MetricType::METRIC_L2) ||
                   (metric == faiss::MetricType::METRIC_Lp &&
                   metricArg == 2))
-                     printf("Call runL2Distance....\n");
 
                      runL2Distance(resources,
                       vectors,

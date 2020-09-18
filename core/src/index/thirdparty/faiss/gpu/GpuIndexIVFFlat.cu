@@ -238,26 +238,17 @@ GpuIndexIVFFlat::searchImpl_(int n,
                                    // Device is already set in GpuIndex::search
     FAISS_ASSERT(index_);
     FAISS_ASSERT(n > 0);
-    printf("Hello searchImpl_\n");
     // Data is already resident on the GPU
-    printf("distance指针指向地址: %p", distances);
     Tensor<float, 2, true> queries(const_cast<float*>(x), {n, (int) this->d});
     Tensor<float, 2, true> outDistances(distances, {n, k});
-    printf("Outdistance指针指向地址: %p", outDistances.data());
     static_assert(sizeof(long) == sizeof(Index::idx_t), "size mismatch");
     Tensor<long, 2, true> outLabels(const_cast<long*>(labels), {n, k});
     
     auto stream = resources_->getDefaultStream(device_);
 
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-    //distances = new float[n*k];
-    // labels = new long[n*k];
 
     index_->query(queries, nprobe, k, outDistances, outLabels, &distances, &labels, bitsetDevice);
-    printf("end searchImpl_\n");
-
-    printf("outDistance指针指向地址: %p", outDistances.data());
-    printf("distance指针指向地址: %p", distances);
 }
 
 
