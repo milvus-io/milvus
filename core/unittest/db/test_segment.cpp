@@ -340,7 +340,7 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
       return ++lsn;
     };
 
-    std::string c1 = "c1";
+    std::string c1 = "test_deleted_docs_collection";
     auto status = CreateCollection(db_, c1, next_lsn());
     ASSERT_TRUE(status.ok());
 
@@ -349,14 +349,6 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(ss);
     ASSERT_EQ(ss->GetName(), c1);
-
-    SegmentFileContext sf_context;
-    SFContextBuilder(sf_context, ss);
-
-    std::vector<SegmentFileContext> contexts;
-    SFContextsBuilder(contexts, ss);
-
-    // std::cout << ss->ToString() << std::endl;
 
     auto& partitions = ss->GetResources<Partition>();
     ID_TYPE partition_id;
@@ -367,7 +359,7 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
     }
 
     const std::string segment_dir = "/tmp";
-    const std::string del_docs_location = "/tmp/del_docs";
+    const std::string collection_dir = segment_dir + milvus::engine::COLLECTIONS_FOLDER;
     const std::vector<milvus::engine::offset_t> input_data{1, 2, 3};
 
     {
@@ -381,13 +373,21 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
         ASSERT_TRUE(status.ok());
 
         /* commit new segment file */
-        for (auto& cctx : contexts) {
-            SegmentFilePtr seg_file;
-            auto nsf_context = cctx;
-            nsf_context.segment_id = new_seg->GetID();
-            nsf_context.partition_id = new_seg->GetPartitionId();
-            status = op->CommitNewSegmentFile(nsf_context, seg_file);
-        }
+        SegmentFileContext sf_context;
+        //SFContextBuilder(sf_context, ss);
+        sf_context.field_name = milvus::engine::FIELD_UID;
+        sf_context.field_element_name = milvus::engine::ELEMENT_DELETED_DOCS;
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.collection_id = new_seg->GetCollectionId();
+
+        SegmentFilePtr delete_file;
+        status = op->CommitNewSegmentFile(sf_context, delete_file);
+
+	    std::cout << "[test_segment.cpp    394 line] print the path of new segment file..." << std::endl;
+	    std::cout << 
+	        milvus::engine::snapshot::GetResPath<milvus::engine::snapshot::SegmentFile>(collection_dir, delete_file)
+	        << std::endl;
 
         /* build segment visitor */
         auto ctx = op->GetContext();
@@ -396,21 +396,17 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
         ASSERT_TRUE(visitor);
         ASSERT_EQ(visitor->GetSegment(), new_seg);
         ASSERT_FALSE(visitor->GetSegment()->IsActive());
-        // std::cout << visitor->ToString() << std::endl;
-        // std::cout << ss->ToString() << std::endl;
 
         /* test to write deleted docs */
         milvus::segment::SegmentWriter segment_writer(segment_dir, visitor);
 
+        std::string del_docs_path =
+            milvus::engine::snapshot::GetResPath<milvus::engine::snapshot::SegmentFile>(collection_dir, delete_file);
         milvus::segment::DeletedDocsPtr deleted_docs_ptr = std::make_shared<milvus::segment::DeletedDocs>();
         deleted_docs_ptr->AddDeletedDoc(input_data.at(0));
-        ASSERT_TRUE(segment_writer.WriteDeletedDocs(del_docs_location, deleted_docs_ptr).ok());
-
-        deleted_docs_ptr = std::make_shared<milvus::segment::DeletedDocs>();
         deleted_docs_ptr->AddDeletedDoc(input_data.at(1));
         deleted_docs_ptr->AddDeletedDoc(input_data.at(2));
-        // write twice so as to test Move()
-        ASSERT_TRUE(segment_writer.WriteDeletedDocs(del_docs_location, deleted_docs_ptr).ok());
+        ASSERT_TRUE(segment_writer.WriteDeletedDocs(del_docs_path, deleted_docs_ptr).ok());
 
         /* test to read deleted docs */
         milvus::segment::SegmentReader segment_reader(segment_dir, visitor);
@@ -419,8 +415,6 @@ TEST_F(SegmentTest, SEGMENT_DELETEDDOCS_RW_TEST) {
         ASSERT_TRUE(segment_reader.LoadDeletedDocs(deleted_docs_ptr).ok());
         size_t deleted_docs_size;
         ASSERT_TRUE(segment_reader.ReadDeletedDocsSize(deleted_docs_size).ok());
-
-        const auto& deleted_docs_vec = deleted_docs_ptr->GetDeletedDocs();
 
         EXPECT_EQ(deleted_docs_size, input_data.size());
         EXPECT_EQ(deleted_docs_vec.size(), deleted_docs_size);
