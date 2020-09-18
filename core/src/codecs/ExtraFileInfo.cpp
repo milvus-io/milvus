@@ -15,6 +15,7 @@
 
 #include "codecs/ExtraFileInfo.h"
 #include "crc32c/crc32c.h"
+#include "utils/Log.h"
 
 const char* MAGIC = "Milvus";
 const int64_t MAGIC_SIZE = 6;
@@ -41,7 +42,12 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr) {
     magic.resize(MAGIC_SIZE);
     fs_ptr->reader_ptr_->Read(magic.data(), MAGIC_SIZE);
 
-    return !strncmp(magic.data(), MAGIC, MAGIC_SIZE);
+    if (strncmp(magic.data(), MAGIC, MAGIC_SIZE)) {
+        LOG_ENGINE_ERROR_ << "Check magic failed. Record is " << magic.data() << " while magic is Milvus";
+        fs_ptr->reader_ptr_->Close();
+        return false;
+    }
+    return true;
 }
 
 std::unordered_map<std::string, std::string>
@@ -118,8 +124,12 @@ CheckSum(const storage::FSHandlerPtr& fs_ptr) {
     fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
 
     uint32_t result = CalculateSum(fs_ptr, true);
-
-    return record == result;
+    if (record != result) {
+        LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result;
+        fs_ptr->reader_ptr_->Close();
+        return false;
+    }
+    return true;
 }
 
 bool

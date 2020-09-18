@@ -47,7 +47,8 @@ class SearchTask : public Task {
 
     static void
     MergeTopkToResultSet(const engine::ResultIds& src_ids, const engine::ResultDistances& src_distances, size_t src_k,
-                         size_t nq, size_t topk, bool ascending, engine::QueryResultPtr& result);
+                         size_t nq, size_t topk, bool ascending, engine::ResultIds& tar_ids,
+                         engine::ResultDistances& tar_distances);
 
     int64_t
     nq();

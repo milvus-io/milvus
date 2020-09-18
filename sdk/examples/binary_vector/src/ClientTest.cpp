@@ -63,7 +63,8 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
 
     {  // create collection
         JSON extra_params;
-        extra_params["segment_row_limit"] = 1024;
+        extra_params["segment_row_limit"] = 1000000;
+        extra_params["auto_id"] = false;
         stat = connection->CreateCollection(mapping, extra_params.dump());
         std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
         milvus_sdk::Utils::PrintCollectionParam(mapping);
@@ -86,7 +87,6 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
             {  // generate vectors
                 milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
                 BuildBinaryVectors(begin_index, begin_index + BATCH_ENTITY_COUNT, entity_array, entity_ids, DIMENSION);
-                entity_ids.clear();
             }
 
             if (search_entity_array.size() < NQ) {
@@ -115,12 +115,12 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
     }
 
     {  // search vectors
-        // std::string metric_type = "HAMMING";
-//        std::string metric_type = "JACCARD";
-         std::string metric_type = "TANIMOTO";
+//        std::string metric_type = "HAMMING";
+        std::string metric_type = "JACCARD";
+//        std::string metric_type = "TANIMOTO";
 
         nlohmann::json dsl_json, vector_param_json;
-        milvus_sdk::Utils::GenBinaryDSLJson(dsl_json, vector_param_json, metric_type);
+        milvus_sdk::Utils::GenPureVecDSLJson(dsl_json, vector_param_json, metric_type);
 
         std::vector<milvus::VectorData> temp_entity_array;
         for (auto& pair : search_entity_array) {
