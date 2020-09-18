@@ -732,7 +732,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     // remove delete id from the id list
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
+    segment_reader->LoadDeletedDocs(deleted_docs_ptr);
     if (deleted_docs_ptr) {
         const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
         std::vector<offset_t> temp_ids;
