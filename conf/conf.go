@@ -4,8 +4,6 @@ import (
 	"github.com/czs007/suvlim/storage/pkg/types"
 	yaml "gopkg.in/yaml.v2"
 	"io/ioutil"
-	"path"
-	"runtime"
 )
 
 // yaml.MapSlice
@@ -60,14 +58,10 @@ func init() {
 	load_config()
 }
 
-func getCurrentFileDir() string {
-    _, fpath, _, _ := runtime.Caller(0)
-    return path.Dir(fpath)
-}
-
 func load_config() {
-	filePath := path.Join(getCurrentFileDir(), "config.yaml")
-	source, err := ioutil.ReadFile(filePath)
+	//var config ServerConfig
+	filename := "../conf/config.yaml"
+	source, err := ioutil.ReadFile(filename)
 	if err != nil {
 		panic(err)
 	}

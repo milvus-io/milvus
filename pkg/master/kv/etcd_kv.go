@@ -21,43 +21,20 @@ var (
 	errTxnFailed = errors.New("failed to commit transaction")
 )
 
-type EtcdKVBase struct {
+type etcdKVBase struct {
 	client   *clientv3.Client
 	rootPath string
 }
 
 // NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
-	return &EtcdKVBase{
+func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
+	return &etcdKVBase{
 		client:   client,
 		rootPath: rootPath,
 	}
 }
 
-func (kv *EtcdKVBase) LoadWithPrefix(key string) ( []string, []string) {
-	key = path.Join(kv.rootPath, key)
-	println("in loadWithPrefix,", key)
-	resp, err := etcdutil.EtcdKVGet(kv.client, key,clientv3.WithPrefix())
-	if err != nil {
-		return [] string {}, [] string {}
-	}
-	var keys []string
-	var values []string
-	for _,kvs := range resp.Kvs{
-		//println(len(kvs.))
-		if len(kvs.Key) <= 0{
-			println("KKK")
-			continue
-		}
-		keys = append(keys, string(kvs.Key))
-		values = append(values, string(kvs.Value))
-	}
-	//println(keys)
-	//println(values)
-	return keys, values
-}
-
-func (kv *EtcdKVBase) Load(key string) (string, error) {
+func (kv *etcdKVBase) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
@@ -72,7 +49,7 @@ func (kv *EtcdKVBase) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *EtcdKVBase) Save(key, value string) error {
+func (kv *etcdKVBase) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 
 	txn := NewSlowLogTxn(kv.client)
@@ -87,7 +64,7 @@ func (kv *EtcdKVBase) Save(key, value string) error {
 	return nil
 }
 
-func (kv *EtcdKVBase) Remove(key string) error {
+func (kv *etcdKVBase) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 
 	txn := NewSlowLogTxn(kv.client)
@@ -102,15 +79,9 @@ func (kv *EtcdKVBase) Remove(key string) error {
 	return nil
 }
 
-func (kv *EtcdKVBase) Watch(key string) clientv3.WatchChan {
+func (kv *etcdKVBase) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key)
-	return rch
-}
-
-func (kv *EtcdKVBase) WatchWithPrefix(key string) clientv3.WatchChan {
-	key = path.Join(kv.rootPath, key)
-	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
 	return rch
 }
 
