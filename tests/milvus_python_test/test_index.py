@@ -65,6 +65,29 @@ class TestIndexBase:
         ids = connect.insert(collection, entities)
         connect.create_index(collection, field_name, get_simple_index)
 
+    def test_create_index_on_field_not_existed(self, connect, collection, get_simple_index):
+        '''
+        target: test create index interface
+        method: create collection and add entities in it, create index on field not existed
+        expected: error raised
+        '''
+        tmp_field_name = gen_unique_str()
+        ids = connect.insert(collection, entities)
+        with pytest.raises(Exception) as e:
+            connect.create_index(collection, tmp_field_name, get_simple_index)
+
+    @pytest.mark.level(2)
+    def test_create_index_on_field(self, connect, collection, get_simple_index):
+        '''
+        target: test create index interface
+        method: create collection and add entities in it, create index on other field
+        expected: error raised
+        '''
+        tmp_field_name = "int64"
+        ids = connect.insert(collection, entities)
+        with pytest.raises(Exception) as e:
+            connect.create_index(collection, tmp_field_name, get_simple_index)
+
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         '''
