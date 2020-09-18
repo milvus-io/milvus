@@ -18,9 +18,9 @@
   - [`/collections/{collection_name}` (GET)](#collectionscollection_name-get)
   - [`/collections/{collection_name}` (DELETE)](#collectionscollection_name-delete)
   - [`/collections/{collection_name}` (OPTIONS)](#collectionscollection_name-options)
-  - [`/collections/{collection_name}/fields/{field_name}/indexes` (POST)](#collectionscollection_nameindexes-post)
-  - [`/collections/{collection_name}/fields/{field_name}/indexes` (DELETE)](#collectionscollection_nameindexes-delete)
-  - [`/collections/{collection_name}/fields/{field_name}/indexes` (OPTIONS)](#collectionscollection_nameindexes-options)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (POST)](#collectionscollection_namefieldsfield_nameindexes-post)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (DELETE)](#collectionscollection_namefieldsfield_nameindexes-delete)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (OPTIONS)](#collectionscollection_namefieldsfield_nameindexes-options)
   - [`/collections/{collection_name}/partitions` (GET)](#collectionscollection_namepartitions-get)
   - [`/collections/{collection_name}/partitions` (POST)](#collectionscollection_namepartitions-post)
   - [`/collections/{collection_name}/partitions` (OPTIONS)](#collectionscollection_namepartitions-options)
@@ -29,10 +29,10 @@
   - [`/collections/{collection_name}/entities` (PUT)](#collectionscollection_nameentities-put)
   - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
   - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
-  - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_namevectorsidentitiy_id-get)
+  - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities_id-get)
   - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
-  - [`system/{op}` (PUT)](#systemop-put)
+  - [`/system/{op}` (PUT)](#systemop-put)
 - [Error Codes](#error-codes)
 
 <!-- /TOC -->
@@ -730,7 +730,7 @@ $ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/indexes" -H
 
 If the deletion is successful, no message will be returned.
 
-### `/collections/{collection_name}/indexes` (OPTIONS)
+### `/collections/{collection_name}/fields/{field_name}/indexes` (OPTIONS)
 
 Use this API for Cross-Origin Resource Sharing (CORS).
 
@@ -738,7 +738,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 
 | Request Component | Value                                    |
 | ----------------- | ---------------------------------------- |
-| Name              | `/collections/{collection_name}/fields/{field_name}/indexes/{index_name}` |
+| Name              | `/collections/{collection_name}/fields/{field_name}/indexes` |
 | Header            | N/A                                      |
 | Body              | N/A                                      |
 | Method            | OPTIONS                                  |
