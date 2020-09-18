@@ -840,8 +840,8 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
         segment::DeletedDocsPtr deleted_docs;
-        status = segment_reader->LoadDeletedDocs(deleted_docs);
-        if (!status.ok() || deleted_docs == nullptr) {
+        segment_reader->LoadDeletedDocs(deleted_docs);
+        if (deleted_docs == nullptr) {
             continue;  // no deleted docs, no need to compact
         }
 
