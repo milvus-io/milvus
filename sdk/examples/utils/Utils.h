@@ -85,7 +85,7 @@ class Utils {
     GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);
 
     static void
-    GenBinaryDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);
+    GenPureVecDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);
 
     static void
     PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result);
