@@ -11,10 +11,10 @@ import (
 	"github.com/czs007/suvlim/pkg/master/common"
 	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	messagepb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/czs007/suvlim/pkg/master/id"
 	"github.com/czs007/suvlim/pkg/master/informer"
 	"github.com/czs007/suvlim/pkg/master/kv"
 	"github.com/czs007/suvlim/pkg/master/mock"
-	"github.com/google/uuid"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
@@ -55,6 +55,7 @@ func SegmentStatsController() {
 
 func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 	if int(ss.MemorySize) > common.SEGMENT_THRESHOLE*0.8 {
+		currentTime := time.Now()
 		memRate := int(ss.MemoryRate)
 		if memRate == 0 {
 			memRate = 1
@@ -68,12 +69,35 @@ func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		seg.CloseTimeStamp = uint64(time.Now().Add(time.Duration(sec) * time.Second).Unix())
+		seg.CloseTimeStamp = uint64(currentTime.Add(time.Duration(sec) * time.Second).Unix())
 		updateData, err := mock.Segment2JSON(*seg)
 		if err != nil {
 			return err
 		}
 		kvbase.Save(strconv.Itoa(int(ss.SegementID)), updateData)
+		//create new segment
+		newSegID := id.New().Uint64()
+		newSeg := mock.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))
+		newSegData, err := mock.Segment2JSON(*&newSeg)
+		if err != nil {
+			return err
+		}
+		//save to kv store
+		kvbase.Save(strconv.Itoa(int(newSegID)), newSegData)
+		// update collection data
+		c, _ := kvbase.Load(strconv.Itoa(int(seg.CollectionID)))
+		collection, err := mock.JSON2Collection(c)
+		if err != nil {
+			return err
+		}
+		segIDs := collection.SegmentIDs
+		segIDs = append(segIDs, newSegID)
+		collection.SegmentIDs = segIDs
+		cData, err := mock.Collection2JSON(*collection)
+		if err != nil {
+			return err
+		}
+		kvbase.Save(strconv.Itoa(int(seg.CollectionID)), cData)
 	}
 	return nil
 }
@@ -97,7 +121,7 @@ type GRPCMasterServer struct {
 }
 
 func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
-	//	ms.CreateRequest <- in
+	//	ms.CreateRequest <- in2
 	fmt.Println("Handle a new create collection request")
 	err := WriteCollection2Datastore(in)
 	if err != nil {
@@ -126,30 +150,41 @@ func CollectionController(ch chan *messagepb.Mapping) {
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
 	for collection := range ch {
-		sID := uuid.New()
-		cID := uuid.New()
+		sID := id.New().Uint64()
+		cID := id.New().Uint64()
+		s2ID := id.New().Uint64()
 		fieldMetas := []*messagepb.FieldMeta{}
 		if collection.Schema != nil {
 			fieldMetas = collection.Schema.FieldMetas
 		}
 		c := mock.NewCollection(cID, collection.CollectionName,
-			time.Now(), fieldMetas, []uuid.UUID{sID},
+			time.Now(), fieldMetas, []uint64{sID, s2ID},
 			[]string{"default"})
 		cm := mock.GrpcMarshal(&c)
-		s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
+		s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 511, time.Now(), time.Unix(1<<36-1, 0))
+		s2 := mock.NewSegment(s2ID, cID, collection.CollectionName, "default", 512, 1023, time.Now(), time.Unix(1<<36-1, 0))
 		collectionData, _ := mock.Collection2JSON(*cm)
 		segmentData, err := mock.Segment2JSON(s)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save("collection/"+cID.String(), collectionData)
+		s2Data, err := mock.Segment2JSON(s2)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save("segment/"+sID.String(), segmentData)
+		err = kvbase.Save("collection/"+strconv.FormatUint(cID, 10), collectionData)
 		if err != nil {
 			log.Fatal(err)
 		}
+		err = kvbase.Save("segment/"+strconv.FormatUint(sID, 10), segmentData)
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = kvbase.Save("segment/"+strconv.FormatUint(s2ID, 10), s2Data)
+		if err != nil {
+			log.Fatal(err)
+		}
+
 	}
 }
 
@@ -160,29 +195,33 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 	})
 	defer cli.Close()
 	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
-	sID := uuid.New()
-	cID := uuid.New()
+	sID := id.New().Uint64()
+	cID := id.New().Uint64()
 	fieldMetas := []*messagepb.FieldMeta{}
 	if collection.Schema != nil {
 		fieldMetas = collection.Schema.FieldMetas
 	}
 	c := mock.NewCollection(cID, collection.CollectionName,
-		time.Now(), fieldMetas, []uuid.UUID{sID},
+		time.Now(), fieldMetas, []uint64{sID},
 		[]string{"default"})
 	cm := mock.GrpcMarshal(&c)
 	s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
-	collectionData, _ := mock.Collection2JSON(*cm)
+	collectionData, err := mock.Collection2JSON(*cm)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
 	segmentData, err := mock.Segment2JSON(s)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-	err = kvbase.Save("collection/"+cID.String(), collectionData)
+	err = kvbase.Save("collection/"+strconv.FormatUint(cID, 10), collectionData)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-	err = kvbase.Save("segment/"+sID.String(), segmentData)
+	err = kvbase.Save("segment/"+strconv.FormatUint(sID, 10), segmentData)
 	if err != nil {
 		log.Fatal(err)
 		return err
