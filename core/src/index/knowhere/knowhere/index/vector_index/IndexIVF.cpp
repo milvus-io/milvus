@@ -24,6 +24,7 @@
 #endif
 
 #include <fiu/fiu-local.h>
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -320,7 +321,7 @@ void
 IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    ivf_index->nprobe = params->nprobe;
+    ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);
     stdclock::time_point before = stdclock::now();
     if (params->nprobe > 1 && n <= 4) {
         ivf_index->parallel_mode = 1;

@@ -38,7 +38,7 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
         return Status(SS_INVALID_CONTEX_ERROR, "Nothing to do");
     }
 
-    for (auto iter : context_.new_segment_file_map) {
+    for (auto& iter : context_.new_segment_file_map) {
         for (auto& new_file : iter.second) {
             auto update_ctx = ResourceContextBuilder<SegmentFile>().SetOp(meta::oUpdate).CreatePtr();
             update_ctx->AddAttr(SizeField::Name);
@@ -47,7 +47,7 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
     }
 
     std::map<ID_TYPE, SegmentCommit::VecT> new_segment_commits;
-    for (auto iter : new_segments_) {
+    for (auto& iter : new_segments_) {
         for (auto& new_segment : iter.second) {
             OperationContext context;
             context.new_segment = new_segment;
@@ -70,7 +70,7 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
         }
     }
 
-    for (auto iter : new_segment_commits) {
+    for (auto& iter : new_segment_commits) {
         auto& partition_id = iter.first;
         auto context = context_;
         context.new_segment_commits = iter.second;
