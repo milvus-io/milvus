@@ -210,7 +210,6 @@ MemCollection::ApplyDeleteToFile() {
                 del_offsets.insert(offset);
             }
         }
-        uint64_t prev_del_count = del_offsets.size();
 
         // if the to-delete id is actually in this segment, record its offset
         std::vector<engine::idx_t> new_deleted_ids;
@@ -222,7 +221,7 @@ MemCollection::ApplyDeleteToFile() {
             }
         }
 
-        uint64_t new_deleted = del_offsets.size() - prev_del_count;
+        uint64_t new_deleted = new_deleted_ids.size();
         if (new_deleted == 0) {
             return Status::OK();  // nothing change for this segment
         }
@@ -244,7 +243,7 @@ MemCollection::ApplyDeleteToFile() {
             // create new deleted docs file and bloom filter file
             STATUS_CHECK(
                 CreateDeletedDocsBloomFilter(segments_op, ss, seg_visitor, del_offsets, new_deleted, bloom_filter));
-            
+
             segment_changed++;
             recorder.RecordSection("write deleted docs and bloom filter");
         }
