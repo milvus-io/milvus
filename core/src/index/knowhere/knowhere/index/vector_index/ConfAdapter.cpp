@@ -25,7 +25,7 @@ namespace milvus {
 namespace knowhere {
 
 static const int64_t MIN_NLIST = 1;
-static const int64_t MAX_NLIST = 1LL << 20;
+static const int64_t MAX_NLIST = 65536;
 static const int64_t MIN_NPROBE = 1;
 static const int64_t MAX_NPROBE = MAX_NLIST;
 static const int64_t DEFAULT_MIN_DIM = 1;
