@@ -248,10 +248,9 @@ GpuIndexIVFFlat::searchImpl_(int n,
     auto stream = resources_->getDefaultStream(device_);
     
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
+    index_->query(queries, nprobe, k, outDistances, outLabels, &distances, &labels, bitsetDevice);
 }
 
 
 } } // namespace
-
 
