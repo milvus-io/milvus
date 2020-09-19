@@ -100,7 +100,10 @@ CreateIndexReq::OnExecute() {
             }
 
             // validate index parameters
-            status = ValidateIndexParams(json_params_[engine::PARAM_INDEX_EXTRA_PARAMS], dimension, index_type);
+            if (json_params_.contains(engine::PARAM_INDEX_EXTRA_PARAMS)) {
+                index.extra_params_ = json_params_[engine::PARAM_INDEX_EXTRA_PARAMS];
+            }
+            status = ValidateIndexParams(index.extra_params_, dimension, index_type);
             if (!status.ok()) {
                 return status;
             }
@@ -110,9 +113,6 @@ CreateIndexReq::OnExecute() {
             index.index_name_ = index_name_;
             index.index_type_ = index_type;
             index.metric_name_ = metric_type;
-            if (json_params_.contains(engine::PARAM_INDEX_EXTRA_PARAMS)) {
-                index.extra_params_ = json_params_[engine::PARAM_INDEX_EXTRA_PARAMS];
-            }
         } else {
             index.index_name_ = index_name_;
             index.index_type_ = index_type;
