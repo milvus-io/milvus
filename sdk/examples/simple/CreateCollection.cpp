@@ -3,12 +3,18 @@
 #include <Field.h>
 #include <MilvusApi.h>
 #include <interface/ConnectionImpl.h>
+#include "utils/Utils.h"
 
-int main() {
+int main(int argc , char**argv) {
+  
+  TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
+  if (!parameters.is_valid){
+    return 0;
+  }
   auto client = milvus::ConnectionImpl();
   milvus::ConnectParam connect_param;
-  connect_param.ip_address = "localhost";
-  connect_param.port = "19530";
+  connect_param.ip_address = parameters.address_.empty() ? "127.0.0.1":parameters.address_;
+  connect_param.port = parameters.port_.empty() ? "19530":parameters.port_ ;
   client.Connect(connect_param);
 
   milvus::Status stat;
