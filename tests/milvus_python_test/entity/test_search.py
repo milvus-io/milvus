@@ -141,7 +141,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=[1, 10, 2049]
+        params=[1, 10, 16385]
     )
     def get_top_k(self, request):
         yield request.param
