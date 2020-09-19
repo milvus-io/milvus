@@ -108,7 +108,7 @@ ClientTest::CheckParameters(const TestParameters& parameters) {
         return false;
     }
 
-    if (parameters.topk_ <= 0 || parameters.topk_ > 2048) {
+    if (parameters.topk_ <= 0 || parameters.topk_ > 16384) {
         std::cout << "Invalid query topk: " << parameters.topk_ << std::endl;
         return false;
     }

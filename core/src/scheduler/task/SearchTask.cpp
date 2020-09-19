@@ -293,5 +293,18 @@ SearchTask::IndexType() {
     return index_type_;
 }
 
+int64_t
+SearchTask::topk() {
+    if (query_ptr_) {
+        auto vector_query = query_ptr_->vectors.begin();
+        if (vector_query != query_ptr_->vectors.end()) {
+            if (vector_query->second) {
+                return vector_query->second->topk;
+            }
+        }
+    }
+    return 0;
+}
+
 }  // namespace scheduler
 }  // namespace milvus
