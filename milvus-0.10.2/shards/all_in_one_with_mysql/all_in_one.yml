@@ -1,0 +1,77 @@
+version: "2.3"
+services:
+    milvus-mysql:
+      restart: always
+      image: mysql:5.7
+      volumes:
+        - ./mysqld.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf
+        - ./metadata:/var/lib/mysql
+      environment:
+        MYSQL_ROOT_PASSWORD: 'milvusroot'
+        MYSQL_DATABASE: 'milvus'
+      healthcheck:
+        test: ["CMD", "sleep", "5"]
+        interval: 1s
+        timeout: 10s
+        retries: 2
+
+    milvus_wr:
+        runtime: nvidia
+        restart: always
+        image: milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+        volumes:
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./wr_server.yml:/var/lib/milvus/conf/server_config.yaml
+        depends_on:
+            milvus-mysql:
+              condition: service_healthy
+
+    milvus_ro:
+        runtime: nvidia
+        restart: always
+        image: milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+        volumes:
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./ro_server.yml:/var/lib/milvus/conf/server_config.yaml
+        depends_on:
+            - milvus-mysql
+            - milvus_wr
+
+    jaeger:
+        restart: always
+        image: jaegertracing/all-in-one:1.14
+        ports:
+            - "0.0.0.0:5775:5775/udp"
+            - "0.0.0.0:16686:16686"
+            - "0.0.0.0:9441:9441"
+        environment:
+            COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+
+    mishards:
+        restart: always
+        image: milvusdb/mishards
+        ports:
+            - "0.0.0.0:19531:19531"
+            - "0.0.0.0:19532:19532"
+        volumes:
+            - /tmp/milvus/db:/tmp/milvus/db
+            # - /tmp/mishards_env:/source/mishards/.env
+        command: ["python", "mishards/main.py"]
+        environment:
+            FROM_EXAMPLE: 'true'
+            SQLALCHEMY_DATABASE_URI: mysql+pymysql://root:milvusroot@milvus-mysql:3306/milvus?charset=utf8mb4
+            DEBUG: 'true'
+            SERVER_PORT: 19531
+            WOSERVER: tcp://milvus_wr:19530
+            DISCOVERY_PLUGIN_PATH: static
+            DISCOVERY_STATIC_HOSTS: milvus_wr,milvus_ro
+            TRACER_CLASS_NAME: jaeger
+            TRACING_SERVICE_NAME: mishards-demo
+            TRACING_REPORTING_HOST: jaeger
+            TRACING_REPORTING_PORT: 5775
+
+        depends_on:
+            - milvus_wr
+            - milvus_ro
+            - milvus-mysql
+            - jaeger

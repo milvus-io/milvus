@@ -1,0 +1,67 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: mishards-mysql
+  namespace: mishards
+spec:
+  type: ClusterIP
+  selector:
+    app: mishards
+    tier: mysql
+  ports:
+  - protocol: TCP
+    port: 3306
+    targetPort: 3306
+    name: mysql
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mishards-mysql
+  namespace: mishards
+spec:
+  selector:
+    matchLabels:
+      app: mishards
+      tier: mysql
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mishards
+        tier: mysql
+    spec:
+      containers:
+      - name: mishards-mysql
+        image: mysql:5.7
+        imagePullPolicy: IfNotPresent
+        # lifecycle:
+        #   postStart:
+        #     exec:
+        #       command: ["/bin/sh", "-c", "mysql -h milvus-mysql -uroot -p${MYSQL_ROOT_PASSWORD} -e \"CREATE DATABASE IF NOT EXISTS ${DATABASE};\"; \
+        #                                 mysql -uroot -p${MYSQL_ROOT_PASSWORD} -e \"GRANT ALL PRIVILEGES ON ${DATABASE}.* TO 'root'@'%';\""]
+        env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: milvusroot
+          - name: DATABASE
+            value: milvus
+        ports:
+          - name: mysql-port
+            containerPort: 3306
+        volumeMounts:
+        - name: mishards-mysql-disk
+          mountPath: /data
+          subPath: mysql
+        - name: mishards-mysql-configmap
+          mountPath: /etc/mysql/mysql.conf.d/mysqld.cnf
+          subPath: mishards_mysql_config.yml
+
+      volumes:
+      - name: mishards-mysql-disk
+        persistentVolumeClaim:
+            claimName: mishards-mysql-disk
+      - name: mishards-mysql-configmap
+        configMap:
+            name: mishards-mysql-configmap

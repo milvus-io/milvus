@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mishards-db-disk
+  namespace: mishards
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mishards-log-disk
+  namespace: mishards
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mishards-mysql-disk
+  namespace: mishards
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: default
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mishards-redis-disk
+  namespace: mishards
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: default
+  resources:
+    requests:
+      storage: 5Gi

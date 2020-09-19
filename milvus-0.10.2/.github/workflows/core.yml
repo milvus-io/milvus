@@ -1,0 +1,118 @@
+name: Core
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'ci/**'
+      - 'core/**'
+      - '.github/workflows/core.yml'
+      - '!**.md'
+      - '!ci/jenkins/**'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'ci/**'
+      - 'core/**'
+      - '.github/workflows/core.yml'
+      - '!**.md'
+      - '!ci/jenkins/**'
+
+jobs:
+  ubuntu:
+    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      # This step checks out a copy of your repository.
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures ubuntu-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build ubuntu-core
+          docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
+      - name: Docker Run
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run ubuntu-core
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push ubuntu-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          flags: cpu_version_ubuntu_18_04_unittest
+          yml: ./codecov.yaml
+
+  centos:
+    name: AMD64 CentOS ${{ matrix.centos }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        centos: [7]
+    env:
+      CENTOS: ${{ matrix.centos }}
+    steps:
+      - name: Checkout Milvus
+        uses: actions/checkout@v1
+      - name: Check Dockerfile
+        uses: mgrachev/action-hadolint@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+      - name: Docker Pull
+        shell: bash
+        run: |
+          docker-compose pull --ignore-pull-failures db
+          docker-compose pull --ignore-pull-failures centos-core
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker-compose build centos-core
+          docker rmi $(docker images | grep '<none>' | awk '{print $3}') || exit 0
+      - name: Docker Run
+        run: |
+          docker-compose run --use-aliases -d db
+          docker-compose run centos-core
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker-compose push centos-core
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./ci/scripts/output_new.info
+          name: centos-${{ matrix.centos }}-unittests
+          flags: cpu_version_centos7_unittest
+          yml: ./codecov.yaml
