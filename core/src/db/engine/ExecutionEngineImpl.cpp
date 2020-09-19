@@ -34,7 +34,6 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
-#include "knowhere/index/vector_index/gpu/Quantizer.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -96,10 +95,10 @@ IsBinaryIndexType(knowhere::IndexType type) {
 #ifdef MILVUS_GPU_VERSION
 class CachedQuantizer : public cache::DataObj {
  public:
-    explicit CachedQuantizer(knowhere::QuantizerPtr data) : data_(std::move(data)) {
+    explicit CachedQuantizer(knowhere::FaissIVFQuantizerPtr data) : data_(std::move(data)) {
     }
 
-    knowhere::QuantizerPtr
+    knowhere::FaissIVFQuantizerPtr
     Data() {
         return data_;
     }
@@ -110,7 +109,7 @@ class CachedQuantizer : public cache::DataObj {
     }
 
  private:
-    knowhere::QuantizerPtr data_;
+    knowhere::FaissIVFQuantizerPtr data_;
 };
 #endif
 
@@ -266,13 +265,14 @@ ExecutionEngineImpl::HybridLoad() const {
     {
         const int64_t NOT_FOUND = -1;
         int64_t device_id = NOT_FOUND;
-        knowhere::QuantizerPtr quantizer = nullptr;
+        knowhere::FaissIVFQuantizerPtr quantizer = nullptr;
 
         for (auto& gpu : gpus) {
             auto cache = cache::GpuCacheMgr::GetInstance(gpu);
             if (auto cached_quantizer = cache->GetIndex(key)) {
                 device_id = gpu;
                 quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+                break;
             }
         }
 
@@ -284,16 +284,16 @@ ExecutionEngineImpl::HybridLoad() const {
 
     // cache miss
     {
-        std::vector<int64_t> all_free_mem;
+        int64_t max_e = INT_FAST64_MIN;
+        int64_t best_device_id = 0;
         for (auto& gpu : gpus) {
             auto cache = cache::GpuCacheMgr::GetInstance(gpu);
             auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-            all_free_mem.push_back(free_mem);
+            if (free_mem > max_e) {
+                max_e = free_mem;
+                best_device_id = gpu;
+            }
         }
-
-        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-        auto best_index = std::distance(all_free_mem.begin(), max_e);
-        auto best_device_id = gpus[best_index];
 
         milvus::json quantizer_conf{{knowhere::meta::DEVICEID, best_device_id}, {"mode", 1}};
         auto quantizer = hybrid_index->LoadQuantizer(quantizer_conf);

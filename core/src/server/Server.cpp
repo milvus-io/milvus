@@ -18,6 +18,11 @@
 #include <cstring>
 #include <unordered_map>
 
+#ifdef MILVUS_GPU_VERSION
+#include <vector>
+#include "src/cache/GpuCacheMgr.h"
+#endif
+
 #include "config/Config.h"
 #include "index/archive/KnowhereResource.h"
 #include "metrics/Metrics.h"
@@ -320,6 +325,19 @@ Server::Start() {
 void
 Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
+
+#ifdef MILVUS_GPU_VERSION
+    {
+        auto& config = server::Config::GetInstance();
+        std::vector<int64_t> gpus;
+        Status s = config.GetGpuResourceConfigSearchResources(gpus);
+        if (s.ok()) {
+            for (auto& gpu_id : gpus) {
+                cache::GpuCacheMgr::GetInstance(gpu_id)->ClearCache();
+            }
+        }
+    }
+#endif
 
     /* Unlock and close lockfile */
     if (pid_fd_ != -1) {
