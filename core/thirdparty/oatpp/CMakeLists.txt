@@ -13,14 +13,15 @@
 if ( DEFINED ENV{MILVUS_OATPP_URL} )
     set( OATPP_SOURCE_URL "$ENV{MILVUS_OATPP_URL}" )
 else()
-    set( OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz" )
+#    set( OATPP_SOURCE_URL "https://github.com/oatpp/oatpp/archive/${OATPP_VERSION}.tar.gz" )
+    set( OATPP_SOURCE_URL "https://github.com/BossZou/oatpp/archive/${OATPP_VERSION}.tar.gz" )
 endif()
 
 message( STATUS "Building oatpp-${OATPP_VERSION} from source" )
 FetchContent_Declare(
         oatpp
         URL             ${OATPP_SOURCE_URL}
-        URL_MD5         "ed2330211ec528cb0e236958e97e1974"
+        URL_MD5         "c0d96504e8521a8495f76aabbdb5b163"
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/oatpp-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/oatpp-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
