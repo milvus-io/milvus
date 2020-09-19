@@ -31,7 +31,7 @@ Collection::parse() {
     }
     auto schema = std::make_shared<Schema>();
     for (const milvus::grpc::FieldMeta & child: collection.schema().field_metas()){
-            std::cout<<"add Field, name :" << child.field_name() << std::endl;
+            std::cout<<"add Field, name :" << child.field_name() << ", datatype :" << child.type() << ", dim :" << int(child.dim()) << std::endl;
             schema->AddField(std::string_view(child.field_name()), DataType {child.type()}, int(child.dim()));
     }
     /*

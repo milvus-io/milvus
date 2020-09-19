@@ -13,7 +13,7 @@ import (
 func TestIndex_BuildIndex(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	node := NewQueryNode(0, 0)
-	var collection = node.NewCollection(0, "collection0", "fake schema")
+	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 

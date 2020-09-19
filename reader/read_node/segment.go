@@ -77,7 +77,7 @@ func (s *Segment) Close() error {
 	}
 
 	// Build index after closing segment
-	go s.buildIndex()
+	// go s.buildIndex()
 	return nil
 }
 
