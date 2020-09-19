@@ -82,33 +82,34 @@ MemSegment::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
 }
 
 Status
-MemSegment::Serialize() {
-    int64_t size = GetCurrentMem();
-    server::CollectSerializeMetrics metrics(size);
+MemSegment::Serialize(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::MultiSegmentsOperation>& operation) {
+    int64_t mem_size = GetCurrentMem();
+    server::CollectSerializeMetrics metrics(mem_size);
 
-    // delete in mem
-    STATUS_CHECK(ApplyDeleteToMem());
-
-    // create new segment and serialize
-    snapshot::ScopedSnapshotT ss;
-    auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_);
-    if (!status.ok()) {
-        std::string err_msg = "Failed to get latest snapshot: " + status.ToString();
-        LOG_ENGINE_ERROR_ << err_msg;
-        return status;
+    // empty segment, nothing to do
+    if (actions_.empty()) {
+        return Status::OK();
     }
 
     // get max op id
-    idx_t max_op_id = 0;
     for (auto& action : actions_) {
-        if (action.op_id_ > max_op_id) {
-            max_op_id = action.op_id_;
+        if (action.op_id_ > max_op_id_) {
+            max_op_id_ = action.op_id_;
         }
     }
 
-    std::shared_ptr<snapshot::NewSegmentOperation> new_seg_operation;
+    // delete in mem
+    auto status = ApplyDeleteToMem(ss);
+    if (!status.ok()) {
+        if (status.code() == DB_EMPTY_COLLECTION) {
+            // segment is empty, do nothing
+            return Status::OK();
+        }
+    }
+
+    // create new segment and serialize
     segment::SegmentWriterPtr segment_writer;
-    status = CreateNewSegment(ss, new_seg_operation, segment_writer, max_op_id);
+    status = CreateNewSegment(ss, operation, segment_writer);
     if (!status.ok()) {
         LOG_ENGINE_ERROR_ << "Failed to create new segment";
         return status;
@@ -134,39 +135,36 @@ MemSegment::Serialize() {
         return status;
     }
 
-    STATUS_CHECK(new_seg_operation->CommitRowCount(segment_writer->RowCount()));
-    STATUS_CHECK(new_seg_operation->Push());
-    LOG_ENGINE_DEBUG_ << "New segment " << seg_id << " of collection " << collection_id_ << " serialized";
+    operation->CommitRowCount(seg_id, segment_writer->RowCount());
 
-    // notify wal the max operation id is done
-    WalManager::GetInstance().OperationDone(ss->GetName(), max_op_id);
+    LOG_ENGINE_DEBUG_ << "New segment " << seg_id << " of collection " << collection_id_ << " committed";
 
     return Status::OK();
 }
 
 Status
-MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
-                             segment::SegmentWriterPtr& writer, idx_t max_op_id) {
-    // create segment
-    snapshot::SegmentPtr segment;
-    snapshot::OperationContext context;
-    //    context.lsn = max_op_id;
-    context.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
-    operation = std::make_shared<snapshot::NewSegmentOperation>(context, ss);
-    auto status = operation->CommitNewSegment(segment);
+MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss,
+                             std::shared_ptr<snapshot::MultiSegmentsOperation>& operation,
+                             segment::SegmentWriterPtr& writer) {
+    // create new segment
+    snapshot::SegmentPtr new_segment;
+    snapshot::OperationContext new_seg_ctx;
+    new_seg_ctx.prev_partition = ss->GetResource<snapshot::Partition>(partition_id_);
+    auto status = operation->CommitNewSegment(new_seg_ctx, new_segment);
     if (!status.ok()) {
-        std::string err_msg = "MemSegment::CreateSegment failed: " + status.ToString();
+        std::string err_msg = "MemSegment::CreateNewSegment failed: " + status.ToString();
         LOG_ENGINE_ERROR_ << err_msg;
         return status;
     }
 
+    snapshot::SegmentFile::VecT new_segment_files;
     // create segment raw files (placeholder)
     auto names = ss->GetFieldNames();
     for (auto& name : names) {
         snapshot::SegmentFileContext sf_context;
         sf_context.collection_id = collection_id_;
         sf_context.partition_id = partition_id_;
-        sf_context.segment_id = segment->GetID();
+        sf_context.segment_id = new_segment->GetID();
         sf_context.field_name = name;
         sf_context.field_element_name = engine::ELEMENT_RAW_DATA;
 
@@ -177,6 +175,7 @@ MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snap
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
+        new_segment_files.emplace_back(seg_file);
     }
 
     // create deleted_doc and bloom_filter files (placeholder)
@@ -184,7 +183,7 @@ MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snap
         snapshot::SegmentFileContext sf_context;
         sf_context.collection_id = collection_id_;
         sf_context.partition_id = partition_id_;
-        sf_context.segment_id = segment->GetID();
+        sf_context.segment_id = new_segment->GetID();
         sf_context.field_name = engine::FIELD_UID;
         sf_context.field_element_name = engine::ELEMENT_DELETED_DOCS;
 
@@ -203,10 +202,12 @@ MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snap
             LOG_ENGINE_ERROR_ << err_msg;
             return status;
         }
+
+        new_segment_files.emplace_back(delete_doc_file);
+        new_segment_files.emplace_back(bloom_filter_file);
     }
 
-    auto ctx = operation->GetContext();
-    auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
+    auto visitor = SegmentVisitor::Build(ss, new_segment, new_segment_files);
 
     // create segment writer
     writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, visitor);
@@ -215,7 +216,7 @@ MemSegment::CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snap
 }
 
 Status
-MemSegment::ApplyDeleteToMem() {
+MemSegment::ApplyDeleteToMem(snapshot::ScopedSnapshotT& ss) {
     auto outer_iter = actions_.begin();
     for (; outer_iter != actions_.end(); ++outer_iter) {
         MemAction& action = (*outer_iter);
@@ -254,13 +255,30 @@ MemSegment::ApplyDeleteToMem() {
                 }
             }
 
-            // delete entities from chunks
+            // construct a new engine::Segment, delete entities from chunks
+            // since the temp_set is empty, it shared BinaryData with the chunk
+            // the DeleteEntity() will delete elements from the chunk
             Segment temp_set;
-            STATUS_CHECK(temp_set.SetFields(collection_id_));
+            auto& fields = ss->GetResources<snapshot::Field>();
+            for (auto& kv : fields) {
+                const snapshot::FieldPtr& field = kv.second.Get();
+                STATUS_CHECK(temp_set.AddField(field));
+            }
             STATUS_CHECK(temp_set.AddChunk(chunk));
             temp_set.DeleteEntity(offsets);
             chunk->count_ = temp_set.GetRowCount();
         }
+    }
+
+    int64_t row_count = 0;
+    for (auto& action : actions_) {
+        if (action.insert_data_ != nullptr) {
+            row_count += action.insert_data_->count_;
+        }
+    }
+
+    if (row_count == 0) {
+        return Status(DB_EMPTY_COLLECTION, "All entities deleted");
     }
 
     return Status::OK();

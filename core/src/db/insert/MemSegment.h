@@ -58,15 +58,20 @@ class MemSegment {
     }
 
     Status
-    Serialize();
+    Serialize(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::MultiSegmentsOperation>& operation);
+
+    idx_t
+    GetMaxOpID() const {
+        return max_op_id_;
+    }
 
  private:
     Status
-    CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::NewSegmentOperation>& operation,
-                     segment::SegmentWriterPtr& writer, idx_t max_op_id);
+    CreateNewSegment(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::MultiSegmentsOperation>& operation,
+                     segment::SegmentWriterPtr& writer);
 
     Status
-    ApplyDeleteToMem();
+    ApplyDeleteToMem(snapshot::ScopedSnapshotT& ss);
 
     Status
     PutChunksToWriter(const segment::SegmentWriterPtr& writer);
@@ -82,6 +87,8 @@ class MemSegment {
     ActionArray actions_;  // the actions array mekesure insert/delete actions executed one by one
 
     int64_t total_row_count_ = 0;
+
+    idx_t max_op_id_ = 0;
 };
 
 using MemSegmentPtr = std::shared_ptr<MemSegment>;
