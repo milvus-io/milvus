@@ -156,7 +156,7 @@ class TestStatsBase:
         stats = connect.get_collection_stats(collection)
         logging.getLogger().info(stats)
         compact_after = stats["partitions"][0]["segments"][0]["data_size"]
-        assert compact_before > compact_after
+        assert compact_before == compact_after
 
     def test_get_collection_stats_after_compact_delete_one(self, connect, collection):
         '''
