@@ -2162,6 +2162,21 @@ TEST_F(SnapshotTest, MultiSegmentsTest) {
     auto status = Snapshots::GetInstance().GetSnapshot(new_ss, collection_name);
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(new_ss->GetCollectionCommit()->GetRowCount(), (loop - r) * 100);
+
+    std::vector<ID_TYPE> segment_ids;
+    auto segment_executor = [&](const SegmentPtr& segment, SegmentIterator* iterator) -> Status {
+        segment_ids.push_back(segment->GetID());
+        return Status::OK();
+    };
+    auto segment_iterator = std::make_shared<SegmentIterator>(new_ss, segment_executor);
+    segment_iterator->Iterate();
+    ASSERT_TRUE(segment_iterator->GetStatus().ok());
+    ASSERT_EQ(segment_ids.size(), loop - r);
+    for (auto & id : segment_ids) {
+        auto sc = new_ss->GetSegmentCommitBySegmentId(id);
+        ASSERT_TRUE(sc);
+        ASSERT_EQ(sc->GetRowCount(), 100);
+    }
 }
 
 struct GCSchedule {
