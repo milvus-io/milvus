@@ -732,7 +732,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     // remove delete id from the id list
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
+    segment_reader->LoadDeletedDocs(deleted_docs_ptr);
     if (deleted_docs_ptr) {
         const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
         std::vector<offset_t> temp_ids;
@@ -840,8 +840,8 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
         segment::DeletedDocsPtr deleted_docs;
-        status = segment_reader->LoadDeletedDocs(deleted_docs);
-        if (!status.ok() || deleted_docs == nullptr) {
+        segment_reader->LoadDeletedDocs(deleted_docs);
+        if (deleted_docs == nullptr) {
             continue;  // no deleted docs, no need to compact
         }
 
