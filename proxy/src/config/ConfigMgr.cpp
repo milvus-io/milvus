@@ -82,7 +82,7 @@ ConfigMgr::ConfigMgr() {
         {"network.port", CreateIntegerConfig("network.port", false, 0, 65535, &config.network.port.value,
                                                   19530, nullptr, nullptr)},
 
-        
+
         /* pulsar */
         {"pulsar.address", CreateStringConfig("pulsar.address", false, &config.pulsar.address.value,
                                                     "localhost", nullptr, nullptr)},
@@ -94,6 +94,17 @@ ConfigMgr::ConfigMgr() {
         {"master.port", CreateIntegerConfig("master.port", false, 0, 65535, &config.master.port.value,
                                             6000, nullptr, nullptr)},
 
+        /* etcd */
+        {"etcd.address", CreateStringConfig("etcd.address", false, &config.etcd.address.value, "localhost", nullptr,
+                                            nullptr)},
+        {"etcd.port", CreateIntegerConfig("etcd.port", false, 0, 65535, &config.etcd.port.value,
+            6000,nullptr, nullptr)},
+        {"etcd.rootpath", CreateStringConfig("etcd.rootpath", false, &config.etcd.rootpath.value, "by-dev", nullptr,
+                                             nullptr)},
+
+        /* time sync */
+        {"timesync.interval", CreateIntegerConfig("timesync.interval", false, 0, std::numeric_limits<int64_t >::max(), &config.timesync.interval.value, 10,
+                                                   nullptr, nullptr)},
 
         /* log */
         {"logs.level", CreateStringConfig("logs.level", false, &config.logs.level.value, "debug", nullptr, nullptr)},
@@ -146,6 +157,9 @@ ConfigMgr::Load(const std::string& path) {
     // auto proxy_yaml = yaml["porxy"];
     auto other_yaml = YAML::Node{};
     other_yaml["pulsar"] = yaml["pulsar"];
+    other_yaml["master"] = yaml["master"];
+    other_yaml["etcd"] = yaml["etcd"];
+    other_yaml["timesync"] = yaml["timesync"];
     Flatten(yaml["proxy"], flattened, "");
     Flatten(other_yaml, flattened, "");
     // Flatten(yaml["proxy"], flattened, "");

@@ -20,20 +20,6 @@ endif ()
 
 
 message(STATUS "Building pulsar-client-cpp-${PULSAR_CLIENT_CPP_VERSION} from source")
-
-#include(ExternalProject)
-#ExternalProject_Add(
-#        pulsar
-#        URL ${PULSAR_URL}
-#        PREFIX ${pulsar_ROOT}
-#        CONFIGURE_COMMAND cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && cmake -DBUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=${pulsar_ROOT}/build .
-#        BUILD_COMMAND  cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && cmake .
-#        BUILD_IN_SOURCE true
-#        INSTALL_COMMAND cd ${pulsar_ROOT}/src/pulsar/pulsar-client-cpp && make install
-#)
-
-
-
 FetchContent_Declare(
         pulsar
         URL ${PULSAR_URL}
