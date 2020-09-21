@@ -255,7 +255,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // merge deleted docs (Note: this step must before merge raw data)
-    // Note: deleted docs file could not exist, that means the segment has no delted entities
+    // Note: deleted docs file could not exist, that means the segment has no deleted entities
     segment::DeletedDocsPtr src_deleted_docs;
     segment_reader->LoadDeletedDocs(src_deleted_docs);
 
