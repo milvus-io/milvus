@@ -22,8 +22,8 @@ class TestCollectionCount:
         scope="function",
         params=[
             1,
-            const.default_nb,
-            const.default_nb * 2 + 1
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -177,8 +177,8 @@ class TestCollectionCountIP:
         scope="function",
         params=[
             1,
-            const.default_nb,
-            const.default_nb * 2 + 1
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -220,8 +220,8 @@ class TestCollectionCountBinary:
         scope="function",
         params=[
             1,
-            const.default_nb,
-            const.default_nb * 2 + 1
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -413,8 +413,8 @@ class TestCollectionMultiCollections:
         scope="function",
         params=[
             1,
-            const.default_nb,
-            const.default_nb * 2 + 1
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -529,4 +529,4 @@ class TestCollectionMultiCollections:
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
-            assert res == nb
+            assert res == default_nb

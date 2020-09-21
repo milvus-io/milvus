@@ -45,7 +45,7 @@ class TestLoadBase:
         connect.insert(collection, const.default_entities)
         connect.flush([collection])
         logging.getLogger().info(get_simple_index)
-        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
 
     @pytest.mark.level(2)
@@ -62,9 +62,9 @@ class TestLoadBase:
             get_binary_index["metric_type"] = metric_type
             if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
                 with pytest.raises(Exception) as e:
-                    connect.create_index(binary_collection, const.default_binary_vec_field_name, get_binary_index)
+                    connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             else:
-                connect.create_index(binary_collection, const.default_binary_vec_field_name, get_binary_index)
+                connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             connect.load_collection(binary_collection)
 
     def load_empty_collection(self, connect, collection):

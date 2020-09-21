@@ -68,7 +68,7 @@ class TestListCollections:
         if result:
             for collection_name in result:
                 connect.drop_collection(collection_name)
-        time.sleep(const.default_drop_interval)
+        time.sleep(default_drop_interval)
         result = connect.list_collections()
         assert len(result) == 0
 

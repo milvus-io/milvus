@@ -52,7 +52,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_limit
+                "segment_row_limit": default_segment_row_limit
         }
         logging.getLogger().info(fields)
         connect.create_collection(collection_name, fields)
@@ -69,7 +69,7 @@ class TestCreateCollection:
         collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": segment_row_limit
+                "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
@@ -291,7 +291,7 @@ class TestCreateCollectionInvalid(object):
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         logging.getLogger().info(res)
-        assert res["segment_row_limit"] == const.default_server_segment_row_limit
+        assert res["segment_row_limit"] == default_server_segment_row_limit
 
     # TODO: assert exception
     def test_create_collection_limit_fields(self, connect):

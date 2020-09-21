@@ -61,12 +61,12 @@ class TestInfoBase:
         collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": const.default_segment_row_limit
+                "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_limit'] == const.default_segment_row_limit
+        assert res['segment_row_limit'] == default_segment_row_limit
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -90,10 +90,10 @@ class TestInfoBase:
         assert res['segment_row_limit'] == get_segment_row_limit
 
     def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
-        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.get_collection_info(collection)
         for field in res["fields"]:
-            if field["field"] == const.default_float_vec_field_name:
+            if field["field"] == default_float_vec_field_name:
                 index = field["indexes"][0]
                 assert index["index_type"] == get_simple_index["index_type"]
                 assert index["metric_type"] == get_simple_index["metric_type"]
@@ -160,15 +160,15 @@ class TestInfoBase:
         collection_name = gen_unique_str(uid)
         fields = {
                 "fields": [filter_field, vector_field],
-                "segment_row_limit": const.default_segment_row_limit
+                "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields["fields"], nb, vector_field["params"]["dim"])
+        entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
-        assert res['segment_row_limit'] == const.default_segment_row_limit
+        assert res['segment_row_limit'] == default_segment_row_limit
         assert len(res["fields"]) == 2
         for field in res["fields"]:
             if field["type"] == filter_field:
@@ -187,7 +187,7 @@ class TestInfoBase:
         fields = copy.deepcopy(const.default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields["fields"], nb, fields["fields"][-1]["params"]["dim"])
+        entities = gen_entities_by_fields(fields["fields"], default_nb, fields["fields"][-1]["params"]["dim"])
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
