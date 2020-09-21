@@ -384,18 +384,17 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext *context, const ::milvus::
   CHECK_NULLPTR_RETURN(request)
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-  milvus::json json_params;
-  for (int i = 0; i < request->extra_params_size(); i++) {
-    const ::milvus::grpc::KeyValuePair &extra = request->extra_params(i);
-    if (extra.key() == EXTRA_PARAM_KEY) {
-      json_params[EXTRA_PARAM_KEY] = json::parse(extra.value());
-    } else {
-      json_params[extra.key()] = extra.value();
-    }
-  }
+//  milvus::json json_params;
+//  for (int i = 0; i < request->extra_params_size(); i++) {
+//    const ::milvus::grpc::KeyValuePair &extra = request->extra_params(i);
+//    if (extra.key() == EXTRA_PARAM_KEY) {
+//      json_params[EXTRA_PARAM_KEY] = json::parse(extra.value());
+//    } else {
+//      json_params[extra.key()] = extra.value();
+//    }
+//  }
 
-  Status status = req_handler_.CreateIndex(GetContext(context), request->collection_name(), request->field_name(),
-                                           request->index_name(), json_params);
+  Status status = req_handler_.CreateIndex(GetContext(context), request);
 
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
   SET_RESPONSE(response, status, context);

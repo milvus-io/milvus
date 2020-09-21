@@ -16,6 +16,9 @@ class GrpcClient {
   Status
   CreateCollection(const milvus::grpc::Mapping& mapping);
 
+  Status
+  CreateIndex(const milvus::grpc::IndexParam& request);
+
  private:
   std::unique_ptr<masterpb::Master::Stub> stub_;
 

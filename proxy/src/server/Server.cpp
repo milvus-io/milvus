@@ -29,6 +29,8 @@
 #include "server/init/StorageChecker.h"
 #include "src/version.h"
 #include <yaml-cpp/yaml.h>
+#include <src/server/timesync/TimeSync.h>
+#include <src/server/delivery/ReqScheduler.h>
 #include "message_client/ClientV2.h"
 #include "utils/Log.h"
 #include "utils/SignalHandler.h"
@@ -233,13 +235,19 @@ Server::Stop() {
 Status
 Server::StartService() {
     Status stat;
+
+    // timeSync
+    // client id should same to MessageWrapper
+    int client_id = 0;
+    std::string pulsar_server_addr
+        (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
+    static timesync::TimeSync syc(client_id, GetMessageTimeSyncTime, config.timesync.interval(), pulsar_server_addr, "TimeSync");
+
     // stat = engine::KnowhereResource::Initialize();
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
         goto FAIL;
     }
-
-    grpc::GrpcServer::GetInstance().Start();
 
     // Init pulsar message client
     stat = MessageWrapper::GetInstance().Init();
@@ -248,7 +256,13 @@ Server::StartService() {
         goto FAIL;
     }
 
-    MetaWrapper::GetInstance().Init();
+    stat = MetaWrapper::GetInstance().Init();
+    if (!stat.ok()) {
+      LOG_SERVER_ERROR_ << "Meta start service fail: " << stat.message();
+      goto FAIL;
+    }
+
+    grpc::GrpcServer::GetInstance().Start();
 
     return Status::OK();
 FAIL:

@@ -161,8 +161,9 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
   // may have retry policy?
   auto row_count = request.rows_data_size();
   auto stats = std::vector<Status>(ParallelNum);
+  std::atomic_uint64_t msg_sended = 0;
 
-#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id), num_threads(ParallelNum)
+#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id, msg_sended), num_threads(ParallelNum)
   for (auto i = 0; i < row_count; i++) {
     milvus::grpc::InsertOrDeleteMsg mut_msg;
     int this_thread = omp_get_thread_num();
@@ -173,22 +174,28 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
     uint64_t uid = request.entity_id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t));
+    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % 1024;
     try {
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
       printf("%ld \n", mut_msg.segment_id());
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
       mut_msg.mutable_extra_params()->CopyFrom(request.extra_params());
 
-      auto result = paralle_mut_producers_[this_thread]->send(mut_msg);
-      if (result != pulsar::ResultOk) {
-        stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
-      }
+      auto callback = [&stats, &msg_sended,this_thread](Result result, const pulsar::MessageId& messageId){
+        msg_sended += 1;
+        if (result != pulsar::ResultOk) {
+          stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
+        }
+      };
+      paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
     }
     catch (const std::exception &e) {
-      stats[this_thread] = Status(DB_ERROR, "Meta error");
+      stats[this_thread] = Status(DB_ERROR, e.what());
     }
   }
+  while (msg_sended < row_count){
+  }
+
   for (auto &stat : stats) {
     if (!stat.ok()) {
       return stat;
@@ -202,9 +209,12 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
                                    const std::function<uint64_t(const std::string &collection_name,
                                                                 uint64_t channel_id,
                                                                 uint64_t timestamp)> &segment_id) {
-  auto stats = std::vector<pulsar::Result>(ParallelNum);
-#pragma omp parallel for default(none), shared( request, timestamp, stats, segment_id), num_threads(ParallelNum)
-  for (auto i = 0; i < request.id_array_size(); i++) {
+  auto row_count = request.id_array_size();
+  auto stats = std::vector<Status>(ParallelNum);
+  std::atomic_uint64_t msg_sended = 0;
+
+#pragma omp parallel for default(none), shared( request, timestamp, stats, segment_id, msg_sended, row_count), num_threads(ParallelNum)
+  for (auto i = 0; i < row_count; i++) {
     milvus::grpc::InsertOrDeleteMsg mut_msg;
     mut_msg.set_op(milvus::grpc::OpType::DELETE);
     mut_msg.set_client_id(client_id_);
@@ -212,18 +222,24 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_timestamp(timestamp);
     uint64_t uid = request.id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t));
+    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % 1024;
     mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
 
     int this_thread = omp_get_thread_num();
-    auto result = paralle_mut_producers_[this_thread]->send(mut_msg);
-    if (result != pulsar::ResultOk) {
-      stats[this_thread] = result;
-    }
+    auto callback = [&stats, &msg_sended,this_thread](Result result, const pulsar::MessageId& messageId){
+      msg_sended += 1;
+      if (result != pulsar::ResultOk) {
+        stats[this_thread] = Status(DB_ERROR, pulsar::strResult(result));
+      }
+    };
+    paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
   }
+  while (msg_sended < row_count){
+  }
+
   for (auto &stat : stats) {
-    if (stat != pulsar::ResultOk) {
-      return Status(DB_ERROR, pulsar::strResult(stat));
+    if (!stat.ok()) {
+      return stat;
     }
   }
   return Status::OK();

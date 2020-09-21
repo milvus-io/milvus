@@ -65,8 +65,7 @@ class ReqHandler {
     ListPartitions(const ContextPtr& context, const std::string& collection_name, std::vector<std::string>& partitions);
 
     Status
-    CreateIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,
-                const std::string& index_name, const milvus::json& json_params);
+    CreateIndex(const ContextPtr& context, const ::milvus::grpc::IndexParam *request);
 
     Status
     DescribeIndex(const ContextPtr& context, const std::string& collection_name, const std::string& field_name,

@@ -99,15 +99,6 @@ GrpcServer::StartService() {
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
-
-  // timeSync
-  // client id should same to MessageWrapper
-  int client_id = 0;
-  std::string pulsar_server_addr
-      (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
-  timesync::TimeSync syc(client_id,GetMessageTimeSyncTime, config.timesync.interval(), pulsar_server_addr, "TimeSync");
-
-
     // Add gRPC interceptor
     using InterceptorI = ::grpc::experimental::ServerInterceptorFactoryInterface;
     using InterceptorIPtr = std::unique_ptr<InterceptorI>;

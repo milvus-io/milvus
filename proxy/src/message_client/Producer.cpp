@@ -19,6 +19,10 @@ namespace message_client {
         return producer_.send(msg);
     }
 
+    void MsgProducer::sendAsync(const Message &msg, pulsar::SendCallback callback) {
+      return producer_.sendAsync(msg, callback);
+    }
+
     Result MsgProducer::send(const std::string &msg) {
         auto pulsar_msg = pulsar::MessageBuilder().setContent(msg).build();
         return send(pulsar_msg);
@@ -32,12 +36,27 @@ namespace message_client {
       return send(pulsar_msg);
     }
 
+    void MsgProducer::sendAsync(const std::string &msg, int64_t partitioned_key, pulsar::SendCallback callback) {
+      auto pulsar_msg = pulsar::MessageBuilder().
+          setContent(msg).
+          setPartitionKey(std::to_string(partitioned_key)).
+          build();
+      return sendAsync(pulsar_msg, callback);
+    }
+
     Result MsgProducer::send(milvus::grpc::InsertOrDeleteMsg &msg) {
       int32_t channel_id = makeHash(std::to_string(msg.uid())) % 1024;
 //      std::cout << "partition id := " << channel_id <<std::endl;
       msg.set_channel_id(channel_id);
       auto msg_str = msg.SerializeAsString();
       return send(msg_str, msg.uid());
+    }
+
+    void MsgProducer::sendAsync(milvus::grpc::InsertOrDeleteMsg &msg, pulsar::SendCallback callback) {
+      int32_t channel_id = makeHash(std::to_string(msg.uid())) % 1024;
+      msg.set_channel_id(channel_id);
+      auto msg_str = msg.SerializeAsString();
+      return sendAsync(msg_str, msg.uid(), callback);
     }
 
     Result MsgProducer::send(milvus::grpc::SearchMsg &msg) {
