@@ -101,7 +101,9 @@ SearchReq::OnExecute() {
                 // check index type
                 engine::CollectionIndex index;
                 status = DBWrapper::DB()->DescribeIndex(query_ptr_->collection_id, field->GetName(), index);
-                STATUS_CHECK(ValidateIndexType(index.index_type_));
+                if (!index.index_type_.empty()) {
+                    STATUS_CHECK(ValidateIndexType(index.index_type_));
+                }
             }
         }
 
