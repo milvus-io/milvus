@@ -97,6 +97,11 @@ SearchReq::OnExecute() {
                     auto metric_type = query_ptr_->metric_types.at(field->GetName());
                     STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
                 }
+
+                // check index type
+                engine::CollectionIndex index;
+                status = DBWrapper::DB()->DescribeIndex(query_ptr_->collection_id, field->GetName(), index);
+                STATUS_CHECK(ValidateIndexType(index.index_type_));
             }
         }
 
