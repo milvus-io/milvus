@@ -10,8 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <vector>
-#include "hdfs.h"
-#include "utils/Status.h"
+#include <string>
+
+#include "storage/hdfs/hdfs.h"
 
 namespace milvus {
 namespace storage {

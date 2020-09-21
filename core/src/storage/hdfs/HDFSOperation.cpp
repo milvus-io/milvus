@@ -9,13 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "HDFSOperation.h"
+#include "storage/hdfs/HDFSOperation.h"
 #include "HDFSClient.h"
 
 namespace milvus {
 namespace storage {
 
-HDFSOperation::HDFSOperation(const std::string& dir_path_) : dir_path_(dir_path_) {
+HDFSOperation::HDFSOperation(const std::string& dir_path) : dir_path_(dir_path) {
     HDFSClient::getInstance();
 }
 

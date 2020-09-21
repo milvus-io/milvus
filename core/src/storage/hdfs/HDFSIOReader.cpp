@@ -12,7 +12,6 @@
 #include "storage/hdfs/HDFSIOReader.h"
 #include "HDFSClient.h"
 
-
 namespace milvus {
 namespace storage {
 

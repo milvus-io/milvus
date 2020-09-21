@@ -13,9 +13,12 @@
 aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
 # aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3     STORAGE_S3_FILES )
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/hdfs          STORAGE_HDFS_FILES) 
+
 set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
                     ${STORAGE_DISK_FILES}
                     # ${STORAGE_S3_FILES}
+                    ${STORAGE_HDFS_FILES}
                     )
 add_library( storage STATIC )
 target_sources( storage PRIVATE ${STORAGE_FILES} )
