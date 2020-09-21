@@ -66,6 +66,7 @@ endif ()
 
 aux_source_directory(interface interface_files)
 aux_source_directory(grpc grpc_client_files)
+aux_source_directory(utils utils_files)
 
 set(grpc_service_files
         grpc-gen/message.grpc.pb.cc
@@ -84,6 +85,7 @@ add_library(milvus_sdk SHARED
         ${interface_files}
         ${grpc_client_files}
         ${grpc_service_files}
+	${utils_files}
         )
 
 target_link_libraries(milvus_sdk

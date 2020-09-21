@@ -1,13 +1,11 @@
 package mock
 
 import (
-	"fmt"
 	"time"
 
 	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	messagepb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
-	"github.com/google/uuid"
 	jsoniter "github.com/json-iterator/go"
 )
 
@@ -19,15 +17,16 @@ type Collection struct {
 	CreateTime uint64      `json:"creat_time"`
 	Schema     []FieldMeta `json:"schema"`
 	//	ExtraSchema       []FieldMeta `json:"extra_schema"`
-	SegmentIDs        []uint64 `json:"segment_ids"`
-	PartitionTags     []string `json:"partition_tags"`
-	GrpcMarshalString string   `json:"grpc_marshal_string"`
+	SegmentIDs        []uint64                `json:"segment_ids"`
+	PartitionTags     []string                `json:"partition_tags"`
+	GrpcMarshalString string                  `json:"grpc_marshal_string"`
+	IndexParam        []*messagepb.IndexParam `json:"index_param"`
 }
 
 type FieldMeta struct {
-	FieldName string `json:"field_name"`
-	Type      string `json:"type"`
-	DIM       int64  `json:"dimension"`
+	FieldName string             `json:"field_name"`
+	Type      messagepb.DataType `json:"type"`
+	DIM       int64              `json:"dimension"`
 }
 
 func GrpcMarshal(c *Collection) *Collection {
@@ -37,6 +36,16 @@ func GrpcMarshal(c *Collection) *Collection {
 	pbSchema := &messagepb.Schema{
 		FieldMetas: []*messagepb.FieldMeta{},
 	}
+	schemaSlice := []*messagepb.FieldMeta{}
+	for _, v := range c.Schema {
+		newpbMeta := &messagepb.FieldMeta{
+			FieldName: v.FieldName,
+			Type:      v.Type,
+			Dim:       v.DIM,
+		}
+		schemaSlice = append(schemaSlice, newpbMeta)
+	}
+	pbSchema.FieldMetas = schemaSlice
 	grpcCollection := &pb.Collection{
 		Id:            c.ID,
 		Name:          c.Name,
@@ -44,28 +53,26 @@ func GrpcMarshal(c *Collection) *Collection {
 		CreateTime:    c.CreateTime,
 		SegmentIds:    c.SegmentIDs,
 		PartitionTags: c.PartitionTags,
+		Indexes:       c.IndexParam,
 	}
-	out, err := proto.Marshal(grpcCollection)
-	if err != nil {
-		fmt.Println(err)
-	}
-	c.GrpcMarshalString = string(out)
+	out := proto.MarshalTextString(grpcCollection)
+	c.GrpcMarshalString = out
 	return c
 }
 
-func NewCollection(id uuid.UUID, name string, createTime time.Time,
-	schema []*messagepb.FieldMeta, sIds []uuid.UUID, ptags []string) Collection {
+func NewCollection(id uint64, name string, createTime time.Time,
+	schema []*messagepb.FieldMeta, sIds []uint64, ptags []string) Collection {
 
 	segementIDs := []uint64{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
-		newSchema = append(newSchema, FieldMeta{FieldName: v.FieldName, Type: v.Type.String(), DIM: v.Dim})
+		newSchema = append(newSchema, FieldMeta{FieldName: v.FieldName, Type: v.Type, DIM: v.Dim})
 	}
 	for _, sid := range sIds {
-		segementIDs = append(segementIDs, uint64(sid.ID()))
+		segementIDs = append(segementIDs, sid)
 	}
 	return Collection{
-		ID:            uint64(id.ID()),
+		ID:            id,
 		Name:          name,
 		CreateTime:    uint64(createTime.Unix()),
 		Schema:        newSchema,

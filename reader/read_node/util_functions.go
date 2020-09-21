@@ -29,6 +29,16 @@ func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
 	return &entityIDs, &timestamps, &segmentIDs
 }
 
+func (node *QueryNode) GetCollectionByID(collectionID uint64) *Collection {
+	for _, collection := range node.Collections {
+		if collection.CollectionID == collectionID {
+			return collection
+		}
+	}
+
+	return nil
+}
+
 func (node *QueryNode) GetCollectionByCollectionName(collectionName string) (*Collection, error) {
 	for _, collection := range node.Collections {
 		if collection.CollectionName == collectionName {
@@ -47,4 +57,14 @@ func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) 
 	}
 
 	return targetSegment, nil
+}
+
+func (c *Collection) GetPartitionByName(partitionName string) (partition *Partition) {
+	for _, partition := range c.Partitions {
+		if partition.PartitionName == partitionName {
+			return partition
+		}
+	}
+	return nil
+	// TODO: remove from c.Partitions
 }

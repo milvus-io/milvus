@@ -44,6 +44,7 @@ require (
 	github.com/prometheus/client_golang v1.5.1 // indirect
 	github.com/prometheus/common v0.10.0 // indirect
 	github.com/prometheus/procfs v0.1.3 // indirect
+	github.com/rs/xid v1.2.1
 	github.com/sirupsen/logrus v1.6.0
 	github.com/stretchr/testify v1.6.1
 	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b

@@ -280,6 +280,50 @@ TEST(CApiTest, CloseTest) {
 }
 
 
+TEST(CApiTest, GetMemoryUsageInBytesTest) {
+  auto collection_name = "collection0";
+  auto schema_tmp_conf = "null_schema";
+  auto collection = NewCollection(collection_name, schema_tmp_conf);
+  auto partition_name = "partition0";
+  auto partition = NewPartition(collection, partition_name);
+  auto segment = NewSegment(partition, 0);
+
+  std::vector<char> raw_data;
+  std::vector<uint64_t> timestamps;
+  std::vector<int64_t> uids;
+  int N = 10000;
+  std::default_random_engine e(67);
+  for (int i = 0; i < N; ++i) {
+    uids.push_back(100000 + i);
+    timestamps.push_back(0);
+    // append vec
+    float vec[16];
+    for (auto &x: vec) {
+      x = e() % 2000 * 0.001 - 1.0;
+    }
+    raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
+    int age = e() % 100;
+    raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
+  }
+
+  auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+
+  auto offset = PreInsert(segment, N);
+
+  auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int) line_sizeof, N);
+
+  assert(res == 0);
+
+  auto memory_usage_size = GetMemoryUsageInBytes(segment);
+
+  assert(memory_usage_size == 1898459);
+
+  DeleteCollection(collection);
+  DeletePartition(partition);
+  DeleteSegment(segment);
+}
+
+
 namespace {
 auto
 generate_data(int N) {

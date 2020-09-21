@@ -61,7 +61,7 @@ TEST(DogSegmentTest, MockTest) {
 
 
     // auto index_meta = std::make_shared<IndexMeta>(schema);
-    auto segment = CreateSegment(schema, nullptr);
+    auto segment = CreateSegment(schema);
 
     DogDataChunk data_chunk{raw_data.data(), (int)line_sizeof, N};
     auto offset = segment->PreInsert(N);

@@ -20,6 +20,7 @@ namespace masterpb {
 
 static const char* Master_method_names[] = {
   "/masterpb.Master/CreateCollection",
+  "/masterpb.Master/CreateIndex",
 };
 
 std::unique_ptr< Master::Stub> Master::NewStub(const std::shared_ptr< ::grpc::ChannelInterface>& channel, const ::grpc::StubOptions& options) {
@@ -30,6 +31,7 @@ std::unique_ptr< Master::Stub> Master::NewStub(const std::shared_ptr< ::grpc::Ch
 
 Master::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel)
   : channel_(channel), rpcmethod_CreateCollection_(Master_method_names[0], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_CreateIndex_(Master_method_names[1], ::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   {}
 
 ::grpc::Status Master::Stub::CreateCollection(::grpc::ClientContext* context, const ::milvus::grpc::Mapping& request, ::milvus::grpc::Status* response) {
@@ -60,18 +62,58 @@ void Master::Stub::experimental_async::CreateCollection(::grpc::ClientContext* c
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateCollection_, context, request, false);
 }
 
+::grpc::Status Master::Stub::CreateIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::milvus::grpc::Status* response) {
+  return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_CreateIndex_, context, request, response);
+}
+
+void Master::Stub::experimental_async::CreateIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_CreateIndex_, context, request, response, std::move(f));
+}
+
+void Master::Stub::experimental_async::CreateIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+  ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_CreateIndex_, context, request, response, std::move(f));
+}
+
+void Master::Stub::experimental_async::CreateIndex(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_CreateIndex_, context, request, response, reactor);
+}
+
+void Master::Stub::experimental_async::CreateIndex(::grpc::ClientContext* context, const ::grpc::ByteBuffer* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+  ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_CreateIndex_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* Master::Stub::AsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateIndex_, context, request, true);
+}
+
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* Master::Stub::PrepareAsyncCreateIndexRaw(::grpc::ClientContext* context, const ::milvus::grpc::IndexParam& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_CreateIndex_, context, request, false);
+}
+
 Master::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       Master_method_names[0],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< Master::Service, ::milvus::grpc::Mapping, ::milvus::grpc::Status>(
           std::mem_fn(&Master::Service::CreateCollection), this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      Master_method_names[1],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< Master::Service, ::milvus::grpc::IndexParam, ::milvus::grpc::Status>(
+          std::mem_fn(&Master::Service::CreateIndex), this)));
 }
 
 Master::Service::~Service() {
 }
 
 ::grpc::Status Master::Service::CreateCollection(::grpc::ServerContext* context, const ::milvus::grpc::Mapping* request, ::milvus::grpc::Status* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status Master::Service::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request, ::milvus::grpc::Status* response) {
   (void) context;
   (void) request;
   (void) response;

@@ -77,7 +77,7 @@ public:
     // TODO: currently, index has to be set at startup, and can't be modified
     // AddIndex and DropIndex will be added later
     Status
-    BuildIndex() override;
+    BuildIndex(IndexMetaPtr index_meta) override;
 
     Status
     DropRawData(std::string_view field_name) override {
@@ -112,10 +112,10 @@ public:
 
 public:
     friend std::unique_ptr<SegmentBase>
-    CreateSegment(SchemaPtr schema, IndexMetaPtr index_meta);
+    CreateSegment(SchemaPtr schema);
 
-    explicit SegmentNaive(SchemaPtr schema, IndexMetaPtr index_meta)
-            : schema_(schema), index_meta_(index_meta), record_(*schema) {
+    explicit SegmentNaive(SchemaPtr schema)
+            : schema_(schema), record_(*schema) {
     }
 
 private:

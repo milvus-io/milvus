@@ -24,9 +24,13 @@ class MsgClientV2 {
               const std::string &search_result);
 
   // unpackage batch insert or delete request, and delivery message to pulsar per row
-  Status SendMutMessage(const milvus::grpc::InsertParam &request, uint64_t timestamp);
+  Status SendMutMessage(const milvus::grpc::InsertParam &request, uint64_t timestamp, const std::function<uint64_t (const std::string &collection_name,
+                                                                                                              uint64_t channel_id,
+                                                                                                              uint64_t timestam)>&);
 
-  Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp);
+  Status SendMutMessage(const milvus::grpc::DeleteByIDParam &request, uint64_t timestamp, const std::function<uint64_t(const std::string &collection_name,
+                                                                                                                 uint64_t channel_id,
+                                                                                                                 uint64_t timestam) >&);
 
   //
   Status SendQueryMessage(const milvus::grpc::SearchParam &request, uint64_t timestamp, int64_t &query_id);

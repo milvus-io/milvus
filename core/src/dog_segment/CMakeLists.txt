@@ -1,3 +1,5 @@
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/../pb PB_SRC_FILES)
+
 set(DOG_SEGMENT_FILES
         SegmentNaive.cpp
         IndexMeta.cpp
@@ -7,10 +9,13 @@ set(DOG_SEGMENT_FILES
         collection_c.cpp
         partition_c.cpp
         segment_c.cpp
+	${PB_SRC_FILES}
         )
 add_library(milvus_dog_segment SHARED
         ${DOG_SEGMENT_FILES}
         )
+
+
 #add_dependencies( segment sqlite mysqlpp )
 
-target_link_libraries(milvus_dog_segment tbb utils pthread knowhere log)
+target_link_libraries(milvus_dog_segment tbb utils pthread knowhere log libprotobuf)

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "examples/utils/Utils.h"
+#include "Utils.h"
 
 #include <time.h>
 #include <unistd.h>
@@ -25,7 +25,7 @@
 #include <cstring>
 #include <string>
 
-#include "examples/utils/TimeRecorder.h"
+#include "TimeRecorder.h"
 
 namespace {
 

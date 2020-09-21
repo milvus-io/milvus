@@ -341,7 +341,7 @@ GrpcRequestHandler::CreateCollection(::grpc::ServerContext *context, const ::mil
   CHECK_NULLPTR_RETURN(request);
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
-  Status status =  MetaWrapper::GetInstance().MetaClient()->CreateCollection(*request);
+  Status status = req_handler_.CreateCollection(GetContext(context), request);
 
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
   SET_RESPONSE(response, status, context)
@@ -468,6 +468,9 @@ GrpcRequestHandler::DescribeCollection(::grpc::ServerContext *context, const ::m
                                        ::milvus::grpc::Mapping *response) {
   LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
   CHECK_NULLPTR_RETURN(request);
+
+  Status status = req_handler_.GetCollectionInfo(GetContext(context), request, *response);
+  SET_RESPONSE(response->mutable_status(), status, context)
   return ::grpc::Status::OK;
 }
 
@@ -697,6 +700,17 @@ GrpcRequestHandler::Insert(::grpc::ServerContext *context, const ::milvus::grpc:
     return ::grpc::Status::OK;
   }
 
+  // check if collection exist, using `HasCollection` after.
+  try {
+    MetaWrapper::GetInstance().AskCollectionSchema(request->collection_name());
+  }
+  catch (const std::exception& e){
+    // means collection not exit
+    SET_RESPONSE(response->mutable_status(), Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist " + request->collection_name()), context)
+    return ::grpc::Status::OK;
+  }
+
+
   // generate uid for entities
   //if (request->entity_id_array_size() == 0) {
   //    auto ids = std::vector<int64_t >(request->rows_data_size());
@@ -858,8 +872,8 @@ GrpcRequestHandler::Search(::grpc::ServerContext *context, const ::milvus::grpc:
 
   //TODO: check if the request is legal
 
-    BaseReqPtr req_ptr = SearchReq::Create(GetContext(context), request, response);
-    ReqScheduler::ExecReq(req_ptr);
+  BaseReqPtr req_ptr = SearchReq::Create(GetContext(context), request, response);
+  ReqScheduler::ExecReq(req_ptr);
 
   return ::grpc::Status::OK;
 }
