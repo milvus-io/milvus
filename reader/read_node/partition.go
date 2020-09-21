@@ -21,6 +21,10 @@ type Partition struct {
 }
 
 func (p *Partition) NewSegment(segmentId int64) *Segment {
+	/*
+	CSegmentBase
+	NewSegment(CPartition partition, unsigned long segment_id);
+	 */
 	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentId))
 
 	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentId: segmentId}
@@ -29,6 +33,10 @@ func (p *Partition) NewSegment(segmentId int64) *Segment {
 }
 
 func (p *Partition) DeleteSegment(segment *Segment) {
+	/*
+	void
+	DeleteSegment(CSegmentBase segment);
+	 */
 	cPtr := segment.SegmentPtr
 	C.DeleteSegment(cPtr)
 

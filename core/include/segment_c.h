@@ -68,7 +68,7 @@ int
 Close(CSegmentBase c_segment);
 
 int
-BuildIndex(CSegmentBase c_segment);
+BuildIndex(CCollection c_collection, CSegmentBase c_segment);
 
 bool
 IsOpened(CSegmentBase c_segment);

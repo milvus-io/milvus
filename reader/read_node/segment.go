@@ -39,7 +39,7 @@ type Segment struct {
 }
 
 func (s *Segment) GetStatus() int {
-	/*C.IsOpened
+	/*
 	bool
 	IsOpened(CSegmentBase c_segment);
 	*/
@@ -52,7 +52,7 @@ func (s *Segment) GetStatus() int {
 }
 
 func (s *Segment) GetRowCount() int64 {
-	/*C.GetRowCount
+	/*
 	long int
 	GetRowCount(CSegmentBase c_segment);
 	*/
@@ -61,7 +61,7 @@ func (s *Segment) GetRowCount() int64 {
 }
 
 func (s *Segment) GetDeletedCount() int64 {
-	/*C.GetDeletedCount
+	/*
 	long int
 	GetDeletedCount(CSegmentBase c_segment);
 	*/
@@ -69,8 +69,8 @@ func (s *Segment) GetDeletedCount() int64 {
 	return int64(deletedCount)
 }
 
-func (s *Segment) Close() error {
-	/*C.Close
+func (s *Segment) CloseSegment(collection* Collection) error {
+	/*
 	int
 	Close(CSegmentBase c_segment);
 	*/
@@ -80,12 +80,12 @@ func (s *Segment) Close() error {
 	}
 
 	// Build index after closing segment
-	// go s.buildIndex()
+	go s.buildIndex(collection)
 	return nil
 }
 
 func (s *Segment) GetMemSize() uint64 {
-	/*C.GetMemoryUsageInBytes
+	/*
 	long int
 	GetMemoryUsageInBytes(CSegmentBase c_segment);
 	*/
@@ -96,7 +96,7 @@ func (s *Segment) GetMemSize() uint64 {
 
 ////////////////////////////////////////////////////////////////////////////
 func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
-	/*C.PreInsert
+	/*
 	long int
 	PreInsert(CSegmentBase c_segment, long int size);
 	*/
@@ -106,7 +106,7 @@ func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 }
 
 func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
-	/*C.PreDelete
+	/*
 	long int
 	PreDelete(CSegmentBase c_segment, long int size);
 	*/
@@ -116,7 +116,7 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 }
 
 func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
-	/*C.Insert
+	/*
 	int
 	Insert(CSegmentBase c_segment,
 	           long int reserved_offset,
@@ -160,7 +160,7 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 }
 
 func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]uint64) error {
-	/*C.Delete
+	/*
 	int
 	Delete(CSegmentBase c_segment,
 	           long int reserved_offset,
@@ -183,7 +183,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 }
 
 func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
-	/*C.Search
+	/*
 	int
 	Search(CSegmentBase c_segment,
 	       CQueryInfo  c_query_info,

@@ -27,7 +27,7 @@ func (node *QueryNode) SegmentsManagement() {
 
 					// close old segment and move it into partition.ClosedSegments
 					// TODO: check status
-					var _ = oldSegment.Close()
+					var _ = oldSegment.CloseSegment(collection)
 					partition.ClosedSegments = append(partition.ClosedSegments, oldSegment)
 				}
 			}

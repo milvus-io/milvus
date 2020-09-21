@@ -2,11 +2,9 @@ package reader
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"testing"
 
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -52,21 +50,21 @@ func TestIndex_BuildIndex(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Close segment, and build index
-	err = segment.Close()
+	err = segment.CloseSegment(collection)
 	assert.NoError(t, err)
 
 	// 7. Do search
-	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
-	var queryRawData = make([]float32, 0)
-	for i := 0; i < 16; i++ {
-		queryRawData = append(queryRawData, float32(i))
-	}
-	var vectorRecord = msgPb.VectorRowRecord{
-		FloatData: queryRawData,
-	}
-	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[N/2], &vectorRecord)
-	assert.NoError(t, searchErr)
-	fmt.Println(searchRes)
+	//var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	//var queryRawData = make([]float32, 0)
+	//for i := 0; i < 16; i++ {
+	//	queryRawData = append(queryRawData, float32(i))
+	//}
+	//var vectorRecord = msgPb.VectorRowRecord{
+	//	FloatData: queryRawData,
+	//}
+	//var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[N/2], &vectorRecord)
+	//assert.NoError(t, searchErr)
+	//fmt.Println(searchRes)
 
 	// 8. Destruct node, collection, and segment
 	partition.DeleteSegment(segment)

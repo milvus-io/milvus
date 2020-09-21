@@ -17,7 +17,7 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
 
-	// 2. Destruct node, collection, and segment
+	// 2. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -62,7 +62,7 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
-	// 6. Destruct node, collection, and segment
+	// 6. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -87,7 +87,7 @@ func TestSegment_SegmentDelete(t *testing.T) {
 	var err = segment.SegmentDelete(offset, &ids, &timestamps)
 	assert.NoError(t, err)
 
-	// 5. Destruct node, collection, and segment
+	// 5. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -147,7 +147,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 
-	// 7. Destruct node, collection, and segment
+	// 7. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -164,7 +164,7 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 	var offset = segment.SegmentPreInsert(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	// 3. Destruct node, collection, and segment
+	// 3. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -181,7 +181,7 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 	var offset = segment.SegmentPreDelete(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	// 3. Destruct node, collection, and segment
+	// 3. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -200,7 +200,7 @@ func TestSegment_GetStatus(t *testing.T) {
 	var status = segment.GetStatus()
 	assert.Equal(t, status, SegmentOpened)
 
-	// 3. Destruct node, collection, and segment
+	// 3. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -214,10 +214,10 @@ func TestSegment_Close(t *testing.T) {
 	var segment = partition.NewSegment(0)
 
 	// 2. Close segment
-	var err = segment.Close()
+	var err = segment.CloseSegment(collection)
 	assert.NoError(t, err)
 
-	// 3. Destruct node, collection, and segment
+	// 3. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -266,7 +266,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 	var rowCount = segment.GetRowCount()
 	assert.Equal(t, rowCount, int64(len(ids)))
 
-	// 7. Destruct node, collection, and segment
+	// 7. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -296,7 +296,7 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(0))
 
-	// 6. Destruct node, collection, and segment
+	// 6. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -345,7 +345,7 @@ func TestSegment_GetMemSize(t *testing.T) {
 	var memSize = segment.GetMemSize()
 	assert.Equal(t, memSize, uint64(1048714))
 
-	// 7. Destruct node, collection, and segment
+	// 7. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
@@ -353,9 +353,10 @@ func TestSegment_GetMemSize(t *testing.T) {
 
 func TestSegment_RealSchemaTest(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
-	// var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"field_1\"\n    type: INT64\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_2\"\n    type: FLOAT\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
-	// var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"fakevec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
-	var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  " +
+		"field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
+		"field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n" +
+		"\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection(0, "collection0", schemaString)
 	var partition = collection.NewPartition("partition0")
@@ -393,7 +394,7 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
-	// 6. Destruct node, collection, and segment
+	// 6. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
