@@ -13,6 +13,7 @@
 
 #include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -83,11 +84,13 @@ class VecIndex : public Index {
 
     faiss::ConcurrentBitsetPtr
     GetBlacklist() {
+        std::unique_lock<std::mutex> lck(mutex_);
         return bitset_;
     }
 
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
+        std::unique_lock<std::mutex> lck(mutex_);
         bitset_ = std::move(bitset_ptr);
     }
 
@@ -104,11 +107,8 @@ class VecIndex : public Index {
 
     size_t
     BlacklistSize() {
-        if (bitset_) {
-            return bitset_->size() * sizeof(uint8_t);
-        } else {
-            return 0;
-        }
+        std::unique_lock<std::mutex> lck(mutex_);
+        return bitset_ ? bitset_->size() : 0;
     }
 
     size_t
@@ -141,9 +141,13 @@ class VecIndex : public Index {
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
     std::vector<IDType> uids_;
     int64_t index_size_ = -1;
+
+ private:
+    // multi thread may access bitset_
+    std::mutex mutex_;
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

@@ -279,10 +279,15 @@ MemTable::ApplyDeletes() {
             if (index != nullptr) {
                 faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
                 if (blacklist == nullptr) {
+                    // to update and set the blacklist
                     blacklist = std::make_shared<faiss::ConcurrentBitset>(index->Count());
+                    indexes.emplace_back(index);
+                    blacklists.emplace_back(blacklist);
+                } else {
+                    // just to update the blacklist
+                    indexes.emplace_back(nullptr);
+                    blacklists.emplace_back(blacklist);
                 }
-                indexes.emplace_back(index);
-                blacklists.emplace_back(blacklist);
             }
         }
 
@@ -345,7 +350,9 @@ MemTable::ApplyDeletes() {
         }
 
         for (size_t i = 0; i < indexes.size(); ++i) {
-            indexes[i]->SetBlacklist(blacklists[i]);
+            if (indexes[i]) {
+                indexes[i]->SetBlacklist(blacklists[i]);
+            }
         }
 
         segment::Segment tmp_segment;
