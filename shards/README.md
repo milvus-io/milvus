@@ -54,7 +54,7 @@ Follow below steps to start a standalone Milvus instance with Mishards from sour
 3. Start Milvus server.
 
    ```shell
-   $ sudo nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/var/lib/milvus/db milvusdb/milvus:0.10.2-gpu-d081520-8a2393
+   $ sudo nvidia-docker run --rm -d -p 19530:19530 -v /tmp/milvus/db:/var/lib/milvus/db milvusdb/milvus:0.10.3-gpu-d091720-f962e8
    ```
 
 4. Update path permissions.

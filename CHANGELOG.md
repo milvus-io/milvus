@@ -4,6 +4,16 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.10.3 (TBD)
 ## Bug
+
+## Feature
+
+## Improvement
+-   \#3775 Improve search performance in the case that no item deleted
+
+## Task
+
+# Milvus 0.10.3 (TBD)
+## Bug
 -   \#3536 Release search task in time to avoid excessive memory usage
 -   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
 -   \#3742 If the GPU cache is too small, IVF_SQ8H using multiple GPUs will cause to crash
@@ -16,7 +26,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3254 Allow more choices for the parameter ‘m’ of IVF_PQ
 -   \#3606 The supported parameter 'nprobe' of IVF is expanded to [1, 16384]
 -   \#3639 The supported parameter 'topk' of searching is expanded to [1, 16384]
--   \#3775 Improve search performance in the case that no item deleted
+-   \#3784 Upgrade mishards up to v0.10.3
 
 ## Task
 
