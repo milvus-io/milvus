@@ -12,7 +12,17 @@ sudo docker run -it -v /home/zilliz:/home/zilliz -d registry.zilliz.com/milvus/m
 ```shell
 # 1. start milvus k8s pod
 cd milvus-helm/charts/milvus
-helm install --wait --timeout 300s --set image.repository=registry.zilliz.com/milvus/engine --set persistence.enabled=true --set image.tag=PR-3662-cpu-centos7-release --set image.pullPolicy=Always --set service.type=LoadBalancer -f ci/db_backend/mysql_cpu_values.yaml -f ci/filebeat/values.yaml --namespace milvus milvus-test .
+helm install --wait --timeout 300s \
+  --set image.repository=registry.zilliz.com/milvus/engine \
+  --set persistence.enabled=true \
+  --set image.tag=PR-3818-gpu-centos7-release \
+  --set image.pullPolicy=Always \
+  --set service.type=ClusterIP \
+  -f ci/db_backend/mysql_gpu_values.yaml \
+  -f ci/filebeat/values.yaml \
+  -f test.yaml \
+  --namespace milvus \
+  milvus-ci-pr-3818-1-single-centos7-gpu .
 
 # 2. remove milvus k8s pod
 helm uninstall -n milvus milvus-test
