@@ -450,9 +450,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   long* tmp_i = hostOutIndices.data();
 
 
-
-
-
   quantizer_->query(queries,
                     coarseBitset,
                     nprobe,
@@ -487,6 +484,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                  outIndices,
                  resources_);
 
+  fromDevice<float,2>(outDistances, tmp_d, defaultStream);
+  fromDevice<long,2>(outIndices, tmp_i, defaultStream);
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
