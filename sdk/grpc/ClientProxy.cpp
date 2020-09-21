@@ -407,24 +407,32 @@ ClientProxy::Disconnect() {
 Status
 ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
     try {
-        ::milvus::grpc::Mapping grpc_mapping;
-        grpc_mapping.set_collection_name(mapping.collection_name);
-        for (auto& field : mapping.fields) {
-            auto grpc_field = grpc_mapping.mutable_schema()->add_field_metas();
-            grpc_field->set_field_name(field->field_name);
-            grpc_field->set_type((::milvus::grpc::DataType)field->field_type);
-            grpc_field->set_dim(field->dim);
+//        ::milvus::grpc::Mapping grpc_mapping;
+//        grpc_mapping.set_collection_name(mapping.collection_name);
+//        for (auto& field : mapping.fields) {
+//            auto grpc_field = grpc_mapping.add_fields();
+//            grpc_field->set_name(field->field_name);
+//            grpc_field->set_type((::milvus::grpc::DataType)field->field_type);
+//            JSON json_index_param = JSON::parse(field->index_params);
+//            for (auto& json_param : json_index_param.items()) {
+//                auto grpc_index_param = grpc_field->add_index_params();
+//                grpc_index_param->set_key(json_param.key());
+//                grpc_index_param->set_value(json_param.value());
+//            }
+//
+//            auto grpc_extra_param = grpc_field->add_extra_params();
+//            grpc_extra_param->set_key(EXTRA_PARAM_KEY);
+//            grpc_extra_param->set_value(field->extra_params);
+//        }
+//        auto grpc_param = grpc_mapping.add_extra_params();
+//        grpc_param->set_key(EXTRA_PARAM_KEY);
+//        grpc_param->set_value(extra_params);
 
-        }
-        auto grpc_param = grpc_mapping.add_extra_params();
-        grpc_param->set_key(EXTRA_PARAM_KEY);
-        grpc_param->set_value(extra_params);
-
-        return client_ptr_->CreateCollection(grpc_mapping);
+//        return client_ptr_->CreateCollection(grpc_mapping);
+          return Status::OK();
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to create collection: " + std::string(ex.what()));
     }
-    return Status::OK();
 }
 
 Status

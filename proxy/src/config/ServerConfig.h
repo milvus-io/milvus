@@ -82,15 +82,6 @@ struct ServerConfig {
       Integer  port{6000};
     }master;
 
-    struct Etcd{
-      String address{"localhost"};
-      Integer port{2379};
-      String rootpath{"by-dev"};
-    }etcd;
-
-    struct TimeSync{
-      Integer interval{10};
-    }timesync;
 
     struct Engine {
         Integer build_index_threshold{4096};

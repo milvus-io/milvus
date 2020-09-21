@@ -41,7 +41,6 @@ using ResultIds = std::vector<idx_t>;
 using ResultDistances = std::vector<distance_t>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
 enum class DataType {
     NONE = 0,
     BOOL = 1,

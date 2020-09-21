@@ -9,28 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <getopt.h>
-#include <libgen.h>
-#include <cstring>
-#include <string>
+#include "examples/utils/TimeRecorder.h"
 
-#include "interface/ConnectionImpl.h"
-#include "ip.h"
+#include <iostream>
 
-int
-main(int argc, char *argv[]) {
-  auto client = milvus::ConnectionImpl();
-  milvus::ConnectParam connect_param;
-  connect_param.ip_address = IP;
-  connect_param.port = "19530";
-  client.Connect(connect_param);
+namespace milvus_sdk {
 
-  std::vector<int64_t> delete_ids;
-  delete_ids.push_back(1);
-  delete_ids.push_back(2);
-  delete_ids.push_back(3);
-  client.DeleteEntityByID("collection0", delete_ids);
-
-  return 0;
+TimeRecorder::TimeRecorder(const std::string& title) : title_(title) {
+    start_ = std::chrono::system_clock::now();
+    std::cout << title_ << " begin..." << std::endl;
 }
 
+TimeRecorder::~TimeRecorder() {
+    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+    int64_t span = (std::chrono::duration_cast<std::chrono::milliseconds>(end - start_)).count();
+    std::cout << title_ << " totally cost: " << span << " ms" << std::endl;
+}
+
+}  // namespace milvus_sdk

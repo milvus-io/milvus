@@ -177,13 +177,6 @@ IsOpened(CSegmentBase c_segment) {
   return status == milvus::dog_segment::SegmentBase::SegmentState::Open;
 }
 
-long int
-GetMemoryUsageInBytes(CSegmentBase c_segment) {
-  auto segment = (milvus::dog_segment::SegmentBase*)c_segment;
-  auto mem_size = segment->GetMemoryUsageInBytes();
-  return mem_size;
-}
-
 //////////////////////////////////////////////////////////////////
 
 long int

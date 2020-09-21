@@ -161,10 +161,6 @@ class Schema {
         }
     }
 
-    const std::vector<FieldMeta>& get_fields() {
-      return fields_;
-    }
-
     const FieldMeta&
     operator[](const std::string& field_name) const {
         auto offset_iter = offsets_.find(field_name);

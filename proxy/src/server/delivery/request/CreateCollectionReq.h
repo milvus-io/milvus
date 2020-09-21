@@ -22,18 +22,21 @@ namespace server {
 
 class CreateCollectionReq : public BaseReq {
  public:
-  static BaseReqPtr
-  Create(const ContextPtr &context, const ::milvus::grpc::Mapping *request);
+    static BaseReqPtr
+    Create(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+           milvus::json& extra_params);
 
  protected:
-  CreateCollectionReq(const ContextPtr &context, const ::milvus::grpc::Mapping *request);
+    CreateCollectionReq(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                        milvus::json& extra_params);
 
-  Status
-  OnExecute() override;
+    Status
+    OnExecute() override;
 
  private:
-  const std::string collection_name_;
-  const ::milvus::grpc::Mapping *request_;
+    const std::string collection_name_;
+    std::unordered_map<std::string, FieldSchema> fields_;
+    milvus::json extra_params_;
 };
 
 }  // namespace server

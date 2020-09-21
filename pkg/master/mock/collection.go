@@ -1,11 +1,13 @@
 package mock
 
 import (
+	"fmt"
 	"time"
 
 	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	messagepb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
 	jsoniter "github.com/json-iterator/go"
 )
 
@@ -23,9 +25,9 @@ type Collection struct {
 }
 
 type FieldMeta struct {
-	FieldName string             `json:"field_name"`
-	Type      messagepb.DataType `json:"type"`
-	DIM       int64              `json:"dimension"`
+	FieldName string `json:"field_name"`
+	Type      string `json:"type"`
+	DIM       int64  `json:"dimension"`
 }
 
 func GrpcMarshal(c *Collection) *Collection {
@@ -35,16 +37,6 @@ func GrpcMarshal(c *Collection) *Collection {
 	pbSchema := &messagepb.Schema{
 		FieldMetas: []*messagepb.FieldMeta{},
 	}
-	schemaSlice := []*messagepb.FieldMeta{}
-	for _, v := range c.Schema {
-		newpbMeta := &messagepb.FieldMeta{
-			FieldName: v.FieldName,
-			Type:      v.Type,
-			Dim:       v.DIM,
-		}
-		schemaSlice = append(schemaSlice, newpbMeta)
-	}
-	pbSchema.FieldMetas = schemaSlice
 	grpcCollection := &pb.Collection{
 		Id:            c.ID,
 		Name:          c.Name,
@@ -53,24 +45,27 @@ func GrpcMarshal(c *Collection) *Collection {
 		SegmentIds:    c.SegmentIDs,
 		PartitionTags: c.PartitionTags,
 	}
-	out := proto.MarshalTextString(grpcCollection)
-	c.GrpcMarshalString = out
+	out, err := proto.Marshal(grpcCollection)
+	if err != nil {
+		fmt.Println(err)
+	}
+	c.GrpcMarshalString = string(out)
 	return c
 }
 
-func NewCollection(id uint64, name string, createTime time.Time,
-	schema []*messagepb.FieldMeta, sIds []uint64, ptags []string) Collection {
+func NewCollection(id uuid.UUID, name string, createTime time.Time,
+	schema []*messagepb.FieldMeta, sIds []uuid.UUID, ptags []string) Collection {
 
 	segementIDs := []uint64{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
-		newSchema = append(newSchema, FieldMeta{FieldName: v.FieldName, Type: v.Type, DIM: v.Dim})
+		newSchema = append(newSchema, FieldMeta{FieldName: v.FieldName, Type: v.Type.String(), DIM: v.Dim})
 	}
 	for _, sid := range sIds {
-		segementIDs = append(segementIDs, sid)
+		segementIDs = append(segementIDs, uint64(sid.ID()))
 	}
 	return Collection{
-		ID:            id,
+		ID:            uint64(id.ID()),
 		Name:          name,
 		CreateTime:    uint64(createTime.Unix()),
 		Schema:        newSchema,

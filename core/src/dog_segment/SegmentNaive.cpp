@@ -19,20 +19,8 @@ TestABI() {
 std::unique_ptr<SegmentBase>
 CreateSegment(SchemaPtr schema, IndexMetaPtr remote_index_meta) {
     if (remote_index_meta == nullptr) {
-        int dim = 0;
-        std::string index_field_name;
-
-        for (auto& field: schema->get_fields()) {
-            if (field.get_data_type() == DataType::VECTOR_FLOAT) {
-                dim = field.get_dim();
-                index_field_name = field.get_name();
-            }
-        }
-
-        assert(dim != 0);
-        assert(!index_field_name.empty());
-
         auto index_meta = std::make_shared<IndexMeta>(schema);
+        auto dim = schema->operator[]("fakevec").get_dim();
         // TODO: this is merge of query conf and insert conf
         // TODO: should be splitted into multiple configs
         auto conf = milvus::knowhere::Config{
@@ -44,7 +32,7 @@ CreateSegment(SchemaPtr schema, IndexMetaPtr remote_index_meta) {
                 {milvus::knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
                 {milvus::knowhere::meta::DEVICEID,      0},
         };
-        index_meta->AddEntry("fakeindex", index_field_name, knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
+        index_meta->AddEntry("fakeindex", "fakevec", knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
                              knowhere::IndexMode::MODE_CPU, conf);
         remote_index_meta = index_meta;
     }
@@ -153,11 +141,7 @@ Status
 SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t *uids_raw, const Timestamp *timestamps_raw,
                      const DogDataChunk &entities_raw) {
     assert(entities_raw.count == size);
-    if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
-      std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
-          ", schema length = " + std::to_string(schema_->get_total_sizeof());
-        throw std::runtime_error(msg);
-    }
+    assert(entities_raw.sizeof_per_row == schema_->get_total_sizeof());
     auto raw_data = reinterpret_cast<const char *>(entities_raw.raw_data);
     //    std::vector<char> entities(raw_data, raw_data + size * len_per_row);
 

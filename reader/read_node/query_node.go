@@ -102,7 +102,6 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 
 func (node *QueryNode) Close() {
 	node.messageClient.Close()
-	node.kvBase.Close()
 }
 
 func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.MessageClient) *QueryNode {
@@ -157,12 +156,12 @@ func (node *QueryNode) QueryNodeDataInit() {
 	node.insertData = insertData
 }
 
-func (node *QueryNode) NewCollection(collectionID uint64, collectionName string, schemaConfig string) *Collection {
+func (node *QueryNode) NewCollection(collectionName string, schemaConfig string) *Collection {
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)
 
-	var newCollection = &Collection{CollectionPtr: collection, CollectionName: collectionName, CollectionID: collectionID}
+	var newCollection = &Collection{CollectionPtr: collection, CollectionName: collectionName}
 	node.Collections = append(node.Collections, newCollection)
 
 	return newCollection
@@ -185,7 +184,7 @@ func (node *QueryNode) PrepareBatchMsg() []int {
 func (node *QueryNode) InitQueryNodeCollection() {
 	// TODO: remove hard code, add collection creation request
 	// TODO: error handle
-	var newCollection = node.NewCollection(0, "collection1", "fakeSchema")
+	var newCollection = node.NewCollection("collection1", "fakeSchema")
 	var newPartition = newCollection.NewPartition("partition1")
 	// TODO: add segment id
 	var segment = newPartition.NewSegment(0)

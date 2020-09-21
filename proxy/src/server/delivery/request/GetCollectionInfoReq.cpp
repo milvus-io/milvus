@@ -16,36 +16,30 @@
 // #include "server/web_impl/Constants.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "server/MetaWrapper.h"
 
 #include <utility>
 
 namespace milvus {
 namespace server {
 
-GetCollectionInfoReq::GetCollectionInfoReq(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& response)
+GetCollectionInfoReq::GetCollectionInfoReq(const ContextPtr& context, const std::string& collection_name,
+                                           CollectionSchema& collection_schema)
     : BaseReq(context, ReqType::kGetCollectionInfo),
-      collection_name_(request->collection_name()),
-      collection_schema_(response) {
+      collection_name_(collection_name),
+      collection_schema_(collection_schema) {
 }
 
 BaseReqPtr
-GetCollectionInfoReq::Create(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& response) {
-    return std::shared_ptr<BaseReq>(new GetCollectionInfoReq(context, request, response));
+GetCollectionInfoReq::Create(const ContextPtr& context, const std::string& collection_name,
+                             CollectionSchema& collection_schema) {
+    return std::shared_ptr<BaseReq>(new GetCollectionInfoReq(context, collection_name, collection_schema));
 }
 
 Status
 GetCollectionInfoReq::OnExecute() {
-  try {
-    auto schema = MetaWrapper::GetInstance().AskCollectionSchema(collection_name_);
-    collection_schema_.mutable_schema()->CopyFrom(schema);
-    collection_schema_.set_collection_name(collection_schema_.collection_name());
-    return Status::OK();
-  }
-  catch (const std::exception& e){
-    return Status{DB_ERROR, e.what()};
-  }
 
+
+    return Status::OK();
 }
 
 }  // namespace server

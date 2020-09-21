@@ -11,12 +11,12 @@
 
 master:
     address: localhost
-    port: 53100
+    port: 6000
 
 etcd:
   address: localhost
   port: 2379
-  rootpath: by-dev/
+  rootpath: suvlim
   segthreshold: 10000
 
 timesync: 

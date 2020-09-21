@@ -16,7 +16,6 @@
 #include "utils/TimeRecorder.h"
 #include "server/delivery/ReqScheduler.h"
 #include "server/MessageWrapper.h"
-#include "server/MetaWrapper.h"
 
 #include <memory>
 #include <string>
@@ -45,13 +44,7 @@ Status
 InsertReq::OnExecute() {
   LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
   auto &msg_client = MessageWrapper::GetInstance().MessageClient();
-  auto segment_id = [](const std::string &collection_name,
-                       uint64_t channel_id,
-                       uint64_t timestamp) {
-      return MetaWrapper::GetInstance().AskSegmentId(collection_name, channel_id, timestamp);
-  };
-  Status status;
-  status = msg_client->SendMutMessage(*insert_param_, timestamp_, segment_id);
+  Status status = msg_client->SendMutMessage(*insert_param_, timestamp_);
   return status;
 }
 

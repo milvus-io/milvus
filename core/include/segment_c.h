@@ -73,9 +73,6 @@ BuildIndex(CSegmentBase c_segment);
 bool
 IsOpened(CSegmentBase c_segment);
 
-long int
-GetMemoryUsageInBytes(CSegmentBase c_segment);
-
 //////////////////////////////////////////////////////////////////
 
 long int

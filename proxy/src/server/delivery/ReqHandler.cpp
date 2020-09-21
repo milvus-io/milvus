@@ -43,8 +43,9 @@ namespace milvus {
 namespace server {
 
 Status
-ReqHandler::CreateCollection(const ContextPtr& context, const ::milvus::grpc::Mapping *request) {
-    BaseReqPtr req_ptr = CreateCollectionReq::Create(context, request);
+ReqHandler::CreateCollection(const ContextPtr& context, const std::string& collection_name, FieldsType& fields,
+                             milvus::json& json_param) {
+    BaseReqPtr req_ptr = CreateCollectionReq::Create(context, collection_name, fields, json_param);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
@@ -71,8 +72,9 @@ ReqHandler::ListCollections(const ContextPtr& context, std::vector<std::string>&
 }
 
 Status
-ReqHandler::GetCollectionInfo(const ContextPtr& context, const ::milvus::grpc::CollectionName *request, ::milvus::grpc::Mapping& response) {
-    BaseReqPtr req_ptr = GetCollectionInfoReq::Create(context, request, response);
+ReqHandler::GetCollectionInfo(const ContextPtr& context, const std::string& collection_name,
+                              CollectionSchema& collection_schema) {
+    BaseReqPtr req_ptr = GetCollectionInfoReq::Create(context, collection_name, collection_schema);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }

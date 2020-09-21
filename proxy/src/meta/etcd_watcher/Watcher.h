@@ -30,10 +30,10 @@ class AsyncWatchAction {
   void CancelWatch();
  private:
   // Status status;
-  ::grpc::ClientContext context_;
-  ::grpc::CompletionQueue cq_;
+  grpc::ClientContext context_;
+  grpc::CompletionQueue cq_;
   etcdserverpb::WatchResponse reply_;
-  std::unique_ptr<::grpc::ClientAsyncReaderWriter<etcdserverpb::WatchRequest, etcdserverpb::WatchResponse>> stream_;
+  std::unique_ptr<grpc::ClientAsyncReaderWriter<etcdserverpb::WatchRequest, etcdserverpb::WatchResponse>> stream_;
   std::atomic<bool> cancled_ = false;
 };
 }

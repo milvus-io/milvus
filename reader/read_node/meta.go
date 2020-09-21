@@ -3,36 +3,36 @@ package reader
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/pkg/master/mock"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
 	"github.com/czs007/suvlim/conf"
 	"github.com/czs007/suvlim/pkg/master/kv"
-	"github.com/czs007/suvlim/pkg/master/mock"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 const (
 	CollectonPrefix = "/collection/"
-	SegmentPrefix   = "/segment/"
+	SegmentPrefix = "/segment/"
 )
 
+
 func GetCollectionObjId(key string) string {
-	prefix := conf.Config.Etcd.Rootpath + CollectonPrefix
+	prefix  := conf.Config.Etcd.Rootpath + CollectonPrefix
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjId(key string) string {
-	prefix := conf.Config.Etcd.Rootpath + SegmentPrefix
+	prefix  := conf.Config.Etcd.Rootpath + SegmentPrefix
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	prefix := conf.Config.Etcd.Rootpath + CollectonPrefix
+	prefix  := conf.Config.Etcd.Rootpath + CollectonPrefix
 	prefix = strings.TrimSpace(prefix)
 	println("prefix is :$", prefix)
 	index := strings.Index(key, prefix)
@@ -41,31 +41,31 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	prefix := conf.Config.Etcd.Rootpath + SegmentPrefix
+	prefix  := conf.Config.Etcd.Rootpath + SegmentPrefix
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
 	return index == 0
 }
 
-func printCollectionStruct(obj *mock.Collection) {
+func printCollectionStruct(obj *mock.Collection){
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)
 	typeOfS := v.Type()
 
-	for i := 0; i < v.NumField(); i++ {
-		if typeOfS.Field(i).Name == "GrpcMarshalString" {
+	for i := 0; i< v.NumField(); i++ {
+		if typeOfS.Field(i).Name == "GrpcMarshalString"{
 			continue
 		}
 		fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
 	}
 }
 
-func printSegmentStruct(obj *mock.Segment) {
+func printSegmentStruct(obj *mock.Segment){
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)
 	typeOfS := v.Type()
 
-	for i := 0; i < v.NumField(); i++ {
+	for i := 0; i< v.NumField(); i++ {
 		fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
 	}
 }
@@ -78,10 +78,6 @@ func (node *QueryNode) processCollectionCreate(id string, value string) {
 		println(err.Error())
 	}
 	printCollectionStruct(collection)
-	newCollection := node.NewCollection(collection.ID, collection.Name, collection.GrpcMarshalString)
-	for _, partitionTag := range collection.PartitionTags {
-		newCollection.NewPartition(partitionTag)
-	}
 }
 
 func (node *QueryNode) processSegmentCreate(id string, value string) {
@@ -92,25 +88,17 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 		println(err.Error())
 	}
 	printSegmentStruct(segment)
-	collection := node.GetCollectionByID(segment.CollectionID)
-	if collection != nil {
-		partition := collection.GetPartitionByName(segment.PartitionTag)
-		if partition != nil {
-			partition.NewSegment(int64(segment.SegmentID)) // todo change all to uint64
-		}
-	}
-	// segment.CollectionName
 }
 
 func (node *QueryNode) processCreate(key string, msg string) {
 	println("process create", key, ":", msg)
-	if isCollectionObj(key) {
+	if isCollectionObj(key){
 		objID := GetCollectionObjId(key)
 		node.processCollectionCreate(objID, msg)
-	} else if isSegmentObj(key) {
+	}else if isSegmentObj(key){
 		objID := GetSegmentObjId(key)
 		node.processSegmentCreate(objID, msg)
-	} else {
+	}else {
 		println("can not process create msg:", key)
 	}
 }
@@ -124,10 +112,6 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 		println(err.Error())
 	}
 	printSegmentStruct(segment)
-	seg, err := node.GetSegmentBySegmentID(int64(segment.SegmentID)) // todo change  to uint64
-	if seg != nil {
-		seg.SegmentCloseTime = segment.CloseTimeStamp
-	}
 }
 
 func (node *QueryNode) processCollectionModify(id string, value string) {
@@ -140,37 +124,37 @@ func (node *QueryNode) processCollectionModify(id string, value string) {
 	printCollectionStruct(collection)
 }
 
-func (node *QueryNode) processModify(key string, msg string) {
+func (node *QueryNode) processModify(key string, msg string){
 	println("process modify")
-	if isCollectionObj(key) {
+	if isCollectionObj(key){
 		objID := GetCollectionObjId(key)
 		node.processCollectionModify(objID, msg)
-	} else if isSegmentObj(key) {
+	}else if isSegmentObj(key){
 		objID := GetSegmentObjId(key)
 		node.processSegmentModify(objID, msg)
-	} else {
+	}else {
 		println("can not process modify msg:", key)
 	}
 }
 
-func (node *QueryNode) processSegmentDelete(id string) {
+
+func (node *QueryNode) processSegmentDelete(id string){
 	println("Delete segment: ", id)
 
 }
-
-func (node *QueryNode) processCollectionDelete(id string) {
+func (node *QueryNode) processCollectionDelete(id string){
 	println("Delete collection: ", id)
 }
 
-func (node *QueryNode) processDelete(key string) {
+func (node *QueryNode) processDelete(key string){
 	println("process delete")
-	if isCollectionObj(key) {
+	if isCollectionObj(key){
 		objID := GetCollectionObjId(key)
 		node.processCollectionDelete(objID)
-	} else if isSegmentObj(key) {
+	}else if isSegmentObj(key){
 		objID := GetSegmentObjId(key)
 		node.processSegmentDelete(objID)
-	} else {
+	}else {
 		println("can not process delete msg:", key)
 	}
 }
@@ -180,8 +164,6 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 	if err != nil {
 		return err
 	}
-	println("processResp!!!!!\n")
-
 	for _, ev := range resp.Events {
 		if ev.IsCreate() {
 			key := string(ev.Kv.Key)
@@ -203,7 +185,7 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 
 func (node *QueryNode) loadCollections() error {
 	keys, values := node.kvBase.LoadWithPrefix(CollectonPrefix)
-	for i := range keys {
+	for i:= range keys{
 		objID := GetCollectionObjId(keys[i])
 		node.processCollectionCreate(objID, values[i])
 	}
@@ -211,7 +193,7 @@ func (node *QueryNode) loadCollections() error {
 }
 func (node *QueryNode) loadSegments() error {
 	keys, values := node.kvBase.LoadWithPrefix(SegmentPrefix)
-	for i := range keys {
+	for i:= range keys{
 		objID := GetSegmentObjId(keys[i])
 		node.processSegmentCreate(objID, values[i])
 	}
@@ -228,7 +210,7 @@ func (node *QueryNode) InitFromMeta() error {
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	//defer cli.Close()
+	defer cli.Close()
 	node.kvBase = kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
 	node.loadCollections()
 	node.loadSegments()

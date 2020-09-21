@@ -34,11 +34,6 @@ func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
 	}
 }
 
-func (kv *EtcdKVBase) Close(){
-	kv.client.Close()
-}
-
-
 func (kv *EtcdKVBase) LoadWithPrefix(key string) ( []string, []string) {
 	key = path.Join(kv.rootPath, key)
 	println("in loadWithPrefix,", key)
