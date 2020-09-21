@@ -5,16 +5,10 @@ import logging
 from multiprocessing import Pool, Process
 import pytest
 from utils import *
+from constants import const
 
-collection_id = "test_flush"
 DELETE_TIMEOUT = 60
-nprobe = 1
-tag = "1970_01_01"
-top_k = 1
-tag = "partition_tag"
 field_name = "float_vector"
-entity = gen_entities(1)
-entities = gen_entities(nb)
 raw_vector, binary_entity = gen_binary_entities(1)
 raw_vectors, binary_entities = gen_binary_entities(nb)
 default_fields = gen_default_fields()
@@ -73,7 +67,7 @@ class TestFlushBase:
         method: flush collection with no vectors
         expected: no error raised
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         assert len(ids) == nb
         status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
@@ -87,15 +81,13 @@ class TestFlushBase:
         method: add entities into partition in collection, flush serveral times
         expected: the length of ids and the collection row count
         '''
-        # vector = gen_vector(nb, dim)
-        connect.create_partition(id_collection, tag)
-        # vectors = gen_vectors(nb, dim)
+        connect.create_partition(id_collection, const.default_tag)
         ids = [i for i in range(nb)]
-        ids = connect.insert(id_collection, entities, ids)
+        ids = connect.insert(id_collection, const.default_entities, ids)
         connect.flush([id_collection])
         res_count = connect.count_entities(id_collection)
         assert res_count == nb
-        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
         assert len(ids) == nb
         connect.flush([id_collection])
         res_count = connect.count_entities(id_collection)
@@ -106,14 +98,13 @@ class TestFlushBase:
         method: add entities into partitions in collection, flush one
         expected: the length of ids and the collection row count
         '''
-        # vectors = gen_vectors(nb, dim)
         tag_new = gen_unique_str()
-        connect.create_partition(id_collection, tag)
+        connect.create_partition(id_collection, const.default_tag)
         connect.create_partition(id_collection, tag_new)
         ids = [i for i in range(nb)]
-        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
         connect.flush([id_collection])
-        ids = connect.insert(id_collection, entities, ids, partition_tag=tag_new)
+        ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=tag_new)
         connect.flush([id_collection])
         res = connect.count_entities(id_collection)
         assert res == 2 * nb
@@ -126,12 +117,11 @@ class TestFlushBase:
         collection_new = gen_unique_str()
         default_fields = gen_default_fields(False)
         connect.create_collection(collection_new, default_fields)
-        connect.create_partition(id_collection, tag)
-        connect.create_partition(collection_new, tag)
-        # vectors = gen_vectors(nb, dim)
+        connect.create_partition(id_collection, const.default_tag)
+        connect.create_partition(collection_new, const.default_tag)
         ids = [i for i in range(nb)]
-        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
-        ids = connect.insert(collection_new, entities, ids, partition_tag=tag)
+        ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
+        ids = connect.insert(collection_new, const.default_entities, ids, partition_tag=const.default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.count_entities(id_collection)
@@ -154,14 +144,13 @@ class TestFlushBase:
             "auto_id": False
         }
         connect.create_collection(collection_new, fields)
-        connect.create_partition(id_collection, tag)
-        connect.create_partition(collection_new, tag)
-        # vectors = gen_vectors(nb, dim)
+        connect.create_partition(id_collection, const.default_tag)
+        connect.create_partition(collection_new, const.default_tag)
         entities_new = gen_entities_by_fields(fields["fields"], nb_new, dim)
         ids = [i for i in range(nb)]
         ids_new = [i for i in range(nb_new)]
-        ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
-        ids = connect.insert(collection_new, entities_new, ids_new, partition_tag=tag)
+        ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
+        ids = connect.insert(collection_new, entities_new, ids_new, partition_tag=const.default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.count_entities(id_collection)
@@ -174,8 +163,7 @@ class TestFlushBase:
         method: add entities, flush serveral times
         expected: no error raised
         '''
-        # vectors = gen_vectors(nb, dim)
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         for i in range(10):
             connect.flush([collection])
         res = connect.count_entities(collection)
@@ -190,9 +178,8 @@ class TestFlushBase:
         method: add entities
         expected: no error raised
         '''
-        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
-        ids = connect.insert(id_collection, entities, ids)
+        ids = connect.insert(id_collection, const.default_entities, ids)
         timeout = 20
         start_time = time.time()
         while (time.time() - start_time < timeout):
@@ -218,12 +205,11 @@ class TestFlushBase:
         method: add entities, with same ids, count(same ids) < 15, > 15
         expected: the length of ids and the collection row count
         '''
-        # vectors = gen_vectors(nb, dim)
         ids = [i for i in range(nb)]
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        ids = connect.insert(id_collection, entities, ids)
+        ids = connect.insert(id_collection, const.default_entities, ids)
         connect.flush([id_collection])
         res = connect.count_entities(id_collection)
         assert res == nb
@@ -233,8 +219,7 @@ class TestFlushBase:
         method: delete entities, flush serveral times
         expected: no error raised
         '''
-        # vectors = gen_vectors(nb, dim)
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         status = connect.delete_entity_by_id(collection, [ids[-1]])
         assert status.OK()
         for i in range(10):
@@ -253,7 +238,7 @@ class TestFlushBase:
         '''
         ids = []
         for i in range(5):
-            tmp_ids = connect.insert(collection, entities)
+            tmp_ids = connect.insert(collection, const.default_entities)
             connect.flush([collection])
             ids.extend(tmp_ids)
         disable_flush(connect)
@@ -298,21 +283,19 @@ class TestFlushAsync:
         status = future.result()
 
     def test_flush_async_long(self, connect, collection):
-        # vectors = gen_vectors(nb, dim)
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, const.default_entities)
         future = connect.flush([collection], _async=True)
         status = future.result()
 
     def test_flush_async_long_drop_collection(self, connect, collection):
-        # vectors = gen_vectors(nb, dim)
         for i in range(5):
-            ids = connect.insert(collection, entities)
+            ids = connect.insert(collection, const.default_entities)
         future = connect.flush([collection], _async=True)
         logging.getLogger().info("DROP")
         connect.drop_collection(collection)
 
     def test_flush_async(self, connect, collection):
-        connect.insert(collection, entities)
+        connect.insert(collection, const.default_entities)
         logging.getLogger().info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
         logging.getLogger().info("after")
