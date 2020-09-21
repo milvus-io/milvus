@@ -21,3 +21,9 @@ DeleteCollection(CCollection collection) {
   std::cout << "delete collection " << col->get_collection_name() << std::endl;
   delete col;
 }
+
+void UpdateIndexs(CCollection c_collection, const char *index_string) {
+  auto c = (milvus::dog_segment::Collection*)c_collection;
+  std::string s(index_string);
+  c->CreateIndex(s);
+}

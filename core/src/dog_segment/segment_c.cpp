@@ -12,7 +12,6 @@ CSegmentBase
 NewSegment(CPartition partition, unsigned long segment_id) {
   auto p = (milvus::dog_segment::Partition*)partition;
 
-  // TODO: remove hard code null index ptr
   auto segment = milvus::dog_segment::CreateSegment(p->get_schema());
 
   // TODO: delete print
