@@ -17,7 +17,7 @@ helm install --wait --timeout 300s \
   --set persistence.enabled=true \
   --set image.tag=PR-3818-gpu-centos7-release \
   --set image.pullPolicy=Always \
-  --set service.type=ClusterIP \
+  --set service.type=LoadBalancer \
   -f ci/db_backend/mysql_gpu_values.yaml \
   -f ci/filebeat/values.yaml \
   -f test.yaml \
