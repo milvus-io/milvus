@@ -31,6 +31,7 @@
 #include <google/protobuf/message.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
+#include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "message.pb.h"
 // @@protoc_insertion_point(includes)
@@ -73,6 +74,33 @@ template<> ::masterpb::SegmentStat* Arena::CreateMaybeMessage<::masterpb::Segmen
 PROTOBUF_NAMESPACE_CLOSE
 namespace masterpb {
 
+enum SegmentStatus : int {
+  OPENED = 0,
+  CLOSED = 1,
+  INDEXING = 2,
+  INDEXED = 3,
+  SegmentStatus_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  SegmentStatus_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool SegmentStatus_IsValid(int value);
+constexpr SegmentStatus SegmentStatus_MIN = OPENED;
+constexpr SegmentStatus SegmentStatus_MAX = INDEXED;
+constexpr int SegmentStatus_ARRAYSIZE = SegmentStatus_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentStatus_descriptor();
+template<typename T>
+inline const std::string& SegmentStatus_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, SegmentStatus>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function SegmentStatus_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    SegmentStatus_descriptor(), enum_t_value);
+}
+inline bool SegmentStatus_Parse(
+    const std::string& name, SegmentStatus* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<SegmentStatus>(
+    SegmentStatus_descriptor(), name, value);
+}
 // ===================================================================
 
 class Collection :
@@ -403,6 +431,8 @@ class Segment :
     kChannelEndFieldNumber = 5,
     kOpenTimestampFieldNumber = 6,
     kCloseTimestampFieldNumber = 7,
+    kRowsFieldNumber = 10,
+    kStatusFieldNumber = 9,
   };
   // string partition_tag = 3;
   void clear_partition_tag();
@@ -456,6 +486,16 @@ class Segment :
   ::PROTOBUF_NAMESPACE_ID::uint64 close_timestamp() const;
   void set_close_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // int64 rows = 10;
+  void clear_rows();
+  ::PROTOBUF_NAMESPACE_ID::int64 rows() const;
+  void set_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // .masterpb.SegmentStatus status = 9;
+  void clear_status();
+  ::masterpb::SegmentStatus status() const;
+  void set_status(::masterpb::SegmentStatus value);
+
   // @@protoc_insertion_point(class_scope:masterpb.Segment)
  private:
   class _Internal;
@@ -469,6 +509,8 @@ class Segment :
   ::PROTOBUF_NAMESPACE_ID::int32 channel_end_;
   ::PROTOBUF_NAMESPACE_ID::uint64 open_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::uint64 close_timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::int64 rows_;
+  int status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_master_2eproto;
 };
@@ -590,6 +632,8 @@ class SegmentStat :
     kSegmentIdFieldNumber = 1,
     kMemorySizeFieldNumber = 2,
     kMemoryRateFieldNumber = 3,
+    kStatusFieldNumber = 4,
+    kRowsFieldNumber = 5,
   };
   // uint64 segment_id = 1;
   void clear_segment_id();
@@ -606,6 +650,16 @@ class SegmentStat :
   float memory_rate() const;
   void set_memory_rate(float value);
 
+  // .masterpb.SegmentStatus status = 4;
+  void clear_status();
+  ::masterpb::SegmentStatus status() const;
+  void set_status(::masterpb::SegmentStatus value);
+
+  // int64 rows = 5;
+  void clear_rows();
+  ::PROTOBUF_NAMESPACE_ID::int64 rows() const;
+  void set_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:masterpb.SegmentStat)
  private:
   class _Internal;
@@ -614,6 +668,8 @@ class SegmentStat :
   ::PROTOBUF_NAMESPACE_ID::uint64 segment_id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 memory_size_;
   float memory_rate_;
+  int status_;
+  ::PROTOBUF_NAMESPACE_ID::int64 rows_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_master_2eproto;
 };
@@ -1064,6 +1120,34 @@ inline void Segment::set_allocated_collection_name(std::string* collection_name)
   // @@protoc_insertion_point(field_set_allocated:masterpb.Segment.collection_name)
 }
 
+// .masterpb.SegmentStatus status = 9;
+inline void Segment::clear_status() {
+  status_ = 0;
+}
+inline ::masterpb::SegmentStatus Segment::status() const {
+  // @@protoc_insertion_point(field_get:masterpb.Segment.status)
+  return static_cast< ::masterpb::SegmentStatus >(status_);
+}
+inline void Segment::set_status(::masterpb::SegmentStatus value) {
+  
+  status_ = value;
+  // @@protoc_insertion_point(field_set:masterpb.Segment.status)
+}
+
+// int64 rows = 10;
+inline void Segment::clear_rows() {
+  rows_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 Segment::rows() const {
+  // @@protoc_insertion_point(field_get:masterpb.Segment.rows)
+  return rows_;
+}
+inline void Segment::set_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  rows_ = value;
+  // @@protoc_insertion_point(field_set:masterpb.Segment.rows)
+}
+
 // -------------------------------------------------------------------
 
 // SegmentStat
@@ -1110,6 +1194,34 @@ inline void SegmentStat::set_memory_rate(float value) {
   // @@protoc_insertion_point(field_set:masterpb.SegmentStat.memory_rate)
 }
 
+// .masterpb.SegmentStatus status = 4;
+inline void SegmentStat::clear_status() {
+  status_ = 0;
+}
+inline ::masterpb::SegmentStatus SegmentStat::status() const {
+  // @@protoc_insertion_point(field_get:masterpb.SegmentStat.status)
+  return static_cast< ::masterpb::SegmentStatus >(status_);
+}
+inline void SegmentStat::set_status(::masterpb::SegmentStatus value) {
+  
+  status_ = value;
+  // @@protoc_insertion_point(field_set:masterpb.SegmentStat.status)
+}
+
+// int64 rows = 5;
+inline void SegmentStat::clear_rows() {
+  rows_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentStat::rows() const {
+  // @@protoc_insertion_point(field_get:masterpb.SegmentStat.rows)
+  return rows_;
+}
+inline void SegmentStat::set_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  rows_ = value;
+  // @@protoc_insertion_point(field_set:masterpb.SegmentStat.rows)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
@@ -1121,6 +1233,16 @@ inline void SegmentStat::set_memory_rate(float value) {
 // @@protoc_insertion_point(namespace_scope)
 
 }  // namespace masterpb
+
+PROTOBUF_NAMESPACE_OPEN
+
+template <> struct is_proto_enum< ::masterpb::SegmentStatus> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::masterpb::SegmentStatus>() {
+  return ::masterpb::SegmentStatus_descriptor();
+}
+
+PROTOBUF_NAMESPACE_CLOSE
 
 // @@protoc_insertion_point(global_scope)
 
