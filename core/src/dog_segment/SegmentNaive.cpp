@@ -587,6 +587,7 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
     if(record_.ack_responder_.GetAck() < 1024 * 4) {
         return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
     }
+    index_meta_ = remote_index_meta;
     for (auto&[index_name, entry]: index_meta_->get_entries()) {
         assert(entry.index_name == index_name);
         const auto &field = (*schema_)[entry.field_name];
