@@ -32,6 +32,7 @@ class CreatePartitionReq : public BaseReq {
  private:
     const std::string collection_name_;
     const std::string tag_;
+    const int64_t max_partition_num_ = 0;
 };
 
 }  // namespace server

@@ -155,6 +155,9 @@ InitConfig() {
 
         /* invisible */
         /* engine */
+        {"engine.max_partition_num",
+         CreateIntegerConfig("engine.build_index_threshold", 1, std::numeric_limits<int64_t>::max(),
+                             &config.engine.max_partition_num.value, 4096)},
         {"engine.build_index_threshold",
          CreateIntegerConfig("engine.build_index_threshold", 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.build_index_threshold.value, 4096)},

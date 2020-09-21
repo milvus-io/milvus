@@ -122,6 +122,7 @@ struct ServerConfig {
     } metric;
 
     struct Engine {
+        Integer max_partition_num{4096};
         Integer build_index_threshold{4096};
         Integer search_combine_nq{0};
         Integer use_blas_threshold{0};
