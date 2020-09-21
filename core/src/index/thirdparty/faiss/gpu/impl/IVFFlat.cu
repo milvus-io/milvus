@@ -439,6 +439,20 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
+
+  float* coarseDis_h = new float[queries.getSize(0)*nprobe];
+  int* coarseInd_h = new int[queries.getSize(0)*nprobe];
+  float* outDistances_h = new float[queries.getSize(0)*k*2];  
+  int* outIndices_h = new int[queries.getSize(0)*k*2];
+  HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
+  HostTensor<float, 2, true> hostOutDistances(outDistances, stream);
+  float* tmp_d = hostOutDistances.data(); 
+  long* tmp_i = hostOutIndices.data();
+
+
+
+
+
   quantizer_->query(queries,
                     coarseBitset,
                     nprobe,
