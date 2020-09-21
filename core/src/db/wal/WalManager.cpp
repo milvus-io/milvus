@@ -226,7 +226,7 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
                 file->ReadLastOpId(last_id);
                 if (last_id <= max_op_id) {
                     file->CloseFile();
-                    std::experimental::filesystem::remove(pair.second);
+                    OperationDone(collection_name, max_op_id);
                     continue;  // skip and delete this file since all its operations already done
                 }
 
