@@ -6,7 +6,7 @@ from time import sleep
 import threading
 from multiprocessing import Process
 from utils import *
-from constants import const
+from constants import *
 
 uid = "collection_info"
 
@@ -82,7 +82,7 @@ class TestInfoBase:
         expected: no exception raised
         '''
         collection_name = gen_unique_str(uid)
-        fields = copy.deepcopy(const.default_fields)
+        fields = copy.deepcopy(default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         # assert segment row count
@@ -129,7 +129,7 @@ class TestInfoBase:
         threads_num = 4 
         threads = []
         collection_name = gen_unique_str(uid)
-        connect.create_collection(collection_name, const.default_fields)
+        connect.create_collection(collection_name, default_fields)
 
         def get_info():
             res = connect.get_collection_info(connect, collection_name)
@@ -184,7 +184,7 @@ class TestInfoBase:
         expected: no exception raised
         '''
         collection_name = gen_unique_str(uid)
-        fields = copy.deepcopy(const.default_fields)
+        fields = copy.deepcopy(default_fields)
         fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], default_nb, fields["fields"][-1]["params"]["dim"])

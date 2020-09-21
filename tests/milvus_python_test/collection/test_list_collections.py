@@ -6,7 +6,7 @@ import threading
 from time import sleep
 from multiprocessing import Process
 from utils import *
-from constants import const
+from constants import *
 
 uid = "list_collections"
 
@@ -33,7 +33,7 @@ class TestListCollections:
         collection_num = 50
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
-            connect.create_collection(collection_name, const.default_fields)
+            connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
 
     @pytest.mark.level(2)
@@ -82,7 +82,7 @@ class TestListCollections:
         threads_num = 4 
         threads = []
         collection_name = gen_unique_str(uid)
-        connect.create_collection(collection_name, const.default_fields)
+        connect.create_collection(collection_name, default_fields)
 
         def _list():
             assert collection_name in connect.list_collections()

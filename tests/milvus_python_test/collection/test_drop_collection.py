@@ -6,7 +6,7 @@ from time import sleep
 import threading
 from multiprocessing import Process
 from utils import *
-from constants import const
+from constants import *
 
 uniq_id = "drop_collection"
 
@@ -61,7 +61,7 @@ class TestDropCollection:
         def create():
             collection_name = gen_unique_str(collection_id)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, const.default_fields)
+            connect.create_collection(collection_name, default_fields)
             connect.drop_collection(collection_name)
         for i in range(threads_num):
             t = threading.Thread(target=create, args=())

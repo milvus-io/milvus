@@ -9,7 +9,7 @@ import sklearn.preprocessing
 
 import pytest
 from utils import *
-from constants import const
+from constants import *
 
 uid = "collection_count"
 tag = "collection_count_tag"
@@ -145,7 +145,7 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         res = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, const.default_float_vec_field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.count_entities(collection)
         assert res == insert_count
 
@@ -477,7 +477,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_fields)
+            connect.create_collection(collection_name, default_fields)
             res = connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -499,7 +499,7 @@ class TestCollectionMultiCollections:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_binary_fields)
+            connect.create_collection(collection_name, default_binary_fields)
             res = connect.insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
@@ -519,13 +519,13 @@ class TestCollectionMultiCollections:
         for i in range(0, int(collection_num / 2)):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_fields)
-            res = connect.insert(collection_name, const.default_entities)
+            connect.create_collection(collection_name, default_fields)
+            res = connect.insert(collection_name, default_entities)
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_binary_fields)
-            res = connect.insert(collection_name, const.default_binary_entities)
+            connect.create_collection(collection_name, default_binary_fields)
+            res = connect.insert(collection_name, default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])

@@ -6,7 +6,7 @@ from multiprocessing import Pool, Process
 
 import pytest
 from utils import *
-from constants import const
+from constants import *
 
 uid = "collection_stats"
 
@@ -84,7 +84,7 @@ class TestStatsBase:
         method: add entities, check count in collection info
         expected: count as expected
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
@@ -100,7 +100,7 @@ class TestStatsBase:
         '''
         nb = 10
         for i in range(nb):
-            ids = connect.insert(collection, const.default_entity)
+            ids = connect.insert(collection, default_entity)
             connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == nb
@@ -114,7 +114,7 @@ class TestStatsBase:
         method: add and delete entities, check count in collection info
         expected: status ok, count as expected
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         status = connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -133,7 +133,7 @@ class TestStatsBase:
         expected: status ok, count as expected
         '''
         delete_length = 1000
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         status = connect.flush([collection])
         delete_ids = ids[:delete_length]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -154,7 +154,7 @@ class TestStatsBase:
         method: add and delete one entity, and compact collection, check count in collection info
         expected: status ok, count as expected
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         status = connect.flush([collection])
         delete_ids = ids[:1]
         connect.delete_entity_by_id(collection, delete_ids)
@@ -176,7 +176,7 @@ class TestStatsBase:
         expected: status ok, vectors added to partition
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag = default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert len(stats["partitions"]) == 2
@@ -192,7 +192,7 @@ class TestStatsBase:
         new_tag = "new_tag"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag = default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         for partition in stats["partitions"]:
@@ -200,7 +200,7 @@ class TestStatsBase:
                 assert partition["row_count"] == default_nb
             else:
                 assert partition["row_count"] == 0
-        ids = connect.insert(collection, const.default_entities, partition_tag=new_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=new_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         for partition in stats["partitions"]:
@@ -213,7 +213,7 @@ class TestStatsBase:
         method: create collection, add vectors, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
@@ -230,7 +230,7 @@ class TestStatsBase:
         expected: status ok, index created and shown in segments
         '''
         get_simple_index["metric_type"] = "IP"
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         get_simple_index.update({"metric_type": "IP"})
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
@@ -247,7 +247,7 @@ class TestStatsBase:
         method: create collection, add binary entities, create index and call collection_stats 
         expected: status ok, index created and shown in segments
         '''
-        ids = connect.insert(binary_collection, const.default_binary_entities)
+        ids = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, "binary_vector", get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
@@ -263,7 +263,7 @@ class TestStatsBase:
         method: create collection, add vectors, create index and call collection_stats multiple times 
         expected: status ok, index info shown in segments
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         for index_type in ["IVF_FLAT", "IVF_SQ8"]:
             connect.create_index(collection, default_float_vec_field_name,
@@ -287,8 +287,8 @@ class TestStatsBase:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_fields)
-            res = connect.insert(collection_name, const.default_entities)
+            connect.create_collection(collection_name, default_fields)
+            res = connect.insert(collection_name, default_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
@@ -308,8 +308,8 @@ class TestStatsBase:
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, const.default_fields)
-            res = connect.insert(collection_name, const.default_entities)
+            connect.create_collection(collection_name, default_fields)
+            res = connect.insert(collection_name, default_entities)
             connect.flush(collection_list)
             if i % 2:
                 connect.create_index(collection_name, default_float_vec_field_name,

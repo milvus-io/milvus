@@ -5,7 +5,7 @@ import itertools
 from time import sleep
 from multiprocessing import Process
 from utils import *
-from constants import const
+from constants import *
 
 uid = "load_collection"
 
@@ -42,7 +42,7 @@ class TestLoadBase:
         method: insert and create index, load collection with correct params
         expected: no error raised
         ''' 
-        connect.insert(collection, const.default_entities)
+        connect.insert(collection, default_entities)
         connect.flush([collection])
         logging.getLogger().info(get_simple_index)
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
@@ -55,7 +55,7 @@ class TestLoadBase:
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         ''' 
-        connect.insert(binary_collection, const.default_binary_entities)
+        connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
             logging.getLogger().info(metric_type)
