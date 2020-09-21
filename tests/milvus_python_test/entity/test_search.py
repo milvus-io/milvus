@@ -12,7 +12,7 @@ from utils import *
 
 dim = 128
 segment_row_count = 5000
-top_k_limit = 2048
+top_k_limit = 16384
 collection_id = "search"
 tag = "1970_01_01"
 insert_interval_time = 1.5
@@ -141,7 +141,7 @@ class TestSearchBase:
 
     @pytest.fixture(
         scope="function",
-        params=[1, 10, 2049]
+        params=[1, 10, 16385]
     )
     def get_top_k(self, request):
         yield request.param
