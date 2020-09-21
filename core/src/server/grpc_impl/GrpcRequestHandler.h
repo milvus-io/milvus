@@ -331,6 +331,14 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     ProcessLeafQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:
+    void
+    WaitToInsert(const std::string& request_id,int64_t request_size);
+
+    void
+    FinishInsert(const std::string& request_id,int64_t request_size);
+
+
+ private:
     ReqHandler req_handler_;
 
     std::unordered_map<std::string, std::shared_ptr<Context>> context_map_;
@@ -339,6 +347,12 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     mutable std::mt19937_64 random_num_generator_;
     mutable std::mutex random_mutex_;
     mutable std::mutex context_map_mutex_;
+
+    mutable std::mutex insert_request_buffer_mutex_;
+    std::condition_variable insert_event_cv_;
+    const int64_t insert_request_buffer_size_;
+    int64_t remain_insert_request_buffer_size = 0;
+
 };
 
 }  // namespace grpc

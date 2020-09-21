@@ -82,26 +82,29 @@ wal:
   enable: true
   path: @MILVUS_DB_PATH@/wal
 
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# Cache Config         | Description                                                | Type       | Default         |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# cache_size           | The size of CPU memory used for caching data for faster    | String     | 4GB             |
-#                      | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# insert_buffer_size   | Buffer size used for data insertion.                       | String     | 1GB             |
-#                      | The sum of 'insert_buffer_size' and 'cache_size'           |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
-#                      | be pre-loaded when Milvus server starts up.                |            |                 |
-#                      | '*' means preload all existing tables (single-quote or     |            |                 |
-#                      | double-quote required).                                    |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
+#----------------------------+-------------------------------------------------------------------+-----------------+
+# Cache Config               | Description                                                | Type       | Default   |
+#----------------------------+------------------------------------------------------------+------------+-----------+
+# cache_size                 | The size of CPU memory used for caching data for faster    | String     | 4GB       |
+#                            | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |           |
+#                            | must be less than system memory size.                      |            |           |
+#----------------------------+------------------------------------------------------------+------------+-----------+
+# insert_buffer_size         | Buffer size used for data insertion.                       | String     | 1GB       |
+#                            | The sum of 'insert_buffer_size' and 'cache_size'           |            |           |
+#                            | must be less than system memory size.                      |            |           |
+#----------------------------+------------------------------------------------------------+------------+-----------+
+# preload_collection         | A comma-separated list of collection names that need to    | StringList |           |
+#                            | be pre-loaded when Milvus server starts up.                |            |           |
+#                            | '*' means preload all existing tables (single-quote or     |            |           |
+#                            | double-quote required).                                    |            |           |
+#----------------------------+------------------------------------------------------------+------------+-----------+
+# insert_request_buffer_size | A limitation of processing insert request size concurrent. | String     | 2GB       |
+#----------------------------+------------------------------------------------------------+------------+-----------+
 cache:
   cache_size: 4GB
   insert_buffer_size: 1GB
   preload_collection:
+  insert_request_buffer_size: 2GB
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # GPU Config           | Description                                                | Type       | Default         |

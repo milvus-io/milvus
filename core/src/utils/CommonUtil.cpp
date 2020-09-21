@@ -206,6 +206,21 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
+std::string CommonUtil::ConvertSize(int64_t size) {
+    const int64_t gb = 1024ll * 1024 * 1024;
+    const int64_t mb = 1024ll * 1024;
+    const int64_t kb = 1024ll;
+    if (size % gb == 0) {
+        return std::to_string(size / gb) + "GB";
+    } else if (size % mb == 0) {
+        return std::to_string(size / mb) + "MB";
+    } else if (size % kb == 0) {
+        return std::to_string(size / kb) + "KB";
+    } else {
+        return std::to_string(size);
+    }
+}
+
 #ifdef ENABLE_CPU_PROFILING
 std::string
 CommonUtil::GetCurrentTimeStr() {
