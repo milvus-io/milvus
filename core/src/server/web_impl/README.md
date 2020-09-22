@@ -18,23 +18,21 @@
   - [`/collections/{collection_name}` (GET)](#collectionscollection_name-get)
   - [`/collections/{collection_name}` (DELETE)](#collectionscollection_name-delete)
   - [`/collections/{collection_name}` (OPTIONS)](#collectionscollection_name-options)
-  - [`/collections/{collection_name}/indexes` (GET)](#collectionscollection_nameindexes-get)
-  - [`/collections/{collection_name}/indexes` (POST)](#collectionscollection_nameindexes-post)
-  - [`/collections/{collection_name}/indexes` (DELETE)](#collectionscollection_nameindexes-delete)
-  - [`/collections/{collection_name}/indexes` (OPTIONS)](#collectionscollection_nameindexes-options)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (POST)](#collectionscollection_namefieldsfield_nameindexes-post)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (DELETE)](#collectionscollection_namefieldsfield_nameindexes-delete)
+  - [`/collections/{collection_name}/fields/{field_name}/indexes` (OPTIONS)](#collectionscollection_namefieldsfield_nameindexes-options)
   - [`/collections/{collection_name}/partitions` (GET)](#collectionscollection_namepartitions-get)
   - [`/collections/{collection_name}/partitions` (POST)](#collectionscollection_namepartitions-post)
   - [`/collections/{collection_name}/partitions` (OPTIONS)](#collectionscollection_namepartitions-options)
   - [`/collections/{collection_name}/partitions` (DELETE)](#collectionscollection_namepartitions-delete)
-  - [`/collections/{collection_name}/segments` (GET)](#collectionscollection_namesegments-get)
-  - [`/collections/{collection_name}/segments/{segment_name}/vectors` (GET)](#collectionscollection_namesegmentssegment_namevectors-get)
   - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
-  - [`/collections/{collection_name}/vectors` (PUT)](#collectionscollection_namevectors-put)
-  - [`/collections/{collection_name}/vectors` (POST)](#collectionscollection_namevectors-post)
-  - [`/collections/{collection_name}/vectors` (GET)](#collectionscollection_namevectorsidvector_id-get)
-  - [`/collections/{collection_name}/vectors` (OPTIONS)](#collectionscollection_namevectors-options)
+  - [`/collections/{collection_name}/entities` (PUT)](#collectionscollection_nameentities-put)
+  - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
+  - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
+  - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities_id-get)
+  - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
-  - [`system/{op}` (PUT)](#systemop-put)
+  - [`/system/{op}` (PUT)](#systemop-put)
 - [Error Codes](#error-codes)
 
 <!-- /TOC -->
@@ -78,7 +76,7 @@ $ curl -X GET "http://127.0.0.1:19121/state" -H "accept: application/json"
 { "message": "Success", "code": 0 }
 ```
 
-### `/devices`
+### `/devices`<h2 id="devices"></h2>
 
 Gets CPU/GPU information from the host.
 
@@ -383,18 +381,21 @@ $ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "acce
 
 ```json
 {
-  "collections": [
-    {
-      "collection_name": "test_collection",
-      "dimension": 1,
-      "index_file_size": 10,
-      "metric_type": "L2",
-      "count": 0,
-      "index": "FLAT",
-      "index_params": {"nlist":  4096}
-    }
-  ],
-  "count": 58
+    "collections": [
+        {
+            "collection_name": "test_collection",
+            "fields": [
+                {
+                "field_name": "field_vec",
+                "field_type": "VECTOR_FLOAT",
+                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                "extra_params": {"dimension": 128, "metric_type":  "L2"}
+                }
+            ],
+            "segment_size": 1024
+        }
+    ],
+    "count": 58
 }
 ```
 
@@ -410,10 +411,15 @@ Creates a collection.
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "collection_name": string,
-  "dimension": integer($int64),
-  "index_file_size": integer($int64),
-  "metric_type": string
+    "collection_name": "test_collection",
+    "fields": [
+        {
+            "field_name": "field_vec",
+            "field_type": "VECTOR_FLOAT",
+            "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+            "extra_params": {"dimension": 128, "metric_type":  "L2"}
+        } 
+    ]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -520,13 +526,18 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection" -H "accept: a
 
 ```json
 {
-  "collection_name": "test_collection",
-  "dimension": 1,
-  "index_file_size": 10,
-  "metric_type": "L2",
-  "count": 0,
-  "index": "FLAT",
-  "index_params": {"nprobe":  16384}
+    "code": 0,
+    "message":"OK",
+    "collection_name": "test_collection",
+    "fields": [
+        {
+            "field_name": "field_vec",
+            "field_type": "VECTOR_FLOAT",
+            "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+            "extra_params": {"dimension": 128, "metric_type":  "L2"}
+        } 
+    ],
+    "row_count": 10000
 }
 ```
 
@@ -623,48 +634,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 $ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection"
 ```
 
-### `/collections/{collection_name}/indexes` (GET)
-
-Gets the index type and nlist of a collection.
-
-#### Request
-
-| Request Component | Value                                    |
-| ----------------- | ---------------------------------------- |
-| Name              | `/collections/{collection_name}/indexes` |
-| Header            | `accept: application/json`               |
-| Body              | N/A                                      |
-| Method            | GET                                      |
-
-##### Query Parameters
-
-| Parameter         | Description             | Required? |
-| ----------------- | ----------------------- | --------- |
-| `collection_name` | Name of the collection. | Yes       |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-| 404         | The required resource does not exist.                             |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/indexes" -H "accept: application/json"
-```
-
-##### Response
-
-```json
-{ "index_type": "FLAT", "params": { "nlist": 4096 } }
-```
-
-### `/collections/{collection_name}/indexes` (POST)
+### `/collections/{collection_name}/fields/{field_name}/indexes` (POST)
 
 Updates the index type and nlist of a collection.
 
@@ -677,9 +647,9 @@ Updates the index type and nlist of a collection.
 <tr><td>Body</td><td><pre><code>
 {
   "index_type": "IVF_FLAT",
-  "metric_type": "IP",
+  "metric_type": "L2",
   "params": {
-      "nlist": 1024
+      "nlist": 16384
   }
 }
 </code></pre> </td></tr>
@@ -692,6 +662,7 @@ Updates the index type and nlist of a collection.
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
 | `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
@@ -722,7 +693,7 @@ $ curl -X POST "http://127.0.0.1:19121/collections/test_collection/indexes" -H "
 { "message": "OK", "code": 0 }
 ```
 
-### `/collections/{collection_name}/indexes` (DELETE)
+### `/collections/{collection_name}/fields/{field_name}/indexes/{index_name}` (DELETE)
 
 Drops an index for a collection.
 
@@ -759,7 +730,7 @@ $ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/indexes" -H
 
 If the deletion is successful, no message will be returned.
 
-### `/collections/{collection_name}/indexes` (OPTIONS)
+### `/collections/{collection_name}/fields/{field_name}/indexes` (OPTIONS)
 
 Use this API for Cross-Origin Resource Sharing (CORS).
 
@@ -767,7 +738,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 
 | Request Component | Value                                    |
 | ----------------- | ---------------------------------------- |
-| Name              | `/collections/{collection_name}/indexes` |
+| Name              | `/collections/{collection_name}/fields/{field_name}/indexes` |
 | Header            | N/A                                      |
 | Body              | N/A                                      |
 | Method            | OPTIONS                                  |
@@ -942,115 +913,26 @@ $ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/partitions"
 
 The deletion is successful if no information is returned.
 
-### `/collections/{collection_name}/segments` (GET)
-
-Gets all segments in a collection starting from `offset` and ends with `page_size`.
-
-#### Request
-
-| Request Component | Value                                     |
-| ----------------- | ----------------------------------------- |
-| Name              | `/collections/{collection_name}/segments` |
-| Header            | `accept: application/json`                |
-| Body              | N/A                                       |
-| Method            | GET                                       |
-
-##### Query Parameters
-
-| Parameter         | Description                                                   | Required? |
-| ----------------- | ------------------------------------------------------------- | --------- |
-| `collection_name` | Name of the collection.                                       | Yes       |
-| `offset`          | Row offset from which the data page starts. The default is 0. | No        |
-| `page_size`       | Size of the data page. The default is 10.                     | No        |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-| 404         | The required resource does not exist.                             |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments?offset=0&page_size=1" -H "accept: application/json"
-```
-
+### `/collections/{collection_name}/partitions/{partition_tag}/entities?offset=0&page_size=1` (GET)
 ##### Response
 
 ```json
 {
-  "code":0,
-  "message":"OK",
-  "count":1,
-  "segments":[
-    {
-      "data_size":5284922,
-      "index_name":"IVFFLAT",
-      "name":"1589468453228582000",
-      "partition_tag":"_default",
-      "row_count":10000
-    }
-  ]
+    "entities": [
+        {
+            "__id": "1578989029645098000",
+            "field_1": 1,
+            "field_vec": []
+        },
+        {
+            "__id": "1578989029645098001",
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
 }
 ```
 
-### `/collections/{collection_name}/segments/{segment_name}/vectors` (GET)
-
-Gets all vectors of segment in a collection starting from `offset` and ends with `page_size`.
-
-#### Request
-
-| Request Component | Value                                     |
-| ----------------- | ----------------------------------------- |
-| Name              | `/collections/{collection_name}/segments` |
-| Header            | `accept: application/json`                |
-| Body              | N/A                                       |
-| Method            | GET                                       |
-
-##### Query Parameters
-
-| Parameter         | Description                                                   | Required? |
-| ----------------- | ------------------------------------------------------------- | --------- |
-| `collection_name` | Name of the collection.                                       | Yes       |
-| `segment_name`    | Name of the segment.                                          | Yes       |
-| `offset`          | Row offset from which the data page starts. The default is 0. | No        |
-| `page_size`       | Size of the data page. The default is 10.                     | No        |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-| 404         | The required resource does not exist.                             |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/1583727470444700000/vectors?offset=0&page_size=1" -H "accept: application/json"
-```
-
-##### Response
-
-```json
-{
-  "code": 0,
-  "message": "OK",
-  "count": 2,
-  "vectors": [
-    {
-      "vector": [0.1],
-      "id": "1583727470435045000"
-    }
-  ]
-}
-```
 
 ### `/collections/{collection_name}/segments/{segment_name}/ids` (GET)
 
@@ -1099,27 +981,38 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 }
 ```
 
-### `/collections/{collection_name}/vectors` (PUT)
+### `/collections/{collection_name}/entities` (GET)
 
-1. Searches vectors in a collection.
+1. Searches entities in a collection.
 
 #### Request
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "search": {
-      "topk": integer($int64),
-      "partition_tags": [string],
-      "file_ids": [string],
-      "vectors": [[number($float/$uint8)]]
-      "params": {
-          "nprobe": 16
-      }
-  }
+    "query": {
+        "bool": {
+            "must":[
+                {"vector": 
+                    {
+                        "field_vec": {
+                            "nprobe": 64,
+                            "topk": 100,
+                            "metric_type": "L2"
+                            "values": [
+                                [0.1, 0.2, "..."],
+                                "..."
+                            ]
+                        }
+                    }
+                }
+            ],
+        }
+    },
+    "fields": ["field_vec"]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>PUT</td></tr>
@@ -1129,10 +1022,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 | Parameter  | Description                                                                                                                                                                                  | Required? |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `topk`     | The top k most similar results of each query vector.                                                                                                                                         | Yes       |
-| `tags`     | Tags of partitions that you need to search. You do not have to specify this value if the collection is not partitioned or you wish to search the whole collection.                           | No        |
-| `file_ids` | IDs of the vector files. You do not have to specify this value if you do not use Milvus in distributed scenarios. Also, if you assign a value to `file_ids`, the value of `tags` is ignored. | No        |
-| `vectors`  | Vectors to query.                                                                                                                                                                            | Yes       |
+| `dsl`      | query dsl.                                                                                                                                                                            | Yes       |
 | `params`   | Extra params for search. Please refer to [Index and search parameters](#Index-and-search-parameters) to get more detail information.                                                                                        | Yes       |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
@@ -1156,30 +1046,155 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]],\"params\":{\"nprobe\":16}}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]],\"params\":{\"nprobe\":16}}}"
 ```
 
 ##### Response
 
 ```json
 {
-  "num": 1,
-  "results": [
-    [
-      { "id": "1578989029645098000", "distance": "0.000000" },
-      { "id": "1578989029645098001", "distance": "0.010000" }
+    "num": 2,
+    "result": [
+        [
+            {
+                "id": "1578989029645098000",
+                "distance": "0.000000",
+                "entity": {
+                    "field_1": 1,
+                    "field_2": 2,
+                    "field_vec": []
+                } 
+            },
+            {
+                "id": "1578989029645098001",
+                "distance": "0.010000",
+                "entity": {
+                    "field_1": 10,
+                    "field_2": 20,
+                    "field_vec": []
+                } 
+            }
+        ]
     ]
-  ]
 }
 ```
 
-2. Delete vectors
+2. Obtain entities by ID.
+
+#### Request
+
+| Request Component | Value                                    |
+| ----------------- | ---------------------------------------- |
+| Name              | `/collections/{collection_name}/entities`|
+| Header            | `accept: application/json`               |
+| Body              | N/A                                      |
+| Method            | GET                                      |
+
+#### Query Parameters
+
+| Parameter         | Description                           | Required? |
+| ----------------- | ------------------------------------- | --------- |
+| `collection_name` | Name of the collection.               | Yes       |
+| `entitity_id_list`  | Vector id list, separated by commas.  | Yes       |
+
+#### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 201         | Created                                                           |
+| 400         | The request is incorrect. Refer to the error message for details. |
+| 404         | The required resource does not exist.                             |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/entities?ids=1578989029645098000,1578989029645098001" -H "accept: application/json" -H "Content-Type: application/json"
+```
+
+##### Response
+
+```json
+{
+    "entities": [
+        {
+            "__id": "1578989029645098000",
+            "field_1": 1,
+            "field_vec": []
+        },
+        {
+            "__id": "1578989029645098001",
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
+}
+```
+
+3. get page entities
+
+#### Request
+
+| Request Component | Value                                    |
+| ----------------- | ---------------------------------------- |
+| Name              | `/collections/{collection_name}/entities`|
+| Header            | `accept: application/json`               |
+| Body              | N/A                                      |
+| Method            | GET                                      |
+
+#### Query Parameters
+
+| Parameter         | Description                           | Required? |
+| ----------------- | ------------------------------------- | --------- |
+| `collection_name` | Name of the collection.               | Yes       |
+| `page_size`       | page size, separated by commas.       | Yes       |
+| `offset`          | offset, separated by commas.          | Yes       |
+
+#### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 201         | Created                                                           |
+| 400         | The request is incorrect. Refer to the error message for details. |
+| 404         | The required resource does not exist.                             |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/entities?page_size=10&offset=0" -H "accept: application/json" -H "Content-Type: application/json"
+```
+
+##### Response
+
+```json
+{
+    "entities": [
+        {
+            "__id": "1578989029645098000",
+            "field_1": 1,
+            "field_vec": []
+        },
+        {
+            "__id": "1578989029645098001",
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
+}
+```
+
+### `/collections/{collection_name}/entities` (DELETE)
+
+Delete entities
 
 #### Request
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1195,7 +1210,7 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 
 | Parameter | Description     | Required? |
 | --------- | --------------- | --------- |
-| ids       | IDs of vectors. | Yes       |
+| ids       | IDs of entities. | Yes       |
 
 ##### Query Parameters
 
@@ -1216,7 +1231,7 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
 ```
 
 ##### Response
@@ -1225,23 +1240,26 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/vectors" -H "a
 { "code": 0, "message": "success" }
 ```
 
-### `/collections/{collection_name}/vectors` (POST)
+### `/collections/{collection_name}/entities` (POST)
 
-Inserts vectors to a collection.
+Inserts entities to a collection.
 
-> Note: It is recommended that you do not insert more than 1 million vectors per request.
+> Note: It is recommended that you do not insert more than 1 million entities per request.
 
 #### Request
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/vectors</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "partition_tag": $string,
-  "vectors": [[number($float/$uint8)]],
-  "ids": [$string]
+    "partition_tag": "part",
+    "entities": {
+        "__id": [123456789,234567]
+        "field_1": [1, 2]
+        "field_vec": [[], []]
+    }
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -1251,11 +1269,11 @@ Inserts vectors to a collection.
 
 | Parameter       | Description                                                                                                                                                                                                                      | Required? |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `partition_tag` | Tag of the partition to insert vectors to.                                                                                                                                                                                       | No        |
-| `vectors`       | Vectors to insert to the collection.                                                                                                                                                                                             | Yes       |
-| `ids`           | IDs of the vectors to insert to the collection. If you assign IDs to the vectors, you must provide IDs for all vectors in the collection. If you do not specify this parameter, Milvus automatically assigns IDs to the vectors. | No        |
+| `partition_tag` | Tag of the partition to insert entities to.                                                                                                                                                                                       | No        |
+| `entities`      | entities to insert to the collection.                                                                                                                                                                                             | Yes       |
+| `ids`           | IDs of the entities to insert to the collection. If you assign IDs to the entities, you must provide IDs for all vectors in the collection. If you do not specify this parameter, Milvus automatically assigns IDs to the vectors. | No        |
 
-> Note: Type of items of `vectors` depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
+> Note: Type of items of `entities` depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
 ##### Query Parameters
 
@@ -1276,7 +1294,7 @@ Inserts vectors to a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
 ```
 
 ##### Response
@@ -1292,60 +1310,7 @@ $ curl -X POST "http://127.0.0.1:19121/collections/test_collection/vectors" -H "
 }
 ```
 
-### `/collections/{collection_name}/vectors?ids={vector_id_list}` (GET)
-
-Obtain vectors by ID.
-
-#### Request
-
-| Request Component | Value                                    |
-| ----------------- | ---------------------------------------- |
-| Name              | `/collections/{collection_name}/vectors` |
-| Header            | `accept: application/json`               |
-| Body              | N/A                                      |
-| Method            | GET                                      |
-
-#### Query Parameters
-
-| Parameter         | Description                           | Required? |
-| ----------------- | ------------------------------------- | --------- |
-| `collection_name` | Name of the collection.               | Yes       |
-| `vector_id_list`  | Vector id list, separated by commas.  | Yes       |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 201         | Created                                                           |
-| 400         | The request is incorrect. Refer to the error message for details. |
-| 404         | The required resource does not exist.                             |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/collections/test_collection/vectors?ids=1578989029645098000,1578989029645098001" -H "accept: application/json" -H "Content-Type: application/json"
-```
-
-##### Response
-
-```json
-{
-  "vectors": [
-    {
-      "id": "1578989029645098000",
-      "vector": [0.1]
-    },
-    {
-      "id": "1578989029645098001",
-      "vector": [0.2]
-    }
-  ]
-}
-```
-
-### `/collections/{collection_name}/vectors` (OPTIONS)
+### `/collections/{collection_name}/entities` (OPTIONS)
 
 Use this API for Cross-Origin Resource Sharing (CORS).
 
@@ -1353,7 +1318,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 
 | Request Component | Value                                    |
 | ----------------- | ---------------------------------------- |
-| Name              | `/collections/{collection_name}/vectors` |
+| Name              | `/collections/{collection_name}/entities` |
 | Header            | N/A                                      |
 | Body              | N/A                                      |
 | Method            | OPTIONS                                  |
@@ -1363,7 +1328,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 ##### Request
 
 ```shell
-$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/vectors"
+$ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/entities"
 ```
 
 ### `/system/{msg}` (GET)
@@ -1458,7 +1423,8 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 <tr><td>Body</td><td><pre><code>
 {
   "compact": {
-     "collection_name": $string
+     "collection_name": $string,
+     "threshold": 0.1
   }
 }
 </code></pre> </td></tr>
@@ -1477,7 +1443,7 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 ###### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"compact\": {\"collection_name\": \"test_collection\"}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"compact\": {\"collection_name\": \"test_collection\", \"threshold\": 0.1}}"
 ```
 
 ###### Response

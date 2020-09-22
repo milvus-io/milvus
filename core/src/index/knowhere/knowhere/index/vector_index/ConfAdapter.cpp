@@ -25,7 +25,7 @@ namespace milvus {
 namespace knowhere {
 
 static const int64_t MIN_NLIST = 1;
-static const int64_t MAX_NLIST = 1LL << 20;
+static const int64_t MAX_NLIST = 65536;
 static const int64_t MIN_NPROBE = 1;
 static const int64_t MAX_NPROBE = MAX_NLIST;
 static const int64_t DEFAULT_MIN_DIM = 1;
@@ -34,6 +34,11 @@ static const int64_t DEFAULT_MIN_ROWS = 1;  // minimum size for build index
 static const int64_t DEFAULT_MAX_ROWS = 50000000;
 static const int64_t NGT_MIN_EDGE_SIZE = 1;
 static const int64_t NGT_MAX_EDGE_SIZE = 200;
+static const int64_t HNSW_MIN_EFCONSTRUCTION = 8;
+static const int64_t HNSW_MAX_EFCONSTRUCTION = 512;
+static const int64_t HNSW_MIN_M = 4;
+static const int64_t HNSW_MAX_M = 64;
+static const int64_t HNSW_MAX_EF = 32768;
 static const std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP};
 
 #define CheckIntByRange(key, min, max)                                                                   \
@@ -246,60 +251,41 @@ NSGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMod
 
 bool
 HNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_EFCONSTRUCTION = 8;
-    static int64_t MAX_EFCONSTRUCTION = 512;
-    static int64_t MIN_M = 4;
-    static int64_t MAX_M = 64;
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
 
 bool
 HNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MAX_EF = 4096;
-
-    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 RHNSWFlatConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_EFCONSTRUCTION = 8;
-    static int64_t MAX_EFCONSTRUCTION = 512;
-    static int64_t MIN_M = 4;
-    static int64_t MAX_M = 64;
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
 
 bool
 RHNSWFlatConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MAX_EF = 4096;
-
-    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_EFCONSTRUCTION = 8;
-    static int64_t MAX_EFCONSTRUCTION = 512;
-    static int64_t MIN_M = 4;
-    static int64_t MAX_M = 64;
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
 
@@ -310,32 +296,23 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 RHNSWPQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MAX_EF = 4096;
-
-    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 RHNSWSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static int64_t MIN_EFCONSTRUCTION = 8;
-    static int64_t MAX_EFCONSTRUCTION = 512;
-    static int64_t MIN_M = 4;
-    static int64_t MAX_M = 64;
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::IndexParams::efConstruction, MIN_EFCONSTRUCTION, MAX_EFCONSTRUCTION);
-    CheckIntByRange(knowhere::IndexParams::M, MIN_M, MAX_M);
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
 
 bool
 RHNSWSQConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    static int64_t MAX_EF = 4096;
-
-    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], MAX_EF);
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }

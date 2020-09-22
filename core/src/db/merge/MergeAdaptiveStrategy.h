@@ -8,25 +8,23 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#include <fiu/fiu-local.h>
-#include <fiu-control.h>
-#include <gtest/gtest.h>
-#include <src/scheduler/task/BuildIndexTask.h>
-#include <src/scheduler/task/SearchTask.h>
-#include <src/scheduler/optimizer/FaissIVFPass.h>
 
-#include "scheduler/optimizer/BuildIndexPass.h"
-#include "scheduler/optimizer/FaissFlatPass.h"
-#include "scheduler/optimizer/FaissIVFSQ8HPass.h"
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "db/merge/MergeStrategy.h"
+#include "utils/Status.h"
 
 namespace milvus {
-namespace scheduler {
+namespace engine {
 
-#ifdef MILVUS_GPU_VERSION
-TEST(Action_Test, TESTACTION) {
-}
+class MergeAdaptiveStrategy : public MergeStrategy {
+ public:
+    Status
+    RegroupSegments(const Partition2SegmentsMap& part2segment, int64_t row_per_segment, SegmentGroups& groups) override;
+};  // MergeSimpleStrategy
 
-#endif
-
-}  // namespace scheduler
+}  // namespace engine
 }  // namespace milvus

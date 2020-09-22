@@ -235,12 +235,12 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
@@ -418,7 +418,7 @@ Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
