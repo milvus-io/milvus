@@ -7,13 +7,13 @@ import numpy
 import pytest
 import sklearn.preprocessing
 from utils import *
-from constants import const
+from constants import *
 
 uid = "test_index"
 BUILD_TIMEOUT = 300
-field_name = const.default_float_vec_field_name
-binary_field_name = const.default_binary_vec_field_name
-query, query_vecs = gen_query_vectors(field_name, const.default_entities, const.default_top_k, 1)
+field_name = default_float_vec_field_name
+binary_field_name = default_binary_vec_field_name
+query, query_vecs = gen_query_vectors(field_name, default_entities, default_top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
@@ -53,7 +53,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
 
     def test_create_index_on_field_not_existed(self, connect, collection, get_simple_index):
@@ -63,7 +63,7 @@ class TestIndexBase:
         expected: error raised
         '''
         tmp_field_name = gen_unique_str()
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
@@ -75,7 +75,7 @@ class TestIndexBase:
         expected: error raised
         '''
         tmp_field_name = "int64"
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
@@ -95,8 +95,8 @@ class TestIndexBase:
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         '''
-        connect.create_partition(collection, const.default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag=const.default_tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
 
@@ -107,8 +107,8 @@ class TestIndexBase:
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         '''
-        connect.create_partition(collection, const.default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag=const.default_tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush()
         connect.create_index(collection, field_name, get_simple_index)
 
@@ -128,13 +128,13 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
         logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, const.default_entities, const.default_top_k, nq, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, search_params=search_param)
         res = connect.search(collection, query)
         assert len(res) == nq
 
@@ -146,7 +146,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
 
         def build(connect):
             connect.create_index(collection, field_name, default_index)
@@ -182,10 +182,10 @@ class TestIndexBase:
         expected: create index ok, and count correct
         '''
         connect.create_index(collection, field_name, get_simple_index)
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         count = connect.count_entities(collection)
-        assert count == nb
+        assert count == default_nb
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -207,13 +207,13 @@ class TestIndexBase:
         method: create another index with different index_params after index have been built
         expected: return code 0, and describe index result equals with the second index params
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
-            assert stats["row_count"] == nb
+            assert stats["row_count"] == default_nb
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
@@ -222,7 +222,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
 
@@ -243,8 +243,8 @@ class TestIndexBase:
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         '''
-        connect.create_partition(collection, const.default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag=const.default_tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
@@ -256,8 +256,8 @@ class TestIndexBase:
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         '''
-        connect.create_partition(collection, const.default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag=const.default_tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush()
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
@@ -270,14 +270,14 @@ class TestIndexBase:
         expected: return search success
         '''
         metric_type = "IP"
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, const.default_entities, const.default_top_k, nq, metric_type=metric_type, search_params=search_param)
+        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, metric_type=metric_type, search_params=search_param)
         res = connect.search(collection, query)
         assert len(res) == nq
 
@@ -289,7 +289,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
 
         def build(connect):
             default_index["metric_type"] = "IP"
@@ -327,10 +327,10 @@ class TestIndexBase:
         '''
         default_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         count = connect.count_entities(collection)
-        assert count == nb
+        assert count == default_nb
 
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -353,13 +353,13 @@ class TestIndexBase:
         method: create another index with different index_params after index have been built
         expected: return code 0, and describe index result equals with the second index params
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         indexs = [default_index, {"index_type": "FLAT", "params": {"nlist": 1024}, "metric_type": "IP"}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             stats = connect.get_collection_stats(collection)
             # assert stats["partitions"][0]["segments"][0]["index_name"] == index["index_type"]
-            assert stats["row_count"] == nb
+            assert stats["row_count"] == default_nb
 
     """
     ******************************************************************
@@ -556,7 +556,7 @@ class TestIndexBinary:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(binary_collection, const.default_binary_entities)
+        ids = connect.insert(binary_collection, default_binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -566,8 +566,8 @@ class TestIndexBinary:
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         '''
-        connect.create_partition(binary_collection, const.default_tag)
-        ids = connect.insert(binary_collection, const.default_binary_entities, partition_tag=const.default_tag)
+        connect.create_partition(binary_collection, default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -578,9 +578,9 @@ class TestIndexBinary:
         expected: return search success
         '''
         nq = get_nq
-        ids = connect.insert(binary_collection, const.default_binary_entities)
+        ids = connect.insert(binary_collection, default_binary_entities)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        query, vecs = gen_query_vectors(binary_field_name, const.default_binary_entities, const.default_top_k, nq, metric_type="JACCARD")
+        query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
         logging.getLogger().info(search_param)
         res = connect.search(binary_collection, query, search_params=search_param)
@@ -594,7 +594,7 @@ class TestIndexBinary:
         expected: return create_index failure
         '''
         # insert 6000 vectors
-        ids = connect.insert(binary_collection, const.default_binary_entities)
+        ids = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
 
         if get_l2_index["index_type"] == "BIN_FLAT":
@@ -615,11 +615,11 @@ class TestIndexBinary:
         method: create collection and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        ids = connect.insert(binary_collection, const.default_binary_entities)
+        ids = connect.insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == nb
+        assert stats["row_count"] == default_nb
         for partition in stats["partitions"]:
             segments = partition["segments"]
             if segments:
@@ -634,13 +634,13 @@ class TestIndexBinary:
         method: create collection, create partition and add entities in it, create index, call describe index
         expected: return code 0, and index instructure
         '''
-        connect.create_partition(binary_collection, const.default_tag)
-        ids = connect.insert(binary_collection, const.default_binary_entities, partition_tag=const.default_tag)
+        connect.create_partition(binary_collection, default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
         logging.getLogger().info(stats)
-        assert stats["row_count"] == nb
+        assert stats["row_count"] == default_nb
         assert len(stats["partitions"]) == 2
         for partition in stats["partitions"]:
             segments = partition["segments"]
@@ -676,14 +676,14 @@ class TestIndexBinary:
         method: create collection, create partition and add entities in it, create index on collection, call drop collection index
         expected: return code 0, and default index param
         '''
-        connect.create_partition(binary_collection, const.default_tag)
-        ids = connect.insert(binary_collection, const.default_binary_entities, partition_tag=const.default_tag)
+        connect.create_partition(binary_collection, default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
         connect.drop_index(binary_collection, binary_field_name)
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == nb
+        assert stats["row_count"] == default_nb
         for partition in stats["partitions"]:
             segments = partition["segments"]
             if segments:
@@ -772,7 +772,7 @@ class TestIndexAsync:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         logging.getLogger().info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True)
         logging.getLogger().info("before result")
@@ -787,7 +787,7 @@ class TestIndexAsync:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         logging.getLogger().info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True)
         logging.getLogger().info("DROP")
@@ -806,7 +806,7 @@ class TestIndexAsync:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, const.default_entities)
+        ids = connect.insert(collection, default_entities)
         logging.getLogger().info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True,
                                       _callback=self.check_result)

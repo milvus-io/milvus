@@ -6,7 +6,7 @@ import logging
 from multiprocessing import Pool, Process
 import pytest
 from utils import *
-from constants import const
+from constants import *
 
 TIMEOUT = 120
 
@@ -22,7 +22,7 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
 
     # TODO: enable
     @pytest.mark.level(2)
@@ -60,9 +60,9 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
-            connect.create_partition(collection, const.default_tag)
+            connect.create_partition(collection, default_tag)
 
     def test_create_partition_collection_not_existed(self, connect):
         '''
@@ -72,7 +72,7 @@ class TestCreateBase:
         '''
         collection_name = gen_unique_str()
         with pytest.raises(Exception) as e:
-            connect.create_partition(collection_name, const.default_tag)
+            connect.create_partition(collection_name, default_tag)
 
     def test_create_partition_tag_name_None(self, connect, collection):
         '''
@@ -90,11 +90,11 @@ class TestCreateBase:
         method: call function: create_partition, and again
         expected: status ok
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         tag_name = gen_unique_str()
         connect.create_partition(collection, tag_name)
         tag_list = connect.list_partitions(collection)
-        assert const.default_tag in tag_list
+        assert default_tag in tag_list
         assert tag_name in tag_list
         assert "_default" in tag_list
 
@@ -104,9 +104,9 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(id_collection, const.default_tag)
-        ids = [i for i in range(nb)]
-        insert_ids = connect.insert(id_collection, const.default_entities, ids)
+        connect.create_partition(id_collection, default_tag)
+        ids = [i for i in range(default_nb)]
+        insert_ids = connect.insert(id_collection, default_entities, ids)
         assert len(insert_ids) == len(ids)
  
     def test_create_partition_insert_with_tag(self, connect, id_collection):
@@ -115,9 +115,9 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(id_collection, const.default_tag)
-        ids = [i for i in range(nb)]
-        insert_ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
+        connect.create_partition(id_collection, default_tag)
+        ids = [i for i in range(default_nb)]
+        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
         assert len(insert_ids) == len(ids)
 
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
@@ -127,10 +127,10 @@ class TestCreateBase:
         expected: status not ok
         '''
         tag_new = "tag_new"
-        connect.create_partition(collection, const.default_tag)
-        ids = [i for i in range(nb)]
+        connect.create_partition(collection, default_tag)
+        ids = [i for i in range(default_nb)]
         with pytest.raises(Exception) as e:
-            insert_ids = connect.insert(collection, const.default_entities, ids, partition_tag=tag_new)
+            insert_ids = connect.insert(collection, default_entities, ids, partition_tag=tag_new)
 
     def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
@@ -138,14 +138,14 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok
         '''
-        connect.create_partition(id_collection, const.default_tag)
-        ids = [i for i in range(nb)]
-        insert_ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
-        ids = [(i+nb) for i in range(nb)]
-        new_insert_ids = connect.insert(id_collection, const.default_entities, ids, partition_tag=const.default_tag)
+        connect.create_partition(id_collection, default_tag)
+        ids = [i for i in range(default_nb)]
+        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        ids = [(i+default_nb) for i in range(default_nb)]
+        new_insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
         connect.flush([id_collection])
         res = connect.count_entities(id_collection)
-        assert res == nb * 2
+        assert res == default_nb * 2
 
     @pytest.mark.level(2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
@@ -154,17 +154,17 @@ class TestCreateBase:
         method: call function: create_partition
         expected: status ok, collection length is correct
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         collection_new = gen_unique_str()
-        connect.create_collection(collection_new, const.default_fields)
-        connect.create_partition(collection_new, const.default_tag)
-        ids = connect.insert(collection, const.default_entities, partition_tag=const.default_tag)
-        ids = connect.insert(collection_new, const.default_entities, partition_tag=const.default_tag)
+        connect.create_collection(collection_new, default_fields)
+        connect.create_partition(collection_new, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection_new, default_entities, partition_tag=default_tag)
         connect.flush([collection, collection_new])
         res = connect.count_entities(collection)
-        assert res == nb
+        assert res == default_nb
         res = connect.count_entities(collection_new)
-        assert res == nb
+        assert res == default_nb
 
 
 class TestShowBase:
@@ -180,9 +180,9 @@ class TestShowBase:
         method: create partition first, then call function: list_partitions
         expected: status ok, partition correct
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         res = connect.list_partitions(collection)
-        assert const.default_tag in res
+        assert default_tag in res
 
     def test_list_partitions_no_partition(self, connect, collection):
         '''
@@ -200,10 +200,10 @@ class TestShowBase:
         expected: status ok, partitions correct
         '''
         tag_new = gen_unique_str()
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
         res = connect.list_partitions(collection)
-        assert const.default_tag in res
+        assert default_tag in res
         assert tag_new in res
 
 
@@ -227,8 +227,8 @@ class TestHasBase:
         method: create partition first, then call function: has_partition
         expected: status ok, result true
         '''
-        connect.create_partition(collection, const.default_tag)
-        res = connect.has_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
+        res = connect.has_partition(collection, default_tag)
         logging.getLogger().info(res)
         assert res
 
@@ -238,9 +238,9 @@ class TestHasBase:
         method: create partition first, then call function: has_partition
         expected: status ok, result true
         '''
-        for tag_name in [const.default_tag, "tag_new", "tag_new_new"]:
+        for tag_name in [default_tag, "tag_new", "tag_new_new"]:
             connect.create_partition(collection, tag_name)
-        for tag_name in [const.default_tag, "tag_new", "tag_new_new"]:
+        for tag_name in [default_tag, "tag_new", "tag_new_new"]:
             res = connect.has_partition(collection, tag_name)
             assert res
 
@@ -250,7 +250,7 @@ class TestHasBase:
         method: then call function: has_partition, with tag not existed
         expected: status ok, result empty
         '''
-        res = connect.has_partition(collection, const.default_tag)
+        res = connect.has_partition(collection, default_tag)
         logging.getLogger().info(res)
         assert not res
 
@@ -261,7 +261,7 @@ class TestHasBase:
         expected: status not ok
         '''
         with pytest.raises(Exception) as e:
-            res = connect.has_partition("not_existed_collection", const.default_tag)
+            res = connect.has_partition("not_existed_collection", default_tag)
 
     @pytest.mark.level(2)
     def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
@@ -271,7 +271,7 @@ class TestHasBase:
         expected: status ok
         '''
         tag_name = get_tag_name
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
             res = connect.has_partition(collection, tag_name)
 
@@ -289,11 +289,11 @@ class TestDropBase:
         method: create partitions first, then call function: drop_partition
         expected: status ok, no partitions in db
         '''
-        connect.create_partition(collection, const.default_tag)
-        connect.drop_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
+        connect.drop_partition(collection, default_tag)
         res = connect.list_partitions(collection)
         tag_list = []
-        assert const.default_tag not in tag_list
+        assert default_tag not in tag_list
 
     def test_drop_partition_tag_not_existed(self, connect, collection):
         '''
@@ -301,7 +301,7 @@ class TestDropBase:
         method: create partitions first, then call function: drop_partition
         expected: status not ok
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         new_tag = "new_tag"
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, new_tag)
@@ -312,10 +312,10 @@ class TestDropBase:
         method: create partitions first, then call function: drop_partition
         expected: status not ok
         '''
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         new_collection = gen_unique_str()
         with pytest.raises(Exception) as e:
-            connect.drop_partition(new_collection, const.default_tag)
+            connect.drop_partition(new_collection, default_tag)
 
     @pytest.mark.level(2)
     def test_drop_partition_repeatedly(self, connect, collection):
@@ -324,13 +324,13 @@ class TestDropBase:
         method: create partitions first, then call function: drop_partition
         expected: status not ok, no partitions in db
         '''
-        connect.create_partition(collection, const.default_tag)
-        connect.drop_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
+        connect.drop_partition(collection, default_tag)
         time.sleep(2)
         with pytest.raises(Exception) as e:
-            connect.drop_partition(collection, const.default_tag)
+            connect.drop_partition(collection, default_tag)
         tag_list = connect.list_partitions(collection)
-        assert const.default_tag not in tag_list
+        assert default_tag not in tag_list
 
     def test_drop_partition_create(self, connect, collection):
         '''
@@ -338,12 +338,12 @@ class TestDropBase:
         method: create partitions first, then call function: drop_partition, create_partition
         expected: status not ok, partition in db
         '''
-        connect.create_partition(collection, const.default_tag)
-        connect.drop_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
+        connect.drop_partition(collection, default_tag)
         time.sleep(2)
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         tag_list = connect.list_partitions(collection)
-        assert const.default_tag in tag_list
+        assert default_tag in tag_list
 
 
 class TestNameInvalid(object):
@@ -369,9 +369,9 @@ class TestNameInvalid(object):
         expected: status not ok
         '''
         collection_name = get_collection_name
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
-            connect.drop_partition(collection_name, const.default_tag)
+            connect.drop_partition(collection_name, default_tag)
 
     def test_drop_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
@@ -380,7 +380,7 @@ class TestNameInvalid(object):
         expected: status not ok
         '''
         tag_name = get_tag_name
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, tag_name)
 
@@ -392,6 +392,6 @@ class TestNameInvalid(object):
         expected: status not ok
         '''
         collection_name = get_collection_name
-        connect.create_partition(collection, const.default_tag)
+        connect.create_partition(collection, default_tag)
         with pytest.raises(Exception) as e:
             res = connect.list_partitions(collection_name)
