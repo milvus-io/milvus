@@ -527,8 +527,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
             tmp_i[d * k + m] = outIndices_h[d * 2 * k + m];
         }
     }
-    outIndices.copyFrom(hostOutIndices, stream);
-    outDistances.copyFrom(hostOutDistances, stream);
+    outIndices.copyFrom(hOutIndices, stream);
+    outDistances.copyFrom(hOutDistances, stream);
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
