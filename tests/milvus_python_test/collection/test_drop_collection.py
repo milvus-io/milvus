@@ -6,13 +6,11 @@ from time import sleep
 import threading
 from multiprocessing import Process
 from utils import *
+from constants import *
 
 uniq_id = "drop_collection"
-default_fields = gen_default_fields() 
-
 
 class TestDropCollection:
-
     """
     ******************************************************************
       The following cases are used to test `drop_collection` function
