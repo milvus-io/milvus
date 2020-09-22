@@ -25,6 +25,9 @@
 #include <unordered_map>
 #include <numeric>
 
+#include <string.h>
+#include<iostream>
+
 namespace faiss { namespace gpu {
 
 IVFFlat::IVFFlat(GpuResources* resources,
@@ -410,6 +413,17 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   }
 }
 
+void Usort(float *dis, int *ind, int sz){
+    for(int i = 0;i < sz;i ++) {
+        for(int j = i + 1; j < sz; j ++) {
+            if(dis[j] < dis[i]){
+            std::swap(dis[i], dis[j]);
+            std::swap(ind[i], ind[j]);
+            }
+        }
+    }
+}
+
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
                int nprobe,
@@ -440,10 +454,10 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
 
-  float* coarseDis_h = new float[queries.getSize(0)*nprobe];
-  int* coarseInd_h = new int[queries.getSize(0)*nprobe];
-  float* outDistances_h = new float[queries.getSize(0)*k*2];  
-  int* outIndices_h = new int[queries.getSize(0)*k*2];
+  float* coarseDis_h = new float[queries.getSize(0) * nprobe];
+  int* coarseInd_h = new int[queries.getSize(0) * nprobe];
+  float* outDistances_h = new float[queries.getSize(0) * k * 2];  
+  int* outIndices_h = new int[queries.getSize(0) * k * 2];
   HostTensor<long, 2, true> hOutIndices(outIndices, stream);
   HostTensor<float, 2, true> hOutDistances(outDistances, stream);
   float* tmp_d = hOutDistances.data(); 
@@ -492,7 +506,7 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                 outDistances_h[d * 2 * k + k + m] = tmp_d[d * k + m];
                 outIndices_h[d * 2 * k + k + m] = tmp_i[d * k + m];
             }
-            // Usort(outDistances_h+k*2*d, outIndices_h+k*2*d, 2*k);
+            Usort(outDistances_h + k * 2 * d, outIndices_h + k * 2 * d, 2 * k);
         }
     }
 
@@ -507,9 +521,12 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   }
 
-
-
-
+    for(int d = 0; d < queries.getSize(0); d ++) {
+        for(int m = 0; m < k; m ++) {
+            tmp_d[d * k + m] = outDistances_h[d * 2 * k + m];
+            tmp_i[d * k + m] = outIndices_h[d * 2 * k + m];
+        }
+    }
 
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
