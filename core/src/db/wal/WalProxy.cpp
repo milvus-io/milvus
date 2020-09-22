@@ -99,12 +99,6 @@ WalProxy::Insert(const std::string& collection_name, const std::string& partitio
     // split chunk accordding to segment row count
     std::vector<DataChunkPtr> chunks;
     STATUS_CHECK(utils::SplitChunk(data_chunk, row_count_per_segment, chunks));
-    if (chunks.size() > 0 && data_chunk != chunks[0]) {
-        // data has been copied to new chunk, do this to free memory
-        data_chunk->fixed_fields_.clear();
-        data_chunk->variable_fields_.clear();
-        data_chunk->count_ = 0;
-    }
 
     // write operation into wal file, and insert to memory
     for (auto& chunk : chunks) {

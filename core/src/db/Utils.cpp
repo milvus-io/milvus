@@ -246,6 +246,11 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         chunks.emplace_back(new_chunk);
     }
 
+    // data has been copied, do this to free memory
+    chunk->fixed_fields_.clear();
+    chunk->variable_fields_.clear();
+    chunk->count_ = 0;
+
     return Status::OK();
 }
 

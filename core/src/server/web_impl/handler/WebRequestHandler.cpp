@@ -135,6 +135,25 @@ CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& fiel
     }
 }
 
+template <typename T>
+void
+RecordDataAddr(const std::string& field_name, int32_t num, const T* data, InsertParam& insert_param) {
+    int64_t bytes = num * sizeof(T);
+    const char* data_addr = reinterpret_cast<const char*>(data);
+    auto data_segment = std::make_pair(data_addr, bytes);
+    insert_param.fields_data_[field_name].emplace_back(data_segment);
+}
+
+void
+ConvertToParam(const std::unordered_map<std::string, std::vector<uint8_t>>& data_chunk, int64_t row_num,
+               InsertParam& insert_param) {
+    insert_param.row_count_ = row_num;
+    for (auto& pair : data_chunk) {
+        auto& bin = pair.second;
+        RecordDataAddr<uint8_t>(pair.first, bin.size(), bin.data(), insert_param);
+    }
+}
+
 using FloatJson = nlohmann::basic_json<std::map, std::vector, std::string, bool, std::int64_t, std::uint64_t, float>;
 
 /////////////////////////////////// Private methods ///////////////////////////////////////
@@ -1627,14 +1646,13 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         field_types.insert({field.first, field.second.field_type_});
     }
 
-    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
-    int64_t row_num;
-
     auto entities_json = body_json["entities"];
     if (!entities_json.is_array()) {
         RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
     }
-    row_num = entities_json.size();
+
+    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+    int64_t row_num = entities_json.size();
     int64_t offset = 0;
     std::vector<uint8_t> ids;
     for (auto& one_entity : entities_json) {
@@ -1740,7 +1758,10 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 #endif
 
-    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
+    InsertParam insert_param;
+    ConvertToParam(chunk_data, row_num, insert_param);
+
+    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, insert_param);
     if (!status.ok()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }
