@@ -13,7 +13,7 @@
 
 #include <memory>
 #include <string>
-#include "storage/hdfs/hdfs.h"
+#include "core/thirdparty/hdfs/hdfs.h"
 #include "storage/IOWriter.h"
 
 namespace milvus {

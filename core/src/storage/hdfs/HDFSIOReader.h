@@ -12,8 +12,8 @@
 #include <memory>
 #include <string>
 #include "HDFSClient.h"
+#include "core/thirdparty/hdfs/hdfs.h"
 #include "storage/IOReader.h"
-#include "storage/hdfs/hdfs.h"
 
 namespace milvus {
 namespace storage {

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "storage/hdfs/hdfs.h"
+#include "core/thirdparty/hdfs/hdfs.h"
 #include "storage/Operation.h"
 
 #include <memory>

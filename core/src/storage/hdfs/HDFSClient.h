@@ -9,10 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <vector>
 #include <string>
+#include <vector>
 
-#include "storage/hdfs/hdfs.h"
+#include "core/thirdparty/hdfs/hdfs.h"
 
 namespace milvus {
 namespace storage {
