@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -22,17 +23,17 @@ const (
 )
 
 func GetCollectionObjId(key string) string {
-	prefix := conf.Config.Etcd.Rootpath + CollectonPrefix
+	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectonPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjId(key string) string {
-	prefix := conf.Config.Etcd.Rootpath + SegmentPrefix
+	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	prefix := conf.Config.Etcd.Rootpath + CollectonPrefix
+	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectonPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	println("prefix is :$", prefix)
 	index := strings.Index(key, prefix)
@@ -41,7 +42,7 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	prefix := conf.Config.Etcd.Rootpath + SegmentPrefix
+	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
 	return index == 0
