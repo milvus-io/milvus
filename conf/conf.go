@@ -1,18 +1,24 @@
 package conf
 
 import (
-	"github.com/czs007/suvlim/storage/pkg/types"
-	yaml "gopkg.in/yaml.v2"
 	"io/ioutil"
 	"path"
 	"runtime"
+
+	"github.com/czs007/suvlim/storage/pkg/types"
+	yaml "gopkg.in/yaml.v2"
 )
 
 // yaml.MapSlice
 
 type MasterConfig struct {
-	Address string
-	Port    int32
+	PulsarURL             string
+	PulsarMoniterInterval int32
+	PulsarTopic           string
+	EtcdRootPath          string
+	SegmentThreshole      float32
+	DefaultGRPCPort       string
+	EtcdEndPoints         []string
 }
 
 type EtcdConfig struct {
@@ -61,8 +67,8 @@ func init() {
 }
 
 func getCurrentFileDir() string {
-    _, fpath, _, _ := runtime.Caller(0)
-    return path.Dir(fpath)
+	_, fpath, _, _ := runtime.Caller(0)
+	return path.Dir(fpath)
 }
 
 func load_config() {

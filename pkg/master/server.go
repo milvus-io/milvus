@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/czs007/suvlim/pkg/master/common"
+	"github.com/czs007/suvlim/conf"
 	pb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	"github.com/czs007/suvlim/pkg/master/grpc/message"
 	messagepb "github.com/czs007/suvlim/pkg/master/grpc/message"
@@ -33,11 +33,11 @@ func Run() {
 
 func SegmentStatsController() {
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"127.0.0.1:12379"},
+		Endpoints:   conf.Config.Master.EtcdEndPoints,
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
 
 	ssChan := make(chan mock.SegmentStats, 10)
 	defer close(ssChan)
@@ -56,13 +56,13 @@ func SegmentStatsController() {
 }
 
 func ComputeCloseTime(ss mock.SegmentStats, kvbase kv.Base) error {
-	if int(ss.MemorySize) > common.SEGMENT_THRESHOLE*0.8 {
+	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
 		currentTime := time.Now()
 		memRate := int(ss.MemoryRate)
 		if memRate == 0 {
 			memRate = 1
 		}
-		sec := common.SEGMENT_THRESHOLE * 0.2 / memRate
+		sec := int(conf.Config.Master.SegmentThreshole*0.2) / memRate
 		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
 		if err != nil {
 			return err
@@ -138,7 +138,7 @@ func UpdateSegmentStatus(ss mock.SegmentStats, kvbase kv.Base) error {
 }
 
 func GRPCServer(ch chan *messagepb.Mapping) error {
-	lis, err := net.Listen("tcp", common.DEFAULT_GRPC_PORT)
+	lis, err := net.Listen("tcp", conf.Config.Master.DefaultGRPCPort)
 	if err != nil {
 		return err
 	}
@@ -194,11 +194,11 @@ func (ms GRPCMasterServer) CreateIndex(ctx context.Context, in *messagepb.IndexP
 
 func CollectionController(ch chan *messagepb.Mapping) {
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"127.0.0.1:12379"},
+		Endpoints:   conf.Config.Master.EtcdEndPoints,
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
 	for collection := range ch {
 		sID := id.New().Uint64()
 		cID := id.New().Uint64()
@@ -243,7 +243,7 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
 	sID := id.New().Uint64()
 	cID := id.New().Uint64()
 	fieldMetas := []*messagepb.FieldMeta{}
@@ -281,11 +281,11 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 
 func UpdateCollectionIndex(index *messagepb.IndexParam) error {
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"127.0.0.1:12379"},
+		Endpoints:   conf.Config.Master.EtcdEndPoints,
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, common.ETCD_ROOT_PATH)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
 	collectionName := index.CollectionName
 	c, err := kvbase.Load("collection/" + collectionName)
 	if err != nil {

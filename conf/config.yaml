@@ -10,8 +10,13 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 master:
-    address: localhost
-    port: 53100
+  pulsarurl: "pulsar://localhost:6650"
+  pulsarmoniterinterval: 1
+  pulsartopic: "monitor-topic"
+  etcdrootpath: "by-dev"
+  segmentthreshole: 10000
+  defaultgrpcport: ":53100"
+  etcdendpoints: ["127.0.0.1:12379"]
 
 etcd:
   address: localhost
