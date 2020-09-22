@@ -141,14 +141,9 @@ MemCollection::Serialize() {
     recorder.RecordSection("ApplyDeleteToFile");
 
     // serialize mem to new segment files
-    while (true) {
-        auto status = SerializeSegments();
-        if (status.ok()) {
-            break;
-        } else if (status.code() == SS_STALE_ERROR) {
-            LOG_ENGINE_ERROR_ << "Failed to serialize segments: something stale. Try again";
-            continue;
-        }
+    auto status = SerializeSegments();
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to serialize segments: " << status.message();
     }
     recorder.RecordSection("SerializeSegments");
 
@@ -352,11 +347,20 @@ MemCollection::SerializeSegments() {
     idx_t max_op_id = 0;
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
-        for (auto& segment : segments) {
-            STATUS_CHECK(segment->Serialize(ss, operation));
+        for (MemSegmentList::iterator iter = segments.begin(); iter != segments.end();) {
+            auto& segment = *iter;
+            auto status = segment->Serialize(ss, operation);
             idx_t segment_max_op_id = segment->GetMaxOpID();
             if (max_op_id < segment_max_op_id) {
                 max_op_id = segment_max_op_id;
+            }
+
+            // if the partition or collection has been deleted, the Serialize method will failed
+            // that means no need to serialize this segment, remove it from segment list
+            if (status.ok()) {
+                ++iter;
+            } else {
+                iter = segments.erase(iter);
             }
         }
     }
