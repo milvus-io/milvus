@@ -360,6 +360,7 @@ MemCollection::SerializeSegments() {
             }
         }
     }
+    operation->SetContextLsn(max_op_id);
 
     // if any segment is actually created, call push() method
     // sometimes segment might be ignored since its row count is 0 (all deleted)
