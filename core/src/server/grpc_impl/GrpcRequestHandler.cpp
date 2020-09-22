@@ -1307,7 +1307,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     // By limiting the number of requests processed at the same time,
     // avoid excessive memory consumption (causing oom in extreme cases).
-    // acquire resource
+    // acquire resources
     int64_t request_size = request->ByteSizeLong();
     WaitToInsert(request_id, request_size);
 
@@ -1412,7 +1412,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
 
-    // release resource
+    // release resources
     FinishInsert(request_id, request_size);
 
     return ::grpc::Status::OK;
