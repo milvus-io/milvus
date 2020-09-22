@@ -19,11 +19,13 @@
 #include <utility>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "query/BinaryQuery.h"
 #include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -589,7 +591,10 @@ get_request_id(::grpc::ServerContext* context) {
 }  // namespace
 
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
-    : tracer_(tracer), random_num_generator_() {
+    : tracer_(tracer),
+      random_num_generator_(),
+      max_concurrent_insert_request_size_(config.cache.max_concurrent_insert_request_size()),
+      max_concurrent_insert_request_size(max_concurrent_insert_request_size_) {
     std::random_device random_device;
     random_num_generator_.seed(random_device());
 }
@@ -1294,8 +1299,15 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     //    engine::VectorsData vectors;
     //    CopyRowRecords(request->entity().vector_data(0).value(), request->entity_id_array(), vectors);
 
+    auto request_id = GetContext(context)->ReqID();
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", request_id.c_str(), __func__);
+
+    // By limiting the number of requests processed at the same time,
+    // avoid excessive memory consumption (causing oom in extreme cases).
+    // acquire resources
+    int64_t request_size = request->ByteSizeLong();
+    WaitToInsert(request_id, request_size);
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
@@ -1387,8 +1399,11 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                insert_param.id_returned_.size());
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
+
+    // release resources
+    FinishInsert(request_id, request_size);
 
     return ::grpc::Status::OK;
 }
@@ -1837,6 +1852,35 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
+}
+
+void
+GrpcRequestHandler::WaitToInsert(const std::string& request_id, int64_t request_size) {
+    std::unique_lock<std::mutex> lock(max_concurrent_insert_request_mutex);
+    insert_event_cv_.wait(lock, [&] { return max_concurrent_insert_request_size - request_size > 0; });
+    max_concurrent_insert_request_size -= request_size;
+    LOG_SERVER_DEBUG_ << LogOut(
+        "Start to process insert request [%s], "
+        "gRPC buffer size(request/remain/total): %s, %s, %s",
+        request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
+    lock.unlock();
+}
+
+void
+GrpcRequestHandler::FinishInsert(const std::string& request_id, int64_t request_size) {
+    {
+        std::lock_guard<std::mutex> lock(max_concurrent_insert_request_mutex);
+        max_concurrent_insert_request_size += request_size;
+        LOG_SERVER_DEBUG_ << LogOut(
+            "Finish to process insert request [%s], "
+            "gRPC buffer size(request/remain/total): %s, %s, %s",
+            request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
+    }
+    insert_event_cv_.notify_all();
 }
 
 }  // namespace grpc

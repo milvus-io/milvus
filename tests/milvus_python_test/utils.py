@@ -13,15 +13,21 @@ from milvus import Milvus, DataType
 
 port = 19530
 epsilon = 0.000001
+namespace = "milvus"
+
 default_flush_interval = 1
 big_flush_interval = 1000
-dim = 128
-nb = 1200
-top_k = 10
-segment_row_limit = 1000
+default_drop_interval = 3
+default_dim = 128
+default_nb = 1200
+default_top_k = 10
+max_top_k = 2048
+default_segment_row_limit = 1000
+default_server_segment_row_limit = 1024 * 512
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
-namespace = "milvus"
+default_partition_name = "_default"
+default_tag = "1970_01_01"
 
 # TODO:
 all_index_types = [
@@ -216,7 +222,7 @@ def gen_single_filter_fields():
 def gen_single_vector_fields():
     fields = []
     for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-        field = {"field": data_type.name, "type": data_type, "params": {"dim": dim}}
+        field = {"field": data_type.name, "type": data_type, "params": {"dim": default_dim}}
         fields.append(field)
     return fields
 
@@ -226,9 +232,9 @@ def gen_default_fields(auto_id=True):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dim}},
+            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
         ],
-        "segment_row_limit": segment_row_limit,
+        "segment_row_limit": default_segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
@@ -239,16 +245,16 @@ def gen_binary_default_fields(auto_id=True):
         "fields": [
             {"field": "int64", "type": DataType.INT64},
             {"field": "float", "type": DataType.FLOAT},
-            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dim}}
+            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
         ],
-        "segment_row_limit": segment_row_limit,
+        "segment_row_limit": default_segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
 
 
 def gen_entities(nb, is_normal=False):
-    vectors = gen_vectors(nb, dim, is_normal)
+    vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
@@ -258,7 +264,7 @@ def gen_entities(nb, is_normal=False):
 
 
 def gen_binary_entities(nb):
-    raw_vectors, vectors = gen_binary_vectors(nb, dim)
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
         {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
         {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
@@ -321,7 +327,7 @@ def gen_default_vector_expr(default_query):
 
 def gen_default_term_expr(keyword="term", field="int64", values=None):
     if values is None:
-        values = [i for i in range(nb // 2)]
+        values = [i for i in range(default_nb // 2)]
     expr = {keyword: {field: {"values": values}}}
     return expr
 
@@ -335,7 +341,7 @@ def update_term_expr(src_term, terms):
 
 def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     if ranges is None:
-        ranges = {"GT": 1, "LT": nb // 2}
+        ranges = {"GT": 1, "LT": default_nb // 2}
     expr = {keyword: {field: ranges}}
     return expr
 
@@ -352,18 +358,18 @@ def gen_invalid_range():
         {"range": 1},
         {"range": {}},
         {"range": []},
-        {"range": {"range": {"int64": {"GT": 0, "LT": nb // 2}}}}
+        {"range": {"range": {"int64": {"GT": 0, "LT": default_nb // 2}}}}
     ]
     return range
 
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": nb//2},
-        {"GT": nb // 2, "LT": nb*2},
+        {"GT": 0, "LT": default_nb//2},
+        {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
-        {"LT": nb},
-        {"GT": -1, "LT": top_k},
+        {"LT": default_nb},
+        {"GT": -1, "LT": default_top_k},
     ]
     return ranges
 
@@ -373,7 +379,7 @@ def gen_invalid_term():
         {"term": 1},
         {"term": []},
         {"term": {}},
-        {"term": {"term": {"int64": {"values": [i for i in range(nb // 2)]}}}}
+        {"term": {"term": {"int64": {"values": [i for i in range(default_nb // 2)]}}}}
     ]
     return terms
 
@@ -406,7 +412,7 @@ def add_field(entities, field_name=None):
 
 def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
-    vectors = gen_vectors(nb, dim, is_normal)
+    vectors = gen_vectors(nb, default_dim, is_normal)
     field = {
         "field": gen_unique_str(),
         "type": DataType.FLOAT_VECTOR,
@@ -461,7 +467,7 @@ def update_field_value(entities, old_type, new_value):
     return tmp_entities
 
 
-def add_vector_field(nb, dimension=dim):
+def add_vector_field(nb, dimension=default_dim):
     field_name = gen_unique_str()
     field = {
         "field": field_name,
