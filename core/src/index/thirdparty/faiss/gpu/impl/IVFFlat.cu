@@ -444,48 +444,54 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   int* coarseInd_h = new int[queries.getSize(0)*nprobe];
   float* outDistances_h = new float[queries.getSize(0)*k*2];  
   int* outIndices_h = new int[queries.getSize(0)*k*2];
-  HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
-  HostTensor<float, 2, true> hostOutDistances(outDistances, stream);
-  float* tmp_d = hostOutDistances.data(); 
-  long* tmp_i = hostOutIndices.data();
+  HostTensor<long, 2, true> hOutIndices(outIndices, stream);
+  HostTensor<float, 2, true> hOutDistances(outDistances, stream);
+  float* tmp_d = hOutDistances.data(); 
+  long* tmp_i = hOutIndices.data();
+  int nprobeTile = 8;
 
-
-  quantizer_->query(queries,
-                    coarseBitset,
-                    nprobe,
-                    metric_,
-                    metricArg_,
-                    coarseDistances,
-                    coarseIndices,
-                    false);
-
-  DeviceTensor<float, 3, true>
+  for (int i = 0; i < nprobe; i += nprobeTile) {
+    quantizer_->query(queries,
+                        coarseBitset,
+                        nprobe,
+                        metric_,
+                        metricArg_,
+                        coarseDistances,
+                        coarseIndices,
+                        false);
+    DeviceTensor<float, 3, true>
     residualBase(mem, {queries.getSize(0), nprobe, dim_}, stream);
 
-  if (useResidual_) {
-    // Reconstruct vectors from the quantizer
-    quantizer_->reconstruct(coarseIndices, residualBase);
+    if (useResidual_) {
+        // Reconstruct vectors from the quantizer
+        quantizer_->reconstruct(coarseIndices, residualBase);
+    }
+
+    runIVFFlatScan(queries,
+                    coarseIndices,
+                    bitset,
+                    deviceListDataPointers_,
+                    deviceListIndexPointers_,
+                    indicesOptions_,
+                    deviceListLengths_,
+                    maxListLength_,
+                    k,
+                    metric_,
+                    useResidual_,
+                    residualBase,
+                    scalarQ_.get(),
+                    outDistances,
+                    outIndices,
+                    resources_);
+
+    fromDevice<float,2>(outDistances, tmp_d, stream);
+    fromDevice<long,2>(outIndices, tmp_i, stream);
   }
 
-  runIVFFlatScan(queries,
-                 coarseIndices,
-                 bitset,
-                 deviceListDataPointers_,
-                 deviceListIndexPointers_,
-                 indicesOptions_,
-                 deviceListLengths_,
-                 maxListLength_,
-                 k,
-                 metric_,
-                 useResidual_,
-                 residualBase,
-                 scalarQ_.get(),
-                 outDistances,
-                 outIndices,
-                 resources_);
 
-  fromDevice<float,2>(outDistances, tmp_d, stream);
-  fromDevice<long,2>(outIndices, tmp_i, stream);
+
+
+
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
