@@ -116,7 +116,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 			// start new segment and add it into partition.OpenedSegments
 			newSegment := partition.NewSegment(newSegmentID)
 			newSegment.SegmentStatus = SegmentOpened
-			newSegment.SegmentCloseTime = -1
+			newSegment.SegmentCloseTime = segment.CloseTimeStamp
 			partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
 			node.SegmentsMap[newSegmentID] = newSegment
 		}
