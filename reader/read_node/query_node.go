@@ -14,7 +14,9 @@ package reader
 import "C"
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -54,6 +56,12 @@ type QueryNodeDataBuffer struct {
 	SearchBuffer            []*msgPb.SearchMsg
 	validInsertDeleteBuffer []bool
 	validSearchBuffer       []bool
+}
+
+type QueryInfo struct {
+	NumQueries int64  `json:"num_queries"`
+	TopK       int    `json:"topK"`
+	FieldName  string `json:"field_name"`
 }
 
 type QueryNode struct {
@@ -463,6 +471,19 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
+func (node *QueryNode) QueryJson2Info(queryJson *string) *QueryInfo {
+	var query QueryInfo
+	var err = json.Unmarshal([]byte(*queryJson), &query)
+
+	if err != nil {
+		log.Printf("Unmarshal query json failed")
+		return nil
+	}
+
+	fmt.Println(query)
+	return &query
+}
+
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 	// TODO: use client id to publish results to different clients
 	// var clientId = (*(searchMessages[0])).ClientId
@@ -475,16 +496,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 	// Traverse all messages in the current messageClient.
 	// TODO: Do not receive batched search requests
 	for _, msg := range searchMessages {
-		var collectionName = searchMessages[0].CollectionName
-		var targetCollection, err = node.GetCollectionByCollectionName(collectionName)
-		if err != nil {
-			fmt.Println(err.Error())
-			return msgPb.Status{ErrorCode: 1}
-		}
-
 		var resultsTmp = make([]SearchResultTmp, 0)
-		// TODO: get top-k's k from queryString
-		const TopK = 1
 
 		var timestamp = msg.Timestamp
 		var vector = msg.Records
@@ -498,36 +510,27 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			return msgPb.Status{ErrorCode: 1}
 		}
 
-		// 2. Do search in all segments
-		for _, partition := range targetCollection.Partitions {
-			for _, openSegment := range partition.OpenedSegments {
-				var res, err = openSegment.SegmentSearch(queryJson, timestamp, vector)
-				if err != nil {
-					fmt.Println(err.Error())
-					return msgPb.Status{ErrorCode: 1}
-				}
-				fmt.Println(res.ResultIds)
-				for i := 0; i < len(res.ResultIds); i++ {
-					resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
-				}
+		// 2. Get query information from query json
+		query := node.QueryJson2Info(&queryJson)
+
+		// 3. Do search in all segments
+		for _, segment := range node.SegmentsMap {
+			var res, err = segment.SegmentSearch(query, timestamp, vector)
+			if err != nil {
+				fmt.Println(err.Error())
+				return msgPb.Status{ErrorCode: 1}
 			}
-			for _, closedSegment := range partition.ClosedSegments {
-				var res, err = closedSegment.SegmentSearch(queryJson, timestamp, vector)
-				if err != nil {
-					fmt.Println(err.Error())
-					return msgPb.Status{ErrorCode: 1}
-				}
-				for i := 0; i <= len(res.ResultIds); i++ {
-					resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
-				}
+			fmt.Println(res.ResultIds)
+			for i := 0; i < len(res.ResultIds); i++ {
+				resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
 			}
 		}
 
-		// 2. Reduce results
+		// 4. Reduce results
 		sort.Slice(resultsTmp, func(i, j int) bool {
 			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
 		})
-		resultsTmp = resultsTmp[:TopK]
+		resultsTmp = resultsTmp[:query.TopK]
 		var entities = msgPb.Entities{
 			Ids: make([]int64, 0),
 		}
@@ -547,7 +550,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		results.RowNum = int64(len(results.Distances))
 
-		// 3. publish result to pulsar
+		// 5. publish result to pulsar
 		node.PublishSearchResult(&results)
 	}
 

@@ -143,7 +143,8 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var vectorRecord = msgPb.VectorRowRecord{
 		FloatData: queryRawData,
 	}
-	var searchRes, searchErr = segment.SegmentSearch(queryJson, timestamps[N/2], &vectorRecord)
+	query := node.QueryJson2Info(&queryJson)
+	var searchRes, searchErr = segment.SegmentSearch(query, timestamps[N/2], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 

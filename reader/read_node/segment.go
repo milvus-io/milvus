@@ -13,7 +13,6 @@ package reader
 */
 import "C"
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/czs007/suvlim/errors"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
@@ -75,12 +74,21 @@ func (s *Segment) CloseSegment(collection* Collection) error {
 	Close(CSegmentBase c_segment);
 	*/
 	var status = C.Close(s.SegmentPtr)
+	s.SegmentStatus = SegmentClosed
+
 	if status != 0 {
 		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
 	}
 
 	// Build index after closing segment
-	go s.buildIndex(collection)
+	s.SegmentStatus = SegmentIndexing
+	s.buildIndex(collection)
+
+	// TODO: remove redundant segment indexed status
+	// Change segment status to indexed
+	s.SegmentStatus = SegmentIndexed
+
+	s.SegmentStatus = SegmentClosed
 	return nil
 }
 
@@ -182,7 +190,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
 	/*
 	int
 	Search(CSegmentBase c_segment,
@@ -193,20 +201,7 @@ func (s *Segment) SegmentSearch(queryJson string, timestamp uint64, vectorRecord
 	       long int* result_ids,
 	       float* result_distances);
 	*/
-	type QueryInfo struct {
-		NumQueries int64  `json:"num_queries"`
-		TopK       int    `json:"topK"`
-		FieldName  string `json:"field_name"`
-	}
-
-	type CQueryInfo C.CQueryInfo
-
-	var query QueryInfo
-	var err = json.Unmarshal([]byte(queryJson), &query)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(query)
+	//type CQueryInfo C.CQueryInfo
 
 	cQuery := C.CQueryInfo{
 		num_queries: C.long(query.NumQueries),

@@ -10,24 +10,22 @@ import (
 )
 
 func (node *QueryNode) SegmentsManagement() {
-	node.queryNodeTimeSync.UpdateTSOTimeSync()
-	var timeNow = node.queryNodeTimeSync.TSOTimeSync
+	//node.queryNodeTimeSync.UpdateTSOTimeSync()
+	//var timeNow = node.queryNodeTimeSync.TSOTimeSync
+
+	timeNow := node.messageClient.GetTimeNow()
+
 	for _, collection := range node.Collections {
 		for _, partition := range collection.Partitions {
 			for _, oldSegment := range partition.OpenedSegments {
 				// TODO: check segment status
 				if timeNow >= oldSegment.SegmentCloseTime {
-					// start new segment and add it into partition.OpenedSegments
-					// TODO: get segmentID from master
-					var segmentID int64 = 0
-					var newSegment = partition.NewSegment(segmentID)
-					newSegment.SegmentCloseTime = timeNow + SegmentLifetime
-					partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
-					node.SegmentsMap[segmentID] = newSegment
-
 					// close old segment and move it into partition.ClosedSegments
-					// TODO: check status
-					var _ = oldSegment.CloseSegment(collection)
+					if oldSegment.SegmentStatus == SegmentClosed {
+						log.Println("Never reach here, Opened segment cannot be closed")
+						continue
+					}
+					go oldSegment.CloseSegment(collection)
 					partition.ClosedSegments = append(partition.ClosedSegments, oldSegment)
 				}
 			}
@@ -47,20 +45,38 @@ func (node *QueryNode) SegmentManagementService() {
 func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 	var statisticData = make([]masterPb.SegmentStat, 0)
 
-	for _, collection := range node.Collections {
-		for _, partition := range collection.Partitions {
-			for _, openedSegment := range partition.OpenedSegments {
-				currentMemSize := openedSegment.GetMemSize()
-				memIncreaseRate := float32((int64(currentMemSize))-(int64(openedSegment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
-				stat := masterPb.SegmentStat{
-					// TODO: set master pb's segment id type from uint64 to int64
-					SegmentId:  uint64(openedSegment.SegmentId),
-					MemorySize: currentMemSize,
-					MemoryRate: memIncreaseRate,
-				}
-				statisticData = append(statisticData, stat)
-			}
+	//for _, collection := range node.Collections {
+	//	for _, partition := range collection.Partitions {
+	//		for _, openedSegment := range partition.OpenedSegments {
+	//			currentMemSize := openedSegment.GetMemSize()
+	//			memIncreaseRate := float32((int64(currentMemSize))-(int64(openedSegment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
+	//			stat := masterPb.SegmentStat{
+	//				// TODO: set master pb's segment id type from uint64 to int64
+	//				SegmentId:  uint64(openedSegment.SegmentId),
+	//				MemorySize: currentMemSize,
+	//				MemoryRate: memIncreaseRate,
+	//			}
+	//			statisticData = append(statisticData, stat)
+	//		}
+	//	}
+	//}
+
+	for segmentID, segment := range node.SegmentsMap {
+		currentMemSize := segment.GetMemSize()
+		memIncreaseRate := float32((int64(currentMemSize))-(int64(segment.LastMemSize))) / (float32(sleepMillisecondTime) / 1000)
+		segment.LastMemSize = currentMemSize
+
+		//segmentStatus := segment.SegmentStatus
+		//segmentNumOfRows := segment.GetRowCount()
+
+		stat := masterPb.SegmentStat{
+			// TODO: set master pb's segment id type from uint64 to int64
+			SegmentId: uint64(segmentID),
+			MemorySize: currentMemSize,
+			MemoryRate: memIncreaseRate,
 		}
+
+		statisticData = append(statisticData, stat)
 	}
 
 	var status = node.PublicStatistic(&statisticData)
