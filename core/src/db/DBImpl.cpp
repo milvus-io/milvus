@@ -568,6 +568,10 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
         segment::DeletedDocsPtr delete_docs = std::make_shared<segment::DeletedDocs>();
         segment_reader.LoadDeletedDocs(delete_docs);
         auto& docs_offsets = delete_docs->GetDeletedDocs();
+        if (docs_offsets.empty()) {
+            LOG_ENGINE_DEBUG_ << "delete_docs is empty";
+            continue;
+        }
 
         faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
         if (nullptr == blacklist) {
@@ -579,9 +583,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
         }
 
         for (auto& i : docs_offsets) {
-            if (!blacklist->test(i)) {
-                blacklist->set(i);
-            }
+            blacklist->set(i);
         }
     }
 

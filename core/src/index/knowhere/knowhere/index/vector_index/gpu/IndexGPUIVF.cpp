@@ -149,7 +149,8 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k,
+                                 GetBlacklist());
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

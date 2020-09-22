@@ -329,7 +329,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     } else {
         ivf_index->parallel_mode = 0;
     }
-    ivf_index->search(n, (float*)data, k, distances, labels, bitset_);
+    ivf_index->search(n, (float*)data, k, distances, labels, GetBlacklist());
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost

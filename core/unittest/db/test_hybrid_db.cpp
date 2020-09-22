@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#if 0
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest.h>
@@ -477,3 +478,4 @@ TEST_F(DBTest, HYBRID_INVALID_TEST) {
     ASSERT_FALSE(stat.ok());
     fiu_disable("read_attrs_internal_open_file_fail");
 }
+#endif

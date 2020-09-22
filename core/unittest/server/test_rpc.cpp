@@ -1193,6 +1193,7 @@ TEST_F(RpcHandlerTest, CMD_TEST) {
     handler->Cmd(&context, &command, &reply);
 }
 
+#if 0
 TEST_F(RpcHandlerTest, HYBRID_TEST) {
     ::grpc::ServerContext context;
     milvus::grpc::Mapping mapping;
@@ -1447,6 +1448,7 @@ TEST_F(RpcHandlerTest, HYBRID_INVALID_TEST) {
     handler->HybridSearch(&context, &search_param, &topk_query_result);
     fiu_disable("SearchRequest.OnExecute.throw_std_exception");
 }
+#endif
 
 //////////////////////////////////////////////////////////////////////
 namespace {

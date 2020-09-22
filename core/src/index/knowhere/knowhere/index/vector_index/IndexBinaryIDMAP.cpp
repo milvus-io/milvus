@@ -145,7 +145,7 @@ BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distanc
         flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
     int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, (uint8_t*)data, k, i_distances, labels, bitset_);
+    flat_index->search(n, (uint8_t*)data, k, i_distances, labels, GetBlacklist());
 
     // if hamming, it need transform int32 to float
     if (flat_index->metric_type == faiss::METRIC_Hamming) {

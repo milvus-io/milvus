@@ -438,9 +438,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
             vector_count_ = count;
 
-            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
-            for (auto& offset : deleted_docs) {
-                concurrent_bitset_ptr->set(offset);
+            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
+            if (!deleted_docs.empty()) {
+                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
+                for (auto& offset : deleted_docs) {
+                    concurrent_bitset_ptr->set(offset);
+                }
             }
 
             auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
@@ -488,11 +491,13 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     }
                     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-                        std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-                    for (auto& offset : deleted_docs) {
-                        if (!concurrent_bitset_ptr->test(offset)) {
-                            concurrent_bitset_ptr->set(offset);
+                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
+                    if (!deleted_docs.empty()) {
+                        concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                        for (auto& offset : deleted_docs) {
+                            if (!concurrent_bitset_ptr->test(offset)) {
+                                concurrent_bitset_ptr->set(offset);
+                            }
                         }
                     }
 
@@ -754,6 +759,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
     free(res_dist);
 }
 
+#if 0
 template <typename T>
 void
 ProcessRangeQuery(std::vector<T> data, T value, query::CompareOperator type, faiss::ConcurrentBitsetPtr& bitset) {
@@ -1106,62 +1112,11 @@ ExecutionEngineImpl::ExecBinaryQuery(milvus::query::GeneralQueryPtr general_quer
     }
     return Status::OK();
 }
+#endif
 
 Status
 ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvus::json& extra_params, float* distances,
                             int64_t* labels, bool hybrid) {
-#if 0
-    if (index_type_ == EngineType::FAISS_IVFSQ8H) {
-        if (!hybrid) {
-            const std::string key = location_ + ".quantizer";
-            std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
-
-            const int64_t NOT_FOUND = -1;
-            int64_t device_id = NOT_FOUND;
-
-            // cache hit
-            {
-                knowhere::QuantizerPtr quantizer = nullptr;
-
-                for (auto& gpu : gpus) {
-                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                    if (auto cached_quantizer = cache->GetIndex(key)) {
-                        device_id = gpu;
-                        quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
-                    }
-                }
-
-                if (device_id != NOT_FOUND) {
-                    // cache hit
-                    milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
-                    auto new_index = index_->LoadData(quantizer, config);
-                    index_ = new_index;
-                }
-            }
-
-            if (device_id == NOT_FOUND) {
-                // cache miss
-                std::vector<int64_t> all_free_mem;
-                for (auto& gpu : gpus) {
-                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                    auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-                    all_free_mem.push_back(free_mem);
-                }
-
-                auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-                auto best_index = std::distance(all_free_mem.begin(), max_e);
-                device_id = gpus[best_index];
-
-                auto pair = index_->CopyToGpuWithQuantizer(device_id);
-                index_ = pair.first;
-
-                // cache
-                auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
-                cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
-            }
-        }
-    }
-#endif
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search float", "search", 0));
 
     if (index_ == nullptr) {

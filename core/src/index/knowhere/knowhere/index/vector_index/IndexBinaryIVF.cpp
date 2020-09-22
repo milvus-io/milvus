@@ -208,7 +208,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
 
     stdclock::time_point before = stdclock::now();
     int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    index_->search(n, (uint8_t*)data, k, i_distances, labels, bitset_);
+    index_->search(n, (uint8_t*)data, k, i_distances, labels, GetBlacklist());
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();

@@ -225,7 +225,7 @@ IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int6
     auto default_type = flat_index->metric_type;
     if (config.contains(Metric::TYPE))
         flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, (float*)data, k, distances, labels, bitset_);
+    flat_index->search(n, (float*)data, k, distances, labels, GetBlacklist());
     flat_index->metric_type = default_type;
 }
 

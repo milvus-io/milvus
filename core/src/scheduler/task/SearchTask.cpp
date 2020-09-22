@@ -281,6 +281,7 @@ XSearchTask::Execute() {
             // step 2: search
             bool hybrid = std::dynamic_pointer_cast<SpecResLabel>(label_)->IsHybrid();
             Status s;
+#if 0
             if (general_query != nullptr) {
                 std::unordered_map<std::string, engine::DataType> types;
                 auto attr_type = search_job->attr_type();
@@ -313,6 +314,7 @@ XSearchTask::Execute() {
                 search_job->SearchDone(index_id_);
                 return;
             }
+#endif
             if (!vectors.float_data_.empty()) {
                 s = index_engine_->Search(nq, vectors.float_data_.data(), topk, extra_params, output_distance.data(),
                                           output_ids.data(), hybrid);
