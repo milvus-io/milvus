@@ -486,6 +486,25 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
     fromDevice<float,2>(outDistances, tmp_d, stream);
     fromDevice<long,2>(outIndices, tmp_i, stream);
+    if(i) {
+          for(int d=0;d<queries.getSize(0);d++) {
+            for(int m = 0;m<k;m++) {
+                outDistances_h[d * 2 * k + k + m] = tmp_d[d * k + m];
+                outIndices_h[d * 2 * k + k + m] = tmp_i[d * k + m];
+            }
+            // Usort(outDistances_h+k*2*d, outIndices_h+k*2*d, 2*k);
+        }
+    }
+
+    else{
+        for(int d = 0; d < queries.getSize(0); d ++) {
+            for(int m = 0; m < k; m ++) {
+                outDistances_h[d * 2 * k + m] = tmp_d[d * k + m];
+                outIndices_h[d * 2 * k + m] = tmp_i[d * k + m];
+            }
+        }
+    }
+
   }
 
 
