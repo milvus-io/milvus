@@ -12,6 +12,7 @@
 #pragma once
 
 #include "core/thirdparty/hdfs/hdfs.h"
+
 #include "storage/Operation.h"
 
 #include <memory>
