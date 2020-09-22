@@ -332,11 +332,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
  private:
     void
-    WaitToInsert(const std::string& request_id,int64_t request_size);
+    WaitToInsert(const std::string& request_id, int64_t request_size);
 
     void
-    FinishInsert(const std::string& request_id,int64_t request_size);
-
+    FinishInsert(const std::string& request_id, int64_t request_size);
 
  private:
     ReqHandler req_handler_;
@@ -352,7 +351,6 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     std::condition_variable insert_event_cv_;
     const int64_t insert_request_buffer_size_;
     int64_t remain_insert_request_buffer_size = 0;
-
 };
 
 }  // namespace grpc

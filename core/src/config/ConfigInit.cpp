@@ -123,7 +123,7 @@ InitConfig() {
          CreateStringConfig("cache.preload_collection", &config.cache.preload_collection.value, "")},
         {"cache.insert_request_buffer_size_",
          CreateSizeConfig("cache.insert_request_buffer_size_", 256 * MB, std::numeric_limits<int64_t>::max(),
-                          &config.cache.insert_request_buffer_size.value, 2 * GB )},
+                          &config.cache.insert_request_buffer_size.value, 2 * GB)},
 
         /* gpu */
         {"gpu.enable", CreateBoolConfig("gpu.enable", &config.gpu.enable.value, false)},

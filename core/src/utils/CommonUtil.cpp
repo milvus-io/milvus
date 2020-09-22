@@ -206,7 +206,8 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
-std::string CommonUtil::ConvertSize(int64_t size) {
+std::string
+CommonUtil::ConvertSize(int64_t size) {
     const int64_t gb = 1024ll * 1024 * 1024;
     const int64_t mb = 1024ll * 1024;
     const int64_t kb = 1024ll;

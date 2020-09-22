@@ -51,7 +51,6 @@ class CommonUtil {
     static std::string
     ConvertSize(int64_t size);
 
-
 #ifdef ENABLE_CPU_PROFILING
     static std::string
     GetCurrentTimeStr();
