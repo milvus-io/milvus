@@ -50,10 +50,9 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
 
     ResourcePtr res_ptr;
     if (!gpu_enable_) {
-        LOG_SERVER_ERROR_ << LogOut("FaissIVFSQ8HPass: SQ8H index only works with gpu enabled!");
-        return false;
-    }
-    if (search_task->nq() < threshold_) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: gpu disable, specify cpu to search!");
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
