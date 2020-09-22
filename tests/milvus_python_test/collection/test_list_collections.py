@@ -6,15 +6,11 @@ import threading
 from time import sleep
 from multiprocessing import Process
 from utils import *
+from constants import *
 
-
-drop_interval_time = 3
-collection_id = "list_collections"
-default_fields = gen_default_fields() 
-
+uid = "list_collections"
 
 class TestListCollections:
-
     """
     ******************************************************************
       The following cases are used to test `list_collections` function
@@ -36,7 +32,7 @@ class TestListCollections:
         '''
         collection_num = 50
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             connect.create_collection(collection_name, default_fields)
             assert collection_name in connect.list_collections()
 
@@ -57,7 +53,7 @@ class TestListCollections:
             assert the value returned by list_collections method
         expected: False
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         assert collection_name not in connect.list_collections()
 
     @pytest.mark.level(2)
@@ -72,7 +68,7 @@ class TestListCollections:
         if result:
             for collection_name in result:
                 connect.drop_collection(collection_name)
-        time.sleep(drop_interval_time)
+        time.sleep(default_drop_interval)
         result = connect.list_collections()
         assert len(result) == 0
 
@@ -85,7 +81,7 @@ class TestListCollections:
         '''
         threads_num = 4 
         threads = []
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
 
         def _list():

@@ -6,17 +6,9 @@ import logging
 from multiprocessing import Pool, Process
 import pytest
 from utils import *
+from constants import *
 
-tag = "1970_01_01"
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-collection_id = "list_id_in_segment"
-entity = gen_entities(1)
-raw_vector, binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-default_fields = gen_default_fields() 
-
+uid = "list_id_in_segment"
 
 def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=None):
     if vec_type != "float":
@@ -27,9 +19,9 @@ def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=Non
     connect.flush([collection])
     if index_params:
         if vec_type == 'float':
-            connect.create_index(collection, field_name, index_params)
+            connect.create_index(collection, default_float_vec_field_name, index_params)
         else:
-            connect.create_index(collection, binary_field_name, index_params)
+            connect.create_index(collection, default_binary_vec_field_name, index_params)
     stats = connect.get_collection_stats(collection)
     return ids, stats["partitions"][0]["segments"][0]["id"]
 
@@ -58,7 +50,7 @@ class TestListIdInSegmentBase:
         method: call list_id_in_segment with a random collection_name, which is not in db
         expected: status not ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         ids, segment_id = get_segment_id(connect, collection)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection_name, segment_id)
@@ -99,7 +91,7 @@ class TestListIdInSegmentBase:
         expected: status not ok
         '''
         ids, seg_id = get_segment_id(connect, collection)
-        # segment = gen_unique_str(collection_id)
+        # segment = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
             vector_ids = connect.list_id_in_segment(collection, seg_id + 10000)
 
@@ -126,11 +118,11 @@ class TestListIdInSegmentBase:
         '''
         nb = 10
         entities = gen_entities(nb)
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        assert stats["partitions"][1]["tag"] == tag
+        assert stats["partitions"][1]["tag"] == default_tag
         vector_ids = connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["id"])
         # vector_ids should match ids
         assert len(vector_ids) == nb
@@ -154,7 +146,7 @@ class TestListIdInSegmentBase:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
+        ids, seg_id = get_segment_id(connect, collection, nb=default_nb, index_params=get_simple_index)
         try:
             connect.list_id_in_segment(collection, seg_id)
         except Exception as e:
@@ -168,11 +160,11 @@ class TestListIdInSegmentBase:
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        assert stats["partitions"][1]["tag"] == tag
+        assert stats["partitions"][1]["tag"] == default_tag
         try:
             connect.list_id_in_segment(collection, stats["partitions"][1]["segments"][0]["id"])
         except Exception as e:
@@ -222,7 +214,7 @@ class TestListIdInSegmentBase:
         expected: ids returned in ids inserted
         '''
         get_simple_index["metric_type"] = "IP"
-        ids, seg_id = get_segment_id(connect, collection, nb=nb, index_params=get_simple_index)
+        ids, seg_id = get_segment_id(connect, collection, nb=default_nb, index_params=get_simple_index)
         vector_ids = connect.list_id_in_segment(collection, seg_id)
         # TODO:
         segment_row_limit = connect.get_collection_info(collection)["segment_row_limit"]
@@ -259,10 +251,10 @@ class TestListIdInSegmentBinary:
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(binary_collection, tag)
+        connect.create_partition(binary_collection, default_tag)
         nb = 10
         vectors, entities = gen_binary_entities(nb)
-        ids = connect.insert(binary_collection, entities, partition_tag=tag)
+        ids = connect.insert(binary_collection, entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
@@ -289,7 +281,7 @@ class TestListIdInSegmentBinary:
         method: call list_id_in_segment and check if the segment contains vectors
         expected: status ok
         '''
-        ids, seg_id = get_segment_id(connect, binary_collection, nb=nb, index_params=get_jaccard_index, vec_type='binary')
+        ids, seg_id = get_segment_id(connect, binary_collection, nb=default_nb, index_params=get_jaccard_index, vec_type='binary')
         vector_ids = connect.list_id_in_segment(binary_collection, seg_id)
         # TODO: 
 
@@ -299,11 +291,11 @@ class TestListIdInSegmentBinary:
         method: create partition, add vectors to it and call list_id_in_segment, check if the segment contains vectors
         expected: status ok
         '''
-        connect.create_partition(binary_collection, tag)
-        ids = connect.insert(binary_collection, binary_entities, partition_tag=tag)
+        connect.create_partition(binary_collection, default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
-        assert stats["partitions"][1]["tag"] == tag
+        assert stats["partitions"][1]["tag"] == default_tag
         vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
         # vector_ids should match ids
         # TODO

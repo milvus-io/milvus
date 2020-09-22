@@ -10,23 +10,16 @@ from milvus import IndexType, MetricType
 from utils import *
 
 
-collection_id = "wal"
+uid = "wal"
 TIMEOUT = 120
-tag = "1970_01_01"
 insert_interval_time = 1.5
 big_nb = 100000
 field_name = "float_vector"
-entity = gen_entities(1)
-binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
 big_entities = gen_entities(big_nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-default_fields = gen_default_fields() 
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
 class TestRestartBase:
-
     """
     ******************************************************************
       The following cases are used to test `create_partition` function 
@@ -51,9 +44,9 @@ class TestRestartBase:
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -256,7 +249,7 @@ class TestRestartBase:
         collection_num = 2
         collection_list = []
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             ids = connect.insert(collection_name, big_entities)
