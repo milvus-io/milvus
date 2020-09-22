@@ -32,7 +32,7 @@ main(int argc, char *argv[]) {
   delete_ids.push_back(1);
   delete_ids.push_back(2);
   delete_ids.push_back(3);
-  client.DeleteEntityByID("collection0", delete_ids);
+  client.DeleteEntityByID("collection1", delete_ids);
 
   return 0;
 }

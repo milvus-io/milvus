@@ -3,6 +3,7 @@
 #include "nlohmann/json.hpp"
 #include <mutex>
 #include <google/protobuf/text_format.h>
+#include <boost/filesystem.hpp>
 
 using Collection = masterpb::Collection;
 using Schema = milvus::grpc::Schema;
@@ -23,6 +24,7 @@ void ParseSegmentInfo(const std::string &json_str, SegmentInfo &segment_info) {
   segment_info.set_close_timestamp(json["close_timestamp"].get<uint64_t>());
   segment_info.set_collection_id(json["collection_id"].get<uint64_t>());
   segment_info.set_collection_name(json["collection_name"].get<std::string>());
+  segment_info.set_rows(json["rows"].get<std::int64_t>());
 }
 
 void ParseCollectionSchema(const std::string &json_str, Collection &collection) {
@@ -51,8 +53,8 @@ MetaWrapper &MetaWrapper::GetInstance() {
 Status MetaWrapper::Init() {
   try {
     etcd_root_path_ = config.etcd.rootpath();
-    segment_path_ = etcd_root_path_ + "segment/";
-    collection_path_ = etcd_root_path_ + "collection/";
+    segment_path_ = (boost::filesystem::path(etcd_root_path_)  / "segment/").string();
+    collection_path_ = (boost::filesystem::path(etcd_root_path_) / "collection/").string();
 
     auto master_addr = config.master.address() + ":" + std::to_string(config.master.port());
     master_client_ = std::make_shared<milvus::master::GrpcClient>(master_addr);
@@ -65,7 +67,6 @@ Status MetaWrapper::Init() {
       UpdateMeta(res);
     };
     watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
-
     SyncMeta();
   }
   catch (const std::exception &e) {
@@ -160,6 +161,17 @@ Status MetaWrapper::SyncMeta() {
     }
   }
   return status;
+}
+
+int64_t MetaWrapper::CountCollection(const std::string &collection_name) {
+  uint64_t count = 0;
+  // TODO: index to speed up
+  for (const auto& segment_info : segment_infos_){
+    if (segment_info.second.collection_name() == collection_name){
+      count += segment_info.second.rows();
+    }
+  }
+  return count;
 }
 
 }

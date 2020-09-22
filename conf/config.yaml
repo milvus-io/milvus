@@ -16,7 +16,7 @@ master:
 etcd:
   address: localhost
   port: 2379
-  rootpath: by-dev/
+  rootpath: by-dev
   segthreshold: 10000
 
 timesync: 

@@ -2,7 +2,7 @@
 #include "interface/ConnectionImpl.h"
 #include "utils/Utils.h"
 
-const std::string COLLECTION = "collection_0";
+const std::string COLLECTION = "collection1";
 
 int main(int argc, char *argv[]) {
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
