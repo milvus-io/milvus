@@ -418,7 +418,7 @@ Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
