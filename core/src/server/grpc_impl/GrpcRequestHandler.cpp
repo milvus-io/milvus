@@ -595,8 +595,8 @@ get_request_id(::grpc::ServerContext* context) {
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
     : tracer_(tracer),
       random_num_generator_(),
-      insert_request_buffer_size_(config.cache.insert_request_buffer_size()),
-      remain_insert_request_buffer_size(insert_request_buffer_size_) {
+      max_concurrent_insert_request_size_(config.cache.max_concurrent_insert_request_size()),
+      max_concurrent_insert_request_size(max_concurrent_insert_request_size_) {
     std::random_device random_device;
     random_num_generator_.seed(random_device());
 }
@@ -1866,29 +1866,29 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
 
 void
 GrpcRequestHandler::WaitToInsert(const std::string& request_id, int64_t request_size) {
-    std::unique_lock<std::mutex> lock(insert_request_buffer_mutex_);
-    insert_event_cv_.wait(lock, [&] { return remain_insert_request_buffer_size - request_size > 0; });
-    remain_insert_request_buffer_size -= request_size;
+    std::unique_lock<std::mutex> lock(max_concurrent_insert_request_mutex);
+    insert_event_cv_.wait(lock, [&] { return max_concurrent_insert_request_size - request_size > 0; });
+    max_concurrent_insert_request_size -= request_size;
     LOG_SERVER_DEBUG_ << LogOut(
         "Start to process insert request [%s], "
         "gRPC buffer size(request/remain/total): %s, %s, %s",
         request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
-        CommonUtil::ConvertSize(remain_insert_request_buffer_size).c_str(),
-        CommonUtil::ConvertSize(insert_request_buffer_size_).c_str());
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
     lock.unlock();
 }
 
 void
 GrpcRequestHandler::FinishInsert(const std::string& request_id, int64_t request_size) {
     {
-        std::lock_guard<std::mutex> lock(insert_request_buffer_mutex_);
-        remain_insert_request_buffer_size += request_size;
+        std::lock_guard<std::mutex> lock(max_concurrent_insert_request_mutex);
+        max_concurrent_insert_request_size += request_size;
         LOG_SERVER_DEBUG_ << LogOut(
             "Finish to process insert request [%s], "
             "gRPC buffer size(request/remain/total): %s, %s, %s",
             request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
-            CommonUtil::ConvertSize(remain_insert_request_buffer_size).c_str(),
-            CommonUtil::ConvertSize(insert_request_buffer_size_).c_str());
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
     }
     insert_event_cv_.notify_all();
 }

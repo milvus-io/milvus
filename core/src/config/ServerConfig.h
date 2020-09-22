@@ -103,7 +103,7 @@ struct ServerConfig {
         Integer insert_buffer_size{0};
         Bool cache_insert_data{false};
         String preload_collection{"unknown"};
-        Integer insert_request_buffer_size{0};
+        Integer max_concurrent_insert_request_size{0};
     } cache;
 
     struct Metric {

@@ -347,10 +347,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     mutable std::mutex random_mutex_;
     mutable std::mutex context_map_mutex_;
 
-    mutable std::mutex insert_request_buffer_mutex_;
+    mutable std::mutex max_concurrent_insert_request_mutex;
     std::condition_variable insert_event_cv_;
-    const int64_t insert_request_buffer_size_;
-    int64_t remain_insert_request_buffer_size = 0;
+    const int64_t max_concurrent_insert_request_size_;
+    int64_t max_concurrent_insert_request_size = 0;
 };
 
 }  // namespace grpc
