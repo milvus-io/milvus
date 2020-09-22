@@ -91,12 +91,6 @@ InsertReq::OnExecute() {
             return Status(SERVER_COLLECTION_NOT_EXIST, "Collection doesn't exist: " + collection_name_);
         }
 
-        exist = false;
-        STATUS_CHECK(DBWrapper::DB()->HasPartition(collection_name_, partition_name_, exist));
-        if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, "Partition doesn't exist: " + partition_name_);
-        }
-
         // step 2: check insert data limitation
         auto status = ValidateInsertDataSize(insert_param_);
         if (!status.ok()) {
