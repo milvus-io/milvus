@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"log"
 	"path"
 	"reflect"
 	"strconv"
@@ -46,6 +47,15 @@ func isSegmentObj(key string) bool {
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
 	return index == 0
+}
+
+func isSegmentChannelRangeInQueryNodeChannelRange(segment *mock.Segment) bool {
+	if segment.ChannelStart > segment.ChannelEnd {
+		log.Printf("Illegal segment channel range")
+		return false
+	}
+	// TODO: add query node channel range check
+	return true
 }
 
 func printCollectionStruct(obj *mock.Collection) {
@@ -93,6 +103,11 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 		println(err.Error())
 	}
 	printSegmentStruct(segment)
+
+	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+		return
+	}
+
 	collection := node.GetCollectionByID(segment.CollectionID)
 	if collection != nil {
 		partition := collection.GetPartitionByName(segment.PartitionTag)
@@ -101,6 +116,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 			// start new segment and add it into partition.OpenedSegments
 			newSegment := partition.NewSegment(newSegmentID)
 			newSegment.SegmentStatus = SegmentOpened
+			newSegment.SegmentCloseTime = -1
 			partition.OpenedSegments = append(partition.OpenedSegments, newSegment)
 			node.SegmentsMap[newSegmentID] = newSegment
 		}
@@ -130,6 +146,11 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 		println(err.Error())
 	}
 	printSegmentStruct(segment)
+
+	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+		return
+	}
+
 	seg, err := node.GetSegmentBySegmentID(int64(segment.SegmentID)) // todo change  to uint64
 	if seg != nil {
 		seg.SegmentCloseTime = segment.CloseTimeStamp
