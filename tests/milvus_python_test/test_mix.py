@@ -11,9 +11,7 @@ from milvus import IndexType, MetricType
 from utils import *
 
 index_file_size = 10
-collection_id = "test_mix"
-add_interval_time = 5
-vectors = gen_vectors(10000, dim)
+vectors = gen_vectors(10000, default_dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 top_k = 1
@@ -24,7 +22,6 @@ index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 
 class TestMixBase:
-
     # disable
     def _test_search_during_createIndex(self, args):
         loops = 10000
@@ -35,7 +32,7 @@ class TestMixBase:
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
         milvus_instance.create_collection({'collection_name': collection,
-             'dimension': dim,
+             'dimension': default_dim,
              'index_file_size': index_file_size,
              'metric_type': MetricType.L2})
         for i in range(10):
@@ -88,7 +85,7 @@ class TestMixBase:
             collection_name = gen_unique_str('test_mix_multi_collections')
             collection_list.append(collection_name)
             param = {'collection_name': collection_name,
-                     'dimension': dim,
+                     'dimension': default_dim,
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_collection(param)
@@ -101,7 +98,7 @@ class TestMixBase:
             collection_name = gen_unique_str('test_mix_multi_collections')
             collection_list.append(collection_name)
             param = {'collection_name': collection_name,
-                     'dimension': dim,
+                     'dimension': default_dim,
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_collection(param)
