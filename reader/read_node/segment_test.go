@@ -354,10 +354,11 @@ func TestSegment_GetMemSize(t *testing.T) {
 
 func TestSegment_RealSchemaTest(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
-	var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  " +
-		"field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
-		"field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n" +
-		"\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	//var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  " +
+	//	"field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
+	//	"field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n" +
+	//	"\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
+	var schemaString = "id: 6875229265736357360\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600764055\nsegment_ids: 6875229265736357360\npartition_tags: \"default\"\n"
 	node := NewQueryNode(0, 0)
 	var collection = node.NewCollection(0, "collection0", schemaString)
 	var partition = collection.NewPartition("partition0")

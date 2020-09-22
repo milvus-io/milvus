@@ -50,7 +50,7 @@ int
 main(int argc, char* argv[]) {
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
     if (!parameters.is_valid){
-    return 0;
+      return 0;
    }
 
     auto client = milvus::ConnectionImpl();
@@ -66,7 +66,7 @@ main(int argc, char* argv[]) {
 
     milvus_sdk::TimeRecorder insert("insert");
     for (int j = 0; j < LOOP; ++j) {
-        auto status = client.Insert("collection1", "tag01", data, ids_array);
+        auto status = client.Insert("collection0", "tag01", data, ids_array);
         if (!status.ok()){
             return -1;
         }

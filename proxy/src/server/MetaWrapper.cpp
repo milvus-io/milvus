@@ -52,8 +52,8 @@ MetaWrapper &MetaWrapper::GetInstance() {
 
 Status MetaWrapper::Init() {
   try {
-    etcd_root_path_ = config.etcd.rootpath();
-    segment_path_ = (boost::filesystem::path(etcd_root_path_)  / "segment/").string();
+    etcd_root_path_ = config.etcd.rootpath() + "/";
+    segment_path_ = (boost::filesystem::path(etcd_root_path_) / "segment/").string();
     collection_path_ = (boost::filesystem::path(etcd_root_path_) / "collection/").string();
 
     auto master_addr = config.master.address() + ":" + std::to_string(config.master.port());
@@ -64,10 +64,10 @@ Status MetaWrapper::Init() {
 
     // init etcd watcher
     auto f = [&](const etcdserverpb::WatchResponse &res) {
-      UpdateMeta(res);
+        UpdateMeta(res);
     };
     watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
-    SyncMeta();
+    return SyncMeta();
   }
   catch (const std::exception &e) {
     return Status(DB_ERROR, "Init meta error");
@@ -115,11 +115,10 @@ uint64_t MetaWrapper::AskSegmentId(const std::string &collection_name, uint64_t 
     uint64_t open_ts = segment_info.open_timestamp();
     uint64_t close_ts = segment_info.close_timestamp();
     if (channel_id >= segment_info.channel_start() && channel_id < segment_info.channel_end()
-        && timestamp >= open_ts << 18 && timestamp < close_ts << 18
-        && segment_info.collection_name() == collection_name) {
+        && timestamp >= (open_ts << 18) && timestamp < (close_ts << 18)
+        && std::string(segment_info.collection_name()) == collection_name) {
       return segment_info.segment_id();
     }
-    return 0;
   }
   throw std::runtime_error("Can't find eligible segment");
 }
@@ -166,8 +165,8 @@ Status MetaWrapper::SyncMeta() {
 int64_t MetaWrapper::CountCollection(const std::string &collection_name) {
   uint64_t count = 0;
   // TODO: index to speed up
-  for (const auto& segment_info : segment_infos_){
-    if (segment_info.second.collection_name() == collection_name){
+  for (const auto &segment_info : segment_infos_) {
+    if (segment_info.second.collection_name() == collection_name) {
       count += segment_info.second.rows();
     }
   }

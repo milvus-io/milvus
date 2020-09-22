@@ -32,12 +32,15 @@ func Run() {
 }
 
 func SegmentStatsController() {
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   conf.Config.Master.EtcdEndPoints,
+		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
 
 	ssChan := make(chan mock.SegmentStats, 10)
 	defer close(ssChan)
@@ -138,7 +141,9 @@ func UpdateSegmentStatus(ss mock.SegmentStats, kvbase kv.Base) error {
 }
 
 func GRPCServer(ch chan *messagepb.Mapping) error {
-	lis, err := net.Listen("tcp", conf.Config.Master.DefaultGRPCPort)
+	defaultGRPCPort := ":"
+	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
+	lis, err := net.Listen("tcp", defaultGRPCPort)
 	if err != nil {
 		return err
 	}
@@ -193,12 +198,15 @@ func (ms GRPCMasterServer) CreateIndex(ctx context.Context, in *messagepb.IndexP
 // }
 
 func CollectionController(ch chan *messagepb.Mapping) {
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   conf.Config.Master.EtcdEndPoints,
+		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
 	for collection := range ch {
 		sID := id.New().Uint64()
 		cID := id.New().Uint64()
@@ -238,12 +246,15 @@ func CollectionController(ch chan *messagepb.Mapping) {
 }
 
 func WriteCollection2Datastore(collection *messagepb.Mapping) error {
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"127.0.0.1:12379"},
+		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
 	sID := id.New().Uint64()
 	cID := id.New().Uint64()
 	fieldMetas := []*messagepb.FieldMeta{}
@@ -254,7 +265,7 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 		time.Now(), fieldMetas, []uint64{sID},
 		[]string{"default"})
 	cm := mock.GrpcMarshal(&c)
-	s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, 100, time.Now(), time.Unix(1<<36-1, 0))
+	s := mock.NewSegment(sID, cID, collection.CollectionName, "default", 0, conf.Config.Pulsar.TopicNum, time.Now(), time.Unix(1<<46-1, 0))
 	collectionData, err := mock.Collection2JSON(*cm)
 	if err != nil {
 		log.Fatal(err)
@@ -280,12 +291,15 @@ func WriteCollection2Datastore(collection *messagepb.Mapping) error {
 }
 
 func UpdateCollectionIndex(index *messagepb.IndexParam) error {
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
 	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   conf.Config.Master.EtcdEndPoints,
+		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
 	defer cli.Close()
-	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Master.EtcdRootPath)
+	kvbase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
 	collectionName := index.CollectionName
 	c, err := kvbase.Load("collection/" + collectionName)
 	if err != nil {

@@ -3,16 +3,21 @@ package mock
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/pkg/master/common"
 )
 
 func FakePulsarProducer() {
+	pulsarAddr := "pulsar://"
+	pulsarAddr += conf.Config.Pulsar.Address
+	pulsarAddr += ":"
+	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:               common.PULSAR_URL,
+		URL:               pulsarAddr,
 		OperationTimeout:  30 * time.Second,
 		ConnectionTimeout: 30 * time.Second,
 	})
@@ -21,7 +26,7 @@ func FakePulsarProducer() {
 	}
 
 	producer, err := client.CreateProducer(pulsar.ProducerOptions{
-		Topic: common.PULSAR_TOPIC,
+		Topic: conf.Config.Master.PulsarTopic,
 	})
 	testSegmentStats, _ := SegmentMarshal(SegmentStats{
 		SegementID: uint64(1111),

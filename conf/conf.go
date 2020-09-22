@@ -12,13 +12,11 @@ import (
 // yaml.MapSlice
 
 type MasterConfig struct {
-	PulsarURL             string
+	Address               string
+	Port                  int32
 	PulsarMoniterInterval int32
 	PulsarTopic           string
-	EtcdRootPath          string
 	SegmentThreshole      float32
-	DefaultGRPCPort       string
-	EtcdEndPoints         []string
 }
 
 type EtcdConfig struct {
@@ -41,8 +39,10 @@ type StorageConfig struct {
 }
 
 type PulsarConfig struct {
-	Address string
-	Port    int32
+	Address  string
+	Port     int32
+	TopicNum int
+	NodeNum  int
 }
 
 //type ProxyConfig struct {
@@ -51,12 +51,33 @@ type PulsarConfig struct {
 //	Port     int32
 //}
 
+type Reader struct {
+	ClientId         int
+	StopFlag         int64
+	ReaderQueueSize  int
+	SearchChanSize   int
+	Key2SegChanSize  int
+	InsertTopicStart int
+	InsertTopicEnd   int
+}
+
+type Writer struct {
+	ClientId           int
+	StopFlag           int64
+	ReaderQueueSize    int
+	SearchByIdChanSize int
+	InsertTopicStart   int
+	InsertTopicEnd     int
+}
+
 type ServerConfig struct {
 	Master   MasterConfig
 	Etcd     EtcdConfig
 	Timesync TimeSyncConfig
 	Storage  StorageConfig
 	Pulsar   PulsarConfig
+	Writer   Writer
+	Reader   Reader
 	//Proxy    ProxyConfig
 }
 

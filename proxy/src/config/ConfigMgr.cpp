@@ -88,11 +88,15 @@ ConfigMgr::ConfigMgr() {
                                                     "localhost", nullptr, nullptr)},
         {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,
                                                   6650, nullptr, nullptr)},
+        {"pulsar.topicnum", CreateIntegerConfig("pulsar.topicnum", false, 0, 1024, &config.pulsar.topicnum.value,
+                                            1024, nullptr, nullptr)},
+        {"pulsar.nodenum", CreateIntegerConfig("pulsar.nodenum", false, 0, 1024, &config.pulsar.nodenum.value,
+                                                1, nullptr, nullptr)},
         /* master */
         {"master.address", CreateStringConfig("master.address", false, &config.master.address.value,
                                               "localhost", nullptr, nullptr)},
         {"master.port", CreateIntegerConfig("master.port", false, 0, 65535, &config.master.port.value,
-                                            6000, nullptr, nullptr)},
+                                            53100, nullptr, nullptr)},
 
         /* etcd */
         {"etcd.address", CreateStringConfig("etcd.address", false, &config.etcd.address.value, "localhost", nullptr,

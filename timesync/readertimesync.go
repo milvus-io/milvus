@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/conf"
 	pb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -39,10 +41,9 @@ type ReaderTimeSyncCfg struct {
 	insertOrDeleteChan chan *pb.InsertOrDeleteMsg //output insert or delete msg
 
 	readStopFlagClientId int64
-	interval             int
+	interval             int64
 	proxyIdList          []int64
 	readerQueueSize      int
-	TestData             int
 
 	revTimesyncFromReader map[uint64]int
 
@@ -62,16 +63,20 @@ func toMillisecond(ts *pb.TimeSyncMsg) int {
 }
 
 func NewReaderTimeSync(
-	pulsarAddr string,
 	timeSyncTopic string,
 	timeSyncSubName string,
 	readTopics []string,
 	readSubName string,
 	proxyIdList []int64,
-	interval int,
 	readStopFlagClientId int64,
 	opts ...ReaderTimeSyncOption,
 ) (ReaderTimeSync, error) {
+	pulsarAddr := "pulsar://"
+	pulsarAddr += conf.Config.Pulsar.Address
+	pulsarAddr += ":"
+	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	interval := int64(conf.Config.Timesync.Interval)
+
 	//check if proxyId has duplication
 	if len(proxyIdList) == 0 {
 		return nil, fmt.Errorf("proxy id list is empty")
@@ -189,7 +194,7 @@ func (r *ReaderTimeSyncCfg) alignTimeSync(ts []*pb.TimeSyncMsg) []*pb.TimeSyncMs
 				curIdx := len(ts) - 1 - i
 				preIdx := len(ts) - i
 				timeGap := toMillisecond(ts[curIdx]) - toMillisecond(ts[preIdx])
-				if timeGap >= (r.interval/2) || timeGap <= (-r.interval/2) {
+				if int64(timeGap) >= (r.interval/2) || int64(timeGap) <= (-r.interval/2) {
 					ts = ts[preIdx:]
 					return ts
 				}

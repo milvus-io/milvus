@@ -81,7 +81,7 @@ TEST(CLIENT_CPP, GetResult) {
     auto status_send = client_v2.SendQueryMessage(request, 10, query_id);
 
     milvus::grpc::QueryResult result;
-    auto status = client_v2.GetQueryResult(query_id, result);
+    auto status = client_v2.GetQueryResult(query_id, &result);
 
     std::cout << result.client_id() << std::endl;
     for (int k = 0; k < result.distances_size(); ++k) {

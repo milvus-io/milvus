@@ -1,69 +1,36 @@
-#include "thread"
-#include "pulsar/Client.h"
+#include <gtest/gtest.h>
+#include <omp.h>
+#include "message_client/Producer.h"
+#include "grpc/message.pb.h"
 
-using namespace pulsar;
-using MyData = milvus::grpc::PMessage;
 
-static const std::string exampleSchema =
-        "{\"type\":\"record\",\"name\":\"Example\",\"namespace\":\"test\","
-        "\"fields\":[{\"name\":\"id\",\"type\":\"string\"}, {\"name\":\"reason\",\"type\":\"string\"}]}";
-
-int consumer() {
-
-    Client client("pulsar://localhost:6650");
-
-    ConsumerConfiguration consumerConf;
-    Consumer consumer;
-    consumerConf.setSchema(SchemaInfo(PROTOBUF, "Protobuf", exampleSchema));
-    Result result = client.subscribe("topic-proto", "sub-2", consumerConf, consumer);
-
-    if (result != ResultOk) {
-        std::cout << "Failed to subscribe: " << result << std::endl;
-        return -1;
-    }
-
-    Message msg;
-    for (int i = 0; i < 10; i++) {
-        consumer.receive(msg);
-        MyData data;
-        data.ParseFromString(msg.getDataAsString());
-        std::cout << " Received: " << msg
-                  << "  with payload '" << data.id() << " " << data.reason()  << "'"
-                  << std::endl;
-
-        consumer.acknowledge(msg);
-    }
-
-    client.close();
-    return 0;
-}
-
-int main() {
-    Client client("pulsar://localhost:6650");
-
-    Producer producer;
-    ProducerConfiguration producerConf;
-    producerConf.setSchema(SchemaInfo(PROTOBUF, "Protobuf", exampleSchema));
-    Result result = client.createProducer("pro", producerConf, producer);
-
-    if (result != ResultOk) {
-        std::cout << "Error creating producer: " << result << std::endl;
-        return -1;
-    }
-
-//    std::thread t(consumer);
-    // Publish 10 messages to the topic
-    for (int i = 0; i < 1; i++) {
-        auto data = MyData();
-        auto a = new milvus::grpc::A();
-        a->set_a(9999);
-        data.set_allocated_a(a);
-        data.set_id("999");
-        data.set_reason("*****test****");
-        Message msg = MessageBuilder().setContent(data.SerializeAsString()).build();
-        Result res = producer.send(msg);
-        std::cout << " Message sent: " << res << std::endl;
-    }
-    client.close();
-//    t.join();
+TEST(CLIENT_CPP, MultiTopic) {
+  auto row_count = 10000;
+  int ParallelNum = 128;
+  uint64_t timestamp = 0;
+  // TODO: Get the segment from master
+  int64_t segment = 0;
+  auto stats = std::vector<pulsar::Result>(ParallelNum);
+  std::chrono::milliseconds start = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch());
+  std::string blob = new char[2000];
+  milvus::grpc::RowData data;
+  data.set_blob(blob);
+#pragma omp parallel for default(none), shared(row_count, timestamp, segment, stats, data), num_threads(ParallelNum)
+  for (auto i = 0; i < row_count; i++) {
+    milvus::grpc::InsertOrDeleteMsg mut_msg;
+    int this_thread = omp_get_thread_num();
+    mut_msg.set_op(milvus::grpc::OpType::INSERT);
+    mut_msg.set_uid(i);
+    mut_msg.set_client_id(0);
+    mut_msg.set_timestamp(timestamp);
+    mut_msg.set_collection_name("collection0");
+    mut_msg.set_partition_tag("partition0");
+    mut_msg.set_segment_id(segment);
+//    mut_msg.mutable_rows_data()->CopyFrom(&data);
+//    auto result = paralle_mut_producers_[this_thread]->send(mut_msg);
+//    if (result != pulsar::ResultOk) {
+//      stats[this_thread] = result;
+//    }
+  }
 }

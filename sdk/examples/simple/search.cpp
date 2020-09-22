@@ -54,7 +54,7 @@ int main(int argc , char**argv) {
   nlohmann::json vector_param_json;
   vector_param_json["num_queries"] = 1;
   vector_param_json["topK"] = TOP_K;
-  vector_param_json["field_name"] = "fakevec";
+  vector_param_json["field_name"] = "field_vec";
   std::string vector_param_json_string = vector_param_json.dump();
 
   vectorParam.json_param = vector_param_json_string;
@@ -63,7 +63,7 @@ int main(int argc , char**argv) {
   milvus::TopKQueryResult result;
 
   milvus_sdk::TimeRecorder test_search("search");
-  auto status = client.Search("collection1", partition_list, "dsl", vectorParam, result);
+  auto status = client.Search("collection0", partition_list, "dsl", vectorParam, result);
 
     return 0;
 }

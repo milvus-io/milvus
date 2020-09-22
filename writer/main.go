@@ -17,7 +17,6 @@ func main() {
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	println(pulsarAddr)
 	mc := message_client.MessageClient{}
 
 	mc.InitClient(pulsarAddr)
@@ -39,7 +38,6 @@ func main() {
 	}
 
 	//TODO:: start a gorouter for searchById
-
 	for {
 		if ctx.Err() != nil {
 			break

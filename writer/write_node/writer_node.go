@@ -78,6 +78,7 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		timeStamps = append(timeStamps, uint64(data[i].Timestamp))
 		segmentString, _ := (*wn.KvStore).GetSegments(ctx, []byte(prefixKey), uint64(data[i].Timestamp))
+
 		var segmentIds []int64
 		for _, str := range segmentString {
 			id, err := strconv.ParseInt(str, 10, 64)

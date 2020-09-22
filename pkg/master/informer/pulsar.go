@@ -3,17 +3,22 @@ package informer
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/pkg/master/common"
 	"github.com/czs007/suvlim/pkg/master/mock"
 )
 
 func NewPulsarClient() PulsarClient {
+	pulsarAddr := "pulsar://"
+	pulsarAddr += conf.Config.Pulsar.Address
+	pulsarAddr += ":"
+	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:               common.PULSAR_URL,
+		URL:               pulsarAddr,
 		OperationTimeout:  30 * time.Second,
 		ConnectionTimeout: 30 * time.Second,
 	})
@@ -32,7 +37,7 @@ type PulsarClient struct {
 
 func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
 	consumer, err := pc.Client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            common.PULSAR_TOPIC,
+		Topic:            conf.Config.Master.PulsarTopic,
 		SubscriptionName: "my-sub",
 		Type:             pulsar.Shared,
 	})

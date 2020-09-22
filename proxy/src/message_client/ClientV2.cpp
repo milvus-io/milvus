@@ -35,6 +35,7 @@ Status MsgClientV2::Init(const std::string &insert_delete,
   time_sync_producer_ = std::make_shared<MsgProducer>(pulsar_client, time_sync);
 
   for (auto i = 0; i < mut_parallelism_; i++) {
+//    std::string topic = insert_delete + "-" + std::to_string(i);
     paralle_mut_producers_.emplace_back(std::make_shared<MsgProducer>(pulsar_client,
                                                                       insert_delete,
                                                                       producerConfiguration));
@@ -162,8 +163,8 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
   auto row_count = request.rows_data_size();
   auto stats = std::vector<Status>(ParallelNum);
   std::atomic_uint64_t msg_sended = 0;
-
-#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id, msg_sended), num_threads(ParallelNum)
+  auto topic_num = config.pulsar.topicnum();
+#pragma omp parallel for default(none), shared(row_count, request, timestamp, stats, segment_id, msg_sended, topic_num), num_threads(ParallelNum)
   for (auto i = 0; i < row_count; i++) {
     milvus::grpc::InsertOrDeleteMsg mut_msg;
     int this_thread = omp_get_thread_num();
@@ -174,7 +175,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
     uint64_t uid = request.entity_id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % 1024;
+    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
     try {
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
       printf("%ld \n", mut_msg.segment_id());
@@ -190,6 +191,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
       paralle_mut_producers_[this_thread]->sendAsync(mut_msg, callback);
     }
     catch (const std::exception &e) {
+      msg_sended += 1;
       stats[this_thread] = Status(DB_ERROR, e.what());
     }
   }

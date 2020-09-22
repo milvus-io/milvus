@@ -172,6 +172,7 @@ config_summary()
 
 add_subdirectory( thirdparty )
 add_subdirectory( src )
+add_subdirectory(unittest)
 
 # Unittest lib
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
