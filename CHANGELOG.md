@@ -50,6 +50,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3689 Client get stuck if drop collection during creating index
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
 -   \#3741 Inconsistent parameter names
+-   \#3806 Raise exception when build index on non-vector field
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC

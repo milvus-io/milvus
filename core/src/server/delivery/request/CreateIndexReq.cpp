@@ -114,8 +114,7 @@ CreateIndexReq::OnExecute() {
             index.index_type_ = index_type;
             index.metric_name_ = metric_type;
         } else {
-            index.index_name_ = index_name_;
-            index.index_type_ = index_type;
+            return Status(SERVER_UNEXPECTED_ERROR, "Not support to create index on non-vector field");
         }
 
         STATUS_CHECK(DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index));
