@@ -51,6 +51,9 @@ class ConcurrentBitset {
     ConcurrentBitset&
     operator^=(ConcurrentBitset& bitset);
 
+    std::shared_ptr<ConcurrentBitset>
+    Negate();
+
     bool
     test(id_type_t id);
 

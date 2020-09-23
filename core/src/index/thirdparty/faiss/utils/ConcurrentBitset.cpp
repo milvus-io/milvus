@@ -148,6 +148,31 @@ ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
     return result_bitset;
 }
 
+std::shared_ptr<ConcurrentBitset>
+ConcurrentBitset::Negate() {
+    auto result_bitset = std::make_shared<ConcurrentBitset>(capacity());
+
+    auto result_8 = const_cast<uint8_t*>(result_bitset->data());
+    auto result_64 = reinterpret_cast<uint64_t*>(result_8);
+
+    auto u8 = const_cast<uint8_t*>(data());
+    auto u64 = reinterpret_cast<uint64_t*>(u8);
+
+    size_t n8 = bitset_.size();
+    size_t n64 = n8 / 8;
+
+    for (size_t i = 0; i < n64; i++) {
+        result_64[i] = ~u64[i];
+    }
+    size_t remain = n8 % 8;
+    u8 += n64 * 8;
+    result_8 += n64 * 8;
+    for (size_t i = 0; i < remain; i++) {
+        result_8[i] = ~u8[i];
+    }
+    return result_bitset;
+}
+
 ConcurrentBitset&
 ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
     //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) { 

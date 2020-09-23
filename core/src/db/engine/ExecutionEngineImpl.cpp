@@ -330,7 +330,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         }
 
         list = vec_index->GetBlacklist();
-        entity_count_ = list->capacity();
+        entity_count_ = vec_index->GetUids().size();
         // Parse general query
         auto status = ExecBinaryQuery(context.query_ptr_->root, bitset, attr_type, vector_placeholder);
         if (!status.ok()) {
@@ -339,12 +339,22 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         rc.RecordSection("Scalar field filtering");
 
         // Do And
-        for (int64_t i = 0; i < entity_count_; i++) {
-            if (!list->test(i) && !bitset->test(i)) {
-                list->set(i);
+        if (!list && !bitset) {
+            LOG_ENGINE_DEBUG_ << "List and bitset is null";
+            vec_index->SetBlacklist(nullptr);
+        } else if (!list && bitset) {
+            LOG_ENGINE_DEBUG_ << "List is null";
+            list = bitset->Negate();
+        } else if (list && bitset) {
+            for (int64_t i = 0; i < entity_count_; i++) {
+                if (!list->test(i) && !bitset->test(i)) {
+                    list->set(i);
+                }
             }
         }
+
         vec_index->SetBlacklist(list);
+        rc.RecordSection("Set blacklist");
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
@@ -436,7 +446,6 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
-            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
         }
     }

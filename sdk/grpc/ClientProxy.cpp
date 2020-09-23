@@ -407,6 +407,9 @@ ClientProxy::Connect(const std::string& uri) {
 Status
 ClientProxy::Connected() const {
     try {
+        if (!client_ptr_) {
+            return Status(StatusCode::NotConnected, "Client is not connected to milvus server");
+        }
         std::string info;
         return client_ptr_->Cmd("", info);
     } catch (std::exception& ex) {

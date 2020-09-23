@@ -274,10 +274,11 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(LoadUids(uids));
 
         // load deleted doc
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids.size());
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
         segment::DeletedDocsPtr deleted_docs_ptr;
         STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
         if (deleted_docs_ptr != nullptr) {
+            concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids.size());
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             for (auto& offset : deleted_docs) {
                 concurrent_bitset_ptr->set(offset);
