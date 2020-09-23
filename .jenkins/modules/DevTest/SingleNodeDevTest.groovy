@@ -12,7 +12,7 @@ timeout(time: 150, unit: 'MINUTES') {
             try {
                 dir ('charts/milvus') {
                     writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000"
-                    sh "helm install --wait --timeout 300s --set image.repository=registry.zilliz.com/milvus/engine --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml -f ci/filebeat/values.yaml -f test.yaml -set image.resources.limits.cpu=12.0 --namespace milvus ${env.HELM_RELEASE_NAME} ."
+                    sh "helm install --wait --timeout 300s --set image.repository=registry.zilliz.com/milvus/engine --set image.tag=${DOCKER_VERSION} --set image.pullPolicy=Always --set service.type=ClusterIP -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml -f ci/filebeat/values.yaml -f test.yaml --set image.resources.limits.cpu=12.0 --namespace milvus ${env.HELM_RELEASE_NAME} ."
                 }
             } catch (exc) {
                 def helmStatusCMD = "helm get manifest --namespace milvus ${env.HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
