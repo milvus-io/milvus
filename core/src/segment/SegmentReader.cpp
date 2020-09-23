@@ -532,9 +532,9 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
-            return Status(DB_ERROR, "File doesn't exist");  // file doesn't exist
-        }
+        //if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+        //    return Status(DB_ERROR, "File doesn't exist");  // file doesn't exist
+        //}
 
         // if the data is in cache, no need to read file
         auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);
