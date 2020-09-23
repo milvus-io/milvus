@@ -11,6 +11,7 @@
 
 #include "db/wal/WalOperationCodec.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 #include <memory>
 #include <utility>
@@ -25,6 +26,7 @@ WalOperationCodec::WriteInsertOperation(const WalFilePtr& file, const std::strin
         return Status(DB_ERROR, "Invalid input for write insert operation");
     }
 
+    TimeRecorderAuto rc("WAL::WriteInsertOperation");
     try {
         // calculate total bytes, it must equal to total_bytes
         int64_t calculate_total_bytes = 0;
@@ -109,6 +111,7 @@ WalOperationCodec::WriteDeleteOperation(const WalFilePtr& file, const IDNumbers&
         return Status(DB_ERROR, "Invalid input for write delete operation");
     }
 
+    TimeRecorderAuto rc("WAL::WriteDeleteOperation");
     try {
         // calculate total bytes, it must equal to total_bytes
         int64_t calculate_total_bytes = 0;
