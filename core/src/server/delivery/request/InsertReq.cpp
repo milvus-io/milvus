@@ -115,7 +115,7 @@ InsertReq::OnExecute() {
             return Status(SERVER_UNEXPECTED_ERROR, "Insert action return empty id array");
         }
 
-        int64_t num = iter->second->data_.size() / 4;
+        int64_t num = iter->second->data_.size() / sizeof(int64_t);
         insert_param_.id_returned_.resize(num);
         memcpy(insert_param_.id_returned_.data(), iter->second->data_.data(), iter->second->data_.size());
 

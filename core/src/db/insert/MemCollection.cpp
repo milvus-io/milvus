@@ -171,7 +171,7 @@ MemCollection::ApplyDeleteToFile() {
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
-        // Step 1: Check to-delete id possibly in this segment
+        // Step 1: Check to-delete id possissbly in this segment
         std::unordered_set<idx_t> ids_to_check;
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));

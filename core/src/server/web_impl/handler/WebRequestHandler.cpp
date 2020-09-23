@@ -1767,13 +1767,10 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     // return generated ids
-    auto pair = chunk_data.find(engine::FIELD_UID);
-    if (pair != chunk_data.end()) {
-        int64_t count = pair->second.size() / 8;
-        auto pdata = reinterpret_cast<int64_t*>(pair->second.data());
+    if (!insert_param.id_returned_.empty()) {
         ids_dto->ids = ids_dto->ids.createShared();
-        for (int64_t i = 0; i < count; ++i) {
-            ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
+        for (auto id : insert_param.id_returned_) {
+            ids_dto->ids->push_back(std::to_string(id).c_str());
         }
     }
     ids_dto->code = status.code();
