@@ -169,7 +169,7 @@ class TestSearchBase:
         method: search with the given vectors, check the result
         expected: the length of the result is top_k
         '''
-        top_k = 2049
+        top_k = 16385
         nq = get_nq
         entities, ids = init_data(connect, collection)
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq)
