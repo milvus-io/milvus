@@ -148,3 +148,8 @@ endif()
 if (MILVUS_WITH_AWS)
     add_subdirectory( aws )
 endif ()
+
+# ****************************** Thirdparty hdfs ***************************************
+if(MILVUS_SUPPORT_HDFS)
+    add_subdirectory( hdfs )
+endif()

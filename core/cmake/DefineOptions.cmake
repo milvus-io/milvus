@@ -89,6 +89,8 @@ define_option(MILVUS_WITH_AWS "Build with aws" OFF)
 
 define_option(MILVUS_WITH_OATPP "Build with oatpp" ON)
 
+define_option(MILVUS_SUPPORT_HDFS "Build with hdfs" OFF)
+
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 
