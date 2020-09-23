@@ -13,19 +13,20 @@ func (node *QueryNode) SegmentsManagement() {
 	//node.queryNodeTimeSync.UpdateTSOTimeSync()
 	//var timeNow = node.queryNodeTimeSync.TSOTimeSync
 
-	timeNow := node.messageClient.GetTimeNow() >> 18
+	timeNow := node.messageClient.GetTimeNow()
 
 	for _, collection := range node.Collections {
 		for _, partition := range collection.Partitions {
-			for _, segment := range partition.Segments {
-				if segment.SegmentStatus != SegmentOpened {
-					log.Println("Segment have been closed")
-					continue
-				}
-
-				fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
-				if timeNow >= segment.SegmentCloseTime {
-					go segment.CloseSegment(collection)
+			for _, oldSegment := range partition.OpenedSegments {
+				// TODO: check segment status
+				if timeNow >= oldSegment.SegmentCloseTime {
+					// close old segment and move it into partition.ClosedSegments
+					if oldSegment.SegmentStatus != SegmentOpened {
+						log.Println("Never reach here, Opened segment cannot be closed")
+						continue
+					}
+					go oldSegment.CloseSegment(collection)
+					partition.ClosedSegments = append(partition.ClosedSegments, oldSegment)
 				}
 			}
 		}
@@ -33,7 +34,7 @@ func (node *QueryNode) SegmentsManagement() {
 }
 
 func (node *QueryNode) SegmentManagementService() {
-	sleepMillisecondTime := 3000
+	sleepMillisecondTime := 1000
 	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
 		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
@@ -80,8 +81,6 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 		statisticData = append(statisticData, stat)
 	}
 
-	fmt.Println("Publish segment statistic")
-	fmt.Println(statisticData)
 	var status = node.PublicStatistic(&statisticData)
 	if status.ErrorCode != msgPb.ErrorCode_SUCCESS {
 		log.Printf("Publish segments statistic failed")
@@ -89,7 +88,7 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 }
 
 func (node *QueryNode) SegmentStatisticService() {
-	sleepMillisecondTime := 3000
+	sleepMillisecondTime := 1000
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
 		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)

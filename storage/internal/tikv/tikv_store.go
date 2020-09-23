@@ -3,7 +3,6 @@ package tikv_driver
 import (
 	"context"
 	"errors"
-	"github.com/czs007/suvlim/conf"
 	. "github.com/czs007/suvlim/storage/internal/tikv/codec"
 	. "github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/tikv/client-go/config"
@@ -87,8 +86,7 @@ type TikvStore struct {
 }
 
 func NewTikvStore(ctx context.Context) (*TikvStore, error) {
-	var pdAddress0 = conf.Config.Storage.Address + ":" + strconv.FormatInt(int64(conf.Config.Storage.Port), 10)
-	pdAddrs := []string{pdAddress0}
+	pdAddrs := []string{"127.0.0.1:2379"}
 	conf := config.Default()
 	client, err := rawkv.NewClient(ctx, pdAddrs, conf)
 	if err != nil {

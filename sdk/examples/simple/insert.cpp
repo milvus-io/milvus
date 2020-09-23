@@ -21,7 +21,7 @@
 #include "interface/ConnectionImpl.h"
 #include "utils/TimeRecorder.h"
 
-const int N = 200000;
+const int N = 100;
 const int DIM = 16;
 const int LOOP = 10;
 
