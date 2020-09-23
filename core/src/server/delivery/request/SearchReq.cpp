@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/SearchReq.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -102,7 +103,8 @@ SearchReq::OnExecute() {
                 engine::CollectionIndex index;
                 status = DBWrapper::DB()->DescribeIndex(query_ptr_->collection_id, field->GetName(), index);
                 if (!index.index_type_.empty()) {
-                    STATUS_CHECK(ValidateIndexType(index.index_type_));
+                    bool is_vector = engine::IsVectorField(field);
+                    STATUS_CHECK(ValidateIndexType(index.index_type_, is_vector));
                 }
             }
         }

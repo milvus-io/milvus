@@ -36,7 +36,7 @@ extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
-ValidateIndexType(std::string& index_type);
+ValidateIndexType(std::string& index_type, bool is_vector);
 
 extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
