@@ -82,10 +82,11 @@ CreateIndexReq::OnExecute() {
         if (json_params_.contains(engine::PARAM_INDEX_TYPE)) {
             index_type = json_params_[engine::PARAM_INDEX_TYPE].get<std::string>();
         }
-        STATUS_CHECK(ValidateIndexType(index_type));
 
         engine::CollectionIndex index;
         if (engine::IsVectorField(field)) {
+            STATUS_CHECK(ValidateIndexType(index_type, true));
+
             auto params = field->GetParams();
             auto dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
 
@@ -114,6 +115,8 @@ CreateIndexReq::OnExecute() {
             index.index_type_ = index_type;
             index.metric_name_ = metric_type;
         } else {
+            STATUS_CHECK(ValidateIndexType(index_type, false));
+
             index.index_name_ = index_name_;
             index.index_type_ = index_type;
         }
