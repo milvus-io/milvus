@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <chrono>
+#include "config/ServerConfig.h"
 #include "TimeSync.h"
 #include "message_client/Producer.h"
 
@@ -30,6 +31,7 @@ TimeSync::TimeSync(int64_t id,
 
     for (;;) {
       if (this->stop_) break;
+      this->sync_msg_.set_peer_id(config.proxy_id());
       this->sync_msg_.set_timestamp(this->timestamp_());
       this->sync_msg_.set_sync_type(milvus::grpc::READ);
       auto rst = producer.send(sync_msg_.SerializeAsString());

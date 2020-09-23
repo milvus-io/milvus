@@ -289,6 +289,9 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
   auto partition = NewPartition(collection, partition_name);
   auto segment = NewSegment(partition, 0);
 
+  auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
+  std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+
   std::vector<char> raw_data;
   std::vector<uint64_t> timestamps;
   std::vector<int64_t> uids;
@@ -316,6 +319,8 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
   assert(res == 0);
 
   auto memory_usage_size = GetMemoryUsageInBytes(segment);
+
+  std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
 
   assert(memory_usage_size == 1898459);
 

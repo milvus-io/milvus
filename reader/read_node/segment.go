@@ -73,6 +73,8 @@ func (s *Segment) CloseSegment(collection* Collection) error {
 	int
 	Close(CSegmentBase c_segment);
 	*/
+	fmt.Println("Closing segment :", s.SegmentId)
+
 	var status = C.Close(s.SegmentPtr)
 	s.SegmentStatus = SegmentClosed
 
@@ -82,11 +84,13 @@ func (s *Segment) CloseSegment(collection* Collection) error {
 
 	// Build index after closing segment
 	s.SegmentStatus = SegmentIndexing
+	fmt.Println("Building index...")
 	s.buildIndex(collection)
 
 	// TODO: remove redundant segment indexed status
 	// Change segment status to indexed
 	s.SegmentStatus = SegmentIndexed
+	fmt.Println("Segment closed and indexed")
 
 	return nil
 }

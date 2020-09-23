@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "src/message_client/ClientV2.h"
+#include "config/ServerConfig.h"
 
 TEST(CLIENT_CPP, GetResult) {
 //    auto client= std::make_shared<milvus::message_client::MsgClient>("pulsar://localhost:6650");
@@ -73,7 +74,7 @@ TEST(CLIENT_CPP, GetResult) {
 //    producer.send(fake_message2.SerializeAsString());
 
     int64_t query_id = 10;
-    milvus::message_client::MsgClientV2 client_v2(1, "pulsar://localhost:6650");
+    milvus::message_client::MsgClientV2 client_v2(1, "pulsar://localhost:6650", milvus::config.pulsar.topicnum());
     auto init_status = client_v2.Init("insert_delete", "search", "time_sync", "result", "result");
 
 //    client_v2.SendQueryMessage();

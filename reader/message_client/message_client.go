@@ -23,7 +23,8 @@ type MessageClient struct {
 
 	// pulsar
 	client                   pulsar.Client
-	searchResultProducer     pulsar.Producer
+	//searchResultProducer     pulsar.Producer
+	searchResultProducers     map[int64]pulsar.Producer
 	segmentsStatisticProducer pulsar.Producer
 	searchConsumer           pulsar.Consumer
 	key2segConsumer          pulsar.Consumer
@@ -56,9 +57,9 @@ func (mc *MessageClient) TimeSyncEnd() uint64 {
 	return mc.timestampBatchEnd
 }
 
-func (mc *MessageClient) SendResult(ctx context.Context, msg msgpb.QueryResult) {
+func (mc *MessageClient) SendResult(ctx context.Context, msg msgpb.QueryResult, producerKey int64) {
 	var msgBuffer, _ = proto.Marshal(&msg)
-	if _, err := mc.searchResultProducer.Send(ctx, &pulsar.ProducerMessage{
+	if _, err := mc.searchResultProducers[producerKey].Send(ctx, &pulsar.ProducerMessage{
 		Payload: msgBuffer,
 	}); err != nil {
 		log.Fatal(err)
@@ -158,7 +159,14 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.MessageClientID = conf.Config.Reader.ClientId
 
 	//create producer
-	mc.searchResultProducer = mc.creatProducer("SearchResult")
+	mc.searchResultProducers = make(map[int64]pulsar.Producer)
+	proxyIdList := conf.Config.Master.ProxyIdList
+	for _, key := range proxyIdList{
+		topic := "SearchResult-"
+		topic = topic + strconv.Itoa(int(key))
+		mc.searchResultProducers[key] = mc.creatProducer(topic)
+	}
+	//mc.searchResultProducer = mc.creatProducer("SearchResult")
 	mc.segmentsStatisticProducer = mc.creatProducer("SegmentsStatistic")
 
 	//create consumer
@@ -176,15 +184,13 @@ func (mc *MessageClient) InitClient(url string) {
 	timeSyncTopic := "TimeSync"
 	timeSyncSubName := "reader" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
-	for i := conf.Config.Reader.InsertTopicStart; i < conf.Config.Reader.InsertTopicEnd; i++ {
-		str := "InsertOrDelete-partition-"
+	for i := conf.Config.Reader.TopicStart; i < conf.Config.Reader.TopicEnd; i++ {
+		str := "InsertOrDelete-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
 
 	readSubName := "reader" + strconv.Itoa(mc.MessageClientID)
-	// TODO::read proxy conf from config.yaml
-	proxyIdList := []int64{0}
 	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
 	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
 		timeSyncSubName,
@@ -205,7 +211,9 @@ func (mc *MessageClient) InitClient(url string) {
 
 func (mc *MessageClient) Close() {
 	mc.client.Close()
-	mc.searchResultProducer.Close()
+	for key, _ := range mc.searchResultProducers {
+		mc.searchResultProducers[key].Close()
+	}
 	mc.segmentsStatisticProducer.Close()
 	mc.searchConsumer.Close()
 	mc.key2segConsumer.Close()

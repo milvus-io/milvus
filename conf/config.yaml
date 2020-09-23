@@ -15,6 +15,9 @@ master:
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
   segmentthreshole: 10000
+  proxyidlist: [0]
+  querynodenum: 1
+  writenodenum: 1
 
 etcd:
   address: localhost
@@ -28,36 +31,35 @@ timesync:
 storage:
   driver: TIKV
   address: localhost
-  port: 0
-  accesskey: ab
-  secretkey:  dd
+  port: 2379
+  accesskey:
+  secretkey:
 
 pulsar:
   address: localhost
   port: 6650
   topicnum: 128
-  nodenum: 1
 
 reader:
-  clientid: 1
+  clientid: 0
   stopflag: -1
-  readerqueuesize: 1024
+  readerqueuesize: 10000
   searchchansize: 10000
   key2segchansize: 10000
-  inserttopicstart: 0
-  inserttopicend: 128
+  topicstart: 0
+  topicend: 128
 
 writer:
-  clientid: 1
+  clientid: 0
   stopflag: -2
   readerqueuesize: 1024
   searchbyidchansize: 10000
-  insertopicstart: 0
-  inserttopicend: 128
+  topicstart: 0
+  topicend: 128
 
 proxy:
   timezone: UTC+8
-  query_node_num: 1
+  proxy_id: 0
 
   network:
     address: 0.0.0.0

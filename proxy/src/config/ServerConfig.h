@@ -65,7 +65,8 @@ struct ServerConfig {
     using Floating = ConfigValue<double>;
 
     String timezone{"unknown"};
-    Integer query_node_num{1};
+//    Integer query_node_num{1};
+    Integer proxy_id{0};
 
     struct Network {
         String address{"unknown"};
@@ -76,12 +77,12 @@ struct ServerConfig {
         String address{"localhost"};
         Integer port{6650};
         Integer topicnum{1024};
-        Integer nodenum{1};
     }pulsar;
 
     struct Master{
       String address{"localhost"};
-      Integer  port{53100};
+      Integer port{53100};
+      Integer query_node_num{2};
     }master;
 
     struct Etcd{

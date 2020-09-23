@@ -16,7 +16,7 @@ type SearchResult struct {
 func (node *QueryNode) PublishSearchResult(results *msgPb.QueryResult) msgPb.Status {
 	var ctx = context.Background()
 
-	node.messageClient.SendResult(ctx, *results)
+	node.messageClient.SendResult(ctx, *results, results.ClientId)
 
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
@@ -31,7 +31,7 @@ func (node *QueryNode) PublishFailedSearchResult() msgPb.Status {
 
 	var ctx = context.Background()
 
-	node.messageClient.SendResult(ctx, results)
+	node.messageClient.SendResult(ctx, results, results.ClientId)
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 

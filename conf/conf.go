@@ -17,6 +17,9 @@ type MasterConfig struct {
 	PulsarMoniterInterval int32
 	PulsarTopic           string
 	SegmentThreshole      float32
+	ProxyIdList           []int64
+	QueryNodeNum          int
+	WriteNodeNum          int
 }
 
 type EtcdConfig struct {
@@ -42,7 +45,6 @@ type PulsarConfig struct {
 	Address  string
 	Port     int32
 	TopicNum int
-	NodeNum  int
 }
 
 //type ProxyConfig struct {
@@ -52,13 +54,13 @@ type PulsarConfig struct {
 //}
 
 type Reader struct {
-	ClientId         int
-	StopFlag         int64
-	ReaderQueueSize  int
-	SearchChanSize   int
-	Key2SegChanSize  int
-	InsertTopicStart int
-	InsertTopicEnd   int
+	ClientId        int
+	StopFlag        int64
+	ReaderQueueSize int
+	SearchChanSize  int
+	Key2SegChanSize int
+	TopicStart      int
+	TopicEnd        int
 }
 
 type Writer struct {
@@ -66,8 +68,8 @@ type Writer struct {
 	StopFlag           int64
 	ReaderQueueSize    int
 	SearchByIdChanSize int
-	InsertTopicStart   int
-	InsertTopicEnd     int
+	TopicStart         int
+	TopicEnd           int
 }
 
 type ServerConfig struct {

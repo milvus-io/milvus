@@ -1,18 +1,19 @@
 #pragma once
 
+#include "config/ServerConfig.h"
 #include "utils/Status.h"
 #include "Producer.h"
 #include "Consumer.h"
 #include "grpc/message.pb.h"
 
 namespace milvus::message_client {
-constexpr uint32_t ParallelNum = 12 * 20;
+//constexpr uint32_t ParallelNum = 12 * 20;
 
 class MsgClientV2 {
  public:
   MsgClientV2(int64_t client_id,
               const std::string &service_url,
-              const uint32_t mut_parallelism = ParallelNum,
+              const uint32_t mut_parallelism,
               const pulsar::ClientConfiguration &config = pulsar::ClientConfiguration());
   ~MsgClientV2();
 

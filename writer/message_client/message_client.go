@@ -130,14 +130,13 @@ func (mc *MessageClient) InitClient(url string) {
 	timeSyncTopic := "TimeSync"
 	timeSyncSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
-	for i := conf.Config.Writer.InsertTopicStart; i < conf.Config.Writer.InsertTopicEnd; i++ {
-		str := "InsertOrDelete-partition-"
+	for i := conf.Config.Writer.TopicStart; i < conf.Config.Writer.TopicEnd; i++ {
+		str := "InsertOrDelete-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
 	readSubName := "writer" + strconv.Itoa(mc.MessageClientID)
-	// TODO::read proxy conf from config.yaml
-	proxyIdList := []int64{0}
+	proxyIdList := conf.Config.Master.ProxyIdList
 	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
 	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
 		timeSyncSubName,
