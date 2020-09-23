@@ -46,7 +46,7 @@ class ExecutionEngine {
     Search(ExecutionEngineContext& context) = 0;
 
     virtual Status
-    BuildIndex() = 0;
+    BuildIndex(uint64_t device_id) = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;

@@ -58,6 +58,8 @@ class BuildIndexTask : public Task {
     engine::TargetFields target_fields_;
 
     engine::ExecutionEnginePtr execution_engine_;
+private:
+    uint8_t gpu_device_id = 0;
 };
 
 }  // namespace scheduler
