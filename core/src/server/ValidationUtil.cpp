@@ -167,7 +167,7 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(std::string& index_type) {
+ValidateIndexType(std::string& index_type, bool is_vector) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
@@ -177,13 +177,15 @@ ValidateIndexType(std::string& index_type) {
 
     std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
-    static std::set<std::string> s_valid_index_names = {
+    static std::set<std::string> s_vector_index_type = {
         knowhere::IndexEnum::INVALID,
         knowhere::IndexEnum::INDEX_FAISS_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+#ifdef MILVUS_GPU_VERSION
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
+#endif
         knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
         knowhere::IndexEnum::INDEX_NSG,
@@ -192,12 +194,14 @@ ValidateIndexType(std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWFlat,
         knowhere::IndexEnum::INDEX_RHNSWPQ,
         knowhere::IndexEnum::INDEX_RHNSWSQ,
+    };
 
-        // structured index names
+    static std::set<std::string> s_structured_index_types = {
         engine::DEFAULT_STRUCTURED_INDEX,
     };
 
-    if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
+    std::set<std::string>& index_types = is_vector ? s_vector_index_type : s_structured_index_types;
+    if (index_types.find(index_type) == index_types.end()) {
         std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
@@ -249,7 +253,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         }
 
         // special check for 'm' parameter
-        std::vector<int64_t> resset;
+        int64_t m_value = index_params[knowhere::IndexParams::m];
+        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, m_value)) {
+            std::string msg = "Invalid m, dimension can't not be divided by m ";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+        /*std::vector<int64_t> resset;
         milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
         int64_t m_value = index_params[knowhere::IndexParams::m];
         if (resset.empty()) {
@@ -271,7 +281,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+        }*/
     } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
         if (!status.ok()) {
@@ -308,9 +318,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             }
 
             // special check for 'PQM' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
             int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
+            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, pqm_value)) {
+                std::string msg = "Invalid m, dimension can't not be divided by m ";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+            /*int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'PQM'";
                 LOG_SERVER_ERROR_ << msg;
@@ -330,7 +344,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
+            }*/
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
@@ -406,7 +420,7 @@ Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }

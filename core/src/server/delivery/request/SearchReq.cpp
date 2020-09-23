@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/SearchReq.h"
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
@@ -96,6 +97,14 @@ SearchReq::OnExecute() {
                 if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
                     auto metric_type = query_ptr_->metric_types.at(field->GetName());
                     STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));
+                }
+
+                // check index type
+                engine::CollectionIndex index;
+                status = DBWrapper::DB()->DescribeIndex(query_ptr_->collection_id, field->GetName(), index);
+                if (!index.index_type_.empty()) {
+                    bool is_vector = engine::IsVectorField(field);
+                    STATUS_CHECK(ValidateIndexType(index.index_type_, is_vector));
                 }
             }
         }
