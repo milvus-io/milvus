@@ -62,6 +62,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3463 Restrict the content of partition_tag
 -   \#3502 Normalize http method in web sever
 -   \#3732 Add new operation supporting multi-segments
+-   \#3828 Limit the number of insert requests processing concurrently.
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

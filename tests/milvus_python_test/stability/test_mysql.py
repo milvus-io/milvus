@@ -7,16 +7,7 @@ from multiprocessing import Pool, Process
 import pytest
 from utils import *
 
-
-dim = 128
-index_file_size = 10
-collection_id = "mysql_failure"
-nprobe = 1
-tag = "1970_01_01"
-
-
 class TestMysql:
-
     """
     ******************************************************************
       The following cases are used to test mysql failure
@@ -33,7 +24,7 @@ class TestMysql:
         big_nb = 20000
         index_param = {"nlist": 1024, "m": 16}
         index_type = IndexType.IVF_PQ
-        vectors = gen_vectors(big_nb, dim)
+        vectors = gen_vectors(big_nb, default_dim)
         status, ids = connect.insert(collection, vectors, ids=[i for i in range(big_nb)])
         status = connect.flush([collection])
         assert status.OK()

@@ -226,7 +226,7 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
                 file->ReadLastOpId(last_id);
                 if (last_id <= max_op_id) {
                     file->CloseFile();
-                    std::experimental::filesystem::remove(pair.second);
+                    OperationDone(collection_name, max_op_id);
                     continue;  // skip and delete this file since all its operations already done
                 }
 
@@ -244,15 +244,13 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
         }
 
         // flush to makesure data is serialized
-        return db->Flush();
+        auto status = db->Flush();
+        LOG_ENGINE_DEBUG_ << "End wal recovery";
+        return status;
     } catch (std::exception& ex) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
     }
-
-    LOG_ENGINE_DEBUG_ << "Wal recovery finished";
-
-    return Status::OK();
 }
 
 Status

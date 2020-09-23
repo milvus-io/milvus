@@ -21,7 +21,9 @@
 namespace milvus {
 namespace server {
 
-constexpr int64_t QUERY_MAX_TOPK = 2048;
+constexpr int64_t QUERY_MAX_TOPK = 16384;
+constexpr int64_t GPU_QUERY_MAX_TOPK = 2048;
+constexpr int64_t GPU_QUERY_MAX_NPROBE = 2048;
 
 extern Status
 ValidateCollectionName(const std::string& collection_name);
@@ -33,7 +35,7 @@ extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
 
 extern Status
-ValidateIndexType(std::string& index_type);
+ValidateIndexType(std::string& index_type, bool is_vector);
 
 extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);

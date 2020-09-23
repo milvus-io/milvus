@@ -48,6 +48,9 @@ class CommonUtil {
     static void
     ConvertTime(tm time_struct, time_t& time_integer);
 
+    static std::string
+    ConvertSize(int64_t size);
+
 #ifdef ENABLE_CPU_PROFILING
     static std::string
     GetCurrentTimeStr();
