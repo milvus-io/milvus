@@ -38,7 +38,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Search(ExecutionEngineContext& context) override;
 
     Status
-    BuildIndex() override;
+    BuildIndex(uint64_t device_id) override;
 
  private:
     Status
