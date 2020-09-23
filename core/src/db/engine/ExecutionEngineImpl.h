@@ -46,7 +46,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
               knowhere::VecIndexPtr& vec_index, bool hybrid = false);
 
     knowhere::VecIndexPtr
-    CreateVecIndex(const std::string& index_name);
+    CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode);
 
     Status
     CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,

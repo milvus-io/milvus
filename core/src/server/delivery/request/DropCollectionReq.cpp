@@ -43,9 +43,6 @@ DropCollectionReq::OnExecute() {
 
         STATUS_CHECK(DBWrapper::DB()->DropCollection(collection_name_));
 
-        /* flush to trigger CleanUpFilesWithTTL */
-        STATUS_CHECK(DBWrapper::DB()->Flush());
-
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());

@@ -12,6 +12,7 @@
 #include "scheduler/selector/FaissFlatPass.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/ServerConfig.h"
+#include "faiss/gpu/utils/DeviceUtils.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
@@ -54,6 +55,9 @@ FaissFlatPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < threshold_) {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq < gpu_search_threshold, specify cpu to search!");
+        res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+    } else if (search_task->topk() > faiss::gpu::getMaxKSelection()) {
+        LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: topk > gpu_max_topk_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else {
         LOG_SERVER_DEBUG_ << LogOut("FaissFlatPass: nq >= gpu_search_threshold, specify gpu %d to search!",
