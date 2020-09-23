@@ -91,6 +91,7 @@ void bfKnnOnDevice(GpuResources* resources,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
                    bool ignoreOutDistances) {
+
   // We are guaranteed that all data arguments are resident on our preferred
   // `device` here, and are ordered wrt `stream`
 
