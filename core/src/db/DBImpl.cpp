@@ -541,6 +541,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     std::vector<DataChunkPtr> chunks;
     STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_count, chunks));
 
+    LOG_ENGINE_DEBUG_ << "insert into mem manager";
     for (auto& chunk : chunks) {
         auto status = mem_mgr_->InsertEntities(collection_id, partition_id, chunk, op_id);
         if (!status.ok()) {

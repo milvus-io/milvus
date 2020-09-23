@@ -35,6 +35,7 @@ namespace server {
 namespace {
 Status
 ConvertToChunk(const InsertParam& insert_param, engine::DataChunkPtr& data_chunk) {
+    LOG_SERVER_DEBUG_ << "ConvertToChunk begin";
     data_chunk = std::make_shared<engine::DataChunk>();
     data_chunk->count_ = insert_param.row_count_;
     for (auto& pair : insert_param.fields_data_) {
@@ -46,7 +47,7 @@ ConvertToChunk(const InsertParam& insert_param, engine::DataChunkPtr& data_chunk
             bytes += data_segment.second;
         }
         bin->data_.resize(bytes);
-
+        LOG_SERVER_DEBUG_ << "construct bin data bytes" << bytes;
         // copy data
         int64_t offset = 0;
         for (auto& data_segment : pair.second) {
@@ -56,6 +57,7 @@ ConvertToChunk(const InsertParam& insert_param, engine::DataChunkPtr& data_chunk
 
         data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
     }
+    LOG_SERVER_DEBUG_ << "ConvertToChunk end";
 }
 }  // namespace
 
@@ -115,6 +117,7 @@ InsertReq::OnExecute() {
             return Status(SERVER_UNEXPECTED_ERROR, "Insert action return empty id array");
         }
 
+        LOG_SERVER_DEBUG_ << "return entities id";
         int64_t num = iter->second->data_.size() / sizeof(int64_t);
         insert_param_.id_returned_.resize(num);
         memcpy(insert_param_.id_returned_.data(), iter->second->data_.data(), iter->second->data_.size());
