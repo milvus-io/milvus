@@ -28,7 +28,7 @@ timesync:
 storage:
   driver: TIKV
   address: localhost
-  port: 0
+  port: 2379
   accesskey: ab
   secretkey:  dd
 
@@ -41,7 +41,7 @@ pulsar:
 reader:
   clientid: 1
   stopflag: -1
-  readerqueuesize: 1024
+  readerqueuesize: 10240
   searchchansize: 10000
   key2segchansize: 10000
   inserttopicstart: 0

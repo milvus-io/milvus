@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"github.com/czs007/suvlim/reader/message_client"
+	"log"
 	"sync"
 )
 
@@ -15,11 +16,17 @@ func StartQueryNode(pulsarURL string) {
 	ctx := context.Background()
 
 	// Segments Services
-	//go qn.SegmentManagementService()
+	go qn.SegmentManagementService()
 	go qn.SegmentStatisticService()
 
 	wg := sync.WaitGroup{}
-	qn.InitFromMeta()
+	err := qn.InitFromMeta()
+
+	if err != nil {
+		log.Printf("Init query node from meta failed")
+		return
+	}
+
 	wg.Add(3)
 	go qn.RunMetaService(ctx, &wg)
 	go qn.RunInsertDelete(&wg)

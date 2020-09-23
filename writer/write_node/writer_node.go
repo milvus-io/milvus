@@ -17,11 +17,16 @@ type SegmentIdInfo struct {
 	SegmentIds     []string
 }
 
+type MsgCounter struct {
+	InsertCounter int64
+	DeleteCounter int64
+}
 
 type WriteNode struct {
 	KvStore       *types.Store
 	MessageClient *message_client.MessageClient
 	TimeSync      uint64
+	MsgCounter    *MsgCounter
 }
 
 func (wn *WriteNode) Close() {
@@ -34,10 +39,17 @@ func NewWriteNode(ctx context.Context,
 	timeSync uint64) (*WriteNode, error) {
 	kv, err := storage.NewStore(context.Background(), types.MinIODriver)
 	mc := message_client.MessageClient{}
+
+	msgCounter := MsgCounter{
+		InsertCounter: 0,
+		DeleteCounter: 0,
+	}
+
 	return &WriteNode{
 		KvStore:       &kv,
 		MessageClient: &mc,
 		TimeSync:      timeSync,
+		MsgCounter:    &msgCounter,
 	}, err
 }
 
@@ -57,6 +69,8 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 		binaryData = append(binaryData, []byte(data[i].String()))
 		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
+
+	wn.MsgCounter.InsertCounter += int64(len(timeStamp))
 
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, binaryData, suffixKeys, timeStamp)
 	if error != nil {
@@ -89,12 +103,14 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 		}
 
 		segmentInfo := msgpb.Key2SegMsg{
-			Uid: data[i].Uid,
+			Uid:       data[i].Uid,
 			SegmentId: segmentIds,
 			Timestamp: data[i].Timestamp,
 		}
 		wn.MessageClient.Send(ctx, segmentInfo)
 	}
+
+	wn.MsgCounter.DeleteCounter += int64(len(timeStamps))
 
 	err := (*wn.KvStore).DeleteRows(ctx, prefixKeys, timeStamps)
 	if err != nil {

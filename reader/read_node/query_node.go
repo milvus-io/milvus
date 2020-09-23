@@ -21,6 +21,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	"github.com/czs007/suvlim/pkg/master/kv"
@@ -65,6 +66,12 @@ type QueryInfo struct {
 	FieldName  string `json:"field_name"`
 }
 
+type MsgCounter struct {
+	InsertCounter int64
+	DeleteCounter int64
+	SearchCounter int64
+}
+
 type QueryNode struct {
 	QueryNodeId   uint64
 	Collections   []*Collection
@@ -77,6 +84,7 @@ type QueryNode struct {
 	deleteData           DeleteData
 	insertData           InsertData
 	kvBase               *kv.EtcdKVBase
+	msgCounter           *MsgCounter
 }
 
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
@@ -99,6 +107,12 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 		validSearchBuffer:       make([]bool, 0),
 	}
 
+	msgCounter := MsgCounter{
+		InsertCounter: 0,
+		DeleteCounter: 0,
+		SearchCounter: 0,
+	}
+
 	return &QueryNode{
 		QueryNodeId:       queryNodeId,
 		Collections:       nil,
@@ -106,6 +120,7 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 		messageClient:     &mc,
 		queryNodeTimeSync: queryNodeTimeSync,
 		buffer:            buffer,
+		msgCounter:        &msgCounter,
 	}
 }
 
@@ -132,6 +147,12 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 		validSearchBuffer:       make([]bool, 0),
 	}
 
+	msgCounter := MsgCounter{
+		InsertCounter: 0,
+		DeleteCounter: 0,
+		SearchCounter: 0,
+	}
+
 	return &QueryNode{
 		QueryNodeId:       queryNodeId,
 		Collections:       nil,
@@ -139,6 +160,7 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 		messageClient:     mc,
 		queryNodeTimeSync: queryNodeTimeSync,
 		buffer:            buffer,
+		msgCounter:        &msgCounter,
 	}
 }
 
@@ -168,9 +190,9 @@ func (node *QueryNode) QueryNodeDataInit() {
 
 func (node *QueryNode) NewCollection(collectionID uint64, collectionName string, schemaConfig string) *Collection {
 	/*
-	void
-	UpdateIndexes(CCollection c_collection, const char *index_string);
-	 */
+		void
+		UpdateIndexes(CCollection c_collection, const char *index_string);
+	*/
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)
@@ -183,9 +205,9 @@ func (node *QueryNode) NewCollection(collectionID uint64, collectionName string,
 
 func (node *QueryNode) DeleteCollection(collection *Collection) {
 	/*
-	void
-	DeleteCollection(CCollection collection);
-	 */
+		void
+		DeleteCollection(CCollection collection);
+	*/
 	cPtr := collection.CollectionPtr
 	C.DeleteCollection(cPtr)
 
@@ -194,8 +216,8 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 
 func (node *QueryNode) UpdateIndexes(collection *Collection, indexConfig *string) {
 	/*
-	void
-	UpdateIndexes(CCollection c_collection, const char *index_string);
+		void
+		UpdateIndexes(CCollection c_collection, const char *index_string);
 	*/
 	cCollectionPtr := collection.CollectionPtr
 	cIndexConfig := C.CString(*indexConfig)
@@ -222,8 +244,50 @@ func (node *QueryNode) InitQueryNodeCollection() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
+	const Debug = true
+	const CountMsgNum = 1000 * 1000
+
+	if Debug {
+		var printFlag = true
+		var startTime = true
+		var start time.Time
+
+		for {
+			var msgLen = node.PrepareBatchMsg()
+			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+			assert.NotEqual(nil, 0, timeRange.timestampMin)
+			assert.NotEqual(nil, 0, timeRange.timestampMax)
+
+			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+				continue
+			}
+
+			if startTime {
+				fmt.Println("============> Start Test <============")
+				startTime = false
+				start = time.Now()
+			}
+
+			node.QueryNodeDataInit()
+			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+			//fmt.Println("MessagesPreprocess Done")
+			node.WriterDelete()
+			node.PreInsertAndDelete()
+			//fmt.Println("PreInsertAndDelete Done")
+			node.DoInsertAndDelete()
+			//fmt.Println("DoInsertAndDelete Done")
+			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+
+			// Test insert time
+			if printFlag && node.msgCounter.InsertCounter >= CountMsgNum {
+				printFlag = false
+				timeSince := time.Since(start)
+				fmt.Println("============> Do", node.msgCounter.InsertCounter, "Insert in", timeSince, "<============")
+			}
+		}
+	}
+
 	for {
-		// TODO: get timeRange from message client
 		var msgLen = node.PrepareBatchMsg()
 		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
 		assert.NotEqual(nil, 0, timeRange.timestampMin)
@@ -444,6 +508,7 @@ func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.Wai
 	timestamps := node.insertData.insertTimestamps[segmentID]
 	offsets := node.insertData.insertOffset[segmentID]
 
+	node.msgCounter.InsertCounter += int64(len(ids))
 	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, records)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -463,6 +528,7 @@ func (node *QueryNode) DoDelete(segmentID int64, deleteIDs *[]int64, deleteTimes
 
 	offset := node.deleteData.deleteOffset[segmentID]
 
+	node.msgCounter.DeleteCounter += int64(len(*deleteIDs))
 	err = segment.SegmentDelete(offset, deleteIDs, deleteTimestamps)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -487,17 +553,18 @@ func (node *QueryNode) QueryJson2Info(queryJson *string) *QueryInfo {
 }
 
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
-	// TODO: use client id to publish results to different clients
-	// var clientId = (*(searchMessages[0])).ClientId
 
 	type SearchResultTmp struct {
 		ResultId       int64
 		ResultDistance float32
 	}
 
+	node.msgCounter.SearchCounter += int64(len(searchMessages))
+
 	// Traverse all messages in the current messageClient.
 	// TODO: Do not receive batched search requests
 	for _, msg := range searchMessages {
+		var clientId = msg.ClientId
 		var resultsTmp = make([]SearchResultTmp, 0)
 
 		var timestamp = msg.Timestamp
@@ -522,7 +589,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				fmt.Println(err.Error())
 				return msgPb.Status{ErrorCode: 1}
 			}
-			fmt.Println(res.ResultIds)
+
 			for i := 0; i < len(res.ResultIds); i++ {
 				resultsTmp = append(resultsTmp, SearchResultTmp{ResultId: res.ResultIds[i], ResultDistance: res.ResultDistances[i]})
 			}
@@ -543,6 +610,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			Entities:  &entities,
 			Distances: make([]float32, 0),
 			QueryId:   msg.Uid,
+			ClientId:  clientId,
 		}
 		for _, res := range resultsTmp {
 			results.Entities.Ids = append(results.Entities.Ids, res.ResultId)

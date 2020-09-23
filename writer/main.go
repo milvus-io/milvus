@@ -10,6 +10,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 )
 
 func main() {
@@ -31,10 +32,49 @@ func main() {
 		log.Fatal(err)
 	}
 
+	msgCounter := write_node.MsgCounter{
+		InsertCounter: 0,
+		DeleteCounter: 0,
+	}
+
 	wn := write_node.WriteNode{
 		KvStore:       &kv,
 		MessageClient: &mc,
 		TimeSync:      100,
+		MsgCounter:    &msgCounter,
+	}
+
+	const Debug = true
+	const CountMsgNum = 1000 * 1000
+
+	if Debug {
+		var printFlag = true
+		var startTime = true
+		var start time.Time
+
+		for {
+			if ctx.Err() != nil {
+				break
+			}
+			msgLength := wn.MessageClient.PrepareBatchMsg()
+			if msgLength > 0 {
+				if startTime {
+					fmt.Println("============> Start Test <============")
+					startTime = false
+					start = time.Now()
+				}
+
+				wn.DoWriteNode(ctx, &wg)
+				fmt.Println("write node do a batch message, storage len: ", msgLength)
+			}
+
+			// Test insert time
+			if printFlag && wn.MsgCounter.InsertCounter >= CountMsgNum {
+				printFlag = false
+				timeSince := time.Since(start)
+				fmt.Println("============> Do", wn.MsgCounter.InsertCounter, "Insert in", timeSince, "<============")
+			}
+		}
 	}
 
 	//TODO:: start a gorouter for searchById
