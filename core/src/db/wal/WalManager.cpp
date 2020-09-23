@@ -83,6 +83,8 @@ WalManager::Start(const DBOptions& options) {
         return status;
     }
 
+    LOG_ENGINE_DEBUG_ << "WalManager started";
+
     return Status::OK();
 }
 
@@ -94,6 +96,8 @@ WalManager::Stop() {
     }
 
     WaitCleanupFinish();
+
+    LOG_ENGINE_DEBUG_ << "WalManager stopped";
 
     return Status::OK();
 }
@@ -472,6 +476,7 @@ WalManager::CleanupThread() {
                 // remove collection folder
                 // do this under the lock to avoid multi-thread conflict
                 std::experimental::filesystem::remove_all(collection_path);
+                LOG_ENGINE_DEBUG_ << "WAL cleanup: " << collection_path;
             }
 
             TakeCleanupTask(target_collection);
@@ -520,6 +525,7 @@ WalManager::CleanupThread() {
                 }
 
                 std::experimental::filesystem::remove(pair.second);
+                LOG_ENGINE_DEBUG_ << "WAL cleanup: " << pair.second;
             }
         }
 
