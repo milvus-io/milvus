@@ -167,7 +167,7 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(std::string& index_type) {
+ValidateIndexType(std::string& index_type, bool is_vector) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
@@ -177,7 +177,7 @@ ValidateIndexType(std::string& index_type) {
 
     std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
-    static std::set<std::string> s_valid_index_names = {
+    static std::set<std::string> s_vector_index_type = {
         knowhere::IndexEnum::INVALID,
         knowhere::IndexEnum::INDEX_FAISS_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
@@ -196,12 +196,14 @@ ValidateIndexType(std::string& index_type) {
         knowhere::IndexEnum::INDEX_RHNSWSQ,
         knowhere::IndexEnum::INDEX_NGTPANNG,
         knowhere::IndexEnum::INDEX_NGTONNG,
+    };
 
-        // structured index names
+    static std::set<std::string> s_structured_index_types = {
         engine::DEFAULT_STRUCTURED_INDEX,
     };
 
-    if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
+    std::set<std::string>& index_types = is_vector ? s_vector_index_type : s_structured_index_types;
+    if (index_types.find(index_type) == index_types.end()) {
         std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
