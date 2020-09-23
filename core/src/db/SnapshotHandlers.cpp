@@ -110,6 +110,7 @@ GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<m
                                                          std::vector<bool>& valid_row)
     : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names), valid_row_(valid_row) {
     ids_left_ = ids_;
+    data_chunk_ = std::make_shared<engine::DataChunk>();
 }
 
 Status
@@ -129,7 +130,7 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+    segment_reader.LoadDeletedDocs(deleted_docs_ptr);
 
     std::vector<idx_t> ids_in_this_segment;
     std::vector<int64_t> offsets;
@@ -213,7 +214,6 @@ GetEntityByIdSegmentHandler::PostIterate() {
         }
     }
 
-    data_chunk_ = std::make_shared<engine::DataChunk>();
     data_chunk_->count_ = temp_segment.GetRowCount();
     data_chunk_->fixed_fields_.swap(temp_segment.GetFixedFields());
     data_chunk_->variable_fields_.swap(temp_segment.GetVariableFields());

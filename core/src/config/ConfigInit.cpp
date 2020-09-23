@@ -121,6 +121,9 @@ InitConfig() {
          CreateBoolConfig("cache.cache_insert_data", &config.cache.cache_insert_data.value, false)},
         {"cache.preload_collection",
          CreateStringConfig("cache.preload_collection", &config.cache.preload_collection.value, "")},
+        {"cache.max_concurrent_insert_request_size",
+         CreateSizeConfig("cache.max_concurrent_insert_request_size", 256 * MB, std::numeric_limits<int64_t>::max(),
+                          &config.cache.max_concurrent_insert_request_size.value, 2 * GB)},
 
         /* gpu */
         {"gpu.enable", CreateBoolConfig("gpu.enable", &config.gpu.enable.value, false)},
@@ -155,6 +158,9 @@ InitConfig() {
 
         /* invisible */
         /* engine */
+        {"engine.max_partition_num",
+         CreateIntegerConfig("engine.build_index_threshold", 1, std::numeric_limits<int64_t>::max(),
+                             &config.engine.max_partition_num.value, 4096)},
         {"engine.build_index_threshold",
          CreateIntegerConfig("engine.build_index_threshold", 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.build_index_threshold.value, 4096)},
@@ -263,26 +269,29 @@ wal:
   enable: @wal.enable@
   path: @wal.path@
 
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# Cache Config         | Description                                                | Type       | Default         |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# cache_size           | The size of CPU memory used for caching data for faster    | String     | 4GB             |
-#                      | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# insert_buffer_size   | Buffer size used for data insertion.                       | String     | 1GB             |
-#                      | The sum of 'insert_buffer_size' and 'cache_size'           |            |                 |
-#                      | must be less than system memory size.                      |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
-#                      | be pre-loaded when Milvus server starts up.                |            |                 |
-#                      | '*' means preload all existing tables (single-quote or     |            |                 |
-#                      | double-quote required).                                    |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
+#------------------------------------+-------------------------------------------------------------------+-----------------+
+# Cache Config                       | Description                                                | Type       | Default   |
+#------------------------------------+------------------------------------------------------------+------------+-----------+
+# cache_size                         | The size of CPU memory used for caching data for faster    | String     | 4GB       |
+#                                    | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |           |
+#                                    | must be less than system memory size.                      |            |           |
+#------------------------------------+------------------------------------------------------------+------------+-----------+
+# insert_buffer_size                 | Buffer size used for data insertion.                       | String     | 1GB       |
+#                                    | The sum of 'insert_buffer_size' and 'cache_size'           |            |           |
+#                                    | must be less than system memory size.                      |            |           |
+#------------------------------------+------------------------------------------------------------+------------+-----------+
+# preload_collection                 | A comma-separated list of collection names that need to    | StringList |           |
+#                                    | be pre-loaded when Milvus server starts up.                |            |           |
+#                                    | '*' means preload all existing tables (single-quote or     |            |           |
+#                                    | double-quote required).                                    |            |           |
+#------------------------------------+------------------------------------------------------------+------------+-----------+
+# max_concurrent_insert_request_size | A limitation of processing insert request size concurrent. | String     | 2GB       |
+#------------------------------------+------------------------------------------------------------+------------+-----------+
 cache:
   cache_size: @cache.cache_size@
   insert_buffer_size: @cache.insert_buffer_size@
   preload_collection: @cache.preload_collection@
+  max_concurrent_insert_request_size: @cache.max_concurrent_insert_request_size@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # GPU Config           | Description                                                | Type       | Default         |

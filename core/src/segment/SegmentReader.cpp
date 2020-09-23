@@ -111,7 +111,7 @@ SegmentReader::Load() {
     STATUS_CHECK(LoadBloomFilter(id_bloom_filter_ptr));
 
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
+    LoadDeletedDocs(deleted_docs_ptr);
 
     STATUS_CHECK(LoadVectorIndice());
 
@@ -291,7 +291,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         // load deleted doc
         faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids.size());
         segment::DeletedDocsPtr deleted_docs_ptr;
-        STATUS_CHECK(LoadDeletedDocs(deleted_docs_ptr));
+        LoadDeletedDocs(deleted_docs_ptr);
         if (deleted_docs_ptr != nullptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             for (auto& offset : deleted_docs) {
@@ -494,7 +494,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
         if (!std::experimental::filesystem::exists(file_path + codec::IdBloomFilterFormat::FilePostfix())) {
-            return Status::OK();  // file doesn't exist
+            return Status(DB_ERROR, "File doesn't exist");  // file doesn't exist
         }
 
         // if the data is in cache, no need to read file
@@ -532,9 +532,9 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         auto visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, visitor->GetFile());
-        //if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
-        //    return Status::OK();  // file doesn't exist
-        //}
+        if (!std::experimental::filesystem::exists(file_path + codec::DeletedDocsFormat::FilePostfix())) {
+            return Status(DB_ERROR, "File doesn't exist");  // file doesn't exist
+        }
 
         // if the data is in cache, no need to read file
         auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(file_path);

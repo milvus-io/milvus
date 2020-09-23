@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreatePartitionReq.h"
+#include "config/ServerConfig.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
@@ -23,11 +24,12 @@
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MAX_PARTITION_NUM = 4096;
-
 CreatePartitionReq::CreatePartitionReq(const ContextPtr& context, const std::string& collection_name,
                                        const std::string& tag)
-    : BaseReq(context, ReqType::kCreatePartition), collection_name_(collection_name), tag_(tag) {
+    : BaseReq(context, ReqType::kCreatePartition),
+      collection_name_(collection_name),
+      tag_(tag),
+      max_partition_num_(config.engine.max_partition_num()) {
 }
 
 BaseReqPtr
@@ -62,9 +64,9 @@ CreatePartitionReq::OnExecute() {
         // check partition total count
         std::vector<std::string> partition_names;
         status = DBWrapper::DB()->ListPartitions(collection_name_, partition_names);
-        if (partition_names.size() >= MAX_PARTITION_NUM) {
+        if (partition_names.size() >= max_partition_num_) {
             std::stringstream err_ss;
-            err_ss << "The number of partitions exceeds the upper limit (" << MAX_PARTITION_NUM << ")";
+            err_ss << "The number of partitions exceeds the upper limit (" << max_partition_num_ << ")";
             return Status(SERVER_UNSUPPORTED_ERROR, err_ss.str());
         }
 

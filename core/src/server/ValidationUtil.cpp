@@ -183,7 +183,9 @@ ValidateIndexType(std::string& index_type) {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+#ifdef MILVUS_GPU_VERSION
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
+#endif
         knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
         knowhere::IndexEnum::INDEX_NSG,
