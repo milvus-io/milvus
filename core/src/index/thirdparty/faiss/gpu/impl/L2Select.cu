@@ -137,12 +137,15 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
   }
 }
 
+// With bitset included
+// L2 + select kernel for k > 1, no re-use of ||c||^2
 template <typename T, int NumWarpQ, int NumThreadQ, int ThreadsPerBlock>
 __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
                              Tensor<T, 1, true> centroidDistances,
+                             Tensor<uint8_t, 1, true> bitset,
                              Tensor<T, 2, true> outDistances,
                              Tensor<int, 2, true> outIndices,
-                             int k, T initK, int prev) {
+                             int k, T initK) {
   // Each block handles a single row of the distances (results)
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
@@ -159,22 +162,30 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
   int limit = utils::roundDown(productDistances.getSize(1), kWarpSize);
   int i = threadIdx.x;
 
+  bool bitsetEmpty = (bitset.getSize(0) == 0);
+  T v;
+
   for (; i < limit; i += blockDim.x) {
-    T v = Math<T>::add(centroidDistances[i],
-                       productDistances[row][i]);
-    heap.add(v, i);
+    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+      v = Math<T>::add(centroidDistances[i],
+                        productDistances[row][i]);
+      heap.addThreadQ(v, i);
+    }
+    heap.checkThreadQ();
   }
 
   if (i < productDistances.getSize(1)) {
-    T v = Math<T>::add(centroidDistances[i],
-                       productDistances[row][i]);
-    heap.addThreadQ(v, i);
+    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
+      v = Math<T>::add(centroidDistances[i],
+                        productDistances[row][i]);
+      heap.addThreadQ(v, i);
+    }
   }
 
   heap.reduce();
-  for (int i = threadIdx.x+prev; i < k+prev; i += blockDim.x) {
-    outDistances[row][i-prev] = smemK[i];
-    outIndices[row][i-prev] = smemV[i];
+  for (int i = threadIdx.x; i < k; i += blockDim.x) {
+    outDistances[row][i] = smemK[i];
+    outIndices[row][i] = smemV[i];
   }
 }
 
@@ -323,9 +334,9 @@ void runL2SelMn(float* outDis_h,
 #define RUN_L2_SELECT(BLOCK, NUM_WARP_Q, NUM_THREAD_Q)                  \
     do {                                                                \
       l2SelectMinK<float, NUM_WARP_Q, NUM_THREAD_Q, BLOCK>                  \
-        <<<grid, BLOCK, 0, stream>>>(productDistances, centroidDistances,   \
+        <<<grid, BLOCK, 0, stream>>>(productDistances, centroidDistances,  \
                                      outDistances, outIndices,          \
-                                     k, Limits<T>::getMax(), i);           \
+                                     k, Limits<float>::getMax(), i);           \
     } while (0)
 
     // block size 128 for everything <= 1024
@@ -356,7 +367,6 @@ void runL2SelMn(float* outDis_h,
     int* tmp_i = new int[outDistances.getSize(0)*outDistances.getSize(1)];
     fromDevice<float,2>(outDistances,tmp_d, stream);
     fromDevice<int,2>(outIndices, tmp_i, stream);
-    startPos,curQuerySize, k, outDistances.getSize(0), outDistances.getSize(1));
 
     for(int j=0;j<curQuerySize;j++) {
         for(int m=0;m<k;m++) {

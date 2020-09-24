@@ -309,7 +309,7 @@ void runDist(bool computeL2,
 
                  float* outDis_h,
                  int* outInd_h,
-                 int i,
+                 int pos,
                  int curTile,
                  int nprobe,
 
