@@ -322,7 +322,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
   std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
 
-  assert(memory_usage_size == 1898459);
+  assert(memory_usage_size == 2785280);
 
   DeleteCollection(collection);
   DeletePartition(partition);
