@@ -1,6 +1,6 @@
 module github.com/czs007/suvlim
 
-go 1.15
+go 1.14
 
 require (
 	cloud.google.com/go/bigquery v1.4.0 // indirect
@@ -11,6 +11,7 @@ require (
 	github.com/alecthomas/units v0.0.0-20190924025748-f65c72e2690d // indirect
 	github.com/apache/pulsar-client-go v0.1.1
 	github.com/apache/pulsar/pulsar-client-go v0.0.0-20200901051823-800681aaa9af
+	github.com/aws/aws-sdk-go v1.30.8
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/danieljoos/wincred v1.1.0 // indirect

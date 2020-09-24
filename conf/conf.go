@@ -104,6 +104,5 @@ func load_config() {
 	if err != nil {
 		panic(err)
 	}
-
 	//fmt.Printf("Result: %v\n", Config)
 }

@@ -10,23 +10,32 @@ import (
 	"flag"
 	"fmt"
 	"code.cloudfoundry.org/bytefmt"
-	"io/ioutil"
+	"github.com/tikv/client-go/config"
+	"github.com/tikv/client-go/rawkv"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 	"context"
 )
 
 // Global variables
-var duration_secs, threads int
+var duration_secs, threads, batchOpSize int
 var object_size uint64
 var object_data []byte
 var running_threads, upload_count, upload_slowdown_count int32
 var endtime, upload_finish time.Time
-
+var store Store
+var err error
+var keys [][]byte
+var objects_data [][]byte
+var segments []string
+var timestamps []uint64
+var wg sync.WaitGroup
+var client *rawkv.Client
 
 func logit(msg string) {
 	fmt.Println(msg)
@@ -38,13 +47,44 @@ func logit(msg string) {
 }
 
 func _putFile(ctx context.Context, store Store){
-    //objnum := atomic.AddInt32(&upload_count, 1)
+    atomic.AddInt32(&upload_count, 1)
 	key := "collection_abc"
     err := store.PutRow(ctx, []byte(key), object_data, "abc", uint64(time.Now().Unix()))
     if err != nil {
 	atomic.AddInt32(&upload_slowdown_count, 1)
     }
 
+}
+
+func _putFiles(ctx context.Context, store Store){
+	atomic.AddInt32(&upload_count, 1)
+
+	err = client.BatchPut(ctx, keys, objects_data)
+	//err := store.PutRows(ctx, keys, objects_data, segments, timestamps)
+	if err != nil {
+		atomic.AddInt32(&upload_slowdown_count, 1)
+	}
+	//wg.Done()
+}
+
+func runPutFiles(thread_num int) {
+	//var store Store
+	//var err error
+	ctx := context.Background()
+	//store, err = storage.NewStore(ctx, TIKVDriver)
+	//if err != nil {
+	//	panic(err.Error())
+	//}
+
+	for time.Now().Before(endtime) {
+		_putFiles(ctx, store)
+	}
+
+	// Remember last done time
+	upload_finish = time.Now()
+	// One less thread
+	atomic.AddInt32(&running_threads, -1)
+	wg.Done()
 }
 
 func runPutFile(thread_num int) {
@@ -71,8 +111,9 @@ func main() {
 
 	// Parse command line
 	myflag := flag.NewFlagSet("myflag", flag.ExitOnError)
-	myflag.IntVar(&duration_secs, "d", 1, "Duration of each test in seconds")
-	myflag.IntVar(&threads, "t", 1, "Number of threads to run")
+	myflag.IntVar(&duration_secs, "d", 10, "Duration of each test in seconds")
+	myflag.IntVar(&threads, "t", 50, "Number of threads to run")
+	myflag.IntVar(&batchOpSize, "b", 1000, "Batch operation kv pair number")
 
 	var sizeArg string
 	myflag.StringVar(&sizeArg, "z", "1M", "Size of objects in bytes with postfix K, M, and G")
@@ -89,6 +130,14 @@ func main() {
 	logit(fmt.Sprintf("Parameters: duration=%d, threads=%d, size=%s",
 		duration_secs, threads, sizeArg))
 
+	pdAddrs := []string{"127.0.0.1:2379"}
+	conf := config.Default()
+	ctx := context.Background()
+
+	client, err = rawkv.NewClient(ctx, pdAddrs, conf)
+
+
+
 	// Initialize data for the bucket
 	object_data = make([]byte, object_size)
 	rand.Read(object_data)
@@ -102,22 +151,57 @@ func main() {
 	running_threads = int32(threads)
 
 	// Run the upload case
+	//starttime := time.Now()
+	//endtime = starttime.Add(time.Second * time.Duration(duration_secs))
+	//
+	//for n := 1; n <= threads; n++ {
+	//	go runPutFile(n)
+	//}
+	//
+	//// Wait for it to finish
+	//for atomic.LoadInt32(&running_threads) > 0 {
+	//	time.Sleep(time.Millisecond)
+	//}
+	//upload_time := upload_finish.Sub(starttime).Seconds()
+	//
+	//bps := float64(uint64(upload_count)*object_size) / upload_time
+	//logit(fmt.Sprintf("PUT time %.1f secs, objects = %d, speed = %sB/sec, %.1f operations/sec. Slowdowns = %d",
+	//	upload_time, upload_count, bytefmt.ByteSize(uint64(bps)), float64(upload_count)/upload_time, upload_slowdown_count))
+	//
+	//fmt.Println(" upload_count :", upload_count)
+
+	// Run the batchput case
+
+	keys = make([][]byte, batchOpSize)
+	objects_data = make([][]byte, batchOpSize)
+	segments = make([]string, batchOpSize)
+	timestamps = make([]uint64, batchOpSize)
+
+	for n := batchOpSize; n > 0; n-- {
+		keys[n-1] = []byte("collection_abc")
+		objects_data[n-1] = object_data
+		segments[n-1] = "abc"
+		timestamps[n-1] = uint64(time.Now().Unix())
+	}
+
 	starttime := time.Now()
 	endtime = starttime.Add(time.Second * time.Duration(duration_secs))
 
 	for n := 1; n <= threads; n++ {
-		go runPutFile(n)
+		wg.Add(1)
+		go runPutFiles(n)
 	}
 
+	wg.Wait()
 	// Wait for it to finish
 	for atomic.LoadInt32(&running_threads) > 0 {
 		time.Sleep(time.Millisecond)
 	}
 	upload_time := upload_finish.Sub(starttime).Seconds()
 
-	bps := float64(uint64(upload_count)*object_size) / upload_time
+	bps := float64(uint64(upload_count)*object_size*uint64(batchOpSize)) / upload_time
 	logit(fmt.Sprintf("PUT time %.1f secs, objects = %d, speed = %sB/sec, %.1f operations/sec. Slowdowns = %d",
-		upload_time, upload_count, bytefmt.ByteSize(uint64(bps)), float64(upload_count)/upload_time, upload_slowdown_count))
+		upload_time, upload_count*int32(batchOpSize), bytefmt.ByteSize(uint64(bps)), float64(upload_count)/upload_time, upload_slowdown_count))
 
 	fmt.Println(" upload_count :", upload_count)
 

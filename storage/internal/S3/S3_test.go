@@ -1,17 +1,17 @@
-package minio_driver_test
+package S3_driver_test
 
 import (
 	"context"
-	minio_driver "github.com/czs007/suvlim/storage/internal/minio"
+	s3_driver "github.com/czs007/suvlim/storage/internal/S3"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
 var ctx = context.Background()
-var client, err = minio_driver.NewMinioDriver(ctx)
+var client, err = s3_driver.NewS3Driver(ctx)
 
 
-func TestMinioDriver_PutRowAndGetRow(t *testing.T) {
+func TestS3Driver_PutRowAndGetRow(t *testing.T) {
 	err = client.PutRow(ctx, []byte("bar"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)
 	assert.Nil(t, err)
 	err = client.PutRow(ctx, []byte("bar"), []byte("djhfkjsbdfbsdughorsgsdjhgoisdgh"), "SegmentA", 2)
@@ -20,7 +20,7 @@ func TestMinioDriver_PutRowAndGetRow(t *testing.T) {
 	assert.Nil(t, err)
 	err = client.PutRow(ctx, []byte("bar1"), []byte("testkeybarorbar_1"), "SegmentC", 3)
 	assert.Nil(t, err)
-	object, _ := client.GetRow(ctx, []byte("bar"), 5)
+	object, _ := client.GetRow(ctx, []byte("bar"), 1)
 	assert.Equal(t, "abcdefghijklmnoopqrstuvwxyz", string(object))
 	object, _ = client.GetRow(ctx, []byte("bar"), 2)
 	assert.Equal(t, "djhfkjsbdfbsdughorsgsdjhgoisdgh", string(object))
@@ -30,7 +30,7 @@ func TestMinioDriver_PutRowAndGetRow(t *testing.T) {
 	assert.Equal(t, "testkeybarorbar_1", string(object))
 }
 
-func TestMinioDriver_DeleteRow(t *testing.T){
+func TestS3Driver_DeleteRow(t *testing.T){
 	err = client.DeleteRow(ctx, []byte("bar"), 5)
 	assert.Nil(t, err)
 	object, _ := client.GetRow(ctx, []byte("bar"), 6)
@@ -41,7 +41,7 @@ func TestMinioDriver_DeleteRow(t *testing.T){
 	assert.Nil(t, object2)
 }
 
-func TestMinioDriver_GetSegments(t *testing.T) {
+func TestS3Driver_GetSegments(t *testing.T) {
 	err = client.PutRow(ctx, []byte("seg"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)
 	assert.Nil(t, err)
 	err = client.PutRow(ctx, []byte("seg"), []byte("djhfkjsbdfbsdughorsgsdjhgoisdgh"), "SegmentA", 2)
@@ -63,7 +63,7 @@ func TestMinioDriver_GetSegments(t *testing.T) {
 	}
 }
 
-func TestMinioDriver_PutRowsAndGetRows(t *testing.T){
+func TestS3Driver_PutRowsAndGetRows(t *testing.T){
 	keys := [][]byte{[]byte("foo"), []byte("bar")}
 	values := [][]byte{[]byte("The key is foo!"), []byte("The key is bar!")}
 	segments := []string{"segmentA", "segmentB"}
@@ -77,7 +77,7 @@ func TestMinioDriver_PutRowsAndGetRows(t *testing.T){
 	assert.Equal(t, "The key is bar!", string(objects[1]))
 }
 
-func TestMinioDriver_DeleteRows(t *testing.T){
+func TestS3Driver_DeleteRows(t *testing.T){
 	keys := [][]byte{[]byte("foo"), []byte("bar")}
 	timestamps := []uint64{3, 3}
 	err := client.DeleteRows(ctx, keys, timestamps)
@@ -89,7 +89,7 @@ func TestMinioDriver_DeleteRows(t *testing.T){
 	assert.Nil(t, objects[1])
 }
 
-func TestMinioDriver_PutLogAndGetLog(t *testing.T) {
+func TestS3Driver_PutLogAndGetLog(t *testing.T) {
 	err = client.PutLog(ctx, []byte("insert"), []byte("This is insert log!"), 1, 11)
 	assert.Nil(t, err)
 	err = client.PutLog(ctx, []byte("delete"), []byte("This is delete log!"),  2, 10)
@@ -108,7 +108,7 @@ func TestMinioDriver_PutLogAndGetLog(t *testing.T) {
 	assert.Equal(t, "This is insert log!", string(logValues[3]))
 }
 
-func TestMinioDriver_Segment(t *testing.T) {
+func TestS3Driver_Segment(t *testing.T) {
 	err := client.PutSegmentIndex(ctx, "segmentA", []byte("This is segmentA's index!"))
 	assert.Nil(t, err)
 
@@ -119,7 +119,7 @@ func TestMinioDriver_Segment(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestMinioDriver_SegmentDL(t *testing.T){
+func TestS3Driver_SegmentDL(t *testing.T){
 	err := client.PutSegmentDL(ctx, "segmentB", []byte("This is segmentB's delete log!"))
 	assert.Nil(t, err)
 
