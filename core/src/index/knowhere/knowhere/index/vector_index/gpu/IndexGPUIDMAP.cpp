@@ -135,7 +135,7 @@ GPUIDMAP::GenGraph(const float* data, const int64_t k, GraphType& graph, const C
         res.resize(K * b_size);
 
         const float* xq = data + batch_size * dim * i;
-        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config);
+        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config, nullptr);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
