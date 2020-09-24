@@ -295,6 +295,42 @@ void runDistance(bool computeL2,
   }
 }
 
+void runL2Dist(GpuResources* resources,
+                   Tensor<float, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   // can be optionally pre-computed; nullptr if we
+                   // have to compute it upon the call
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<float, 2, true>& queries,
+                   bool queriesRowMajor,
+                   Tensor<uint8_t, 1, true>& bitset,
+                   int k,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                    float* outDis_h,
+                    int* outInd_h,
+                    int i,
+                    int curTile,
+                    int nprobe,
+
+                    bool ignoreOutDistances
+                    ) {
+    runDistance<float>(true, // L2
+                    resources,
+                    vectors,
+                    vectorsRowMajor,
+                    vectorNorms,
+                    queries,
+                    queriesRowMajor,
+                    bitset,
+                    k,
+                    outDistances,
+                    outIndices,
+                    ignoreOutDistances);
+}
+
+
 template <typename T>
 void runL2Distance(GpuResources* resources,
                    Tensor<T, 2, true>& centroids,

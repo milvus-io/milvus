@@ -35,6 +35,28 @@ void runL2Distance(GpuResources* resources,
                    // take shortcuts.
                    bool ignoreOutDistances = false);
 
+void runL2Dist(GpuResources* resources,
+                   Tensor<float, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   // can be optionally pre-computed; nullptr if we
+                   // have to compute it upon the call
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<float, 2, true>& queries,
+                   bool queriesRowMajor,
+                   Tensor<uint8_t, 1, true>& bitset,
+                   int k,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                    float* outDis_h,
+                    int* outInd_h,
+                    int i,
+                    int curTile,
+                    int nprobe,
+                    
+                    bool ignoreOutDistances = false
+                    );
+
 /// Calculates brute-force inner product distance between `vectors`
 /// and `queries`, returning the k closest results seen
 void runIPDistance(GpuResources* resources,
@@ -229,8 +251,8 @@ void bfKnnOnDev(GpuResources* resources,
                    float metricArg,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
-                   
-                   float* outDis_h,
+
+                    float* outDis_h,
                     int* outInd_h,
                     int i,
                     int curTile,
@@ -246,7 +268,7 @@ void bfKnnOnDev(GpuResources* resources,
   if ((metric == faiss::MetricType::METRIC_L2) ||
       (metric == faiss::MetricType::METRIC_Lp &&
        metricArg == 2)) {
-    runL2Distance(resources,
+    runL2Dist(resources,
                   vectors,
                   vectorsRowMajor,
                   vectorNorms,
@@ -255,7 +277,13 @@ void bfKnnOnDev(GpuResources* resources,
                   bitset,
                   k,
                   outDistances,
-                  outIndices);
+                  outIndices,
+
+                  outDis_h,
+                  outInd_h,
+                  i,
+                  curTile,
+                  nprobe);
   } else if (metric == faiss::MetricType::METRIC_INNER_PRODUCT) {
     runIPDistance(resources,
                   vectors,
