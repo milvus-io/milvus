@@ -1,6 +1,6 @@
 module github.com/czs007/suvlim
 
-go 1.14
+go 1.15
 
 require (
 	cloud.google.com/go/bigquery v1.4.0 // indirect
