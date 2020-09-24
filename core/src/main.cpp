@@ -93,7 +93,6 @@ main(int argc, char* argv[]) {
                 char* config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
-                std::cout << "Loading configuration from: " << config_filename << std::endl;
                 break;
             }
             case 'p': {
@@ -134,8 +133,12 @@ main(int argc, char* argv[]) {
         milvus::ConfigMgr::GetInstance().Init();
         milvus::ConfigMgr::GetInstance().LoadFile(config_filename);
         milvus::ConfigMgr::GetInstance().FilePath() = config_filename;
-    } catch (milvus::ConfigStatus& cs) {
-        std::cerr << "Load config(" << config_filename << ") failed: " << cs.message << std::endl;
+        std::cout << "Successfully load configuration from " << config_filename << "." << std::endl;
+    } catch (std::exception& ex) {
+        std::cerr << "Load configuration file " << config_filename << " failed: " << ex.what() << std::endl;
+        goto FAIL;
+    } catch (...) {
+        std::cerr << "Load configuration file " << config_filename << " failed: Unknown error." << std::endl;
         goto FAIL;
     }
 
