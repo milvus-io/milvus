@@ -86,8 +86,8 @@ WebErrorMap(ErrorCode code) {
 using ChunkDataMap = std::unordered_map<std::string, std::vector<uint8_t>>;
 
 void
-CopyRowVectorFromJson(const nlohmann::json& json, const std::string& field_name, int64_t offset,
-                      int64_t row_num, bool is_binary, ChunkDataMap& chunk_data) {
+CopyRowVectorFromJson(const nlohmann::json& json, const std::string& field_name, int64_t offset, int64_t row_num,
+                      bool is_binary, ChunkDataMap& chunk_data) {
     std::vector<uint8_t> binary_data;
     std::vector<float> float_vector;
     uint64_t bytes = 0;
@@ -119,8 +119,8 @@ CopyRowVectorFromJson(const nlohmann::json& json, const std::string& field_name,
 
 template <typename T>
 void
-CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, int64_t offset,
-                      int64_t row_num, ChunkDataMap& chunk_data) {
+CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, int64_t offset, int64_t row_num,
+                      ChunkDataMap& chunk_data) {
     T value = entity_json.get<T>();
     if (chunk_data.find(field_name) == chunk_data.end()) {
         std::vector<uint8_t> T_data(row_num * sizeof(T), 0);
