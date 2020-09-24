@@ -145,18 +145,18 @@ With the following Docker images, you should be able to compile Milvus on any Li
 
 ### Step 1 Pull Milvus Docker images
 
-### ubuntu18.04
+#### ubuntu18.04
 
 Pull CPU-only image:
 
 ```shell
-$ docker pull milvusdb/milvus-cpu-build-env:latest
+$ docker pull milvusdb/milvus-cpu-build-env:v0.7.0-ubuntu18.04
 ```
 
 Pull GPU-enabled image:
 
 ```shell
-$ docker pull milvusdb/milvus-gpu-build-env:latest
+$ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-ubuntu18.04
 ```
 
 #### CentOs7
@@ -178,7 +178,7 @@ $ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-centos7
 Start a CPU-only container:
 
 ```shell
-$ docker run -it -p 19530:19530 -d [milvus_cpu_docker_image]
+$ docker run -it -p 19530:19530 -d <milvus_cpu_docker_image>
 ```
 
 Start a GPU container:
@@ -186,13 +186,13 @@ Start a GPU container:
 - For nvidia docker 2:
 
 ```shell
-$ docker run --runtime=nvidia -it -p 19530:19530 -d [milvus_gpu_docker_image]
+$ docker run --runtime=nvidia -it -p 19530:19530 -d <milvus_gpu_docker_image>
 ```
 
 - For nvidia container toolkit:
 
 ```shell
-docker run --gpus all -it -p 19530:19530 -d [milvus_gpu_docker_image]
+docker run --gpus all -it -p 19530:19530 -d <milvus_gpu_docker_image>
 ```
 
 To enter the container:
