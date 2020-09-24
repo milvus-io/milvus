@@ -7,7 +7,7 @@
 
 
 #include <faiss/gpu/impl/FlatIndex.cuh>
-#include <faiss/gpu/impl/DistanceBf.cuh>
+#include <faiss/gpu/impl/Distance.cuh>
 #include <faiss/gpu/impl/L2Norm.cuh>
 #include <faiss/gpu/impl/VectorResidual.cuh>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
@@ -241,7 +241,7 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                   !exactDistance);
   }
 #else
-    bfKnnOnDevice(resources_,
+    bfKnnOnDev(resources_,
                   getCurrentDevice(),
                   stream,
                   storeTransposed_ ? vectorsTransposed_ : vectors_,
@@ -255,6 +255,13 @@ FlatIndex::query(Tensor<float, 2, true>& input,
                   metricArg,
                   outDistances,
                   outIndices,
+
+                  outDis_h,
+                  outInd_h,
+                  i,
+                  curTile,
+                  nprobe,
+
                   !exactDistance);
 #endif
 }
