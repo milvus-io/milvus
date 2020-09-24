@@ -462,16 +462,23 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   HostTensor<float, 2, true> hOutDistances(outDistances, stream);
   float* tmp_d = hOutDistances.data(); 
   long* tmp_i = hOutIndices.data();
-  int nprobeTile = 8;
-
+  const int nprobeTile = 8;
+  
   for (int i = 0; i < nprobe; i += nprobeTile) {
+    int curTile = min(nprobeTile, nprobe-i);
+
     quantizer_->query(queries,
                         coarseBitset,
-                        nprobe,
+                        curTile,
                         metric_,
                         metricArg_,
                         coarseDistances,
                         coarseIndices,
+                        coarseDis_h,
+                        coarseInd_h,
+                        i,
+                        curTile,
+                        nprobe,
                         false);
     DeviceTensor<float, 3, true>
     residualBase(mem, {queries.getSize(0), nprobe, dim_}, stream);
