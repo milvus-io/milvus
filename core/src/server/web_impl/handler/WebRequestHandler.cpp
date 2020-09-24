@@ -83,55 +83,52 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
-template <typename T>
-void
-CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
-    std::vector<T> values;
-    auto size = json.size();
-    values.resize(size);
-    raw.resize(size * sizeof(T));
-    size_t offset = 0;
-    for (const auto& data : json) {
-        values[offset] = data.get<T>();
-        ++offset;
-    }
-    memcpy(raw.data(), values.data(), size * sizeof(T));
-}
+using ChunkDataMap = std::unordered_map<std::string, std::vector<uint8_t>>;
 
 void
-CopyRowVectorFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin) {
-    //    if (!json.is_array()) {
-    //        return Status(ILLEGAL_BODY, "field \"vectors\" must be a array");
-    //    }
+CopyRowVectorFromJson(const nlohmann::json& json, const std::string& field_name, int64_t offset,
+                      int64_t row_num, bool is_binary, ChunkDataMap& chunk_data) {
+    std::vector<uint8_t> binary_data;
     std::vector<float> float_vector;
-    if (!bin) {
+    uint64_t bytes = 0;
+    if (is_binary) {
+        for (auto& data : json) {
+            binary_data.emplace_back(data.get<uint8_t>());
+        }
+        bytes = binary_data.size() * sizeof(uint8_t);
+    } else {
         for (auto& data : json) {
             float_vector.emplace_back(data.get<float>());
         }
-        auto size = float_vector.size() * sizeof(float);
-        vectors_data.resize(size);
-        memcpy(vectors_data.data(), float_vector.data(), size);
+        bytes = float_vector.size() * sizeof(float);
+    }
+
+    if (chunk_data.find(field_name) == chunk_data.end()) {
+        std::vector<uint8_t> data(row_num * bytes, 0);
+        chunk_data.insert({field_name, data});
+    }
+
+    int64_t vector_offset = offset * bytes;
+    std::vector<uint8_t>& target_data = chunk_data.at(field_name);
+    if (is_binary) {
+        memcpy(target_data.data() + vector_offset, binary_data.data(), bytes);
     } else {
-        for (auto& data : json) {
-            vectors_data.emplace_back(data.get<uint8_t>());
-        }
+        memcpy(target_data.data() + vector_offset, float_vector.data(), bytes);
     }
 }
 
 template <typename T>
 void
-CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, const int64_t offset,
-                      const int64_t row_num, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, int64_t offset,
+                      int64_t row_num, ChunkDataMap& chunk_data) {
     T value = entity_json.get<T>();
-    std::vector<uint8_t> temp_data(sizeof(T), 0);
-    memcpy(temp_data.data(), &value, sizeof(T));
     if (chunk_data.find(field_name) == chunk_data.end()) {
         std::vector<uint8_t> T_data(row_num * sizeof(T), 0);
-        memcpy(T_data.data(), temp_data.data(), sizeof(T));
+        memcpy(T_data.data(), &value, sizeof(T));
         chunk_data.insert({field_name, T_data});
     } else {
         int64_t T_offset = offset * sizeof(T);
-        memcpy(chunk_data.at(field_name).data() + T_offset, temp_data.data(), sizeof(T));
+        memcpy(chunk_data.at(field_name).data() + T_offset, &value, sizeof(T));
     }
 }
 
@@ -145,8 +142,7 @@ RecordDataAddr(const std::string& field_name, int32_t num, const T* data, Insert
 }
 
 void
-ConvertToParam(const std::unordered_map<std::string, std::vector<uint8_t>>& data_chunk, int64_t row_num,
-               InsertParam& insert_param) {
+ConvertToParam(const ChunkDataMap& data_chunk, int64_t row_num, InsertParam& insert_param) {
     insert_param.row_count_ = row_num;
     for (auto& pair : data_chunk) {
         auto& bin = pair.second;
@@ -1651,23 +1647,19 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
     }
 
-    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
+    // construct chunk data by json object
+    ChunkDataMap chunk_data;
     int64_t row_num = entities_json.size();
     int64_t offset = 0;
-    std::vector<uint8_t> ids;
     for (auto& one_entity : entities_json) {
         for (auto& entity : one_entity.items()) {
             std::string field_name = entity.key();
             if (field_name == NAME_ID) {
-                if (ids.empty()) {
-                    ids.resize(row_num * sizeof(int64_t));
-                }
-                auto id = entity.value().get<int64_t>();
-                int64_t id_offset = offset * sizeof(int64_t);
-                memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
+                // special handle id field
+                CopyRowStructuredData<int64_t>(entity.value(), engine::FIELD_UID, offset, row_num, chunk_data);
                 continue;
             }
-            std::vector<uint8_t> temp_data;
+
             switch (field_types.at(field_name)) {
                 case engine::DataType::INT32: {
                     CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
@@ -1688,16 +1680,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 case engine::DataType::VECTOR_FLOAT:
                 case engine::DataType::VECTOR_BINARY: {
                     bool is_bin = !(field_types.at(field_name) == engine::DataType::VECTOR_FLOAT);
-                    CopyRowVectorFromJson(entity.value(), temp_data, is_bin);
-                    auto size = temp_data.size();
-                    if (chunk_data.find(field_name) == chunk_data.end()) {
-                        std::vector<uint8_t> vector_data(row_num * size, 0);
-                        memcpy(vector_data.data(), temp_data.data(), size);
-                        chunk_data.insert({field_name, vector_data});
-                    } else {
-                        int64_t vector_offset = offset * size;
-                        memcpy(chunk_data.at(field_name).data() + vector_offset, temp_data.data(), size);
-                    }
+                    CopyRowVectorFromJson(entity.value(), field_name, offset, row_num, is_bin, chunk_data);
                     break;
                 }
                 default: {}
@@ -1706,61 +1689,11 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         offset++;
     }
 
-    if (!ids.empty()) {
-        chunk_data.insert({engine::FIELD_UID, ids});
-    }
-
-#if 0
-    for (auto& entity : body_json["entities"].items()) {
-        std::string field_name = entity.key();
-        auto field_value = entity.value();
-        if (!field_value.is_array()) {
-            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field value is not an array");
-        }
-        if (field_name == NAME_ID) {
-            std::vector<uint8_t> temp_data(field_value.size() * sizeof(int64_t), 0);
-            CopyStructuredData<int64_t>(field_value, temp_data);
-            chunk_data.insert({engine::FIELD_UID, temp_data});
-            continue;
-        }
-        row_num = field_value.size();
-
-        std::vector<uint8_t> temp_data;
-        switch (field_types.at(field_name)) {
-            case engine::DataType::INT32: {
-                CopyStructuredData<int32_t>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::INT64: {
-                CopyStructuredData<int64_t>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::FLOAT: {
-                CopyStructuredData<float>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::DOUBLE: {
-                CopyStructuredData<double>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::VECTOR_FLOAT: {
-                CopyRecordsFromJson(field_value, temp_data, false);
-                break;
-            }
-            case engine::DataType::VECTOR_BINARY: {
-                CopyRecordsFromJson(field_value, temp_data, true);
-                break;
-            }
-            default: {}
-        }
-
-        chunk_data.insert(std::make_pair(field_name, temp_data));
-    }
-#endif
-
+    // conver to InsertParam, no memory copy, just record the data address and pass to InsertReq
     InsertParam insert_param;
     ConvertToParam(chunk_data, row_num, insert_param);
 
+    // do insert
     status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, insert_param);
     if (!status.ok()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");

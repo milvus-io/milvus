@@ -459,7 +459,6 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // check field names
-    LOG_SERVER_DEBUG_ << "check field names";
     auto field_names = ss->GetFieldNames();
     std::unordered_set<std::string> collection_field_names;
     for (auto& name : field_names) {
@@ -490,7 +489,6 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // check id field existence
-    LOG_SERVER_DEBUG_ << "check id field";
     auto& params = ss->GetCollection()->GetParams();
     bool auto_genid = true;
     if (params.find(PARAM_UID_AUTOGEN) != params.end()) {
