@@ -96,10 +96,9 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
     real_index->hnsw.efSearch = (config[IndexParams::ef]);
-    real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, blacklist);
+    real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

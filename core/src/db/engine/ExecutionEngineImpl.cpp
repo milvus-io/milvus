@@ -284,11 +284,10 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     } else {
         dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
     }
-    auto result = vec_index->Query(dataset, conf);
 
+    auto result = vec_index->Query(dataset, conf);
     MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
                      context.query_result_->result_ids_.data());
-
     if (hybrid) {
         //        HybridUnset();
     }

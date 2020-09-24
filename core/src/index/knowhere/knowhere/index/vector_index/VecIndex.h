@@ -144,9 +144,12 @@ class VecIndex : public Index {
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
     std::vector<IDType> uids_;
     int64_t index_size_ = -1;
+
+ private:
+    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
+
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

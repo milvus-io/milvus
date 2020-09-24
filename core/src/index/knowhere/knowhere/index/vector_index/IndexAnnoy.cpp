@@ -116,7 +116,6 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto all_num = rows * k;
     auto p_id = static_cast<int64_t*>(malloc(all_num * sizeof(int64_t)));
     auto p_dist = static_cast<float*>(malloc(all_num * sizeof(float)));
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
@@ -125,7 +124,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::vector<float> distances;
         distances.reserve(k);
         index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances,
-                                  blacklist);
+                                  bitset_);
 
         int64_t result_num = result.size();
         auto local_p_id = p_id + k * i;
