@@ -57,6 +57,8 @@ ConvertToChunk(const InsertParam& insert_param, engine::DataChunkPtr& data_chunk
 
         data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
     }
+
+    return Status::OK();
 }
 }  // namespace
 
