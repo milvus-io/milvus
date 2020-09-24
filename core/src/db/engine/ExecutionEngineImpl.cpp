@@ -614,7 +614,7 @@ ExecutionEngineImpl::ProcessRangeQuery(const std::unordered_map<std::string, Dat
 }
 
 Status
-ExecutionEngineImpl::BuildIndex() {
+ExecutionEngineImpl::BuildIndex(uint64_t device_id) {
     TimeRecorderAuto rc("ExecutionEngineImpl::BuildIndex");
 
     SegmentPtr segment_ptr;
@@ -627,6 +627,8 @@ ExecutionEngineImpl::BuildIndex() {
     snapshot::OperationContext context;
     context.prev_partition = snapshot->GetResource<snapshot::Partition>(segment->GetPartitionId());
     auto build_op = std::make_shared<snapshot::ChangeSegmentFileOperation>(context, snapshot);
+
+    gpu_num_ = device_id;
 
     for (auto& field_name : target_fields_) {
         // create snapshot segment files
