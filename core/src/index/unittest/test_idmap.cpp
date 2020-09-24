@@ -114,9 +114,8 @@ TEST_P(IDMAPTest, idmap_basic) {
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
-    index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result_bs_1 = index_->Query(query_dataset, conf);
+    auto result_bs_1 = index_->Query(query_dataset, conf, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
 #if 0

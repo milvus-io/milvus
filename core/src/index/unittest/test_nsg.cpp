@@ -176,9 +176,6 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-    // search xq with delete
-    index_->SetBlacklist(bitset);
-
     // Serialize and Load before Query
     bs = index_->Serialize(search_conf);
 
@@ -191,7 +188,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     bs.Append(RAW_DATA, bptr);
 
     index_->Load(bs);
-    auto result_after = index_->Query(query_dataset, search_conf);
+    auto result_after = index_->Query(query_dataset, search_conf, bitset);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
     auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
 

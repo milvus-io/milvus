@@ -127,9 +127,8 @@ TEST_P(IVFTest, ivf_basic_cpu) {
         for (int64_t i = 0; i < nq; ++i) {
             concurrent_bitset_ptr->set(i);
         }
-        index_->SetBlacklist(concurrent_bitset_ptr);
 
-        auto result_bs_1 = index_->Query(query_dataset, conf_);
+        auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
         AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 

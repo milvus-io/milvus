@@ -111,8 +111,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     auto result1 = index_->Query(query_dataset, conf);
     AssertAnns(result1, nq, k);
 
-    index_->SetBlacklist(bitset);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, bitset);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     /*
