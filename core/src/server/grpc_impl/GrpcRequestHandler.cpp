@@ -1397,7 +1397,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     if (!insert_param.id_returned_.empty()) {
         response->mutable_entity_id_array()->Resize(static_cast<int>(insert_param.id_returned_.size()), 0);
         memcpy(response->mutable_entity_id_array()->mutable_data(), insert_param.id_returned_.data(),
-               insert_param.id_returned_.size());
+               insert_param.id_returned_.size() * sizeof(int64_t));
     }
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
