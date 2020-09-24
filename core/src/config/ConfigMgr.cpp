@@ -43,7 +43,7 @@ Flatten(const YAML::Node& node, std::unordered_map<std::string, std::string>& ta
                 break;
             }
             case YAML::NodeType::Undefined: {
-                throw "Unexpected";
+                std::runtime_error("Undefined YAML Node is not supported in Flatten.");
             }
             default:
                 break;
@@ -123,27 +123,39 @@ ConfigMgr::Init() {
 
 void
 ConfigMgr::LoadFile(const std::string& path) {
-    /* load from milvus.yaml */
-    auto yaml = YAML::LoadFile(path);
+    try {
+        /* load from milvus.yaml */
+        auto yaml = YAML::LoadFile(path);
 
-    /* make it flattened */
-    std::unordered_map<std::string, std::string> flattened;
-    Flatten(yaml, flattened, "");
+        /* make it flattened */
+        std::unordered_map<std::string, std::string> flattened;
+        Flatten(yaml, flattened, "");
 
-    /* update config */
-    for (auto& it : flattened) Set(it.first, it.second, false);
+        /* update config */
+        for (auto& it : flattened) Set(it.first, it.second, false);
+    } catch (std::exception& ex) {
+        throw;
+    } catch (...) {
+        throw std::runtime_error("Unknown error occurred.");
+    }
 }
 
 void
 ConfigMgr::LoadMemory(const std::string& yaml_string) {
-    auto yaml = YAML::Load(yaml_string);
+    try {
+        auto yaml = YAML::Load(yaml_string);
 
-    /* make it flattened */
-    std::unordered_map<std::string, std::string> flattened;
-    Flatten(yaml, flattened, "");
+        /* make it flattened */
+        std::unordered_map<std::string, std::string> flattened;
+        Flatten(yaml, flattened, "");
 
-    /* update config */
-    for (auto& it : flattened) Set(it.first, it.second, false);
+        /* update config */
+        for (auto& it : flattened) Set(it.first, it.second, false);
+    } catch (std::exception& ex) {
+        throw;
+    } catch (...) {
+        throw std::runtime_error("Unknown error occurred.");
+    }
 }
 
 void
