@@ -70,7 +70,7 @@ Status MetaWrapper::Init() {
     return SyncMeta();
   }
   catch (const std::exception &e) {
-    return Status(DB_ERROR, "Init meta error");
+    return Status(DB_ERROR, "Can not connect to meta server");
   }
 }
 
@@ -171,6 +171,10 @@ int64_t MetaWrapper::CountCollection(const std::string &collection_name) {
     }
   }
   return count;
+}
+
+void MetaWrapper::Stop() {
+  watcher_->Cancel();
 }
 
 }

@@ -34,6 +34,9 @@ class MetaWrapper {
   int64_t
   CountCollection(const std::string& collection_name);
 
+  void
+  Stop();
+
  private:
   bool IsCollectionMetaKey(const std::string &key);
 

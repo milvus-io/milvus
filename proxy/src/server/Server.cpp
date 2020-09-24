@@ -236,13 +236,6 @@ Status
 Server::StartService() {
     Status stat;
 
-    // timeSync
-    // client id should same to MessageWrapper
-    int client_id = 0;
-    std::string pulsar_server_addr
-        (std::string{"pulsar://"} + config.pulsar.address() + ":" + std::to_string(config.pulsar.port()));
-    static timesync::TimeSync syc(client_id, GetMessageTimeSyncTime, config.timesync.interval(), pulsar_server_addr, "TimeSync");
-
     // stat = engine::KnowhereResource::Initialize();
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
@@ -274,6 +267,8 @@ void
 Server::StopService() {
     // storage::S3ClientWrapper::GetInstance().StopService();
     grpc::GrpcServer::GetInstance().Stop();
+    MetaWrapper::GetInstance().Stop();
+    MessageWrapper::GetInstance().Stop();
 }
 
 void
