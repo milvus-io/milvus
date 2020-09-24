@@ -7,7 +7,7 @@
 
 
 #include <faiss/gpu/impl/FlatIndex.cuh>
-#include <faiss/gpu/impl/Distance.cuh>
+#include <faiss/gpu/impl/DistanceBf.cuh>
 #include <faiss/gpu/impl/L2Norm.cuh>
 #include <faiss/gpu/impl/VectorResidual.cuh>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
