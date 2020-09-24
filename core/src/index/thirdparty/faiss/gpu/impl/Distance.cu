@@ -315,7 +315,7 @@ void runDist(bool computeL2,
 
                  bool ignoreOutDistances) {
 
-  // k = curTile;
+  k = curTile;
 
   // The # of centroids in `centroids` based on memory layout
   auto numCentroids = centroids.getSize(centroidsRowMajor ? 0 : 1);
@@ -485,7 +485,14 @@ void runDist(bool computeL2,
         // output work directly
         if (tileCols == numCentroids) {
           // Write into the final output
-          runL2SelectMin(distanceBufView,
+          runL2SelMn(outDis_h,
+                        outInd_h,
+                        i,
+                        curQuerySize,
+                        pos,
+                        nprobe,
+
+                        distanceBufView,
                          *centroidNorms,
                          bitset,
                          outDistanceView,

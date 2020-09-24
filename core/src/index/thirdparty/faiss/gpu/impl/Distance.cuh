@@ -57,25 +57,25 @@ void runL2Dist(GpuResources* resources,
                     bool ignoreOutDistances = false
                     );
 
-void runDist(   bool computeL2,
-                 GpuResources* resources,
-                 Tensor<float, 2, true>& centroids,
-                 bool centroidsRowMajor,
-                 Tensor<float, 1, true>* centroidNorms,
-                 Tensor<float, 2, true>& queries,
-                 bool queriesRowMajor,
-                 Tensor<uint8_t, 1, true>& bitset,
-                 int k,
-                 Tensor<float, 2, true>& outDistances,
-                 Tensor<int, 2, true>& outIndices,
+void runDist(bool computeL2,
+            GpuResources* resources,
+            Tensor<float, 2, true>& centroids,
+            bool centroidsRowMajor,
+            Tensor<float, 1, true>* centroidNorms,
+            Tensor<float, 2, true>& queries,
+            bool queriesRowMajor,
+            Tensor<uint8_t, 1, true>& bitset,
+            int k,
+            Tensor<float, 2, true>& outDistances,
+            Tensor<int, 2, true>& outIndices,
 
-                 float* outDis_h,
-                 int* outInd_h,
-                 int i,
-                 int curTile,
-                 int nprobe,
+            float* outDis_h,
+            int* outInd_h,
+            int i,
+            int curTile,
+            int nprobe,
 
-                 bool ignoreOutDistances);
+            bool ignoreOutDistances);
 
 /// Calculates brute-force inner product distance between `vectors`
 /// and `queries`, returning the k closest results seen

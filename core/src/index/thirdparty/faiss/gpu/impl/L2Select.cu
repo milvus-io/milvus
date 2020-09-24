@@ -7,6 +7,14 @@
 
 
 #include <faiss/gpu/impl/L2Select.cuh>
+#include <stdio.h>
+#include <cstring>
+#include <faiss/gpu/utils/MemorySpace.h>
+#include <faiss/gpu/StandardGpuResources.h>
+#include <faiss/gpu/utils/DeviceTensor.cuh>
+#include <faiss/gpu/utils/CopyUtils.cuh>
+
+
 #include <faiss/impl/FaissAssert.h>
 
 #include <faiss/gpu/utils/DeviceDefs.cuh>
@@ -129,15 +137,12 @@ __global__ void l2SelectMin1(Tensor<T, 2, true> productDistances,
   }
 }
 
-// With bitset included
-// L2 + select kernel for k > 1, no re-use of ||c||^2
 template <typename T, int NumWarpQ, int NumThreadQ, int ThreadsPerBlock>
 __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
                              Tensor<T, 1, true> centroidDistances,
-                             Tensor<uint8_t, 1, true> bitset,
                              Tensor<T, 2, true> outDistances,
                              Tensor<int, 2, true> outIndices,
-                             int k, T initK) {
+                             int k, T initK, int prev) {
   // Each block handles a single row of the distances (results)
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
@@ -154,32 +159,67 @@ __global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
   int limit = utils::roundDown(productDistances.getSize(1), kWarpSize);
   int i = threadIdx.x;
 
-  bool bitsetEmpty = (bitset.getSize(0) == 0);
-  T v;
-
   for (; i < limit; i += blockDim.x) {
-    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      v = Math<T>::add(centroidDistances[i],
-                        productDistances[row][i]);
-      heap.addThreadQ(v, i);
-    }
-    heap.checkThreadQ();
+    T v = Math<T>::add(centroidDistances[i],
+                       productDistances[row][i]);
+    heap.add(v, i);
   }
 
   if (i < productDistances.getSize(1)) {
-    if (bitsetEmpty || (!(bitset[i >> 3] & (0x1 << (i & 0x7))))) {
-      v = Math<T>::add(centroidDistances[i],
-                        productDistances[row][i]);
-      heap.addThreadQ(v, i);
-    }
+    T v = Math<T>::add(centroidDistances[i],
+                       productDistances[row][i]);
+    heap.addThreadQ(v, i);
   }
 
   heap.reduce();
-  for (int i = threadIdx.x; i < k; i += blockDim.x) {
-    outDistances[row][i] = smemK[i];
-    outIndices[row][i] = smemV[i];
+  for (int i = threadIdx.x+prev; i < k+prev; i += blockDim.x) {
+    outDistances[row][i-prev] = smemK[i];
+    outIndices[row][i-prev] = smemV[i];
   }
 }
+
+template <typename T, int NumWarpQ, int NumThreadQ, int ThreadsPerBlock>
+__global__ void l2SelectMinK(Tensor<T, 2, true> productDistances,
+                             Tensor<T, 1, true> centroidDistances,
+                             Tensor<T, 2, true> outDistances,
+                             Tensor<int, 2, true> outIndices,
+                             int k, T initK, int prev) {
+  // Each block handles a single row of the distances (results)
+  constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
+
+  __shared__ T smemK[kNumWarps * NumWarpQ];
+  __shared__ int smemV[kNumWarps * NumWarpQ];
+
+  BlockSelect<T, int, false, Comparator<T>,
+              NumWarpQ, NumThreadQ, ThreadsPerBlock>
+    heap(initK, -1, smemK, smemV, k);
+
+  int row = blockIdx.x;
+
+  // Whole warps must participate in the selection
+  int limit = utils::roundDown(productDistances.getSize(1), kWarpSize);
+  int i = threadIdx.x;
+
+  for (; i < limit; i += blockDim.x) {
+    T v = Math<T>::add(centroidDistances[i],
+                       productDistances[row][i]);
+    heap.add(v, i);
+  }
+
+  if (i < productDistances.getSize(1)) {
+    T v = Math<T>::add(centroidDistances[i],
+                       productDistances[row][i]);
+    heap.addThreadQ(v, i);
+  }
+
+  heap.reduce();
+  for (int i = threadIdx.x+prev; i < k+prev; i += blockDim.x) {
+    outDistances[row][i-prev] = smemK[i];
+    outIndices[row][i-prev] = smemV[i];
+  }
+}
+
+
 
 template <typename T>
 void runL2SelectMin(Tensor<T, 2, true>& productDistances,
@@ -244,6 +284,95 @@ void runL2SelectMin(Tensor<T, 2, true>& productDistances,
 
   CUDA_TEST_ERROR();
 }
+
+
+void runL2SelMn(float* outDis_h,
+                int* outInd_h,
+                int startPos,
+                int curQuerySize,
+                int i,
+                int nprobe,
+
+                Tensor<float, 2, true>& productDistances,
+                Tensor<float, 1, true>& centroidDistances,
+                Tensor<uint8_t, 1, true>& bitset,
+                Tensor<float, 2, true>& outDistances,
+                Tensor<int, 2, true>& outIndices,
+                int k,
+                cudaStream_t stream) {
+  FAISS_ASSERT(productDistances.getSize(0) == outDistances.getSize(0));
+  FAISS_ASSERT(productDistances.getSize(0) == outIndices.getSize(0));
+  FAISS_ASSERT(centroidDistances.getSize(0) == productDistances.getSize(1));
+  // FAISS_ASSERT(outDistances.getSize(1) == k);
+  // FAISS_ASSERT(outIndices.getSize(1) == k);
+  FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
+
+  if (k == 1) {
+    constexpr int kThreadsPerBlock = 256;
+    constexpr int kRowsPerBlock = 8;
+
+    auto block = dim3(kThreadsPerBlock);
+    auto grid = dim3(utils::divUp(outDistances.getSize(0), kRowsPerBlock));
+
+    l2SelectMin1<float, kRowsPerBlock, kThreadsPerBlock>
+      <<<grid, block, 0, stream>>>(productDistances, centroidDistances, bitset,
+                                   outDistances, outIndices);
+  } else {
+    auto grid = dim3(outDistances.getSize(0));
+
+#define RUN_L2_SELECT(BLOCK, NUM_WARP_Q, NUM_THREAD_Q)                  \
+    do {                                                                \
+      l2SelectMinK<float, NUM_WARP_Q, NUM_THREAD_Q, BLOCK>                  \
+        <<<grid, BLOCK, 0, stream>>>(productDistances, centroidDistances,   \
+                                     outDistances, outIndices,          \
+                                     k, Limits<T>::getMax(), i);           \
+    } while (0)
+
+    // block size 128 for everything <= 1024
+    if (k <= 32) {
+      RUN_L2_SELECT(128, 32, 2);
+    } else if (k <= 64) {
+      RUN_L2_SELECT(128, 64, 3);
+    } else if (k <= 128) {
+      RUN_L2_SELECT(128, 128, 3);
+    } else if (k <= 256) {
+      RUN_L2_SELECT(128, 256, 4);
+    } else if (k <= 512) {
+      RUN_L2_SELECT(128, 512, 8);
+    } else if (k <= 1024) {
+      RUN_L2_SELECT(128, 1024, 8);
+
+#if GPU_MAX_SELECTION_K >= 2048
+    } else if (k <= 2048) {
+      // smaller block for less shared memory
+      RUN_L2_SELECT(64, 2048, 8);
+#endif
+
+    } else {
+      FAISS_ASSERT(false);
+    }
+
+    float* tmp_d = new float[outDistances.getSize(0)*outDistances.getSize(1)];
+    int* tmp_i = new int[outDistances.getSize(0)*outDistances.getSize(1)];
+    fromDevice<float,2>(outDistances,tmp_d, stream);
+    fromDevice<int,2>(outIndices, tmp_i, stream);
+    startPos,curQuerySize, k, outDistances.getSize(0), outDistances.getSize(1));
+
+    for(int j=0;j<curQuerySize;j++) {
+        for(int m=0;m<k;m++) {
+            outDis_h[(startPos+j)*nprobe+i+m] = tmp_d[k*j+m];
+            outInd_h[(startPos+j)*nprobe+i+m] = tmp_i[k*j+m];
+        }
+    }
+
+    delete [] tmp_d;
+    delete [] tmp_i;
+
+  }
+
+  CUDA_TEST_ERROR();
+}
+
 
 void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     Tensor<float, 1, true>& centroidDistances,
