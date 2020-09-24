@@ -58,13 +58,14 @@ For GPU-enabled version, you will also need:
 
 ### Compilation
 
-#### Step 1 Download Milvus source code
+#### Step 1 Download Milvus source code and specify version 
 
-Download the latest Milvus source code and change directory:
+Download Milvus source code, change directory and specify version (for example, 0.10.3):
 
 ```shell
 $ git clone https://github.com/milvus-io/milvus
 $ cd ./milvus/core
+$ git checkout 0.10.3
 ```
 
 #### Step 2 Install dependencies
@@ -83,9 +84,34 @@ $ ./centos7_build_deps.sh
 
 #### Step 3 Build Milvus source code
 
+If you want to use CPU-only:
+
+run `build.sh`:
+
 ```shell
-$ ./build.sh -t Debug
+$ ./build.sh -t Release
 ```
+
+If you want to use GPU-enabled:
+
+1. Add cuda library path to `LD_LIBRARY_PATH`:
+
+```shell
+$ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+
+2. Add cuda binary path to `PATH`:
+
+```shell
+$ export PATH=/usr/local/cuda/bin:$PATH
+```
+
+3. Add a `-g` parameter to run `build.sh`:
+
+```shell
+$ ./build.sh -g -t Release
+```
+
 When the build completes, everything that you need to run Milvus is under `[Milvus root path]/core/milvus`.
 
 ### Launch Milvus server
@@ -119,6 +145,8 @@ With the following Docker images, you should be able to compile Milvus on any Li
 
 ### Step 1 Pull Milvus Docker images
 
+### ubuntu18.04
+
 Pull CPU-only image:
 
 ```shell
@@ -130,12 +158,27 @@ Pull GPU-enabled image:
 ```shell
 $ docker pull milvusdb/milvus-gpu-build-env:latest
 ```
+
+#### CentOs7
+
+Pull CPU-only image:
+
+```shell
+$ docker pull milvusdb/milvus-cpu-build-env:v0.7.0-centos7
+```
+
+Pull GPU-enabled image:
+
+```shell
+$ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-centos7
+```
+
 ### Step 2 Start the Docker container
 
 Start a CPU-only container:
 
 ```shell
-$ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:latest
+$ docker run -it -p 19530:19530 -d [milvus_cpu_docker_image]
 ```
 
 Start a GPU container:
@@ -143,13 +186,13 @@ Start a GPU container:
 - For nvidia docker 2:
 
 ```shell
-$ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
+$ docker run --runtime=nvidia -it -p 19530:19530 -d [milvus_gpu_docker_image]
 ```
 
 - For nvidia container toolkit:
 
 ```shell
-docker run --gpus all -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
+docker run --gpus all -it -p 19530:19530 -d [milvus_gpu_docker_image]
 ```
 
 To enter the container:
@@ -160,7 +203,7 @@ $ docker exec -it [container_id] bash
 
 ### Step 3 Download Milvus source code
 
-Download latest Milvus source code:
+Download Milvus source code:
 
 ```shell
 $ git clone https://github.com/milvus-io/milvus
@@ -170,6 +213,12 @@ To enter its core directory:
 
 ```shell
 $ cd ./milvus/core
+```
+
+Specify version (for example, 0.10.3):
+
+```shell
+$ git checkout 0.10.3
 ```
 
 ### Step 4 Compile Milvus in the container
