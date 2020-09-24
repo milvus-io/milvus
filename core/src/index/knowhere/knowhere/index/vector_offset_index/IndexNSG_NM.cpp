@@ -74,7 +74,7 @@ NSG_NM::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -96,7 +96,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
             std::lock_guard<std::mutex> lk(mutex_);
             // index_->ori_data_ = (float*) data_.get();
             index_->Search(reinterpret_cast<const float*>(p_data), reinterpret_cast<float*>(data_.get()), rows, dim,
-                           topK, p_dist, p_id, s_params, bitset_);
+                           topK, p_dist, p_id, s_params, bitset);
         }
 
         auto ret_ds = std::make_shared<Dataset>();

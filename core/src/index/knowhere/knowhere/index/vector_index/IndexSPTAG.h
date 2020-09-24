@@ -52,7 +52,8 @@ class CPUSPTAGRNG : public VecIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config,
+          const faiss::ConcurrentBitsetPtr& bitset = nullptr) override;
 
     int64_t
     Count() override;

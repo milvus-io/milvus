@@ -46,7 +46,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config) = 0;
+    Query(const DatasetPtr& dataset, const Config& config, const faiss::ConcurrentBitsetPtr& bitset = nullptr) = 0;
 
 #if 0
     virtual DatasetPtr
@@ -149,7 +149,6 @@ class VecIndex : public Index {
 
  private:
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
-
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

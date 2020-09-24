@@ -105,7 +105,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -124,7 +124,7 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::vector<float> distances;
         distances.reserve(k);
         index_->get_nns_by_vector(static_cast<const float*>(p_data) + i * dim, k, search_k, &result, &distances,
-                                  bitset_);
+                                  bitset);
 
         int64_t result_num = result.size();
         auto local_p_id = p_id + k * i;
