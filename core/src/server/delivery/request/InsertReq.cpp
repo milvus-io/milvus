@@ -86,7 +86,7 @@ InsertReq::OnExecute() {
             return Status{SERVER_INVALID_ARGUMENT, "The field is empty, make sure you have entered entities"};
         }
 
-        // step 1: check collection/partition existence
+        // step 1: check collection existence
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {

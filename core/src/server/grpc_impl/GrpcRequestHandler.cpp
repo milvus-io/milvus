@@ -1377,6 +1377,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param);
         }
     }
+    insert_param.row_count_ = row_num;
 
     // copy id array
     if (request->entity_id_array_size() > 0) {
