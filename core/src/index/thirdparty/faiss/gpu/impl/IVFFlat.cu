@@ -25,6 +25,9 @@
 #include <unordered_map>
 #include <numeric>
 
+#include <string.h>
+#include<iostream>
+
 namespace faiss { namespace gpu {
 
 IVFFlat::IVFFlat(GpuResources* resources,
@@ -391,6 +394,148 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                  outIndices,
                  resources_);
 
+  // If the GPU isn't storing indices (they are on the CPU side), we
+  // need to perform the re-mapping here
+  // FIXME: we might ultimately be calling this function with inputs
+  // from the CPU, these are unnecessary copies
+  if (indicesOptions_ == INDICES_CPU) {
+    HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
+
+    ivfOffsetToUserIndex(hostOutIndices.data(),
+                         numLists_,
+                         hostOutIndices.getSize(0),
+                         hostOutIndices.getSize(1),
+                         listOffsetToUserIndex_);
+
+    // Copy back to GPU, since the input to this function is on the
+    // GPU
+    outIndices.copyFrom(hostOutIndices, stream);
+  }
+}
+
+void Usort(float *dis, int *ind, int sz){
+    for(int i = 0;i < sz;i ++) {
+        for(int j = i + 1; j < sz; j ++) {
+            if(dis[j] < dis[i]){
+            std::swap(dis[i], dis[j]);
+            std::swap(ind[i], ind[j]);
+            }
+        }
+    }
+}
+
+void
+IVFFlat::query(Tensor<float, 2, true>& queries,
+               int nprobe,
+               int k,
+               Tensor<float, 2, true>& outDistances,
+               Tensor<long, 2, true>& outIndices, float* distances,
+                             Index::idx_t* labels, Tensor<uint8_t, 1, true>& bitset) {
+  auto& mem = resources_->getMemoryManagerCurrentDevice();
+  auto stream = resources_->getDefaultStreamCurrentDevice();
+
+  // These are caught at a higher level
+  FAISS_ASSERT(nprobe <= GPU_MAX_SELECTION_K);
+  FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
+  nprobe = std::min(nprobe, quantizer_->getSize());
+
+  FAISS_ASSERT(queries.getSize(1) == dim_);
+
+  FAISS_ASSERT(outDistances.getSize(0) == queries.getSize(0));
+  FAISS_ASSERT(outIndices.getSize(0) == queries.getSize(0));
+
+  // Reserve space for the quantized information
+  DeviceTensor<float, 2, true>
+    coarseDistances(mem, {queries.getSize(0), nprobe}, stream);
+  DeviceTensor<int, 2, true>
+    coarseIndices(mem, {queries.getSize(0), nprobe}, stream);
+
+  DeviceTensor<uint8_t, 1, true> coarseBitset(mem, {0}, stream);
+  // Find the `nprobe` closest lists; we can use int indices both
+  // internally and externally
+
+  float* coarseDis_h = new float[queries.getSize(0) * nprobe];
+  int* coarseInd_h = new int[queries.getSize(0) * nprobe];
+  float* outDistances_h = new float[queries.getSize(0) * k * 2];  
+  int* outIndices_h = new int[queries.getSize(0) * k * 2];
+  HostTensor<long, 2, true> hOutIndices(outIndices, stream);
+  HostTensor<float, 2, true> hOutDistances(outDistances, stream);
+  float* tmp_d = hOutDistances.data(); 
+  long* tmp_i = hOutIndices.data();
+  const int nprobeTile = 8;
+  
+  for (int i = 0; i < nprobe; i += nprobeTile) {
+    int curTile = min(nprobeTile, nprobe-i);
+
+    quantizer_->query(queries,
+                        coarseBitset,
+                        curTile,
+                        metric_,
+                        metricArg_,
+                        coarseDistances,
+                        coarseIndices,
+                        coarseDis_h,
+                        coarseInd_h,
+                        i,
+                        curTile,
+                        nprobe,
+                        false);
+    DeviceTensor<float, 3, true>
+    residualBase(mem, {queries.getSize(0), nprobe, dim_}, stream);
+
+    if (useResidual_) {
+        // Reconstruct vectors from the quantizer
+        quantizer_->reconstruct(coarseIndices, residualBase);
+    }
+
+    runIVFFlatScan(queries,
+                    coarseIndices,
+                    bitset,
+                    deviceListDataPointers_,
+                    deviceListIndexPointers_,
+                    indicesOptions_,
+                    deviceListLengths_,
+                    maxListLength_,
+                    k,
+                    metric_,
+                    useResidual_,
+                    residualBase,
+                    scalarQ_.get(),
+                    outDistances,
+                    outIndices,
+                    resources_);
+
+    fromDevice<float,2>(outDistances, tmp_d, stream);
+    fromDevice<long,2>(outIndices, tmp_i, stream);
+    if(i) {
+          for(int d=0;d<queries.getSize(0);d++) {
+            for(int m = 0;m<k;m++) {
+                outDistances_h[d * 2 * k + k + m] = tmp_d[d * k + m];
+                outIndices_h[d * 2 * k + k + m] = tmp_i[d * k + m];
+            }
+            Usort(outDistances_h + k * 2 * d, outIndices_h + k * 2 * d, 2 * k);
+        }
+    }
+
+    else{
+        for(int d = 0; d < queries.getSize(0); d ++) {
+            for(int m = 0; m < k; m ++) {
+                outDistances_h[d * 2 * k + m] = tmp_d[d * k + m];
+                outIndices_h[d * 2 * k + m] = tmp_i[d * k + m];
+            }
+        }
+    }
+
+  }
+
+    for(int d = 0; d < queries.getSize(0); d ++) {
+        for(int m = 0; m < k; m ++) {
+            tmp_d[d * k + m] = outDistances_h[d * 2 * k + m];
+            tmp_i[d * k + m] = outIndices_h[d * 2 * k + m];
+        }
+    }
+    outIndices.copyFrom(hOutIndices, stream);
+    outDistances.copyFrom(hOutDistances, stream);
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
