@@ -49,5 +49,8 @@ ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 # use login shell to activate environment un the RUN commands
 SHELL [ "/bin/bash", "-c", "-l" ]
 
-# use login shell when running the container
-ENTRYPOINT [ "/bin/bash", "-c", "-l" ]
+# Set permissions on /etc/passwd and /home to allow arbitrary users to write
+COPY --chown=0:0 docker/build_env/entrypoint.sh /
+
+ENTRYPOINT [ "/entrypoint.sh" ]
+CMD ["tail", "-f", "/dev/null"]

@@ -7,7 +7,7 @@ on:
     paths:
       - 'ci/**'
       - 'core/**'
-      - 'docker/build_env/cpu/**'
+      - 'docker/build_env/**'
       - '.github/workflows/cpplint.yml'
       - docker-compose.yml
       - '!**.md'
