@@ -44,11 +44,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ccache && \
 
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
-# use login shell to activate environment un the RUN commands
-SHELL [ "/bin/bash", "-c", "-l" ]
-
 # Set permissions on /etc/passwd and /home to allow arbitrary users to write
 COPY --chown=0:0 docker/build_env/entrypoint.sh /
+RUN mkdir -p /home/user && chgrp -R 0 /home && chmod -R g=u /etc/passwd /etc/group /home && chmod +x /entrypoint.sh
 
+USER 10001
+ENV HOME=/home/user
 ENTRYPOINT [ "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]
