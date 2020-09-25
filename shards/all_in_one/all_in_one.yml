@@ -1,0 +1,58 @@
+version: "2.3"
+services:
+    milvus_wr:
+        runtime: nvidia
+        restart: always
+        image: milvusdb/milvus:0.10.3-gpu-d091720-f962e8
+        ports:
+            - "0.0.0.0:19540:19530"
+        volumes:
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./wr_server.yml:/opt/milvus/conf/server_config.yaml
+
+    milvus_ro:
+        runtime: nvidia
+        restart: always
+        image: milvusdb/milvus:0.10.3-gpu-d091720-f962e8
+        ports:
+            - "0.0.0.0:19541:19530"
+        volumes:
+            - /tmp/milvus/db:/var/lib/milvus/db
+            - ./ro_server.yml:/opt/milvus/conf/server_config.yaml
+
+    jaeger:
+        restart: always
+        image: jaegertracing/all-in-one:1.14
+        ports:
+            - "0.0.0.0:5775:5775/udp"
+            - "0.0.0.0:16686:16686"
+            - "0.0.0.0:9441:9441"
+        environment:
+            COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+
+    mishards:
+        restart: always
+        image: milvusdb/mishards
+        ports:
+            - "0.0.0.0:19531:19531"
+            - "0.0.0.0:19532:19532"
+        volumes:
+            - /tmp/milvus/db:/tmp/milvus/db
+            # - /tmp/mishards_env:/source/mishards/.env
+        command: ["python", "mishards/main.py"]
+        environment:
+            FROM_EXAMPLE: 'true'
+            DEBUG: 'true'
+            SERVER_PORT: 19531
+            WOSERVER: tcp://milvus_wr:19530
+            DISCOVERY_PLUGIN_PATH: static
+            DISCOVERY_STATIC_HOSTS: milvus_wr,milvus_ro
+            TRACER_CLASS_NAME: jaeger
+            TRACING_SERVICE_NAME: mishards-demo
+            TRACING_REPORTING_HOST: jaeger
+            TRACING_REPORTING_PORT: 5775
+
+        depends_on:
+            - milvus_wr
+            - milvus_ro
+            - jaeger

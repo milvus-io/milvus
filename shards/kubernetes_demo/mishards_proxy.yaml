@@ -1,0 +1,88 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: mishards-proxy-servers
+  namespace: mishards
+spec:
+  type: LoadBalancer
+  selector:
+    app: mishards
+    tier: proxy
+  ports:
+  - name: tcp
+    protocol: TCP
+    port: 19530
+    targetPort: 19530
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mishards-proxy
+  namespace: mishards
+spec:
+  selector:
+    matchLabels:
+      app: mishards
+      tier: proxy
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: mishards
+        tier: proxy
+    spec:
+      containers:
+      - name: mishards-proxy
+        image: milvusdb/mishards
+        imagePullPolicy: Always
+        command: ["python", "mishards/main.py"]
+        resources:
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+          requests:
+            memory: "2Gi"
+        ports:
+          - name: tcp
+            containerPort: 5000
+        env:
+          # - name: SQL_ECHO
+          #   value: "True"
+          - name: DEBUG
+            value: "False"
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: MILVUS_CLIENT
+            value: "False"
+          - name: LOG_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: LOG_PATH
+            value: /var/log/milvus
+          - name: SD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: SD_ROSERVER_POD_PATT
+            value: ".*-ro-servers-.*"
+        volumeMounts:
+        - name: mishards-proxy-configmap
+          mountPath: /source/mishards/.env
+          subPath: mishards_proxy_config.yml
+        - name: mishards-log-disk
+          mountPath: /var/log/milvus
+          subPath: proxylog
+      # imagePullSecrets:
+      #   - name: regcred
+      volumes:
+      - name: mishards-proxy-configmap
+        configMap:
+            name: mishards-proxy-configmap
+      - name: mishards-log-disk
+        persistentVolumeClaim:
+            claimName: mishards-log-disk
