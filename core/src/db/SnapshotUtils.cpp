@@ -158,12 +158,27 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
     }
 
     auto ftype = static_cast<engine::DataType>(field->GetFtype());
-    return IsVectorField(ftype);
+    return IsVectorType(ftype);
 }
 
 bool
-IsVectorField(engine::DataType type) {
+IsVectorType(engine::DataType type) {
     return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+}
+
+bool
+IsBinaryVectorField(const engine::snapshot::FieldPtr& field) {
+    if (field == nullptr) {
+        return false;
+    }
+
+    auto ftype = static_cast<engine::DataType>(field->GetFtype());
+    return IsBinaryVectorType(ftype);
+}
+
+bool
+IsBinaryVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_BINARY;
 }
 
 Status
