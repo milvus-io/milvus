@@ -167,7 +167,8 @@ func (mc *MessageClient) InitClient(url string) {
 		mc.searchResultProducers[key] = mc.creatProducer(topic)
 	}
 	//mc.searchResultProducer = mc.creatProducer("SearchResult")
-	mc.segmentsStatisticProducer = mc.creatProducer("SegmentsStatistic")
+	SegmentsStatisticTopicName := conf.Config.Master.PulsarTopic
+	mc.segmentsStatisticProducer = mc.creatProducer(SegmentsStatisticTopicName)
 
 	//create consumer
 	mc.searchConsumer = mc.createConsumer("Search")

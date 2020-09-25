@@ -4,7 +4,7 @@ type QueryNodeTime struct {
 	ReadTimeSyncMin uint64
 	ReadTimeSyncMax uint64
 	WriteTimeSync   uint64
-	SearchTimeSync  uint64
+	ServiceTimeSync  uint64
 	TSOTimeSync     uint64
 }
 
@@ -25,7 +25,7 @@ func (t *QueryNodeTime) UpdateWriteTimeSync() {
 }
 
 func (t *QueryNodeTime) UpdateSearchTimeSync(timeRange TimeRange) {
-	t.SearchTimeSync = timeRange.timestampMax
+	t.ServiceTimeSync = timeRange.timestampMax
 }
 
 func (t *QueryNodeTime) UpdateTSOTimeSync() {

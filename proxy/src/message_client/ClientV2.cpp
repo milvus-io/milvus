@@ -146,9 +146,14 @@ Status MsgClientV2::GetQueryResult(int64_t query_id, milvus::grpc::QueryResult *
     auto status = search_res_msg.ParseFromString(msg.getDataAsString());
     if (status) {
       auto message = std::make_shared<grpc::QueryResult>(search_res_msg);
+      if (message->status().error_code() != grpc::ErrorCode::SUCCESS) {
+        consumer_->acknowledge(msg);
+        return Status(DB_ERROR, "Search Failed");
+      }
       total_results[message->query_id()].push_back(message);
       consumer_->acknowledge(msg);
     } else {
+      consumer_->acknowledge(msg);
       return Status(DB_ERROR, "can't parse message which from pulsar!");
     }
   }

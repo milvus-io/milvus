@@ -80,8 +80,8 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 		statisticData = append(statisticData, stat)
 	}
 
-	fmt.Println("Publish segment statistic")
-	fmt.Println(statisticData)
+	// fmt.Println("Publish segment statistic")
+	// fmt.Println(statisticData)
 	var status = node.PublicStatistic(&statisticData)
 	if status.ErrorCode != msgPb.ErrorCode_SUCCESS {
 		log.Printf("Publish segments statistic failed")
