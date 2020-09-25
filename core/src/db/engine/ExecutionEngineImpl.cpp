@@ -325,17 +325,31 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             }
         }
 
-        list = vec_index->GetBlacklist();
-        entity_count_ = list->capacity();
+        entity_count_ = vec_index->Count();
+
         // Parse general query
         auto status = ExecBinaryQuery(context.query_ptr_->root, bitset, attr_type, vector_placeholder);
         if (!status.ok()) {
             return status;
         }
+        if (bitset != nullptr) {
+            bitset->negate();
+        }
         rc.RecordSection("Scalar field filtering");
 
-        // Do And
-        list = (*list) | bitset->negate();
+        // combine filter and deletion
+        printf("list %p bitset %p\n", list.get(), bitset.get());
+
+        list = vec_index->GetBlacklist();
+        if (list != nullptr) {
+            if (bitset != nullptr) {
+                list = (*list) | (*bitset);
+            }
+        } else {
+            if (bitset != nullptr) {
+                list = bitset;
+            }
+        }
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
@@ -840,9 +854,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 #endif
 
     new_index->SetUids(uids);
-    if (blacklist != nullptr) {
-        new_index->SetBlacklist(blacklist);
-    }
+    new_index->SetBlacklist(blacklist);
 
     return Status::OK();
 }
