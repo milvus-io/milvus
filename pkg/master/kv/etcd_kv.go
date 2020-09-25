@@ -34,22 +34,23 @@ func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
 	}
 }
 
-func (kv *EtcdKVBase) Close() {
+func (kv *EtcdKVBase) Close(){
 	kv.client.Close()
 }
 
-func (kv *EtcdKVBase) LoadWithPrefix(key string) ([]string, []string) {
+
+func (kv *EtcdKVBase) LoadWithPrefix(key string) ( []string, []string) {
 	key = path.Join(kv.rootPath, key)
 	println("in loadWithPrefix,", key)
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, clientv3.WithPrefix())
+	resp, err := etcdutil.EtcdKVGet(kv.client, key,clientv3.WithPrefix())
 	if err != nil {
-		return []string{}, []string{}
+		return [] string {}, [] string {}
 	}
 	var keys []string
 	var values []string
-	for _, kvs := range resp.Kvs {
+	for _,kvs := range resp.Kvs{
 		//println(len(kvs.))
-		if len(kvs.Key) <= 0 {
+		if len(kvs.Key) <= 0{
 			println("KKK")
 			continue
 		}

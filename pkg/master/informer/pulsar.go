@@ -1,13 +1,15 @@
 package informer
 
 import (
+	"context"
+	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"log"
 	"strconv"
 	"time"
 
-	"github.com/czs007/suvlim/conf"
-
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/czs007/suvlim/pkg/master/mock"
 )
 
 func NewPulsarClient() PulsarClient {
@@ -31,4 +33,31 @@ func NewPulsarClient() PulsarClient {
 
 type PulsarClient struct {
 	Client pulsar.Client
+}
+
+func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
+	consumer, err := pc.Client.Subscribe(pulsar.ConsumerOptions{
+		Topic:            conf.Config.Master.PulsarTopic,
+		SubscriptionName: "my-sub",
+		Type:             pulsar.Shared,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		msg, err := consumer.Receive(context.TODO())
+		if err != nil {
+			log.Fatal(err)
+		}
+		m, _ := mock.SegmentUnMarshal(msg.Payload())
+		fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
+			msg.ID(), m.SegementID)
+		ssChan <- m
+		consumer.Ack(msg)
+	}
+
+	if err := consumer.Unsubscribe(); err != nil {
+		log.Fatal(err)
+	}
+	return nil
 }

@@ -14,17 +14,23 @@ namespace milvus {
 namespace server {
 
 namespace {
-void ParseSegmentInfo(const std::string &json_str, SegmentInfo &segment_info) {
-  auto json = JSON::parse(json_str);
-  segment_info.set_segment_id(json["segment_id"].get<uint64_t>());
-  segment_info.set_partition_tag(json["partition_tag"].get<std::string>());
-  segment_info.set_channel_start(json["channel_start"].get<int32_t>());
-  segment_info.set_channel_end(json["channel_end"].get<int32_t>());
-  segment_info.set_open_timestamp(json["open_timestamp"].get<uint64_t>());
-  segment_info.set_close_timestamp(json["close_timestamp"].get<uint64_t>());
-  segment_info.set_collection_id(json["collection_id"].get<uint64_t>());
-  segment_info.set_collection_name(json["collection_name"].get<std::string>());
-  segment_info.set_rows(json["rows"].get<std::int64_t>());
+Status ParseSegmentInfo(const std::string &json_str, SegmentInfo &segment_info) {
+  try {
+    auto json = JSON::parse(json_str);
+    segment_info.set_segment_id(json["segment_id"].get<uint64_t>());
+    segment_info.set_partition_tag(json["partition_tag"].get<std::string>());
+    segment_info.set_channel_start(json["channel_start"].get<int32_t>());
+    segment_info.set_channel_end(json["channel_end"].get<int32_t>());
+    segment_info.set_open_timestamp(json["open_timestamp"].get<uint64_t>());
+    segment_info.set_close_timestamp(json["close_timestamp"].get<uint64_t>());
+    segment_info.set_collection_id(json["collection_id"].get<uint64_t>());
+    segment_info.set_collection_name(json["collection_name"].get<std::string>());
+    segment_info.set_rows(json["rows"].get<std::int64_t>());
+    return Status::OK();
+  }
+  catch (const std::exception &e) {
+    return Status(DB_ERROR, e.what());
+  }
 }
 
 void ParseCollectionSchema(const std::string &json_str, Collection &collection) {
@@ -64,7 +70,7 @@ Status MetaWrapper::Init() {
 
     // init etcd watcher
     auto f = [&](const etcdserverpb::WatchResponse &res) {
-        UpdateMeta(res);
+      UpdateMeta(res);
     };
     watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
     return SyncMeta();
@@ -87,10 +93,14 @@ void MetaWrapper::UpdateMeta(const etcdserverpb::WatchResponse &res) {
       if (event_key.rfind(segment_path_, 0) == 0) {
         // segment info
         SegmentInfo segment_info;
-        ParseSegmentInfo(event_value, segment_info);
-        std::unique_lock lock(mutex_);
-        segment_infos_[segment_info.segment_id()] = segment_info;
-        lock.unlock();
+        auto status = ParseSegmentInfo(event_value, segment_info);
+        if (status.ok()) {
+          std::unique_lock lock(mutex_);
+          segment_infos_[segment_info.segment_id()] = segment_info;
+          lock.unlock();
+        } else {
+          return;
+        }
       } else {
         // table scheme
         Collection collection;
@@ -152,10 +162,14 @@ Status MetaWrapper::SyncMeta() {
       } else {
         assert(IsSegmentMetaKey(kv.key()));
         SegmentInfo segment_info;
-        ParseSegmentInfo(kv.value(), segment_info);
-        std::unique_lock lock(mutex_);
-        segment_infos_[segment_info.segment_id()] = segment_info;
-        lock.unlock();
+        status = ParseSegmentInfo(kv.value(), segment_info);
+        if (status.ok()) {
+          std::unique_lock lock(mutex_);
+          segment_infos_[segment_info.segment_id()] = segment_info;
+          lock.unlock();
+        } else {
+          return status;
+        }
       }
     }
   }

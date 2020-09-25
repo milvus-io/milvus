@@ -242,17 +242,17 @@ Server::StartService() {
         goto FAIL;
     }
 
+    stat = MetaWrapper::GetInstance().Init();
+    if (!stat.ok()) {
+      LOG_SERVER_ERROR_ << "Meta start service fail: " << stat.message();
+      goto FAIL;
+    }
+
     // Init pulsar message client
     stat = MessageWrapper::GetInstance().Init();
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "Pulsar message client start service fail: " << stat.message();
         goto FAIL;
-    }
-
-    stat = MetaWrapper::GetInstance().Init();
-    if (!stat.ok()) {
-      LOG_SERVER_ERROR_ << "Meta start service fail: " << stat.message();
-      goto FAIL;
     }
 
     grpc::GrpcServer::GetInstance().Start();

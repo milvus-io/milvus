@@ -21,6 +21,9 @@ Watcher::Watcher(const std::string &address,
 }
 
 void Watcher::Cancel() {
+  if (call_ == nullptr){
+    return;
+  }
   call_->CancelWatch();
 }
 
