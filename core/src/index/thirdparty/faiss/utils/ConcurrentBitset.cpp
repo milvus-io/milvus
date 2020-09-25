@@ -26,21 +26,12 @@ ConcurrentBitset::ConcurrentBitset(id_type_t capacity, uint8_t init_value) : cap
     }
 }
 
-std::vector<std::atomic<uint8_t>>&
-ConcurrentBitset::bitset() {
-    return bitset_;
-}
-
 ConcurrentBitset&
-ConcurrentBitset::operator&=(ConcurrentBitset& bitset) {
-    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
-    //        bitset_[i].fetch_and(bitset.bitset()[i].load());
-    //    }
-
-    auto u8_1 = const_cast<uint8_t*>(data());
-    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+ConcurrentBitset::operator&=(const ConcurrentBitset& bitset) {
+    auto u8_1 = mutable_data();
+    auto u8_2 = bitset.data();
     auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
-    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+    auto u64_2 = reinterpret_cast<const uint64_t*>(u8_2);
 
     size_t n8 = bitset_.size();
     size_t n64 = n8 / 8;
@@ -60,16 +51,16 @@ ConcurrentBitset::operator&=(ConcurrentBitset& bitset) {
 }
 
 std::shared_ptr<ConcurrentBitset>
-ConcurrentBitset::operator&(const std::shared_ptr<ConcurrentBitset>& bitset) {
-    auto result_bitset = std::make_shared<ConcurrentBitset>(bitset->capacity());
+ConcurrentBitset::operator&(const ConcurrentBitset& bitset) const {
+    auto result_bitset = std::make_shared<ConcurrentBitset>(bitset.capacity());
 
-    auto result_8 = const_cast<uint8_t*>(result_bitset->data());
+    auto result_8 = result_bitset->mutable_data();
     auto result_64 = reinterpret_cast<uint64_t*>(result_8);
 
-    auto u8_1 = const_cast<uint8_t*>(data());
-    auto u8_2 = const_cast<uint8_t*>(bitset->data());
-    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
-    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+    auto u8_1 = data();
+    auto u8_2 = bitset.data();
+    auto u64_1 = reinterpret_cast<const uint64_t*>(u8_1);
+    auto u64_2 = reinterpret_cast<const uint64_t*>(u8_2);
 
     size_t n8 = bitset_.size();
     size_t n64 = n8 / 8;
@@ -91,15 +82,11 @@ ConcurrentBitset::operator&(const std::shared_ptr<ConcurrentBitset>& bitset) {
 }
 
 ConcurrentBitset&
-ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
-    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) {
-    //        bitset_[i].fetch_or(bitset.bitset()[i].load());
-    //    }
-
-    auto u8_1 = const_cast<uint8_t*>(data());
-    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+ConcurrentBitset::operator|=(const ConcurrentBitset& bitset) {
+    auto u8_1 = mutable_data();
+    auto u8_2 = bitset.data();
     auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
-    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+    auto u64_2 = reinterpret_cast<const uint64_t*>(u8_2);
 
     size_t n8 = bitset_.size();
     size_t n64 = n8 / 8;
@@ -119,16 +106,16 @@ ConcurrentBitset::operator|=(ConcurrentBitset& bitset) {
 }
 
 std::shared_ptr<ConcurrentBitset>
-ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
-    auto result_bitset = std::make_shared<ConcurrentBitset>(bitset->capacity());
+ConcurrentBitset::operator|(const ConcurrentBitset& bitset) const {
+    auto result_bitset = std::make_shared<ConcurrentBitset>(bitset.capacity());
 
-    auto result_8 = const_cast<uint8_t*>(result_bitset->data());
+    auto result_8 = result_bitset->mutable_data();
     auto result_64 = reinterpret_cast<uint64_t*>(result_8);
 
-    auto u8_1 = const_cast<uint8_t*>(data());
-    auto u8_2 = const_cast<uint8_t*>(bitset->data());
-    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
-    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+    auto u8_1 = data();
+    auto u8_2 = bitset.data();
+    auto u64_1 = reinterpret_cast<const uint64_t*>(u8_1);
+    auto u64_2 = reinterpret_cast<const uint64_t*>(u8_2);
 
     size_t n8 = bitset_.size();
     size_t n64 = n8 / 8;
@@ -149,15 +136,11 @@ ConcurrentBitset::operator|(const std::shared_ptr<ConcurrentBitset>& bitset) {
 }
 
 ConcurrentBitset&
-ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
-    //    for (id_type_t i = 0; i < ((capacity_ + 8 -1) >> 3); ++i) { 
-    //        bitset_[i].fetch_xor(bitset.bitset()[i].load());
-    //    }
-
-    auto u8_1 = const_cast<uint8_t*>(data());
-    auto u8_2 = const_cast<uint8_t*>(bitset.data());
+ConcurrentBitset::operator^=(const ConcurrentBitset& bitset) {
+    auto u8_1 = mutable_data();
+    auto u8_2 = bitset.data();
     auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
-    auto u64_2 = reinterpret_cast<uint64_t*>(u8_2);
+    auto u64_2 = reinterpret_cast<const uint64_t*>(u8_2);
 
     size_t n8 = bitset_.size();
     size_t n64 = n8 / 8;
@@ -171,6 +154,27 @@ ConcurrentBitset::operator^=(ConcurrentBitset& bitset) {
     u8_2 += n64 * 8;
     for (size_t i = 0; i < remain; i++) {
         u8_1[i] ^= u8_2[i];
+    }
+
+    return *this;
+}
+
+ConcurrentBitset&
+ConcurrentBitset::negate() {
+    auto u8_1 = mutable_data();
+    auto u64_1 = reinterpret_cast<uint64_t*>(u8_1);
+
+    size_t n8 = bitset_.size();
+    size_t n64 = n8 / 8;
+
+    for (size_t i = 0; i < n64; i++) {
+        u64_1[i] = ~u64_1[i];
+    }
+
+    size_t remain = n8 % 8;
+    u8_1 += n64 * 8;
+    for (size_t i = 0; i < remain; i++) {
+        u8_1[i] = ~u8_1[i];
     }
 
     return *this;
@@ -192,17 +196,17 @@ ConcurrentBitset::clear(id_type_t id) {
 }
 
 size_t
-ConcurrentBitset::capacity() {
+ConcurrentBitset::capacity() const {
     return capacity_;
 }
 
 size_t
-ConcurrentBitset::size() {
+ConcurrentBitset::size() const {
     return ((capacity_ + 8 - 1) >> 3);
 }
 
 const uint8_t*
-ConcurrentBitset::data() {
+ConcurrentBitset::data() const {
     return reinterpret_cast<const uint8_t*>(bitset_.data());
 }
 
