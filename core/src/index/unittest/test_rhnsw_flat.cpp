@@ -52,7 +52,7 @@ TEST_P(RHNSWFlatTest, HNSW_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result1, nq, k);
 
     // Serialize and Load before Query
@@ -62,7 +62,7 @@ TEST_P(RHNSWFlatTest, HNSW_basic) {
 
     tmp_index->Load(bs);
 
-    auto result2 = tmp_index->Query(query_dataset, conf);
+    auto result2 = tmp_index->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result2, nq, k);
 }
 
@@ -79,7 +79,7 @@ TEST_P(RHNSWFlatTest, HNSW_delete) {
         bitset->set(i);
     }
 
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result1, nq, k);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
@@ -151,7 +151,7 @@ TEST_P(RHNSWFlatTest, HNSW_serialize) {
         new_idx->Load(binaryset);
         EXPECT_EQ(new_idx->Count(), nb);
         EXPECT_EQ(new_idx->Dim(), dim);
-        auto result = new_idx->Query(query_dataset, conf);
+        auto result = new_idx->Query(query_dataset, conf, nullptr);
 //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }

@@ -46,7 +46,7 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset = nullptr) override;
+    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr&) override;
 
 #if 0
     DatasetPtr

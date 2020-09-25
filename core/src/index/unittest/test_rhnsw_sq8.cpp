@@ -55,14 +55,14 @@ TEST_P(RHNSWSQ8Test, HNSW_basic) {
 
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize(conf);
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result1, nq, k);
 
     auto tmp_index = std::make_shared<milvus::knowhere::IndexRHNSWSQ>();
 
     tmp_index->Load(bs);
 
-    auto result2 = tmp_index->Query(query_dataset, conf);
+    auto result2 = tmp_index->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result2, nq, k);
 }
 
@@ -79,7 +79,7 @@ TEST_P(RHNSWSQ8Test, HNSW_delete) {
         bitset->set(i);
     }
 
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
 //    AssertAnns(result1, nq, k);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
@@ -142,7 +142,7 @@ TEST_P(RHNSWSQ8Test, HNSW_serialize) {
         new_idx->Load(binaryset);
         EXPECT_EQ(new_idx->Count(), nb);
         EXPECT_EQ(new_idx->Dim(), dim);
-        auto result = new_idx->Query(query_dataset, conf);
+        auto result = new_idx->Query(query_dataset, conf, nullptr);
 //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }

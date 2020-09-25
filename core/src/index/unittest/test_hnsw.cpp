@@ -78,7 +78,7 @@ TEST_P(HNSWTest, HNSW_basic) {
 
     index_->Load(bs);
 
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
 }
 
@@ -108,7 +108,7 @@ TEST_P(HNSWTest, HNSW_delete) {
 
     index_->Load(bs);
 
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result1, nq, k);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);

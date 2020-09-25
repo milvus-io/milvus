@@ -51,7 +51,7 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset = nullptr) override;
+    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset) override;
 
 #if 0
     DatasetPtr

@@ -59,7 +59,7 @@ class NSG_NM : public VecIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset = nullptr) override;
+    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr& bitset) override;
 
     int64_t
     Count() override;
