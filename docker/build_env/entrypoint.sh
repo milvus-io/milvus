@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Ensure $HOME exists when starting
 if [ ! -d "${HOME}" ]; then
   mkdir -p "${HOME}"
@@ -19,4 +21,3 @@ if ! whoami &> /dev/null; then
 fi
 
 exec "$@"
-
