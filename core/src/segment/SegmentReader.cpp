@@ -273,13 +273,16 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 
         // load deleted doc
         int64_t row_count = GetRowCount();
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(row_count);
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
         segment::DeletedDocsPtr deleted_docs_ptr;
         LoadDeletedDocs(deleted_docs_ptr);
         if (deleted_docs_ptr != nullptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-            for (auto& offset : deleted_docs) {
-                concurrent_bitset_ptr->set(offset);
+            if (!deleted_docs.empty()) {
+                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(row_count);
+                for (auto& offset : deleted_docs) {
+                    concurrent_bitset_ptr->set(offset);
+                }
             }
         }
         recorder.RecordSection("prepare");
