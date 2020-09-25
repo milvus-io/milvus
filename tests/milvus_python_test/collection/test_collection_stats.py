@@ -56,6 +56,7 @@ class TestStatsBase:
         with pytest.raises(Exception) as e:
             stats = connect.get_collection_stats(collection_name)
 
+    @pytest.mark.level(2)
     def test_get_collection_stats_name_invalid(self, connect, get_collection_name):
         '''
         target: get collection stats where collection name is invalid
@@ -217,6 +218,7 @@ class TestStatsBase:
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         stats = connect.get_collection_stats(collection)
+        logging.getLogger().info(stats)
         assert stats["row_count"] == default_nb
         for file in stats["partitions"][0]["segments"][0]["files"]:
             if file["field"] == default_float_vec_field_name and file["name"] != "_raw":

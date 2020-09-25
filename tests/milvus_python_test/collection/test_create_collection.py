@@ -306,6 +306,7 @@ class TestCreateCollectionInvalid(object):
             connect.create_collection(collection_name, fields)
 
     # TODO: assert exception
+    @pytest.mark.level(2)
     def test_create_collection_invalid_field_name(self, connect, get_invalid_string):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)

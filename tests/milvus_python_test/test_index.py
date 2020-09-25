@@ -726,7 +726,7 @@ class TestIndexInvalid(object):
     def get_index(self, request):
         yield request.param
 
-    @pytest.mark.level(1)
+    @pytest.mark.level(2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:
@@ -793,6 +793,7 @@ class TestIndexAsync:
         logging.getLogger().info("DROP")
         connect.drop_collection(collection)
 
+    @pytest.mark.level(2)
     def test_create_index_with_invalid_collectionname(self, connect):
         collection_name = " "
         future = connect.create_index(collection_name, field_name, default_index, _async=True)
