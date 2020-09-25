@@ -85,6 +85,20 @@ struct IndexParam {
     }
 };
 
+struct InsertParam {
+    using DataSegment = std::pair<const char*, int64_t>;
+    using DataSegments = std::vector<DataSegment>;
+    using FieldDataMap = std::unordered_map<std::string, DataSegments>;
+
+    // for the purpose to avoid data copy
+    // the fields_data_ only pass data address, makesure all data address are keep alive
+    FieldDataMap fields_data_;
+    int64_t row_count_ = 0;
+
+    // to return entities id
+    std::vector<int64_t> id_returned_;
+};
+
 enum class ReqType {
     // general operations
     kCmd = 0,

@@ -489,8 +489,14 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
 }
 
 Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data) {
-    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
+ValidateInsertDataSize(const InsertParam& insert_param) {
+    int64_t chunk_size = 0;
+    for (auto& pair : insert_param.fields_data_) {
+        for (auto& data : pair.second) {
+            chunk_size += data.second;
+        }
+    }
+
     if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
         std::string msg = "The amount of data inserted each time cannot exceed " +
                           std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
