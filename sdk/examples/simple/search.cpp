@@ -17,6 +17,7 @@
 #include "interface/ConnectionImpl.h"
 #include "utils/TimeRecorder.h"
 #include "utils/Utils.h"
+#include <random>
 
 const int TOP_K = 10;
 
@@ -38,16 +39,19 @@ int main(int argc , char**argv) {
   partition_list.emplace_back("partition-3");
 
   milvus::VectorParam vectorParam;
-  milvus::VectorData vectorData;
-  std::vector<float> float_data;
-  for (int i = 0; i < 100; ++i) {
-    float_data.emplace_back(i);
-  }
-
-  vectorData.float_data = float_data;
-
   std::vector<milvus::VectorData> vector_records;
+
+  std::default_random_engine eng(rand() % 20);
+  std::normal_distribution<float> dis(0, 1);
+ 
   for (int j = 0; j < 10; ++j) {
+    milvus::VectorData vectorData;
+    std::vector<float> float_data;
+    for (int i = 0; i < 100; ++i) {
+      float_data.emplace_back(dis(eng));
+    }
+
+    vectorData.float_data = float_data;
     vector_records.emplace_back(vectorData);
   }
 
