@@ -336,11 +336,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         rc.RecordSection("Scalar field filtering");
 
         // Do And
-        for (int64_t i = 0; i < entity_count_; i++) {
-            if (!list->test(i) && !bitset->test(i)) {
-                list->set(i);
-            }
-        }
+        list = (*list) | bitset->negate();
         vec_index->SetBlacklist(list);
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
@@ -382,27 +378,25 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
             }
         }
 
-        if (left_bitset == nullptr || right_bitset == nullptr) {
-            bitset = left_bitset != nullptr ? left_bitset : right_bitset;
+        if (left_bitset == nullptr) {
+            bitset = right_bitset;
+        } else if (right_bitset == nullptr) {
+            bitset = left_bitset;
         } else {
             switch (general_query->bin->relation) {
                 case milvus::query::QueryRelation::AND:
                 case milvus::query::QueryRelation::R1: {
-                    bitset = (*left_bitset) & right_bitset;
+                    bitset = (*left_bitset) & (*right_bitset);
                     break;
                 }
                 case milvus::query::QueryRelation::OR:
                 case milvus::query::QueryRelation::R2:
                 case milvus::query::QueryRelation::R3: {
-                    bitset = (*left_bitset) | right_bitset;
+                    bitset = (*left_bitset) | (*right_bitset);
                     break;
                 }
                 case milvus::query::QueryRelation::R4: {
-                    for (uint64_t i = 0; i < entity_count_; ++i) {
-                        if (left_bitset->test(i) && !right_bitset->test(i)) {
-                            bitset->set(i);
-                        }
-                    }
+                    bitset = (*left_bitset) & (right_bitset->negate());
                     break;
                 }
                 default: {
@@ -412,13 +406,7 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
             }
             // TODO(yukun): optimize
             if (general_query->bin->is_not) {
-                for (uint64_t i = 0; i < entity_count_; ++i) {
-                    if (bitset->test(i)) {
-                        bitset->clear(i);
-                    } else {
-                        bitset->set(i);
-                    }
-                }
+                bitset->negate();
             }
         }
         return status;
@@ -542,10 +530,10 @@ ProcessIndexedRangeQuery(faiss::ConcurrentBitsetPtr& bitset, knowhere::IndexPtr&
             const std::string& comp_op = range_value_it.key();
             T value = range_value_it.value();
             if (not flag) {
-                bitset = (*bitset) | T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
+                bitset = (*bitset) | (*T_index->Range(value, knowhere::s_map_operator_type.at(comp_op)));
                 flag = true;
             } else {
-                bitset = (*bitset) & T_index->Range(value, knowhere::s_map_operator_type.at(comp_op));
+                bitset = (*bitset) & (*T_index->Range(value, knowhere::s_map_operator_type.at(comp_op)));
             }
         }
     } catch (std::exception& exception) {
