@@ -63,7 +63,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     // null faiss index
     {
         ASSERT_ANY_THROW(index_->Serialize(conf));
-        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
         ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
     }
@@ -72,7 +72,7 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
@@ -80,13 +80,12 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
-    index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, concurrent_bitset_ptr);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
 #if 0
-    auto result3 = index_->QueryById(id_dataset, conf);
+    auto result3 = index_->QueryById(id_dataset, conf, nullptr);
     AssertAnns(result3, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     auto result4 = index_->GetVectorById(xid_dataset, conf);
@@ -145,7 +144,7 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf);
+        auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
     }
