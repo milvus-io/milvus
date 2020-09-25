@@ -280,7 +280,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             if (!deleted_docs.empty()) {
                 concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(row_count);
-                for (auto &offset : deleted_docs) {
+                for (auto& offset : deleted_docs) {
                     concurrent_bitset_ptr->set(offset);
                 }
             }
