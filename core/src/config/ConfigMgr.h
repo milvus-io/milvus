@@ -90,10 +90,12 @@ class ConfigMgr : public BaseConfigMgr {
     void
     Init();
 
+    /* throws std::exception only */
     void
     LoadFile(const std::string& path);
 
     /* for testing */
+    /* throws std::exception only */
     void
     LoadMemory(const std::string& yaml_string);
 

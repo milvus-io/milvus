@@ -241,21 +241,21 @@ IVFSQHybrid::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& config) {
+IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                       const faiss::ConcurrentBitsetPtr& bitset) {
     if (gpu_mode_ == 2) {
-        GPUIVF::QueryImpl(n, data, k, distances, labels, config);
+        GPUIVF::QueryImpl(n, data, k, distances, labels, config, bitset);
         //        index_->search(n, (float*)data, k, distances, labels);
     } else if (gpu_mode_ == 1) {  // hybrid
         auto gpu_id = quantizer_->gpu_id;
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
             ResScope rs(res, gpu_id, true);
-            IVF::QueryImpl(n, data, k, distances, labels, config);
+            IVF::QueryImpl(n, data, k, distances, labels, config, bitset);
         } else {
             KNOWHERE_THROW_MSG("Hybrid Search Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
         }
     } else if (gpu_mode_ == 0) {
-        IVF::QueryImpl(n, data, k, distances, labels, config);
+        IVF::QueryImpl(n, data, k, distances, labels, config, bitset);
     }
 }
 

@@ -248,7 +248,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& 
 Status
 ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
                                const query::VectorQueryPtr& vector_param, knowhere::VecIndexPtr& vec_index,
-                               bool hybrid) {
+                               const faiss::ConcurrentBitsetPtr& bitset, bool hybrid) {
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::VecSearch", "search", 0));
 
     if (vec_index == nullptr) {
@@ -284,11 +284,10 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     } else {
         dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
     }
-    auto result = vec_index->Query(dataset, conf);
 
+    auto result = vec_index->Query(dataset, conf, bitset);
     MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
                      context.query_result_->result_ids_.data());
-
     if (hybrid) {
         //        HybridUnset();
     }
@@ -337,7 +336,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         // Do And
         list = (*list) | bitset->negate();
-        vec_index->SetBlacklist(list);
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
@@ -346,7 +344,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
         }
 
-        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index);
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, list);
         if (!status.ok()) {
             return status;
         }
