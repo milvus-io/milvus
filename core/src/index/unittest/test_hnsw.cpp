@@ -262,7 +262,7 @@ main() {
         auto res = index.Query(query_dataset, query_conf);
         const int64_t* I = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-        printf("=\n");
+        printf("I=\n");
         for (int i = 0; i < nq; i++) {
             for (int j = 0; j < k; j++) printf("%5ld ", I[i * k + j]);
             printf("\n");
