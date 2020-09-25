@@ -95,6 +95,9 @@ class SegmentReader {
         return segment_visitor_;
     }
 
+    int64_t
+    GetRowCount();
+
     // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
     Status
     ClearCache();
