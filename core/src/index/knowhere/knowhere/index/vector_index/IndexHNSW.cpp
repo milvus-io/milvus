@@ -136,7 +136,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -153,7 +153,6 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     using P = std::pair<float, int64_t>;
     auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
 
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
@@ -166,7 +165,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn(single_query, k, compare, blacklist);
+        ret = index_->searchKnn(single_query, k, compare, bitset);
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
