@@ -247,7 +247,7 @@ LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
         segment_ptr->GetFieldType(field_name, ftype);
 
         knowhere::IndexPtr index_ptr;
-        if (IsVectorField(ftype)) {
+        if (IsVectorType(ftype)) {
             knowhere::VecIndexPtr vec_index_ptr;
             segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
             index_ptr = vec_index_ptr;
