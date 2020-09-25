@@ -189,7 +189,6 @@ GpuChecker::CheckGpuEnvironment() {
     char device_name[NVML_DEVICE_NAME_BUFFER_SIZE];
     int major, minor;
     for (uint32_t i = 0; i < gpu_sets.size(); i++) {
-
         nvmlDevice_t device;
         nvmlresult = nvmlDeviceGetHandleByIndex(i, &device);
         fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_handle_fail", nvmlresult = NVML_ERROR_UNKNOWN);
