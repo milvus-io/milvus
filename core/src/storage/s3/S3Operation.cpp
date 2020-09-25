@@ -17,9 +17,9 @@
 
 #include "storage/s3/S3Operation.h"
 #include "storage/s3/S3ClientWrapper.h"
-#include "utils/Status.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace storage {
@@ -44,7 +44,7 @@ S3Operation::ListDirectory(std::vector<std::string>& file_paths) {
     if (!status.ok()) {
         std::string err_msg = "Failed to list S3 directory: " + dir_path_;
         LOG_ENGINE_ERROR_ << err_msg;
-        //throw Exception(SERVER_CANNOT_LIST_S3_FOLDER, err_msg);
+        // throw Exception(SERVER_CANNOT_LIST_S3_FOLDER, err_msg);
     }
 }
 

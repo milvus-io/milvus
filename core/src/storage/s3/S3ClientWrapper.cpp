@@ -10,13 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/s3/model/CopyObjectRequest.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
-#include <aws/s3/model/CopyObjectRequest.h>
 #include <fiu/fiu-local.h>
 #include <fstream>
 #include <iostream>
@@ -305,8 +305,7 @@ S3ClientWrapper::Move(const std::string& tar_name, const std::string& src_name) 
 
     // Copy the old object to the target location, then remove the old one
     Aws::S3::Model::CopyObjectRequest request;
-    std::string old_object_pos = (src_name.front() == '/') ? s3_bucket_ + src_name :
-                                 s3_bucket_ + "/" + src_name;
+    std::string old_object_pos = (src_name.front() == '/') ? s3_bucket_ + src_name : s3_bucket_ + "/" + src_name;
     request.WithBucket(s3_bucket_).WithKey(tar_name).WithCopySource(old_object_pos);
 
     auto outcome = client_ptr_->CopyObject(request);
