@@ -12,30 +12,41 @@
 #-------------------------------------------------------------------------------
 aux_source_directory( ${MILVUS_ENGINE_SRC}/storage          STORAGE_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/disk     STORAGE_DISK_FILES )
-aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3       STORAGE_S3_FILES )
+# aux_source_directory( ${MILVUS_ENGINE_SRC}/storage/s3       STORAGE_S3_FILES )
 set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
                     ${STORAGE_DISK_FILES}
-                    ${STORAGE_S3_FILES}
+                    # ${STORAGE_S3_FILES}
                     )
-set( CONFIG_FILES
-        ${MILVUS_ENGINE_SRC}/config/ServerConfig.cpp
-        ${MILVUS_ENGINE_SRC}/config/ConfigType.cpp
-        ${MILVUS_ENGINE_SRC}/config/ConfigMgr.cpp
-        )
+
+# set( CONFIG_FILES
+#         ${MILVUS_ENGINE_SRC}/config/ServerConfig.cpp
+#         ${MILVUS_ENGINE_SRC}/config/ConfigType.cpp
+#         ${MILVUS_ENGINE_SRC}/config/ConfigMgr.cpp
+#         )
+
 add_library( storage STATIC )
-target_sources( storage PRIVATE ${STORAGE_FILES} ${CONFIG_FILES} )
-set( LINK_LIBS
-        log
-        crc32c
-        fiu
-        libboost_filesystem.a
-        libstdc++fs.a
-        yaml-cpp
-        )
 
-if (MILVUS_WITH_AWS)
-    list( APPEND LINK_LIBS AWS::aws-cpp-sdk-s3 AWS::aws-cpp-sdk-core )
+target_sources( storage PRIVATE ${STORAGE_FILES} )
+# target_sources( storage PRIVATE ${STORAGE_FILES} ${CONFIG_FILES} )
+
+set ( LINK_LIBRARY fiu log )
+# set( LINK_LIBS
+#         log
+#         crc32c
+#         fiu
+#         libboost_filesystem.a
+#         libstdc++fs.a
+#         yaml-cpp
+#         )
+
+if ( MILVUS_WITH_AWS )
+    list( APPEND LINK_LIBRARY
+            AWS::aws-cpp-sdk-s3
+            AWS::aws-cpp-sdk-core )
 endif()
+# if (MILVUS_WITH_AWS)
+#     list( APPEND LINK_LIBS AWS::aws-cpp-sdk-s3 AWS::aws-cpp-sdk-core )
+# endif()
 
-#target_link_libraries( storage PRIVATE fiu log )
-target_link_libraries(storage ${LINK_LIBS} )
+target_link_libraries( storage PRIVATE ${LINK_LIBRARY} )
+# target_link_libraries(storage ${LINK_LIBS} )

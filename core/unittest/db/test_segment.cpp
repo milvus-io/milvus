@@ -32,11 +32,11 @@
 #include "segment/Utils.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
-#include "storage/disk/DiskOperation.h"
-#include "storage/s3/S3IOReader.h"
-#include "storage/s3/S3IOWriter.h"
-#include "storage/s3/S3Operation.h"
-#include "storage/s3/S3ClientWrapper.h"
+// #include "storage/disk/DiskOperation.h"
+// #include "storage/s3/S3IOReader.h"
+// #include "storage/s3/S3IOWriter.h"
+// #include "storage/s3/S3Operation.h"
+// #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
@@ -470,10 +470,10 @@ TEST(SegmentUtilTest, CopyRangeDataTest) {
 }
 
 TEST_F(SegmentTest, SEGMENT_RW_TEST) {
-    bool s3_enable = milvus::config.storage.s3_enable();
-    if (s3_enable) {
-        ASSERT_TRUE(milvus::storage::S3ClientWrapper::GetInstance().StartService().ok());
-    }
+    // bool s3_enable = milvus::config.storage.s3_enable();
+    // if (s3_enable) {
+    //     ASSERT_TRUE(milvus::storage::S3ClientWrapper::GetInstance().StartService().ok());
+    // }
 
     LSN_TYPE lsn = 0;
     auto next_lsn = [&]() -> decltype(lsn) {
@@ -594,7 +594,7 @@ TEST_F(SegmentTest, SEGMENT_RW_TEST) {
     status = db_->DropCollection(c1);
     ASSERT_TRUE(status.ok());
 
-    if (s3_enable) {
-        milvus::storage::S3ClientWrapper::GetInstance().StopService();
-    }
+    // if (s3_enable) {
+    //     milvus::storage::S3ClientWrapper::GetInstance().StopService();
+    // }
 }

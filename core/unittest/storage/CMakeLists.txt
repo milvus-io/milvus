@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 
 set(test_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_s3_client.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/test_s3_client.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_disk.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
         )

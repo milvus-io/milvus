@@ -30,12 +30,14 @@ set( BUILD_SHARED_LIBS      OFF CACHE BOOL "" FORCE )
 set( FORCE_SHARED_CRT       OFF CACHE BOOL "" FORCE )
 set( ENABLE_UNITY_BUILD     OFF CACHE BOOL ""  FORCE )
 set( BUILD_DEPS             ON  CACHE BOOL "" FORCE )
-set( BUILD_ONLY            "s3;core" CACHE STRING "" FORCE )
+set( BUILD_ONLY            "s3" CACHE STRING "" FORCE )
+# set( BUILD_ONLY            "s3;core" CACHE STRING "" FORCE )
 set( AWS_DEPS_INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/aws-deps-install )
 
 FetchContent_GetProperties( aws )
 if ( NOT aws_POPULATED )
     FetchContent_Populate( aws )
+
 
     # Adding the following targets:
     # AWS::aws-cpp-sdk-s3
@@ -45,7 +47,8 @@ if ( NOT aws_POPULATED )
                       EXCLUDE_FROM_ALL )
 endif()
 
-get_target_property( AWS_INCLUDE_DIR AWS::aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES )
+get_target_property( AWS_INCLUDE_DIR  AWS::aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES )
+# get_target_property( AWS_INCLUDE_DIR AWS::aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES )
 message( STATUS ${AWS_INCLUDE_DIR} )
 
 get_property( var DIRECTORY "${aws_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
