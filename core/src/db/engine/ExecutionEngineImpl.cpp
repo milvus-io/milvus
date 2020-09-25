@@ -300,9 +300,9 @@ Status
 ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     TimeRecorder rc(LogOut("[%s][%ld] ExecutionEngineImpl::Search", "search", 0));
     try {
-        faiss::ConcurrentBitsetPtr bitset;
+        faiss::ConcurrentBitsetPtr bitset = nullptr;
         std::string vector_placeholder;
-        faiss::ConcurrentBitsetPtr list;
+        faiss::ConcurrentBitsetPtr list = nullptr;
 
         SegmentPtr segment_ptr;
         segment_reader_->GetSegment(segment_ptr);
@@ -338,8 +338,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         rc.RecordSection("Scalar field filtering");
 
         // combine filter and deletion
-        printf("list %p bitset %p\n", list.get(), bitset.get());
-
         list = vec_index->GetBlacklist();
         if (list != nullptr) {
             if (bitset != nullptr) {
@@ -433,7 +431,6 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         }
         if (!general_query->leaf->vector_placeholder.empty()) {
             // skip vector query
-            bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_, 255);
             vector_placeholder = general_query->leaf->vector_placeholder;
         }
     }
