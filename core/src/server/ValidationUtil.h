@@ -12,6 +12,7 @@
 #pragma once
 
 #include "db/Types.h"
+#include "server/delivery/request/Types.h"
 #include "utils/Json.h"
 #include "utils/Status.h"
 
@@ -56,7 +57,7 @@ extern Status
 ValidatePartitionTags(const std::vector<std::string>& partition_tags);
 
 extern Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data);
+ValidateInsertDataSize(const InsertParam& insert_param);
 
 extern Status
 ValidateCompactThreshold(double threshold);
