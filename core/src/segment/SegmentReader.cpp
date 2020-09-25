@@ -227,28 +227,15 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 
 Status
 SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
-    engine::BinaryDataPtr raw;
-    auto status = LoadField(engine::FIELD_UID, raw);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    if (raw == nullptr) {
-        return Status(DB_ERROR, "Failed to load id field");
-    }
-
-    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
-        std::string err_msg = "Failed to load uids: illegal file size";
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
+    engine::idx_t* uids_address = nullptr;
+    int64_t id_count = 0;
+    STATUS_CHECK(LoadUids(&uids_address, id_count));
 
     TimeRecorderAuto recorder("SegmentReader::LoadUids copy uids");
 
     uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
-    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
+    uids.resize(id_count);
+    memcpy(uids.data(), uids_address, id_count * sizeof(engine::idx_t));
 
     return Status::OK();
 }
