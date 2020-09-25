@@ -21,8 +21,6 @@ set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_wal.cpp
                 )
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-access-control")
-
 add_executable( test_db
                 ${SCHEDULER_FILES}
                 ${TEST_FILES}
