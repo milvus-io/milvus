@@ -303,32 +303,6 @@ SegmentWriter::RowCount() {
 }
 
 Status
-SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
-    engine::BinaryDataPtr raw;
-    auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    if (raw == nullptr) {
-        return Status(DB_ERROR, "Invalid id field");
-    }
-
-    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
-        std::string err_msg = "Failed to load uids: illegal file size";
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-
-    uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
-    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
-
-    return Status::OK();
-}
-
-Status
 SegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::knowhere::VecIndexPtr& index) {
     return segment_ptr_->SetVectorIndex(field_name, index);
 }

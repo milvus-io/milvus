@@ -244,11 +244,43 @@ SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
         return Status(DB_ERROR, err_msg);
     }
 
-    TimeRecorderAuto recorder("SegmentReader::LoadUids");
+    TimeRecorderAuto recorder("SegmentReader::LoadUids copy uids");
 
     uids.clear();
     uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
+
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadUids(engine::idx_t** uids_addr, int64_t& count) {
+    count = 0;
+    if (uids_addr == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
+    *uids_addr = nullptr;
+    engine::BinaryDataPtr raw;
+    auto status = LoadField(engine::FIELD_UID, raw);
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << status.message();
+        return status;
+    }
+
+    if (raw == nullptr) {
+        return Status(DB_ERROR, "Failed to load id field");
+    }
+
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
+        std::string err_msg = "Failed to load uids: illegal file size";
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, err_msg);
+    }
+
+    // the raw is holded by segment_
+    *uids_addr = reinterpret_cast<engine::idx_t*>(raw->data_.data());
+    count = raw->data_.size() / sizeof(engine::idx_t);
 
     return Status::OK();
 }
