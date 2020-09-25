@@ -244,6 +244,8 @@ SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
         return Status(DB_ERROR, err_msg);
     }
 
+    TimeRecorderAuto recorder("SegmentReader::LoadUids");
+
     uids.clear();
     uids.resize(raw->data_.size() / sizeof(engine::idx_t));
     memcpy(uids.data(), raw->data_.data(), raw->data_.size());
@@ -268,10 +270,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         if (!engine::IsVectorField(field)) {
             return Status(DB_ERROR, "Field is not vector type");
         }
-
-        // load uids
-        std::vector<int64_t> uids;
-        STATUS_CHECK(LoadUids(uids));
 
         // load deleted doc
         int64_t row_count = GetRowCount();
@@ -311,7 +309,11 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 engine::BinaryDataPtr raw;
                 STATUS_CHECK(LoadField(field_name, raw, false));
 
-                auto dataset = knowhere::GenDataset(uids.size(), dimension, raw->data_.data());
+                // load uids
+                std::vector<int64_t> uids;
+                STATUS_CHECK(LoadUids(uids));
+
+                auto dataset = knowhere::GenDataset(row_count, dimension, raw->data_.data());
 
                 // construct IDMAP index
                 knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
@@ -330,9 +332,9 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
+                recorder.RecordSection("construct temp IDMAP index");
             }
 
-            recorder.RecordSection("create temp IDMAP index");
             return Status::OK();
         }
 
@@ -381,11 +383,16 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(ss_codec.GetVectorIndexFormat()->ConstructIndex(index_type, index_data, raw_data, compress_data,
                                                                      index_ptr));
 
+        // load uids
+        std::vector<int64_t> uids;
+        STATUS_CHECK(LoadUids(uids));
+
         index_ptr->SetUids(uids);
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
         cache::CpuCacheMgr::GetInstance().InsertItem(index_file_path, index_ptr);  // put into cache
+        recorder.RecordSection("construct index");
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load vector index: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -510,7 +517,7 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
 Status
 SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
     try {
-        TimeRecorder recorder("SegmentReader::LoadDeletedDocs");
+        TimeRecorderAuto recorder("SegmentReader::LoadDeletedDocs");
 
         deleted_docs_ptr = segment_ptr_->GetDeletedDocs();
         if (deleted_docs_ptr != nullptr) {
@@ -613,6 +620,30 @@ SegmentReader::GetTempIndexPath(const std::string& field_name, std::string& path
     path += temp_index_name;
 
     return Status::OK();
+}
+
+int64_t
+SegmentReader::GetRowCount() {
+    engine::BinaryDataPtr raw;
+    auto status = LoadField(engine::FIELD_UID, raw);
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << status.message();
+        return 0;
+    }
+
+    if (raw == nullptr) {
+        LOG_ENGINE_ERROR_ << "Failed to load id field";
+        return 0;
+    }
+
+    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
+        std::string err_msg = "Failed to load uids: illegal file size";
+        LOG_ENGINE_ERROR_ << err_msg;
+        return 0;
+    }
+
+    int64_t count = raw->data_.size() / sizeof(engine::idx_t);
+    return count;
 }
 
 Status
