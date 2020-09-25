@@ -85,7 +85,7 @@ CreateIndexReq::OnExecute() {
 
         engine::CollectionIndex index;
         if (engine::IsVectorField(field)) {
-            STATUS_CHECK(ValidateIndexType(index_type, true));
+            STATUS_CHECK(ValidateVectorIndexType(index_type, engine::IsBinaryVectorField(field)));
 
             auto params = field->GetParams();
             auto dimension = params[engine::PARAM_DIMENSION].get<int64_t>();
@@ -115,7 +115,7 @@ CreateIndexReq::OnExecute() {
             index.index_type_ = index_type;
             index.metric_name_ = metric_type;
         } else {
-            STATUS_CHECK(ValidateIndexType(index_type, false));
+            STATUS_CHECK(ValidateStructuredIndexType(index_type));
 
             index.index_name_ = index_name_;
             index.index_type_ = index_type;

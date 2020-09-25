@@ -103,8 +103,11 @@ SearchReq::OnExecute() {
                 engine::CollectionIndex index;
                 status = DBWrapper::DB()->DescribeIndex(query_ptr_->collection_id, field->GetName(), index);
                 if (!index.index_type_.empty()) {
-                    bool is_vector = engine::IsVectorField(field);
-                    STATUS_CHECK(ValidateIndexType(index.index_type_, is_vector));
+                    if (engine::IsVectorField(field)) {
+                        STATUS_CHECK(ValidateVectorIndexType(index.index_type_, engine::IsBinaryVectorField(field)));
+                    } else {
+                        STATUS_CHECK(ValidateStructuredIndexType(index.index_type_));
+                    }
                 }
             }
         }
