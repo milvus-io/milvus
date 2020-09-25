@@ -215,6 +215,8 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         }
     }
 
+    LOG_SERVER_DEBUG_ << "Split chunk since the chunk row count greater than segment_row_limit";
+
     // secondly, copy new chunk
     int64_t copied_count = 0;
     while (copied_count < chunk_count) {
@@ -248,6 +250,11 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         copied_count += count_to_copy;
         chunks.emplace_back(new_chunk);
     }
+
+    // data has been copied, do this to free memory
+    chunk->fixed_fields_.clear();
+    chunk->variable_fields_.clear();
+    chunk->count_ = 0;
 
     return Status::OK();
 }

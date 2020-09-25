@@ -150,8 +150,8 @@ ReqHandler::DropIndex(const ContextPtr& context, const std::string& collection_n
 
 Status
 ReqHandler::Insert(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-                   const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    BaseReqPtr req_ptr = InsertReq::Create(context, collection_name, partition_name, row_count, chunk_data);
+                   InsertParam& insert_param) {
+    BaseReqPtr req_ptr = InsertReq::Create(context, collection_name, partition_name, insert_param);
     ReqScheduler::ExecReq(req_ptr);
     return req_ptr->status();
 }
