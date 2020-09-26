@@ -228,17 +228,14 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& 
     auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
-    memcpy(distances, res_dist, sizeof(float) * nq * k);
+    int64_t num = nq * k;
+
+    memcpy(distances, res_dist, sizeof(float) * num);
 
     /* map offsets to ids */
-    int64_t num = nq * k;
     for (int64_t i = 0; i < num; ++i) {
         int64_t offset = res_ids[i];
-        if (offset != -1) {
-            labels[i] = uids[offset];
-        } else {
-            labels[i] = -1;
-        }
+        labels[i] = (offset == -1) ? -1 : uids[offset];
     }
 
     free(res_ids);
@@ -413,7 +410,6 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
-            // TODO(yukun): optimize
             if (general_query->bin->is_not) {
                 bitset->negate();
             }
