@@ -16,13 +16,13 @@
 #include <fiu/fiu-local.h>
 #include <fiu-control.h>
 
-// #include "easyloggingpp/easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "storage/s3/S3IOReader.h"
 #include "storage/s3/S3IOWriter.h"
 #include "storage/utils.h"
 
-// INITIALIZE_EASYLOGGINGPP
+INITIALIZE_EASYLOGGINGPP
 
 TEST_F(StorageTest, S3_CLIENT_TEST) {
     fiu_init(0);
@@ -35,7 +35,7 @@ TEST_F(StorageTest, S3_CLIENT_TEST) {
     const std::string content = "abcdefghijklmnopqrstuvwxyz";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    //fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
 
     ///////////////////////////////////////////////////////////////////////////
@@ -85,7 +85,7 @@ TEST_F(StorageTest, S3_RW_TEST) {
     const std::string content = "abcdefg";
 
     auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
-    //fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
+    fiu_enable("S3ClientWrapper.StartService.mock_enable", 1, NULL, 0);
     ASSERT_TRUE(storage_inst.StartService().ok());
 
     {
@@ -187,14 +187,10 @@ TEST_F(StorageTest, S3_FAIL_TEST) {
     ASSERT_FALSE(storage_inst.DeleteObject(filename).ok());
     fiu_disable("S3ClientWrapper.DeleteObject.outcome.fail");
 
-    std::vector<std::string> file_paths;
     fiu_enable("S3ClientWrapper.ListObjects.outcome.fail", 1, NULL, 0);
-    ASSERT_FALSE(storage_inst.ListObjects(file_paths, "/tmp").ok());
+    ASSERT_FALSE(storage_inst.DeleteObjects("/tmp").ok());
     fiu_disable("S3ClientWrapper.ListObjects.outcome.fail");
-
-    //fiu_enable("S3ClientWrapper.DeleteObjects.outcome.fail", 1, NULL, 0);
-    //ASSERT_FALSE(storage_inst.DeleteObjects("/tmp").ok());
-    //fiu_disable("S3ClientWrapper.DeleteObjects.outcome.fail");
+    ASSERT_TRUE(storage_inst.DeleteObjects("/tmp").ok());
 
     fiu_enable("S3ClientWrapper.DeleteBucket.outcome.fail", 1, NULL, 0);
     ASSERT_FALSE(storage_inst.DeleteBucket().ok());

@@ -513,7 +513,6 @@ TEST_F(SegmentTest, SEGMENT_RW_TEST) {
 
         /* commit new segment file about deleted doc */
         SegmentFileContext sf_context;
-        //SFContextBuilder(sf_context, ss);
         sf_context.field_name = milvus::engine::FIELD_UID;
         sf_context.field_element_name = milvus::engine::ELEMENT_DELETED_DOCS;
         sf_context.segment_id = new_seg->GetID();
