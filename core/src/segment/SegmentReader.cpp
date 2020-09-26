@@ -227,6 +227,27 @@ SegmentReader::LoadFieldsEntities(const std::vector<std::string>& fields_name, c
 
 Status
 SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
+    engine::idx_t* uids_address = nullptr;
+    int64_t id_count = 0;
+    STATUS_CHECK(LoadUids(&uids_address, id_count));
+
+    TimeRecorderAuto recorder("SegmentReader::LoadUids copy uids");
+
+    uids.clear();
+    uids.resize(id_count);
+    memcpy(uids.data(), uids_address, id_count * sizeof(engine::idx_t));
+
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadUids(engine::idx_t** uids_addr, int64_t& count) {
+    count = 0;
+    if (uids_addr == nullptr) {
+        return Status(DB_ERROR, "null pointer");
+    }
+
+    *uids_addr = nullptr;
     engine::BinaryDataPtr raw;
     auto status = LoadField(engine::FIELD_UID, raw);
     if (!status.ok()) {
@@ -244,11 +265,9 @@ SegmentReader::LoadUids(std::vector<engine::idx_t>& uids) {
         return Status(DB_ERROR, err_msg);
     }
 
-    TimeRecorderAuto recorder("SegmentReader::LoadUids");
-
-    uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
-    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
+    // the raw is holded by segment_
+    *uids_addr = reinterpret_cast<engine::idx_t*>(raw->data_.data());
+    count = raw->data_.size() / sizeof(engine::idx_t);
 
     return Status::OK();
 }
