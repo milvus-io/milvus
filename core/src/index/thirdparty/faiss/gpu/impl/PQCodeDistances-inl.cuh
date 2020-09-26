@@ -51,12 +51,6 @@ pqCodeDistances(Tensor<float, 2, true> queries,
   auto code = threadIdx.x;
   auto subQuantizer = blockIdx.y;
 
-  // Each thread will load the pq centroid data for the code that it
-  // is processing
-#pragma unroll
-  for (int i = 0; i < DimsPerSubQuantizer; ++i) {
-    subQuantizerData[i] = pqCentroids[subQuantizer][i][code].ldg();
-  }
 
   // Where we store our query vector
   float* smemQuery = smem;
@@ -152,6 +146,14 @@ pqCodeDistances(Tensor<float, 2, true> queries,
           }
         }
       } else {
+
+        // Each thread will load the pq centroid data for the code that it
+        // is processing
+        #pragma unroll
+        for (int i = 0; i < DimsPerSubQuantizer; ++i) {
+        subQuantizerData[i] = pqCentroids[subQuantizer][i][code].ldg();
+        }
+
         // These are the processing threads
         float dist = 0.0f;
 
