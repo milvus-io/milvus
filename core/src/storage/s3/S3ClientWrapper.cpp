@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/s3/model/CopyObjectRequest.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -33,20 +34,18 @@ namespace storage {
 
 Status
 S3ClientWrapper::StartService() {
-    server::Config& config = server::Config::GetInstance();
-    bool s3_enable = false;
-    CONFIG_CHECK(config.GetStorageConfigS3Enable(s3_enable));
+    bool s3_enable = config.storage.s3_enable();
     fiu_do_on("S3ClientWrapper.StartService.s3_disable", s3_enable = false);
     if (!s3_enable) {
         LOG_STORAGE_INFO_ << "S3 not enabled!";
         return Status::OK();
     }
 
-    CONFIG_CHECK(config.GetStorageConfigS3Address(s3_address_));
-    CONFIG_CHECK(config.GetStorageConfigS3Port(s3_port_));
-    CONFIG_CHECK(config.GetStorageConfigS3AccessKey(s3_access_key_));
-    CONFIG_CHECK(config.GetStorageConfigS3SecretKey(s3_secret_key_));
-    CONFIG_CHECK(config.GetStorageConfigS3Bucket(s3_bucket_));
+    s3_address_ = config.storage.s3_address();
+    s3_port_ = config.storage.s3_port();
+    s3_access_key_ = config.storage.s3_access_key();
+    s3_secret_key_ = config.storage.s3_secret_key();
+    s3_bucket_ = config.storage.s3_bucket();
 
     Aws::InitAPI(options_);
 
@@ -212,12 +211,12 @@ S3ClientWrapper::GetObjectStr(const std::string& object_name, std::string& conte
 }
 
 Status
-S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::string& marker) {
+S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::string& prefix) {
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(s3_bucket_);
 
-    if (!marker.empty()) {
-        request.WithMarker(marker);
+    if (!prefix.empty()) {
+        request.WithPrefix(prefix);
     }
 
     auto outcome = client_ptr_->ListObjects(request);
@@ -235,11 +234,12 @@ S3ClientWrapper::ListObjects(std::vector<std::string>& object_list, const std::s
         object_list.push_back(s3_object.GetKey());
     }
 
-    if (marker.empty()) {
+    if (prefix.empty()) {
         LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << "' successfully!";
     } else {
-        LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << ":" << marker << "' successfully!";
+        LOG_STORAGE_DEBUG_ << "ListObjects '" << s3_bucket_ << ":" << prefix << "' successfully!";
     }
+
     return Status::OK();
 }
 
@@ -262,10 +262,10 @@ S3ClientWrapper::DeleteObject(const std::string& object_name) {
 }
 
 Status
-S3ClientWrapper::DeleteObjects(const std::string& marker) {
+S3ClientWrapper::DeleteObjects(const std::string& prefix) {
     std::vector<std::string> object_list;
 
-    Status stat = ListObjects(object_list, marker);
+    Status stat = ListObjects(object_list, prefix);
     if (!stat.ok()) {
         return stat;
     }
@@ -276,6 +276,47 @@ S3ClientWrapper::DeleteObjects(const std::string& marker) {
             return stat;
         }
     }
+
+    return Status::OK();
+}
+
+bool
+S3ClientWrapper::Exist(const std::string& object_name) {
+    Aws::S3::Model::GetObjectRequest request;
+    request.WithBucket(s3_bucket_).WithKey(object_name);
+
+    auto outcome = client_ptr_->GetObject(request);
+
+    return outcome.IsSuccess();
+}
+
+Status
+S3ClientWrapper::Move(const std::string& tar_name, const std::string& src_name) {
+    if (src_name.empty() || tar_name.empty()) {
+        std::string err_msg = "ERROR: MoveObject: src_name and tar_name should not be empty";
+        LOG_STORAGE_ERROR_ << err_msg;
+        return Status(SERVER_UNEXPECTED_ERROR, err_msg);
+    }
+
+    // Delete the object that may already exist in the target location
+    if (Exist(tar_name)) {
+        STATUS_CHECK(DeleteObject(tar_name));
+    }
+
+    // Copy the old object to the target location, then remove the old one
+    Aws::S3::Model::CopyObjectRequest request;
+    std::string old_object_pos = (src_name.front() == '/') ? s3_bucket_ + src_name : s3_bucket_ + "/" + src_name;
+    request.WithBucket(s3_bucket_).WithKey(tar_name).WithCopySource(old_object_pos);
+
+    auto outcome = client_ptr_->CopyObject(request);
+
+    if (!outcome.IsSuccess()) {
+        auto err = outcome.GetError();
+        LOG_STORAGE_ERROR_ << "ERROR: MoveObject: " << err.GetExceptionName() << ": " << err.GetMessage();
+        return Status(SERVER_UNEXPECTED_ERROR, err.GetMessage());
+    }
+
+    STATUS_CHECK(DeleteObject(src_name));
 
     return Status::OK();
 }

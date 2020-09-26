@@ -17,6 +17,7 @@ set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
                     ${STORAGE_DISK_FILES}
                     # ${STORAGE_S3_FILES}
                     )
+
 add_library( storage STATIC )
 target_sources( storage PRIVATE ${STORAGE_FILES} )
 
@@ -24,8 +25,8 @@ set ( LINK_LIBRARY fiu log )
 
 if ( MILVUS_WITH_AWS )
     list( APPEND LINK_LIBRARY
-                AWS::aws-cpp-sdk-s3
-                AWS::aws-cpp-sdk-core )
+            AWS::aws-cpp-sdk-s3
+            AWS::aws-cpp-sdk-core )
 endif()
 
 target_link_libraries( storage PRIVATE ${LINK_LIBRARY} )

@@ -30,7 +30,7 @@ set( BUILD_SHARED_LIBS      OFF CACHE BOOL "" FORCE )
 set( FORCE_SHARED_CRT       OFF CACHE BOOL "" FORCE )
 set( ENABLE_UNITY_BUILD     OFF CACHE BOOL ""  FORCE )
 set( BUILD_DEPS             ON  CACHE BOOL "" FORCE )
-set( BUILD_ONLY            "s3" CACHE STRING "" FORCE )
+set( BUILD_ONLY            "s3;core" CACHE STRING "" FORCE )
 set( AWS_DEPS_INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/aws-deps-install )
 
 FetchContent_GetProperties( aws )

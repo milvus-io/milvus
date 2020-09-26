@@ -66,5 +66,16 @@ DiskOperation::DeleteFile(const std::string& file_path) {
     return std::experimental::filesystem::remove(file_path);
 }
 
+bool
+DiskOperation::Move(const std::string& tar_name, const std::string& src_name) {
+    try {
+        std::experimental::filesystem::rename(src_name, tar_name);
+    } catch (std::exception& ex) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace storage
 }  // namespace milvus
