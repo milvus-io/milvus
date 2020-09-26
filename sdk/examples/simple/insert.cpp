@@ -23,7 +23,7 @@
 
 const int N = 200000;
 const int DIM = 16;
-const int LOOP = 10;
+const int LOOP = 1;
 
 const milvus::FieldValue GetData() {
   milvus::FieldValue value_map;
@@ -32,7 +32,7 @@ const milvus::FieldValue GetData() {
   for (int i = 0; i < N; i++) {
     int32_data.push_back(i);
   }
-  std::default_random_engine eng(rand() % 20);
+  std::default_random_engine eng(42);
   std::normal_distribution<float> dis(0, 1);
   std::vector<milvus::VectorData> vector_data;
   for (int i = 0; i < N; i++) {

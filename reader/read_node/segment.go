@@ -144,8 +144,10 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	var sizeofPerRow = len((*records)[0])
 
 	var rawData = make([]byte, numOfRow*sizeofPerRow)
+	var copyOffset = 0
 	for i := 0; i < len(*records); i++ {
-		copy(rawData, (*records)[i])
+		copy(rawData[copyOffset:], (*records)[i])
+		copyOffset += len((*records)[i])
 	}
 
 	var cOffset = C.long(offset)

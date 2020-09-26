@@ -16,6 +16,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	"github.com/stretchr/testify/assert"
 	"log"
 	"sort"
@@ -332,16 +333,16 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 			fmt.Println("Do Search...")
-			for  {
-				if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
+			//for  {
+				//if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
 					var status = node.Search(node.messageClient.SearchMsg)
 					if status.ErrorCode != 0 {
 						fmt.Println("Search Failed")
 						node.PublishFailedSearchResult()
 					}
-					break
-				}
-			}
+					//break
+				//}
+			//}
 		default:
 		}
 	}
@@ -583,8 +584,8 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// So the ServiceTimeSync is always less than searchTimestamp.
 		// Here, we manually make searchTimestamp's logic time minus `conf.Config.Timesync.Interval` milliseconds.
 		// Which means `searchTimestamp.logicTime = searchTimestamp.logicTime - conf.Config.Timesync.Interval`.
-		// var logicTimestamp = searchTimestamp << 46 >> 46
-		// searchTimestamp = (searchTimestamp >> 18 - uint64(conf.Config.Timesync.Interval)) << 18 + logicTimestamp
+		var logicTimestamp = searchTimestamp << 46 >> 46
+		searchTimestamp = (searchTimestamp >> 18 - uint64(conf.Config.Timesync.Interval + 600)) << 18 + logicTimestamp
 
 		var vector = msg.Records
 		// We now only the first Json is valid.
@@ -602,6 +603,11 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		// 3. Do search in all segments
 		for _, segment := range node.SegmentsMap {
+			if segment.GetRowCount() <= 0 {
+				// Skip empty segment
+				continue
+			}
+
 			fmt.Println("Search in segment:", segment.SegmentId, ",segment rows:", segment.GetRowCount())
 			var res, err = segment.SegmentSearch(query, searchTimestamp, vector)
 			if err != nil {
@@ -618,7 +624,9 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		sort.Slice(resultsTmp, func(i, j int) bool {
 			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
 		})
-		resultsTmp = resultsTmp[:query.TopK]
+		if len(resultsTmp) > query.TopK {
+			resultsTmp = resultsTmp[:query.TopK]
+		}
 		var entities = msgPb.Entities{
 			Ids: make([]int64, 0),
 		}
