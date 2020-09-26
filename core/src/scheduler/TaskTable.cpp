@@ -174,7 +174,7 @@ TaskTable::PickToLoad(uint64_t limit) {
         } else if (table_[index]->state == TaskTableItemState::LOADED) {
             cross = true;
             ++loaded_count;
-            if (loaded_count > 2) {
+            if (loaded_count >= 2) {
                 return std::vector<uint64_t>();
             }
         } else if (table_[index]->state == TaskTableItemState::START) {
