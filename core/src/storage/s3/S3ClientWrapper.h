@@ -48,11 +48,15 @@ class S3ClientWrapper {
     Status
     GetObjectStr(const std::string& object_key, std::string& content);
     Status
-    ListObjects(std::vector<std::string>& object_list, const std::string& marker = "");
+    ListObjects(std::vector<std::string>& object_list, const std::string& prefix = "");
     Status
     DeleteObject(const std::string& object_key);
     Status
-    DeleteObjects(const std::string& marker);
+    DeleteObjects(const std::string& prefix);
+    bool
+    Exist(const std::string& object_key);
+    Status
+    Move(const std::string& tar_name, const std::string& src_name);
 
  private:
     std::shared_ptr<Aws::S3::S3Client> client_ptr_;

@@ -25,12 +25,18 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Resources.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "config/ServerConfig.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "segment/IdBloomFilter.h"
 #include "segment/Utils.h"
 #include "storage/disk/DiskIOReader.h"
 #include "storage/disk/DiskIOWriter.h"
+// #include "storage/disk/DiskOperation.h"
+// #include "storage/s3/S3IOReader.h"
+// #include "storage/s3/S3IOWriter.h"
+// #include "storage/s3/S3Operation.h"
+// #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Json.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
@@ -461,4 +467,133 @@ TEST(SegmentUtilTest, CopyRangeDataTest) {
         }
         compare_result(src_data, offsets, row_count, row_width);
     }
+}
+
+TEST_F(SegmentTest, SEGMENT_RW_TEST) {
+    // bool s3_enable = milvus::config.storage.s3_enable();
+    // if (s3_enable) {
+    //     ASSERT_TRUE(milvus::storage::S3ClientWrapper::GetInstance().StartService().ok());
+    // }
+
+    LSN_TYPE lsn = 0;
+    auto next_lsn = [&]() -> decltype(lsn) {
+      return ++lsn;
+    };
+
+    std::string c1 = "test_segment_rw_collection";
+    auto status = CreateCollection(db_, c1, next_lsn());
+    ASSERT_TRUE(status.ok());
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, c1);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(ss);
+    ASSERT_EQ(ss->GetName(), c1);
+
+    auto& partitions = ss->GetResources<Partition>();
+    ID_TYPE partition_id;
+    for (auto& kv : partitions) {
+        /* select the first partition */
+        partition_id = kv.first;
+        break;
+    }
+
+    const std::string segment_dir = "/tmp";
+    const std::string collection_dir = segment_dir + milvus::engine::COLLECTIONS_FOLDER;
+
+    {
+        /* commit new segment */
+        OperationContext context;
+        context.lsn = next_lsn();
+        context.prev_partition = ss->GetResource<Partition>(partition_id);
+        auto op = std::make_shared<NewSegmentOperation>(context, ss);
+        SegmentPtr new_seg;
+        status = op->CommitNewSegment(new_seg);
+        ASSERT_TRUE(status.ok());
+
+        /* commit new segment file about deleted doc */
+        SegmentFileContext sf_context;
+        sf_context.field_name = milvus::engine::FIELD_UID;
+        sf_context.field_element_name = milvus::engine::ELEMENT_DELETED_DOCS;
+        sf_context.segment_id = new_seg->GetID();
+        sf_context.partition_id = new_seg->GetPartitionId();
+        sf_context.collection_id = new_seg->GetCollectionId();
+
+        SegmentFilePtr delete_file;
+        status = op->CommitNewSegmentFile(sf_context, delete_file);
+        ASSERT_TRUE(status.ok());
+
+        /* commit new segment file about bloom filter */
+        sf_context.field_element_name = milvus::engine::ELEMENT_BLOOM_FILTER;
+        SegmentFilePtr bloom_filter_file;
+        status = op->CommitNewSegmentFile(sf_context, bloom_filter_file);
+        ASSERT_TRUE(status.ok());
+
+        /* build segment visitor */
+        auto ctx = op->GetContext();
+        ASSERT_TRUE(ctx.new_segment);
+        auto visitor = SegmentVisitor::Build(ss, ctx.new_segment, ctx.new_segment_files);
+        ASSERT_TRUE(visitor);
+        ASSERT_EQ(visitor->GetSegment(), new_seg);
+        ASSERT_FALSE(visitor->GetSegment()->IsActive());
+
+        /* test to write deleted docs */
+        milvus::segment::SegmentWriter segment_writer(segment_dir, visitor);
+
+        std::string del_docs_path =
+            milvus::engine::snapshot::GetResPath<milvus::engine::snapshot::SegmentFile>(collection_dir, delete_file);
+
+        const std::vector<milvus::engine::offset_t> deleted_docs_data{1, 2, 3};
+        milvus::segment::DeletedDocsPtr deleted_docs_ptr = std::make_shared<milvus::segment::DeletedDocs>();
+        deleted_docs_ptr->AddDeletedDoc(deleted_docs_data.at(0));
+        deleted_docs_ptr->AddDeletedDoc(deleted_docs_data.at(1));
+        deleted_docs_ptr->AddDeletedDoc(deleted_docs_data.at(2));
+        ASSERT_TRUE(segment_writer.WriteDeletedDocs(del_docs_path, deleted_docs_ptr).ok());
+
+        /* test to read deleted docs */
+        milvus::segment::SegmentReader segment_reader(segment_dir, visitor);
+
+        deleted_docs_ptr = nullptr;
+        ASSERT_TRUE(segment_reader.LoadDeletedDocs(deleted_docs_ptr).ok());
+        ASSERT_NE(deleted_docs_ptr, nullptr);
+        size_t deleted_docs_size;
+        ASSERT_TRUE(segment_reader.ReadDeletedDocsSize(deleted_docs_size).ok());
+
+        const auto& deleted_docs_vec = deleted_docs_ptr->GetDeletedDocs();
+
+        EXPECT_EQ(deleted_docs_size, deleted_docs_data.size());
+        EXPECT_EQ(deleted_docs_vec.size(), deleted_docs_size);
+        EXPECT_EQ(deleted_docs_vec.at(0), deleted_docs_data.at(0));
+        EXPECT_EQ(deleted_docs_vec.at(1), deleted_docs_data.at(1));
+        EXPECT_EQ(deleted_docs_vec.at(2), deleted_docs_data.at(2));
+
+        /* test to write bloom filter */
+        std::string bloom_filter_path =
+            milvus::engine::snapshot::GetResPath<milvus::engine::snapshot::SegmentFile>(collection_dir,
+                                                                                        bloom_filter_file);
+
+        const int64_t id_count = 100;
+        milvus::engine::SafeIDGenerator id_gen;
+        IdBloomFilterPtr filter_ptr = std::make_shared<IdBloomFilter>(id_count);
+
+        // insert some ids
+        for (int64_t i = 0; i < id_count; ++i) {
+            auto id = id_gen.GetNextIDNumber();
+            filter_ptr->Add(id);
+        }
+
+        ASSERT_TRUE(segment_writer.WriteBloomFilter(bloom_filter_path, filter_ptr).ok());
+
+        /* test to read bloom filter */
+        filter_ptr = nullptr;
+        ASSERT_TRUE(segment_reader.LoadBloomFilter(filter_ptr).ok());
+        ASSERT_NE(filter_ptr, nullptr);
+    }
+
+    status = db_->DropCollection(c1);
+    ASSERT_TRUE(status.ok());
+
+    // if (s3_enable) {
+    //     milvus::storage::S3ClientWrapper::GetInstance().StopService();
+    // }
 }

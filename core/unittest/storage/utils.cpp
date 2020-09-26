@@ -12,48 +12,13 @@
 #include <fstream>
 #include <string>
 
-#include "config/ServerConfig.h"
+//#include "config/ServerConfig.h"
 #include "storage/utils.h"
-#include "utils/CommonUtil.h"
-
-namespace {
-
-static const char* CONFIG_STR =
-    "storage_config:\n"
-    "  primary_path: /tmp/milvus\n"
-    "  secondary_path:\n"
-    "  s3_enable: true\n"
-    "  s3_address: 127.0.0.1\n"
-    "  s3_port: 9000\n"
-    "  s3_access_key: minioadmin\n"
-    "  s3_secret_key: minioadmin\n"
-    "  s3_bucket: milvus-bucket\n"
-    "\n";
-
-void
-WriteToFile(const std::string& file_path, const char* content) {
-    std::fstream fs(file_path.c_str(), std::ios_base::out);
-
-    // write data to file
-    fs << content;
-    fs.close();
-}
-
-}  // namespace
 
 void
 StorageTest::SetUp() {
-    std::string config_path(CONFIG_PATH);
-    milvus::CommonUtil::CreateDirectory(config_path);
-    config_path += CONFIG_FILE;
-    WriteToFile(config_path, CONFIG_STR);
-
-    // milvus::server::Config& config = milvus::server::Config::GetInstance();
-    // ASSERT_TRUE(config.LoadConfigFile(config_path).ok());
 }
 
 void
 StorageTest::TearDown() {
-    std::string config_path(CONFIG_PATH);
-    milvus::CommonUtil::DeleteDirectory(config_path);
 }

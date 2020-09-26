@@ -9,35 +9,41 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "storage/s3/S3IOWriter.h"
-#include "storage/s3/S3ClientWrapper.h"
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "storage/Operation.h"
 
 namespace milvus {
 namespace storage {
 
-bool
-S3IOWriter::Open(const std::string& name) {
-    name_ = name;
-    len_ = 0;
-    buffer_ = "";
-    return true;
-}
+class S3Operation : public Operation {
+ public:
+    explicit S3Operation(const std::string& dir_path);
 
-void
-S3IOWriter::Write(const void* ptr, int64_t size) {
-    buffer_ += std::string(reinterpret_cast<const char*>(ptr), size);
-    len_ += size;
-}
+    void
+    CreateDirectory() override;
 
-int64_t
-S3IOWriter::Length() {
-    return len_;
-}
+    const std::string&
+    GetDirectory() const override;
 
-void
-S3IOWriter::Close() {
-    S3ClientWrapper::GetInstance().PutObjectStr(name_, buffer_);
-}
+    void
+    ListDirectory(std::vector<std::string>& file_paths) override;
+
+    bool
+    DeleteFile(const std::string& file_path) override;
+
+    bool
+    Move(const std::string& tar_name, const std::string& src_name) override;
+
+ private:
+    const std::string dir_path_;
+};
+
+using S3OperationPtr = std::shared_ptr<S3Operation>;
 
 }  // namespace storage
 }  // namespace milvus
