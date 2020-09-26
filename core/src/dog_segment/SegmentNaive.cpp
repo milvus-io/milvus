@@ -9,7 +9,6 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
 
-
 namespace milvus::dog_segment {
 int
 TestABI() {
@@ -18,7 +17,6 @@ TestABI() {
 
 std::unique_ptr<SegmentBase>
 CreateSegment(SchemaPtr schema) {
-
     auto segment = std::make_unique<SegmentNaive>(schema);
     return segment;
 }
@@ -26,10 +24,10 @@ CreateSegment(SchemaPtr schema) {
 SegmentNaive::Record::Record(const Schema &schema) : uids_(1), timestamps_(1) {
     for (auto &field : schema) {
         if (field.is_vector()) {
-            assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+            Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
             entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(field.get_dim()));
         } else {
-            assert(field.get_data_type() == DataType::INT32);
+            Assert(field.get_data_type() == DataType::INT32);
             entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, true>>());
         }
     }
@@ -73,7 +71,7 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
             for (auto iter = iter_b; iter != iter_e; ++iter) {
                 auto offset = iter->second;
                 if (record_.timestamps_[offset] < query_timestamp) {
-                    assert(offset < insert_barrier);
+                    Assert(offset < insert_barrier);
                     the_offset = std::max(the_offset, offset);
                 }
             }
@@ -102,7 +100,7 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
                     continue;
                 }
                 if (record_.timestamps_[offset] < query_timestamp) {
-                    assert(offset < insert_barrier);
+                    Assert(offset < insert_barrier);
                     the_offset = std::max(the_offset, offset);
                 }
             }
@@ -123,12 +121,13 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
 Status
 SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t *uids_raw, const Timestamp *timestamps_raw,
                      const DogDataChunk &entities_raw) {
-    assert(entities_raw.count == size);
+    Assert(entities_raw.count == size);
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
       std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
           ", schema length = " + std::to_string(schema_->get_total_sizeof());
         throw std::runtime_error(msg);
     }
+    
     auto raw_data = reinterpret_cast<const char *>(entities_raw.raw_data);
     //    std::vector<char> entities(raw_data, raw_data + size * len_per_row);
 
@@ -185,13 +184,13 @@ SegmentNaive::Insert(int64_t reserved_begin, int64_t size, const int64_t *uids_r
     //    go.detach();
     //    const auto& schema = *schema_;
     //    auto record_ptr = GetMutableRecord();
-    //    assert(record_ptr);
+    //    Assert(record_ptr);
     //    auto& record = *record_ptr;
     //    auto data_chunk = ColumnBasedDataChunk::from(row_values, schema);
     //
     //    // TODO: use shared_lock for better concurrency
     //    std::lock_guard lck(mutex_);
-    //    assert(state_ == SegmentState::Open);
+    //    Assert(state_ == SegmentState::Open);
     //    auto ack_id = ack_count_.load();
     //    record.uids_.grow_by(primary_keys, primary_keys + size);
     //    for (int64_t i = 0; i < size; ++i) {
@@ -263,19 +262,20 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier, true);
-    assert(bitmap_holder);
-    assert(bitmap_holder->bitmap_ptr->capacity() == ins_barrier);
+    Assert(bitmap_holder);
+    Assert(bitmap_holder->bitmap_ptr->capacity() == ins_barrier);
 
     auto field_offset = schema_->get_offset(query_info->field_name);
     auto &field = schema_->operator[](query_info->field_name);
 
-    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.value() < record_.entity_vec_.size());
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
     auto index_entry = index_meta_->lookup_by_field(query_info->field_name);
     auto conf = index_entry.config;
@@ -354,10 +354,10 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    assert(bitmap_holder);
+    Assert(bitmap_holder);
 
     auto &field = schema_->operator[](query_info->field_name);
-    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
@@ -366,7 +366,8 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
     // TODO: optimize
 
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.value() < record_.entity_vec_.size());
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
 
     std::vector<int64_t> final_uids(total_count);
@@ -415,17 +416,18 @@ SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, Que
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    assert(bitmap_holder);
+    Assert(bitmap_holder);
 
     auto &field = schema_->operator[](query_info->field_name);
-    assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
     // TODO: optimize
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.has_value());
+    Assert(the_offset_opt.value() < record_.entity_vec_.size());
     auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
     std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
 
@@ -521,7 +523,7 @@ SegmentNaive::Close() {
 template<typename Type>
 knowhere::IndexPtr SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry &entry) {
     auto offset_opt = schema_->get_offset(entry.field_name);
-    assert(offset_opt.has_value());
+    Assert(offset_opt.has_value());
     auto offset = offset_opt.value();
     auto field = (*schema_)[offset];
     auto dim = field.get_dim();
@@ -563,8 +565,8 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
             }
         }
 
-        assert(dim != 0);
-        assert(!index_field_name.empty());
+        Assert(dim != 0);
+        Assert(!index_field_name.empty());
 
         auto index_meta = std::make_shared<IndexMeta>(schema_);
         // TODO: this is merge of query conf and insert conf
@@ -587,19 +589,21 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
     if(record_.ack_responder_.GetAck() < 1024 * 4) {
         return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
     }
+
     index_meta_ = remote_index_meta;
     for (auto&[index_name, entry]: index_meta_->get_entries()) {
-        assert(entry.index_name == index_name);
+        Assert(entry.index_name == index_name);
         const auto &field = (*schema_)[entry.field_name];
 
         if (field.is_vector()) {
-            assert(field.get_data_type() == engine::DataType::VECTOR_FLOAT);
+            Assert(field.get_data_type() == engine::DataType::VECTOR_FLOAT);
             auto index_ptr = BuildVecIndexImpl<float>(entry);
             indexings_[index_name] = index_ptr;
         } else {
             throw std::runtime_error("unimplemented");
         }
     }
+
     index_ready_ = true;
     return Status::OK();
 }
@@ -610,7 +614,7 @@ SegmentNaive::GetMemoryUsageInBytes() {
     if(index_ready_) {
         auto& index_entries = index_meta_->get_entries();
         for(auto [index_name, entry]: index_entries) {
-            assert(schema_->operator[](entry.field_name).is_vector());
+            Assert(schema_->operator[](entry.field_name).is_vector());
             auto vec_ptr = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_name]);
             total_bytes += vec_ptr->IndexSize();
         }

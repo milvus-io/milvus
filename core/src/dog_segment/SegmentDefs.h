@@ -8,6 +8,7 @@
 // #include "knowhere/index/Index.h"
 #include "utils/Status.h"
 #include "dog_segment/IndexMeta.h"
+#include "EasyAssert.h"
 
 namespace milvus::dog_segment {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -40,7 +41,7 @@ field_sizeof(DataType data_type, int dim = 1) {
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
-            assert(dim % 8 == 0);
+            Assert(dim % 8 == 0);
             return dim / 8;
         }
         default: {
@@ -62,7 +63,7 @@ struct FieldMeta {
 
     bool
     is_vector() const {
-        assert(type_ != DataType::NONE);
+        Assert(type_ != DataType::NONE);
         return type_ == DataType::VECTOR_BINARY || type_ == DataType::VECTOR_FLOAT;
     }
 
@@ -141,6 +142,8 @@ class Schema {
 
     const FieldMeta&
     operator[](int field_index) const {
+        Assert(field_index >= 0);
+        Assert(field_index < fields_.size());
         return fields_[field_index];
     }
 

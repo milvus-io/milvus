@@ -20,8 +20,8 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
     auto& index_name = index_param.index_name();
     auto& field_name = index_param.field_name();
 
-    assert(!index_name.empty());
-    assert(!field_name.empty());
+    Assert(!index_name.empty());
+    Assert(!field_name.empty());
 
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
     auto index_mode = knowhere::IndexMode::MODE_CPU;
@@ -72,7 +72,7 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
               dim = field.get_dim();
             }
         }
-        assert(dim != 0);
+        Assert(dim != 0);
 
         index_conf = milvus::knowhere::Config{
             {knowhere::meta::DIM,           dim},

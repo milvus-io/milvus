@@ -41,7 +41,9 @@ class IndexMeta {
     }
 
     const Entry& lookup_by_field(const std::string& field_name) {
+        AssertInfo(lookups_.count(field_name), field_name);
         auto index_name = lookups_.at(field_name);
+        AssertInfo(entries_.count(index_name), index_name);
         return entries_.at(index_name);
     }
  private:
