@@ -26,7 +26,7 @@ class TestCreateBase:
 
     # TODO: enable
     @pytest.mark.level(2)
-    @pytest.mark.timeout(1200)
+    @pytest.mark.timeout(600)
     def test_create_partition_limit(self, connect, collection, args):
         '''
         target: test create partitions, check status returned
@@ -39,7 +39,7 @@ class TestCreateBase:
             pytest.skip("skip in http mode")
 
         def create(connect, threads_num):
-            for i in range(4096 // threads_num):
+            for i in range(max_partition_num // threads_num):
                 tag_tmp = gen_unique_str()
                 connect.create_partition(collection, tag_tmp)
 
@@ -373,6 +373,7 @@ class TestNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection_name, default_tag)
 
+    @pytest.mark.level(2)
     def test_drop_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
         target: test drop partition, with invalid tag name, check status returned

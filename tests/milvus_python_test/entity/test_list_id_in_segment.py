@@ -62,6 +62,7 @@ class TestListIdInSegmentBase:
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_list_id_in_segment_collection_name_invalid(self, connect, collection, get_collection_name):
         '''
         target: get vector ids where collection name is invalid
