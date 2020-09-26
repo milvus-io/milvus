@@ -221,9 +221,10 @@ class TestStatsBase:
         logging.getLogger().info(stats)
         assert stats["row_count"] == default_nb
         for file in stats["partitions"][0]["segments"][0]["files"]:
-            if file["field"] == default_float_vec_field_name and file["name"] != "_raw":
+            if file["field"] == default_float_vec_field_name and "index_type" in file:
                 assert file["data_size"] > 0
                 assert file["index_type"] == get_simple_index["index_type"]
+                break
 
     def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
         '''
