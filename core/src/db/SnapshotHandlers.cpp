@@ -123,8 +123,9 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     }
     segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
-    std::vector<int64_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uids));
+    engine::idx_t* uids_address = nullptr;
+    int64_t id_count = 0;
+    STATUS_CHECK(segment_reader.LoadUids(&uids_address, id_count));
 
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
@@ -143,14 +144,14 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         // check if id really exists in uids
-        auto found = std::find(uids.begin(), uids.end(), id);
-        if (found == uids.end()) {
+        auto found = std::find(uids_address, uids_address + id_count, id);
+        int64_t offset = found - uids_address;
+        if (offset >= id_count) {
             ++it;
-            continue;
+            continue;  // not found
         }
 
         // check if this id is deleted
-        auto offset = std::distance(uids.begin(), found);
         if (deleted_docs_ptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
