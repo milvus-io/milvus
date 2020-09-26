@@ -736,16 +736,16 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     // remove delete id from the id list
     segment::DeletedDocsPtr deleted_docs_ptr;
     segment_reader->LoadDeletedDocs(deleted_docs_ptr);
-//    if (deleted_docs_ptr) {
-//        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
-//        std::vector<offset_t> temp_ids;
-//        temp_ids.reserve(delete_ids.size());
-//        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
-//        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
-//        for (auto offset : temp_ids) {
-//            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
-//        }
-//    }
+    //    if (deleted_docs_ptr) {
+    //        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
+    //        std::vector<offset_t> temp_ids;
+    //        temp_ids.reserve(delete_ids.size());
+    //        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
+    //        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
+    //        for (auto offset : temp_ids) {
+    //            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
+    //        }
+    //    }
 
     if (deleted_docs_ptr == nullptr) {
         return Status::OK();
@@ -768,8 +768,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     if (max_delete_offset < entity_ids.size() - 1) {
         int64_t copy_count = entity_ids.size() - 1 - max_delete_offset;
-        memcpy(entity_ids_left.data() + left_count - copy_count,
-               entity_ids.data() + max_delete_offset + 1,
+        memcpy(entity_ids_left.data() + left_count - copy_count, entity_ids.data() + max_delete_offset + 1,
                copy_count * sizeof(int64_t));
     }
 
