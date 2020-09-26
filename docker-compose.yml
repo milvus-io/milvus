@@ -24,7 +24,7 @@ services:
     networks:
       - milvus
     command: &ubuntu-command
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
         /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   centos-core:
@@ -43,7 +43,7 @@ services:
     networks:
       - milvus
     command: &centos-command
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
         /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   ubuntu-cuda-core:
@@ -62,7 +62,7 @@ services:
     networks:
       - milvus
     command: &ubuntu-cuda-command
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
 
   centos-cuda-core:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
@@ -80,7 +80,7 @@ services:
     networks:
       - milvus
     command: &centos-cuda-command
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -g"]
 
   cpplint:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-core
@@ -95,7 +95,7 @@ services:
     networks:
       - milvus
     command:
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l --tidy -n"]
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l --tidy -n"]
 
   cpplint-gpu:
     image: ${REPO}:${ARCH}-centos-${CENTOS}-cuda-core
@@ -110,7 +110,7 @@ services:
     networks:
       - milvus
     command:
-      ["/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l -g --tidy -n"]
+      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} -l -g --tidy -n"]
 
 networks:
   milvus:
