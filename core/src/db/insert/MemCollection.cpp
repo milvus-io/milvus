@@ -347,7 +347,7 @@ MemCollection::SerializeSegments() {
     idx_t max_op_id = 0;
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
-        for (MemSegmentList::iterator iter = segments.begin(); iter != segments.end();) {
+        for (auto iter = segments.begin(); iter != segments.end();) {
             auto& segment = *iter;
             auto status = segment->Serialize(ss, operation);
             idx_t segment_max_op_id = segment->GetMaxOpID();
