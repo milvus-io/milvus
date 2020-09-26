@@ -25,6 +25,13 @@ namespace milvus {
 using JSON = nlohmann::json;
 static const char* EXTRA_PARAM_KEY = "params";
 
+#define CLIENT_NULL_CHECK(client_ptr)                                                            \
+    do {                                                                                         \
+        if (client_ptr == nullptr) {                                                             \
+            return Status(StatusCode::NotConnected, "Client is not connected to milvus server"); \
+        }                                                                                        \
+    } while (false)
+
 bool
 UriCheck(const std::string& uri) {
     size_t index = uri.find_first_of(':', 0);
@@ -406,6 +413,7 @@ ClientProxy::Connect(const std::string& uri) {
 
 Status
 ClientProxy::Connected() const {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         std::string info;
         return client_ptr_->Cmd("", info);
@@ -428,6 +436,7 @@ ClientProxy::Disconnect() {
 
 Status
 ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::Mapping grpc_mapping;
         grpc_mapping.set_collection_name(mapping.collection_name);
@@ -458,6 +467,7 @@ ClientProxy::CreateCollection(const Mapping& mapping, const std::string& extra_p
 
 Status
 ClientProxy::DropCollection(const std::string& collection_name) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::CollectionName grpc_collection_name;
         grpc_collection_name.set_collection_name(collection_name);
@@ -481,6 +491,7 @@ ClientProxy::HasCollection(const std::string& collection_name) {
 
 Status
 ClientProxy::ListCollections(std::vector<std::string>& collection_array) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         Status status;
         milvus::grpc::CollectionNameList collection_name_list;
@@ -498,6 +509,7 @@ ClientProxy::ListCollections(std::vector<std::string>& collection_array) {
 
 Status
 ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapping) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::Mapping grpc_mapping;
 
@@ -536,6 +548,7 @@ ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapp
 
 Status
 ClientProxy::GetCollectionStats(const std::string& collection_name, std::string& collection_stats) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         Status status;
         ::milvus::grpc::CollectionName grpc_collection_name;
@@ -553,6 +566,7 @@ ClientProxy::GetCollectionStats(const std::string& collection_name, std::string&
 
 Status
 ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_count) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         Status status;
         ::milvus::grpc::CollectionName grpc_collection_name;
@@ -566,6 +580,7 @@ ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_coun
 
 Status
 ClientProxy::CreatePartition(const PartitionParam& partition_param) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::PartitionParam grpc_partition_param;
         grpc_partition_param.set_collection_name(partition_param.collection_name);
@@ -579,6 +594,7 @@ ClientProxy::CreatePartition(const PartitionParam& partition_param) {
 
 Status
 ClientProxy::DropPartition(const PartitionParam& partition_param) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::PartitionParam grpc_partition_param;
         grpc_partition_param.set_collection_name(partition_param.collection_name);
@@ -605,6 +621,7 @@ ClientProxy::HasPartition(const std::string& collection_name, const std::string&
 
 Status
 ClientProxy::ListPartitions(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::CollectionName grpc_collection_name;
         grpc_collection_name.set_collection_name(collection_name);
@@ -622,6 +639,7 @@ ClientProxy::ListPartitions(const std::string& collection_name, PartitionTagList
 
 Status
 ClientProxy::CreateIndex(const IndexParam& index_param) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.set_collection_name(index_param.collection_name);
@@ -645,6 +663,7 @@ ClientProxy::CreateIndex(const IndexParam& index_param) {
 Status
 ClientProxy::DropIndex(const std::string& collection_name, const std::string& field_name,
                        const std::string& index_name) const {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.set_collection_name(collection_name);
@@ -660,6 +679,7 @@ ClientProxy::DropIndex(const std::string& collection_name, const std::string& fi
 Status
 ClientProxy::Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& field_value,
                     std::vector<int64_t>& id_array) {
+    CLIENT_NULL_CHECK(client_ptr_);
     Status status = Status::OK();
     try {
         ::milvus::grpc::InsertParam insert_param;
@@ -691,6 +711,7 @@ ClientProxy::Insert(const std::string& collection_name, const std::string& parti
 Status
 ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
                            std::string& entities) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::EntityIdentity entity_identity;
         entity_identity.set_collection_name(collection_name);
@@ -715,6 +736,7 @@ ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector
 
 Status
 ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::DeleteByIDParam delete_by_id_param;
         delete_by_id_param.set_collection_name(collection_name);
@@ -731,6 +753,7 @@ ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vec
 Status
 ClientProxy::Search(const std::string& collection_name, const std::vector<std::string>& partition_list,
                     const std::string& dsl, const VectorParam& vector_param, TopKQueryResult& query_result) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::SearchParam search_param;
         search_param.set_collection_name(collection_name);
@@ -759,6 +782,7 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
 Status
 ClientProxy::ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
                              std::vector<int64_t>& id_array) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::GetEntityIDsParam param;
         param.set_collection_name(collection_name);
@@ -778,6 +802,7 @@ ClientProxy::ListIDInSegment(const std::string& collection_name, const int64_t& 
 
 Status
 ClientProxy::LoadCollection(const std::string& collection_name) const {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::CollectionName grpc_collection_name;
         grpc_collection_name.set_collection_name(collection_name);
@@ -790,6 +815,7 @@ ClientProxy::LoadCollection(const std::string& collection_name) const {
 
 Status
 ClientProxy::Flush(const std::vector<std::string>& collection_name_array) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         if (collection_name_array.empty()) {
             return client_ptr_->Flush("");
@@ -806,6 +832,7 @@ ClientProxy::Flush(const std::vector<std::string>& collection_name_array) {
 
 Status
 ClientProxy::Compact(const std::string& collection_name, const double& threshold) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::CompactParam grpc_compact_param;
         grpc_compact_param.set_collection_name(collection_name);
@@ -883,6 +910,7 @@ Status
 ClientProxy::SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
                       BooleanQueryPtr& boolean_query, const std::string& extra_params,
                       TopKQueryResult& topk_query_result) {
+    CLIENT_NULL_CHECK(client_ptr_);
     try {
         // convert boolean_query to proto
         ::milvus::grpc::SearchParamPB search_param;
