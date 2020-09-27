@@ -215,7 +215,7 @@ ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+    auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, "", topk_query_result);
 
     std::cout << metric_type << " Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
