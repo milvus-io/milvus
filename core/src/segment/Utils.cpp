@@ -121,6 +121,9 @@ GetIDWithoutDeleted(const engine::IDNumbers& entity_ids, const std::vector<int32
     std::sort(delete_offsets.begin(), delete_offsets.end());
 
     int64_t left_count = entity_ids.size() - delete_offsets.size();
+    if (left_count <= 0) {
+        return;  // all id deleted
+    }
     result_ids.resize(left_count);
 
     int32_t min_delete_offset = *delete_offsets.begin();
@@ -144,6 +147,10 @@ GetIDWithoutDeleted(const engine::IDNumbers& entity_ids, const std::vector<int32
             ++k;
             ++n;
         } else {
+            if (index >= left_count) {
+                LOG_ENGINE_ERROR_ << "offsets array contains duplicate items";
+                break;  // duplicate offsets, avoid out of bounds
+            }
             result_ids[index] = entity_ids[k];
             ++index;
             ++k;

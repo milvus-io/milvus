@@ -474,6 +474,9 @@ TEST(SegmentUtilTest, GetIDWithoutDeletedTest) {
 
         result_ids = entity_ids;
         for (auto offset : temp_offset) {
+            if (offset >= result_ids.size()) {
+                break; // out of bound
+            }
             result_ids.erase(result_ids.begin() + offset, result_ids.begin() + offset + 1);
         }
     };
@@ -485,7 +488,7 @@ TEST(SegmentUtilTest, GetIDWithoutDeletedTest) {
         }
     };
 
-    // generate a offset array, each offset is unique
+    // generate an offset array, each offset is unique
     auto gen_random_offsets = [&](int64_t count, int64_t bound, std::vector<int32_t>& offsets) -> void {
         std::default_random_engine random;
         std::unordered_set<int32_t> unique_offsets;
@@ -596,5 +599,5 @@ TEST(SegmentUtilTest, GetIDWithoutDeletedTest) {
 
     // in the following cases the GetIDWithoutDeleted is 100 times faster than erase approach
     compare(1000000, 10000);
-//    compare(1000000, 990000); // we can see the erase approach performance is very bad for this case
+//    compare(1000000, 990000); // we can see the erase approach performance is very poor for this case
 }
