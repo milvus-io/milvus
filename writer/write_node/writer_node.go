@@ -3,6 +3,7 @@ package write_node
 import (
 	"context"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
@@ -87,7 +88,7 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 	return nil
 }
 
-func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
+func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg) error {
 	var prefixKey string
 	var prefixKeys [][]byte
 	var timeStamps []uint64
@@ -120,10 +121,8 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 	err := (*wn.KvStore).DeleteRows(ctx, prefixKeys, timeStamps)
 	if err != nil {
 		fmt.Println("Can't delete data")
-		wg.Done()
 		return err
 	}
-	wg.Done()
 	return nil
 }
 
@@ -131,10 +130,27 @@ func (wn *WriteNode) UpdateTimeSync(timeSync uint64) {
 	wn.TimeSync = timeSync
 }
 
-func (wn *WriteNode) DoWriteNode(ctx context.Context, wg *sync.WaitGroup) {
-	wg.Add(2)
-	go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg, wg)
-	go wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg, wg)
+func (wn *WriteNode) DoWriteNode(ctx context.Context) {
+	numInsertData := len(wn.MessageClient.InsertMsg)
+	numGoRoute := conf.Config.Writer.Parallelism
+	batchSize := numInsertData / numGoRoute
+	if numInsertData % numGoRoute != 0 {
+		batchSize += 1
+	}
+	start := 0
+	end := 0
+	wg := sync.WaitGroup{}
+	for end < numInsertData {
+		if end + batchSize >= numInsertData {
+			end = numInsertData
+		} else {
+			end = end + batchSize
+		}
+		wg.Add(1)
+		go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg[start:end], &wg)
+		start = end
+	}
 	wg.Wait()
+	wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg)
 	wn.UpdateTimeSync(wn.MessageClient.TimeSync())
 }
