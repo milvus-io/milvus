@@ -98,7 +98,7 @@ ConstructTopkQueryResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQue
     }
     topk_query_result.reserve(nq);
 
-    auto grpc_entity = grpc_result.entities();
+    const auto& grpc_entity = grpc_result.entities();
     int64_t topk = grpc_entity.ids_size() / nq;
     // TODO(yukun): filter -1 results
     for (int64_t i = 0; i < grpc_result.row_num(); i++) {
@@ -144,7 +144,7 @@ ConstructTopkQueryResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQue
                             vector_data[k].float_data.resize(grpc_vector_data.float_data_size());
                             memcpy(vector_data[k].float_data.data(), grpc_vector_data.float_data().data(),
                                    grpc_vector_data.float_data_size() * sizeof(float));
-                        } else if (grpc_vector_data.binary_data().size() > 0) {
+                        } else if (!grpc_vector_data.binary_data().empty()) {
                             vector_data[k].binary_data.resize(grpc_vector_data.binary_data().size() / 8);
                             memcpy(vector_data[k].binary_data.data(), grpc_vector_data.binary_data().data(),
                                    grpc_vector_data.binary_data().size());
@@ -160,40 +160,6 @@ ConstructTopkQueryResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQue
 
 void
 CopyFieldValue(const FieldValue& field_value, ::milvus::grpc::InsertParam& insert_param) {
-    if (!field_value.int8_value.empty()) {
-        for (auto& field_it : field_value.int8_value) {
-            auto grpc_field = insert_param.add_fields();
-            grpc_field->set_field_name(field_it.first);
-            auto grpc_attr_record = grpc_field->mutable_attr_record();
-            auto grpc_int32_value = grpc_attr_record->mutable_int32_value();
-            auto field_data = field_it.second;
-            auto data_size = field_data.size();
-            std::vector<int32_t> int32_value(data_size);
-            for (int i = 0; i < data_size; i++) {
-                int32_value[i] = field_data[i];
-            }
-
-            grpc_int32_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_t));
-        }
-    }
-    if (!field_value.int16_value.empty()) {
-        for (auto& field_it : field_value.int16_value) {
-            auto grpc_field = insert_param.add_fields();
-            grpc_field->set_field_name(field_it.first);
-            auto grpc_attr_record = grpc_field->mutable_attr_record();
-            auto grpc_int32_value = grpc_attr_record->mutable_int32_value();
-            auto field_data = field_it.second;
-            auto data_size = field_data.size();
-            std::vector<int32_t> int32_value(data_size);
-            for (int i = 0; i < data_size; i++) {
-                int32_value[i] = field_data[i];
-            }
-
-            grpc_int32_value->Resize(static_cast<int>(data_size), 0);
-            memcpy(grpc_int32_value->mutable_data(), int32_value.data(), data_size * sizeof(int32_t));
-        }
-    }
     if (!field_value.int32_value.empty()) {
         for (auto& field_it : field_value.int32_value) {
             auto grpc_field = insert_param.add_fields();
@@ -276,9 +242,9 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
 
     int row_num = grpc_entities.ids_size();
     for (i = 0; i < grpc_field_size; i++) {
-        auto grpc_field = grpc_entities.fields(i);
-        auto grpc_attr_record = grpc_field.attr_record();
-        auto grpc_vector_record = grpc_field.vector_record();
+        const auto& grpc_field = grpc_entities.fields(i);
+        const auto& grpc_attr_record = grpc_field.attr_record();
+        const auto& grpc_vector_record = grpc_field.vector_record();
         switch (grpc_field.type()) {
             case ::milvus::grpc::INT8:
             case ::milvus::grpc::INT16:
@@ -517,7 +483,7 @@ ClientProxy::GetCollectionInfo(const std::string& collection_name, Mapping& mapp
 
         mapping.collection_name = collection_name;
         for (int64_t i = 0; i < grpc_mapping.fields_size(); i++) {
-            auto grpc_field = grpc_mapping.fields(i);
+            const auto& grpc_field = grpc_mapping.fields(i);
             FieldPtr field_ptr = std::make_shared<Field>();
             field_ptr->field_name = grpc_field.name();
             JSON json_index_params;
@@ -752,12 +718,13 @@ ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vec
 
 Status
 ClientProxy::Search(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                    const std::string& dsl, const VectorParam& vector_param, TopKQueryResult& query_result) {
+                    const std::string& dsl, const VectorParam& vector_param, const std::string& extra_params,
+                    TopKQueryResult& query_result) {
     CLIENT_NULL_CHECK(client_ptr_);
     try {
         ::milvus::grpc::SearchParam search_param;
         search_param.set_collection_name(collection_name);
-        for (auto partition : partition_list) {
+        for (const auto& partition : partition_list) {
             auto value = search_param.add_partition_tag_array();
             *value = partition;
         }
@@ -768,6 +735,12 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
         for (auto& vector_data : vector_param.vector_records) {
             auto row_record = grpc_vector_record->add_records();
             CopyRowRecord(row_record, vector_data);
+        }
+
+        if (!extra_params.empty()) {
+            auto extra_param = search_param.add_extra_params();
+            extra_param->set_key("params");
+            extra_param->set_value(extra_params);
         }
 
         ::milvus::grpc::QueryResult grpc_result;
@@ -847,13 +820,13 @@ ClientProxy::Compact(const std::string& collection_name, const double& threshold
 /*******************************New Interface**********************************/
 
 void
-WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr boolean_query) {
+WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, const BooleanQueryPtr& boolean_query) {
     if (!boolean_query->GetBooleanQueries().empty()) {
-        for (auto query : boolean_query->GetBooleanQueries()) {
+        for (const auto& query : boolean_query->GetBooleanQueries()) {
             auto grpc_boolean_query = general_query->mutable_boolean_query();
             grpc_boolean_query->set_occur((::milvus::grpc::Occur)query->GetOccur());
 
-            for (auto leaf_query : query->GetLeafQueries()) {
+            for (const auto& leaf_query : query->GetLeafQueries()) {
                 auto grpc_query = grpc_boolean_query->add_general_query();
                 if (leaf_query->term_query_ptr != nullptr) {
                     auto term_query = grpc_query->mutable_term_query();
@@ -877,7 +850,7 @@ WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr b
                     auto range_query = grpc_query->mutable_range_query();
                     range_query->set_boost(leaf_query->query_boost);
                     range_query->set_field_name(leaf_query->range_query_ptr->field_name);
-                    for (auto com_expr : leaf_query->range_query_ptr->compare_expr) {
+                    for (const auto& com_expr : leaf_query->range_query_ptr->compare_expr) {
                         auto grpc_com_expr = range_query->add_operand();
                         grpc_com_expr->set_operand(com_expr.operand);
                         grpc_com_expr->set_operator_((milvus::grpc::CompareOperator)com_expr.compare_operator);
@@ -888,7 +861,7 @@ WriteQueryToProto(::milvus::grpc::GeneralQuery* general_query, BooleanQueryPtr b
                     vector_query->set_field_name(leaf_query->vector_query_ptr->field_name);
                     vector_query->set_query_boost(leaf_query->query_boost);
                     vector_query->set_topk(leaf_query->vector_query_ptr->topk);
-                    for (auto record : leaf_query->vector_query_ptr->query_vector) {
+                    for (const auto& record : leaf_query->vector_query_ptr->query_vector) {
                         ::milvus::grpc::VectorRowRecord* row_record = vector_query->add_records();
                         CopyRowRecord(row_record, record);
                     }
@@ -915,11 +888,11 @@ ClientProxy::SearchPB(const std::string& collection_name, const std::vector<std:
         // convert boolean_query to proto
         ::milvus::grpc::SearchParamPB search_param;
         search_param.set_collection_name(collection_name);
-        for (auto partition : partition_list) {
+        for (const auto& partition : partition_list) {
             auto value = search_param.add_partition_tag_array();
             *value = partition;
         }
-        if (extra_params.size() > 0) {
+        if (!extra_params.empty()) {
             auto extra_param = search_param.add_extra_params();
             extra_param->set_key("params");
             extra_param->set_value(extra_params);

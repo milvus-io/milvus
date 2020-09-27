@@ -131,7 +131,7 @@ TestProcess(std::shared_ptr<milvus::Connection> connection, const milvus::Mappin
 
         std::vector<std::string> partition_tags;
         milvus::TopKQueryResult topk_query_result;
-        auto status = connection->Search(mapping.collection_name, partition_tags, dsl_json.dump(), vector_param, topk_query_result);
+        auto status = connection->Search(mapping.collection_name, partition_tags, dsl_json.dump(), vector_param, "", topk_query_result);
 
         std::cout << metric_type << " Search function call result: " << std::endl;
         milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);

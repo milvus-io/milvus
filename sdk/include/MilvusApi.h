@@ -78,8 +78,6 @@ struct AttrRecord {
  */
 struct FieldValue {
     int64_t row_num;
-    std::unordered_map<std::string, std::vector<int8_t>> int8_value;
-    std::unordered_map<std::string, std::vector<int16_t>> int16_value;
     std::unordered_map<std::string, std::vector<int32_t>> int32_value;
     std::unordered_map<std::string, std::vector<int64_t>> int64_value;
     std::unordered_map<std::string, std::vector<float>> float_value;
@@ -457,7 +455,7 @@ class Connection {
      */
     virtual Status
     Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const VectorParam& vector_param, TopKQueryResult& query_result) = 0;
+           const VectorParam& vector_param, const std::string& extra_params, TopKQueryResult& query_result) = 0;
 
     virtual Status
     SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
@@ -476,8 +474,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,
-                    std::vector<int64_t>& id_array) = 0;
+    ListIDInSegment(const std::string& collection_name, const int64_t& segment_id, std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief Load collection into memory
