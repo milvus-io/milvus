@@ -26,7 +26,6 @@ void runL2SelMn(float* hostOutDistances,
                 int curQuerySize,
                 int i,
                 int nprobe,
-                
                 Tensor<float, 2, true>& productDistances,
                 Tensor<float, 1, true>& centroidDistances,
                 Tensor<uint8_t, 1, true>& bitset,
