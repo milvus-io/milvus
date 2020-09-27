@@ -48,7 +48,13 @@ bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
 bool
-IsVectorField(engine::DataType type);
+IsVectorType(engine::DataType type);
+
+bool
+IsBinaryVectorField(const engine::snapshot::FieldPtr& field);
+
+bool
+IsBinaryVectorType(engine::DataType type);
 
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);

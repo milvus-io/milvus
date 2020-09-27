@@ -171,7 +171,7 @@ MemCollection::ApplyDeleteToFile() {
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
-        // Step 1: Check to-delete id possibly in this segment
+        // Step 1: Check to-delete id possissbly in this segment
         std::unordered_set<idx_t> ids_to_check;
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
@@ -187,8 +187,9 @@ MemCollection::ApplyDeleteToFile() {
 
         // Step 2: Calculate deleted id offset
         // load entity ids
-        std::vector<engine::idx_t> uids;
-        STATUS_CHECK(segment_reader->LoadUids(uids));
+        engine::idx_t* uids_address = nullptr;
+        int64_t id_count = 0;
+        STATUS_CHECK(segment_reader->LoadUids(&uids_address, id_count));
 
         // Load previous deleted offsets
         segment::DeletedDocsPtr prev_del_docs;
@@ -203,8 +204,8 @@ MemCollection::ApplyDeleteToFile() {
 
         // if the to-delete id is actually in this segment, record its offset
         std::vector<engine::idx_t> new_deleted_ids;
-        for (size_t i = 0; i < uids.size(); i++) {
-            auto id = uids[i];
+        for (auto i = 0; i < id_count; ++i) {
+            auto id = uids_address[i];
             if (ids_to_check.find(id) != ids_to_check.end()) {
                 del_offsets.insert(i);
                 new_deleted_ids.push_back(id);
@@ -219,7 +220,7 @@ MemCollection::ApplyDeleteToFile() {
         recorder.RecordSection("detect " + std::to_string(new_deleted) + " entities will be deleted");
 
         // Step 3: drop empty segment or write new deleted-doc and bloom filter file
-        if (del_offsets.size() == uids.size()) {
+        if (del_offsets.size() == id_count) {
             // all entities have been deleted? drop this segment
             STATUS_CHECK(DropSegment(ss, segment->GetID()));
         } else {
@@ -347,7 +348,7 @@ MemCollection::SerializeSegments() {
     idx_t max_op_id = 0;
     for (auto& partition_segments : mem_segments_) {
         MemSegmentList& segments = partition_segments.second;
-        for (MemSegmentList::iterator iter = segments.begin(); iter != segments.end();) {
+        for (auto iter = segments.begin(); iter != segments.end();) {
             auto& segment = *iter;
             auto status = segment->Serialize(ss, operation);
             idx_t segment_max_op_id = segment->GetMaxOpID();

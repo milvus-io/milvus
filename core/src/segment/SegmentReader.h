@@ -50,8 +50,14 @@ class SegmentReader {
     LoadFieldsEntities(const std::vector<std::string>& fields_name, const std::vector<int64_t>& offsets,
                        engine::DataChunkPtr& data_chunk);
 
+    // load uid field and copy out a array
     Status
     LoadUids(std::vector<engine::idx_t>& uids);
+
+    // load uid field and return it address, the performance is better
+    // Note: the uid field data is holded by segment_ptr_, makesure use it address within SegmentReader life circle
+    Status
+    LoadUids(engine::idx_t** uids_addr, int64_t& count);
 
     Status
     LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat = false);
@@ -94,6 +100,9 @@ class SegmentReader {
     GetSegmentVisitor() const {
         return segment_visitor_;
     }
+
+    int64_t
+    GetRowCount();
 
     // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
     Status

@@ -25,11 +25,11 @@ class InsertReq : public BaseReq {
  public:
     static BaseReqPtr
     Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+           InsertParam& insert_param);
 
  protected:
     InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-              const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+              InsertParam& insert_param);
 
     Status
     OnExecute() override;
@@ -37,8 +37,7 @@ class InsertReq : public BaseReq {
  private:
     const std::string collection_name_;
     const std::string partition_name_;
-    const int64_t row_count_;
-    std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data_;
+    InsertParam& insert_param_;
 };
 
 }  // namespace server

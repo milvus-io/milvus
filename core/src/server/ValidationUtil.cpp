@@ -167,7 +167,7 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(std::string& index_type, bool is_vector) {
+ValidateVectorIndexType(std::string& index_type, bool is_binary) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
@@ -175,6 +175,7 @@ ValidateIndexType(std::string& index_type, bool is_vector) {
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
 
+    // string case insensitive
     std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
     static std::set<std::string> s_vector_index_type = {
@@ -186,8 +187,6 @@ ValidateIndexType(std::string& index_type, bool is_vector) {
 #ifdef MILVUS_GPU_VERSION
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
 #endif
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
         knowhere::IndexEnum::INDEX_NSG,
         knowhere::IndexEnum::INDEX_HNSW,
         knowhere::IndexEnum::INDEX_ANNOY,
@@ -196,12 +195,38 @@ ValidateIndexType(std::string& index_type, bool is_vector) {
         knowhere::IndexEnum::INDEX_RHNSWSQ,
     };
 
-    static std::set<std::string> s_structured_index_types = {
+    static std::set<std::string> s_binary_index_types = {
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+    };
+
+    std::set<std::string>& index_types = is_binary ? s_binary_index_types : s_vector_index_type;
+    if (index_types.find(index_type) == index_types.end()) {
+        std::string msg = "Invalid index type: " + index_type;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_INDEX_TYPE, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateStructuredIndexType(std::string& index_type) {
+    // Index name shouldn't be empty.
+    if (index_type.empty()) {
+        std::string msg = "Index type should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // string case insensitive
+    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
+
+    static std::set<std::string> s_index_types = {
         engine::DEFAULT_STRUCTURED_INDEX,
     };
 
-    std::set<std::string>& index_types = is_vector ? s_vector_index_type : s_structured_index_types;
-    if (index_types.find(index_type) == index_types.end()) {
+    if (s_index_types.find(index_type) == s_index_types.end()) {
         std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
@@ -489,8 +514,14 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
 }
 
 Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data) {
-    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
+ValidateInsertDataSize(const InsertParam& insert_param) {
+    int64_t chunk_size = 0;
+    for (auto& pair : insert_param.fields_data_) {
+        for (auto& data : pair.second) {
+            chunk_size += data.second;
+        }
+    }
+
     if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
         std::string msg = "The amount of data inserted each time cannot exceed " +
                           std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
