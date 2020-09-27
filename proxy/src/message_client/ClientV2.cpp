@@ -7,6 +7,7 @@
 #include <omp.h>
 #include <numeric>
 #include <algorithm>
+#include <unistd.h>
 #include "log/Log.h"
 
 namespace milvus::message_client {
@@ -210,9 +211,16 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
 
   auto end = stdclock::now();
   auto data_size = request.ByteSize();
-  LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
-                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
-                   << "M/s";
+  char buff[128];
+  auto r = getcwd(buff, 128);
+  auto path = std::string(buff);
+  std::ofstream file(path + "/proxy2pulsar.benchmark", std::fstream::app);
+  file << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
+       << "cost" << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0 << "s, "
+       << "throughput: "
+       << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0
+           / 1024
+       << "M/s" << std::endl;
 
   for (auto &stat : stats) {
     if (!stat.ok()) {
@@ -259,7 +267,9 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::DeleteByIDParam &request,
   auto end = stdclock::now();
   auto data_size = request.ByteSize();
   LOG_SERVER_INFO_ << "InsertReq Batch size:" << data_size / 1024.0 / 1024.0 << "M, "
-                   << "throughput: " << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000 / 1024.0 / 1024
+                   << "throughput: "
+                   << data_size / std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() * 1000
+                       / 1024.0 / 1024
                    << "M/s";
 
   for (auto &stat : stats) {
