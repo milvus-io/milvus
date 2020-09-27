@@ -38,6 +38,7 @@
 // #include "storage/s3/S3Operation.h"
 // #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Json.h"
+#include "utils/TimeRecorder.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 using IdBloomFilter = milvus::segment::IdBloomFilter;
@@ -596,4 +597,142 @@ TEST_F(SegmentTest, SEGMENT_RW_TEST) {
     // if (s3_enable) {
     //     milvus::storage::S3ClientWrapper::GetInstance().StopService();
     // }
+}
+
+TEST(SegmentUtilTest, GetIDWithoutDeletedTest) {
+    // use std::vector::erase to get id without deleted, as baseline to compare
+    auto erase_approach = [&](const milvus::engine::IDNumbers& entity_ids,
+                              const std::vector<int32_t>& offsets,
+                              milvus::engine::IDNumbers& result_ids) -> void {
+        std::vector<int32_t> temp_offset = offsets;
+        std::sort(temp_offset.begin(), temp_offset.end(), std::greater<>());
+
+        result_ids = entity_ids;
+        for (auto offset : temp_offset) {
+            if (offset >= result_ids.size()) {
+                break; // out of bound
+            }
+            result_ids.erase(result_ids.begin() + offset, result_ids.begin() + offset + 1);
+        }
+    };
+
+    auto gen_ids = [&](int64_t count, milvus::engine::IDNumbers& entity_ids) -> void {
+        milvus::engine::SafeIDGenerator id_gen;
+        for (int64_t i = 0; i < count; ++i) {
+            entity_ids.push_back(id_gen.GetNextIDNumber());
+        }
+    };
+
+    // generate an offset array, each offset is unique
+    auto gen_random_offsets = [&](int64_t count, int64_t bound, std::vector<int32_t>& offsets) -> void {
+        std::default_random_engine random;
+        std::unordered_set<int32_t> unique_offsets;
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = random() % bound;
+            if (unique_offsets.find(offset) == unique_offsets.end()) {
+                unique_offsets.insert(offset);
+                offsets.push_back(offset);
+            }
+        }
+    };
+
+    // edge cases
+    {
+        const int64_t entity_count = 100;
+        milvus::engine::IDNumbers entity_ids;
+        gen_ids(entity_count, entity_ids);
+
+        {
+            // empty offsets
+            std::vector<int32_t> offsets;
+
+            milvus::engine::IDNumbers ids_1;
+            erase_approach(entity_ids, offsets, ids_1);
+
+            milvus::engine::IDNumbers ids_2;
+            milvus::segment::GetIDWithoutDeleted(entity_ids, offsets, ids_2);
+
+            ASSERT_EQ(ids_1, ids_2);
+        }
+
+        {
+            // first offset is 0
+            std::vector<int32_t> offsets = {0, 10, 90};
+
+            milvus::engine::IDNumbers ids_1;
+            erase_approach(entity_ids, offsets, ids_1);
+
+            milvus::engine::IDNumbers ids_2;
+            milvus::segment::GetIDWithoutDeleted(entity_ids, offsets, ids_2);
+
+            ASSERT_EQ(ids_1, ids_2);
+        }
+
+        {
+            // last offset is the last id
+            std::vector<int32_t> offsets = {60, entity_count - 1};
+
+            milvus::engine::IDNumbers ids_1;
+            erase_approach(entity_ids, offsets, ids_1);
+
+            milvus::engine::IDNumbers ids_2;
+            milvus::segment::GetIDWithoutDeleted(entity_ids, offsets, ids_2);
+
+            ASSERT_EQ(ids_1, ids_2);
+        }
+
+        {
+            // all entities deleted
+            std::vector<int32_t> offsets;
+            for (auto i = 0; i < entity_count; ++i) {
+                offsets.push_back(i);
+            }
+
+            milvus::engine::IDNumbers ids_1;
+            erase_approach(entity_ids, offsets, ids_1);
+
+            milvus::engine::IDNumbers ids_2;
+            milvus::segment::GetIDWithoutDeleted(entity_ids, offsets, ids_2);
+
+            ASSERT_EQ(ids_1, ids_2);
+        }
+    }
+
+    // compare result, the entity_count must be greater than offset_count
+    auto compare = [&](int64_t entity_count, int64_t offset_count) -> void {
+        std::string
+            msg = "Entity count = " + std::to_string(entity_count) + " offset count = " + std::to_string(offset_count);
+        milvus::TimeRecorder rc(msg);
+        milvus::engine::IDNumbers entity_ids;
+        gen_ids(entity_count, entity_ids);
+
+        std::vector<int32_t> offsets;
+        gen_random_offsets(offset_count, entity_count, offsets);
+        rc.RecordSection("generate ids and offsets");
+
+        milvus::engine::IDNumbers ids_1;
+        erase_approach(entity_ids, offsets, ids_1);
+        rc.RecordSection("Erase approach");
+
+        milvus::engine::IDNumbers ids_2;
+        milvus::segment::GetIDWithoutDeleted(entity_ids, offsets, ids_2);
+        rc.RecordSection("GetIDWithoutDeleted");
+
+        ASSERT_EQ(ids_1, ids_2);
+    };
+
+    // for small id array, the two approachs performance is equal
+    compare(100, 1);
+    compare(100, 50);
+    compare(100, 100);
+    compare(10000, 1000);
+    compare(10000, 9000);
+
+    // in the following cases the GetIDWithoutDeleted is 10 times faster than erase approach
+    compare(100000, 10000);
+    compare(100000, 90000);
+
+    // in the following cases the GetIDWithoutDeleted is 100 times faster than erase approach
+    compare(1000000, 10000);
+//    compare(1000000, 990000); // we can see the erase approach performance is very poor for this case
 }

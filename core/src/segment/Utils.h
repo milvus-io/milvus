@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "db/Types.h"
+
 namespace milvus {
 namespace segment {
 
@@ -48,6 +50,13 @@ CalcCopyRangesWithOffset(const std::vector<int32_t>& offsets, int64_t row_count,
 bool
 CopyDataWithRanges(const std::vector<uint8_t>& src_data, int64_t row_width, const CopyRanges& copy_ranges,
                    std::vector<uint8_t>& target_data);
+
+// given an id array, and some deleted offsets
+// erase deleted id from the array
+// Note: the offsets must ensure each offset is unique. (the MemCollection::CreateDeletedDocsBloomFilter() ensure this)
+void
+GetIDWithoutDeleted(const engine::IDNumbers& entity_ids, const std::vector<int32_t>& offsets,
+                    engine::IDNumbers& result_ids);
 
 }  // namespace segment
 }  // namespace milvus
