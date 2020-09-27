@@ -28,6 +28,9 @@ RUN ln -s /var/lib/milvus/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/libopenb
 
 WORKDIR /var/lib/milvus
 
+ENV GRPC_TRACE="api,call_error,channel,connectivity_state,http,http2_stream_state,http_keepalive,op_failure"
+ENV GRPC_VERBOSITY="DEBUG"
+
 CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
 
 EXPOSE 19530

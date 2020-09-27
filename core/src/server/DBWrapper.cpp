@@ -57,7 +57,7 @@ DBWrapper::StartService() {
     }
 
     // wal
-    opt.wal_enable_ = false;
+    opt.wal_enable_ = true;
     if (opt.wal_enable_) {
         opt.wal_path_ = config.wal.path();
     }
