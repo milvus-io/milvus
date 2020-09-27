@@ -27,6 +27,7 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "db/SegmentTaskTracker.h"
 #include "db/utils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/Segment.h"
@@ -1575,4 +1576,61 @@ TEST_F(DBTest, LoadTest) {
     total_size =
         entity_count * (COLLECTION_DIM * sizeof(float) + sizeof(int32_t) + sizeof(int64_t) + sizeof(double)) * 2;
     ASSERT_GE(cache_mgr.CacheUsage(), total_size);
+}
+
+TEST(SegmentTaskTrackerTest, TrackerTest) {
+    std::string collection_name = "tracker";
+
+    milvus::engine::SegmentTaskTracker tracker_1(0);
+    milvus::engine::SegmentTaskTracker tracker_2(3);
+
+    auto mark_failed_segments = [&]() -> void {
+        milvus::Status status(100, "illegal");
+        tracker_1.MarkFailedSegment(collection_name, 1, status);
+        tracker_2.MarkFailedSegment(collection_name, 1, status);
+
+        milvus::engine::SegmentFailedMap failed_map = {
+            {2, milvus::Status(200, "200")},
+            {3, milvus::Status(300, "300")},
+        };
+        tracker_1.MarkFailedSegments(collection_name, failed_map);
+        tracker_2.MarkFailedSegments(collection_name, failed_map);
+    };
+
+    mark_failed_segments();
+
+    {
+        std::vector<int64_t> segment_ids = {1, 2, 3};
+        tracker_1.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_TRUE(segment_ids.empty());
+
+        segment_ids = {1, 2, 3, 4};
+        tracker_1.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_FALSE(segment_ids.empty());
+        ASSERT_EQ(segment_ids[0], 4);
+    }
+
+    {
+        std::vector<int64_t> segment_ids = {1, 2, 3};
+        tracker_2.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_EQ(segment_ids.size(), 3);
+
+        segment_ids = {1, 2, 3, 4};
+        tracker_2.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_EQ(segment_ids.size(), 4);
+    }
+
+    mark_failed_segments();
+    mark_failed_segments();
+
+    {
+        std::vector<int64_t> segment_ids = {1, 2, 3};
+        tracker_2.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_TRUE(segment_ids.empty());
+
+        segment_ids = {1, 2, 3, 4};
+        tracker_2.IgnoreFailedSegments(collection_name, segment_ids);
+        ASSERT_FALSE(segment_ids.empty());
+        ASSERT_EQ(segment_ids[0], 4);
+    }
 }

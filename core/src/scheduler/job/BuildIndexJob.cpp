@@ -86,5 +86,28 @@ BuildIndexJob::Dump() const {
     ret.insert(base.begin(), base.end());
     return ret;
 }
+
+void
+BuildIndexJob::MarkFailedSegment(engine::snapshot::ID_TYPE segment_id, const Status& status) {
+    std::lock_guard<std::mutex> lock(failed_segments_mutex_);
+    auto iter = failed_segments_.find(segment_id);
+    if (iter == failed_segments_.end()) {
+        failed_segments_.insert(std::make_pair(segment_id, status));
+    } else {
+        iter->second = status;
+    }
+}
+
+SegmentFailedMap
+BuildIndexJob::GetFailedSegments() {
+    SegmentFailedMap result;
+    {
+        std::lock_guard<std::mutex> lock(failed_segments_mutex_);
+        result = failed_segments_;
+    }
+
+    return result;
+}
+
 }  // namespace scheduler
 }  // namespace milvus
