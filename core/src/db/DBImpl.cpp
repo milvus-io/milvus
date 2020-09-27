@@ -35,6 +35,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "segment/Utils.h"
 #include "server/ValidationUtil.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
@@ -736,15 +737,23 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     // remove delete id from the id list
     segment::DeletedDocsPtr deleted_docs_ptr;
     segment_reader->LoadDeletedDocs(deleted_docs_ptr);
+    //    if (deleted_docs_ptr) {
+    //        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
+    //        std::vector<offset_t> temp_ids;
+    //        temp_ids.reserve(delete_ids.size());
+    //        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
+    //        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
+    //        for (auto offset : temp_ids) {
+    //            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
+    //        }
+    //    }
+
     if (deleted_docs_ptr) {
-        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
-        std::vector<offset_t> temp_ids;
-        temp_ids.reserve(delete_ids.size());
-        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
-        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
-        for (auto offset : temp_ids) {
-            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
-        }
+        // sorted-merge entities id and deleted offsets
+        const std::vector<offset_t>& delete_offsets = deleted_docs_ptr->GetDeletedDocs();
+        IDNumbers result_ids;
+        segment::GetIDWithoutDeleted(entity_ids, delete_offsets, result_ids);
+        entity_ids.swap(result_ids);
     }
 
     return Status::OK();
