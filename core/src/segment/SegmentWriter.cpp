@@ -280,7 +280,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     // convert to DataChunk
     engine::DataChunkPtr chunk = std::make_shared<engine::DataChunk>();
     duplicated_segment->ShareToChunkData(chunk);
-    LOG_ENGINE_DEBUG_ << "share to chunk";
+    LOG_ENGINE_DEBUG_ << "share to chunk end";
 
     // do merge
     status = AddChunk(chunk);
