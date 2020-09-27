@@ -10,17 +10,24 @@ const int DIM = 128;
 int main(int argc , char**argv) {
   
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
+
   if (!parameters.is_valid){
     return 0;
   }
+
+  if (parameters.collection_name_.empty()){
+	std::cout<< "should specify collection name!" << std::endl;
+	milvus_sdk::Utils::PrintHelp(argc, argv);
+	return 0;
+  }
+
   auto client = milvus::ConnectionImpl();
   milvus::ConnectParam connect_param;
   connect_param.ip_address = parameters.address_.empty() ? "127.0.0.1":parameters.address_;
   connect_param.port = parameters.port_.empty() ? "19530":parameters.port_ ;
   client.Connect(connect_param);
 
-  milvus::Status stat;
-  const std::string collectin_name = "collectionTest";
+  const std::string collection_name = parameters.collection_name_;
 
   // Create
   milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
@@ -34,15 +41,24 @@ int main(int argc , char**argv) {
   field_ptr2->field_type = milvus::DataType::VECTOR_FLOAT;
   field_ptr2->dim = DIM;
 
-  milvus::Mapping mapping = {collectin_name, {field_ptr1, field_ptr2}};
+  milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2}};
 
+  milvus::Status stat;
   stat = client.CreateCollection(mapping, "extra_params");
+  if (!stat.ok()){
+  	std::cout << "create collection failed!" << std::endl;
+	return 0;
+  }
+
+  std::cout << "create collection done!" << std::endl;
 
   // Get Collection info
   milvus::Mapping map;
-  client.GetCollectionInfo(collectin_name, map);
+  client.GetCollectionInfo(collection_name, map);
   for (auto &f : map.fields) {
     std::cout << f->field_name << ":" << int(f->field_type) << ":" << f->dim << "DIM" << std::endl;
   }
+
+  return 0;
 
 }

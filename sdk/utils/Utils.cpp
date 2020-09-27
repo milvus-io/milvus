@@ -472,10 +472,9 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
 
 
 void
-Utils::HAHE(int argc){
-
-	std::cout<<"FUCK"<<std::endl;
-
+Utils::PrintHelp(int argc, char* argv[]) {
+	std::string app_name = basename(argv[0]);
+	print_help(app_name);
 }
 
 
