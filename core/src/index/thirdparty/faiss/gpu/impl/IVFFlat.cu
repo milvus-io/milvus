@@ -543,13 +543,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // FIXME: we might ultimately be calling this function with inputs
   // from the CPU, these are unnecessary copies 
   
-  delete [] hostCoarseDistances;
-  delete [] hostCoarseIndices;
-  delete [] hostOutStoreDistances;
-  delete [] hostOutStoreIndices;
-  delete [] tmpIndices;
-  delete [] tmpDistances;
-  
   if (indicesOptions_ == INDICES_CPU) {
     HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
 
@@ -563,6 +556,15 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
     // GPU
     outIndices.copyFrom(hostOutIndices, stream);
   }
+/*
+  delete [] hostCoarseDistances;
+  delete [] hostCoarseIndices;
+  delete [] hostOutStoreDistances;
+  delete [] hostOutStoreIndices;
+  delete [] tmpIndices;
+  delete [] tmpDistances;
+*/
+
 }
 
 } } // namespace
