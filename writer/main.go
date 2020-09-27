@@ -45,11 +45,12 @@ func main() {
 	}
 
 	const Debug = true
-	const CountMsgNum = 1000 * 1000
+	const MB = 1024 * 1024
+	const timeInterval = time.Second * 5
+	const CountMsgNum = 10000 * 10
 
 	if Debug {
-		var printFlag = true
-		var startTime = true
+		var shouldBenchmark = false
 		var start time.Time
 
 		for {
@@ -57,22 +58,25 @@ func main() {
 				break
 			}
 			msgLength := wn.MessageClient.PrepareBatchMsg()
+			// wait until first 100,000 rows are successfully wrote
+			if wn.MsgCounter.InsertCounter >= CountMsgNum {
+				shouldBenchmark = true
+				start = time.Now()
+			}
 			if msgLength > 0 {
-				if startTime {
-					fmt.Println("============> Start Test <============")
-					startTime = false
-					start = time.Now()
-				}
-
 				wn.DoWriteNode(ctx, &wg)
 				fmt.Println("write node do a batch message, storage len: ", msgLength)
 			}
-
 			// Test insert time
-			if printFlag && wn.MsgCounter.InsertCounter >= CountMsgNum {
-				printFlag = false
+			// ignore if less than 1000 records per time interval
+			if shouldBenchmark && wn.MsgCounter.InsertCounter > 1000{
 				timeSince := time.Since(start)
-				fmt.Println("============> Do", wn.MsgCounter.InsertCounter, "Insert in", timeSince, "<============")
+				if timeSince >= timeInterval {
+					speed := wn.MsgCounter.InsertedRecordSize / timeInterval.Seconds() / MB
+					fmt.Println("============> Insert", wn.MsgCounter.InsertCounter,"records, cost:" , timeSince, "speed:", speed, "M/s", "<============")
+					wn.MsgCounter.InsertCounter = 0
+					start = time.Now()
+				}
 			}
 		}
 	}

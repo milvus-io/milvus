@@ -19,6 +19,7 @@ type SegmentIdInfo struct {
 
 type MsgCounter struct {
 	InsertCounter int64
+	InsertedRecordSize float64
 	DeleteCounter int64
 }
 
@@ -43,6 +44,7 @@ func NewWriteNode(ctx context.Context,
 	msgCounter := MsgCounter{
 		InsertCounter: 0,
 		DeleteCounter: 0,
+		InsertedRecordSize: 0,
 	}
 
 	return &WriteNode{
@@ -71,7 +73,10 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 	}
 
 	wn.MsgCounter.InsertCounter += int64(len(timeStamp))
-
+	if len(timeStamp) > 0 {
+		// assume each record is same size
+		wn.MsgCounter.InsertedRecordSize += float64(len(timeStamp) * len(data[0].RowsData.Blob))
+	}
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, binaryData, suffixKeys, timeStamp)
 	if error != nil {
 		fmt.Println("Can't insert data!")
