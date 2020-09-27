@@ -250,7 +250,7 @@ GpuIndexIVFFlat::searchImpl_(int n,
 
   if (!bitset) {
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_, nullptr, stream, {0});
-    index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
+    index_->query(queries, nprobe, k, outDistances, outLabels, distances, labels, bitsetDevice);
   } else {
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
                                              const_cast<uint8_t*>(bitset->data()), stream,
@@ -261,4 +261,5 @@ GpuIndexIVFFlat::searchImpl_(int n,
 
 
 } } // namespace
+
 
