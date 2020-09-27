@@ -188,12 +188,12 @@ GpuChecker::CheckGpuEnvironment() {
 
     char device_name[NVML_DEVICE_NAME_BUFFER_SIZE];
     int major, minor;
-    for (uint32_t i = 0; i < gpu_sets.size(); i++) {
+    for (auto gpu_id : gpu_sets) {
         nvmlDevice_t device;
-        nvmlresult = nvmlDeviceGetHandleByIndex(i, &device);
+        nvmlresult = nvmlDeviceGetHandleByIndex(gpu_id, &device);
         fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_handle_fail", nvmlresult = NVML_ERROR_UNKNOWN);
         if (NVML_SUCCESS != nvmlresult) {
-            err_msg = "Obtain GPU " + std::to_string(i) + " handle failed. " + NvmlErrorString(nvmlresult);
+            err_msg = "Obtain GPU " + std::to_string(gpu_id) + " handle failed. " + NvmlErrorString(nvmlresult);
             LOG_SERVER_FATAL_ << err_msg;
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
@@ -201,7 +201,7 @@ GpuChecker::CheckGpuEnvironment() {
         nvmlresult = nvmlDeviceGetName(device, device_name, NVML_DEVICE_NAME_BUFFER_SIZE);
         fiu_do_on("GpuChecker.CheckGpuEnvironment.nvml_get_device_name_fail", nvmlresult = NVML_ERROR_UNKNOWN);
         if (NVML_SUCCESS != nvmlresult) {
-            err_msg = "Obtain GPU " + std::to_string(i) + " name failed. " + NvmlErrorString(nvmlresult);
+            err_msg = "Obtain GPU " + std::to_string(gpu_id) + " name failed. " + NvmlErrorString(nvmlresult);
             LOG_SERVER_FATAL_ << err_msg;
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
@@ -212,7 +212,7 @@ GpuChecker::CheckGpuEnvironment() {
         fiu_do_on("GpuChecker.CheckGpuEnvironment.device_compute_capacity_fail",
                   status = Status(SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
-            err_msg = "Obtain GPU " + std::to_string(i) + " compute capacity failed. " + status.message();
+            err_msg = "Obtain GPU " + std::to_string(gpu_id) + " compute capacity failed. " + status.message();
             LOG_SERVER_FATAL_ << err_msg;
             std::cerr << err_msg << std::endl;
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
@@ -220,7 +220,7 @@ GpuChecker::CheckGpuEnvironment() {
         float cc = major + minor / 1.0f;
         fiu_do_on("GpuChecker.CheckGpuEnvironment.device_compute_capacity_too_weak", cc = GPU_MIN_COMPUTE_CAPACITY - 1);
         if (cc < GPU_MIN_COMPUTE_CAPACITY) {
-            err_msg = "GPU " + std::to_string(i) + " compute capability " + std::to_string(cc) +
+            err_msg = "GPU " + std::to_string(gpu_id) + " compute capability " + std::to_string(cc) +
                       " is too weak. Required least GPU compute capability is " +
                       std::to_string(GPU_MIN_COMPUTE_CAPACITY);
             LOG_SERVER_FATAL_ << err_msg;
@@ -228,7 +228,7 @@ GpuChecker::CheckGpuEnvironment() {
             return Status(SERVER_UNEXPECTED_ERROR, err_msg);
         }
 
-        LOG_SERVER_INFO_ << "GPU" << i << ": name=" << device_name << ", compute capacity=" << cc;
+        LOG_SERVER_INFO_ << "GPU" << gpu_id << ": name=" << device_name << ", compute capacity=" << cc;
     }
 
     nvmlresult = nvmlShutdown();
