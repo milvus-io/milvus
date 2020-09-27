@@ -22,16 +22,17 @@
 #include <random>
 
 const int N = 200000;
-const int DIM = 16;
-const int LOOP = 1;
+const int DIM = 128;
 
 const milvus::FieldValue GetData() {
   milvus::FieldValue value_map;
 
   std::vector<int32_t> int32_data;
+
   for (int i = 0; i < N; i++) {
     int32_data.push_back(i);
   }
+
   std::default_random_engine eng(42);
   std::normal_distribution<float> dis(0, 1);
   std::vector<milvus::VectorData> vector_data;
@@ -69,13 +70,10 @@ main(int argc, char* argv[]) {
         ids_array.push_back(i);
     }
 
-    milvus_sdk::TimeRecorder insert("insert");
-    for (int j = 0; j < LOOP; ++j) {
-        auto status = client.Insert("collection0", "tag01", data, ids_array);
-        if (!status.ok()){
-            return -1;
-        }
+    milvus_sdk::TimeRecorder insert("insert"); 
+    auto status = client.Insert("collection0", "tag01", data, ids_array);
+    if (!status.ok()){
+       return -1;
     }
-
     return 0;
 }
