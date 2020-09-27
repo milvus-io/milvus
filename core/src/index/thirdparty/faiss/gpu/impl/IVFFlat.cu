@@ -426,7 +426,7 @@ void Usort(float *dis, int *ind, int sz){
 
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
-               Tensor<uint8_t, 1, true>& bitset
+               Tensor<uint8_t, 1, true>& bitset,
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
@@ -510,8 +510,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
     fromDevice<float,2>(outDistances, tmpDistances, stream);
     fromDevice<long,2>(outIndices, tmpIndices, stream);
     if(i) {
-          for(int d=0;d<queries.getSize(0);d++) {
-            for(int m = 0;m<k;m++) {
+          for(int d = 0; d < queries.getSize(0); d ++) {
+            for(int m = 0; m < k; m ++) {
                 hostOutStoreDistances[d * 2 * k + k + m] = tmpDistances[d * k + m];
                 hostOutStoreIndices[d * 2 * k + k + m] = tmpIndices[d * k + m];
             }
@@ -541,10 +541,10 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
-  // from the CPU, these are unnecessary copies
-
-  delete [] hostOutIndices;
-  delete [] hostOutDistances;
+  // from the CPU, these are unnecessary copies 
+  
+  delete [] hostCoarseDistances;
+  delete [] hostCoarseIndices;
   delete [] hostOutStoreDistances;
   delete [] hostOutStoreIndices;
   delete [] tmpIndices;
