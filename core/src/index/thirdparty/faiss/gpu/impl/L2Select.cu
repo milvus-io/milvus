@@ -14,7 +14,6 @@
 #include <faiss/gpu/utils/DeviceTensor.cuh>
 #include <faiss/gpu/utils/CopyUtils.cuh>
 
-
 #include <faiss/impl/FaissAssert.h>
 
 #include <faiss/gpu/utils/DeviceDefs.cuh>
@@ -297,8 +296,8 @@ void runL2SelectMin(Tensor<T, 2, true>& productDistances,
 }
 
 
-void runL2SelMn(float* outDis_h,
-                int* outInd_h,
+void runL2SelMn(float* hostOutDistances,
+                int* hostOutIndices,
                 int startPos,
                 int curQuerySize,
                 int i,
@@ -363,20 +362,20 @@ void runL2SelMn(float* outDis_h,
       FAISS_ASSERT(false);
     }
 
-    float* tmp_d = new float[outDistances.getSize(0)*outDistances.getSize(1)];
-    int* tmp_i = new int[outDistances.getSize(0)*outDistances.getSize(1)];
-    fromDevice<float,2>(outDistances,tmp_d, stream);
-    fromDevice<int,2>(outIndices, tmp_i, stream);
+    float* tmpDistances = new float[outDistances.getSize(0)*outDistances.getSize(1)];
+    int* tmpIndices = new int[outDistances.getSize(0)*outDistances.getSize(1)];
+    fromDevice<float,2>(outDistances,tmpDistances, stream);
+    fromDevice<int,2>(outIndices, tmpIndices, stream);
 
-    for(int j=0;j<curQuerySize;j++) {
-        for(int m=0;m<k;m++) {
-            outDis_h[(startPos+j)*nprobe+i+m] = tmp_d[k*j+m];
-            outInd_h[(startPos+j)*nprobe+i+m] = tmp_i[k*j+m];
+    for(int j = 0; j < curQuerySize; j ++) {
+        for(int m = 0; m < k; m ++) {
+            hostOutDistances[(startPos + j) * nprobe + i + m] = tmpDistances[k * j + m];
+            hostOutIndices[(startPos + j) * nprobe + i + m] = tmpIndices[k * j + m];
         }
     }
 
-    delete [] tmp_d;
-    delete [] tmp_i;
+    delete [] tmpDistances;
+    delete [] tmpIndices;
 
   }
 

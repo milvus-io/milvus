@@ -20,8 +20,8 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     int k,
                     cudaStream_t stream);
 
-void runL2SelMn(float* outDis_h,
-                int* outInd_h,
+void runL2SelMn(float* hostOutDistances,
+                int* hostOutIndices,
                 int startPos,
                 int curQuerySize,
                 int i,

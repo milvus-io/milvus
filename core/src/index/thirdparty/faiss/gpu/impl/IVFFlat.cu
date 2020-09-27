@@ -26,7 +26,7 @@
 #include <numeric>
 
 #include <string.h>
-#include<iostream>
+#include <iostream>
 
 namespace faiss { namespace gpu {
 
@@ -426,11 +426,13 @@ void Usort(float *dis, int *ind, int sz){
 
 void
 IVFFlat::query(Tensor<float, 2, true>& queries,
+               Tensor<uint8_t, 1, true>& bitset
                int nprobe,
                int k,
                Tensor<float, 2, true>& outDistances,
-               Tensor<long, 2, true>& outIndices, float* distances,
-                             Index::idx_t* labels, Tensor<uint8_t, 1, true>& bitset) {
+               Tensor<long, 2, true>& outIndices, 
+               float* distances,
+               Index::idx_t* labels) {
   auto& mem = resources_->getMemoryManagerCurrentDevice();
   auto stream = resources_->getDefaultStreamCurrentDevice();
 
@@ -454,14 +456,14 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
 
-  float* coarseDis_h = new float[queries.getSize(0) * nprobe];
-  int* coarseInd_h = new int[queries.getSize(0) * nprobe];
-  float* outDistances_h = new float[queries.getSize(0) * k * 2];  
-  int* outIndices_h = new int[queries.getSize(0) * k * 2];
-  HostTensor<long, 2, true> hOutIndices(outIndices, stream);
-  HostTensor<float, 2, true> hOutDistances(outDistances, stream);
-  float* tmp_d = hOutDistances.data(); 
-  long* tmp_i = hOutIndices.data();
+  float* hostCoarseDistances = new float[queries.getSize(0) * nprobe];
+  int* hostCoarseIndices = new int[queries.getSize(0) * nprobe];
+  float* hostOutStoreDistances = new float[queries.getSize(0) * k * 2];  
+  int* hostOutStoreIndices = new int[queries.getSize(0) * k * 2];
+  HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
+  HostTensor<float, 2, true> hostOutDistances(outDistances, stream);
+  float* tmpDistances = hostOutDistances.data(); 
+  long* tmpIndices = hostOutIndices.data();
   const int nprobeTile = 8;
   
   for (int i = 0; i < nprobe; i += nprobeTile) {
@@ -474,8 +476,8 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                         metricArg_,
                         coarseDistances,
                         coarseIndices,
-                        coarseDis_h,
-                        coarseInd_h,
+                        hostCoarseDistances,
+                        hostCoarseIndices,
                         i,
                         curTile,
                         nprobe,
@@ -505,23 +507,23 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
                     outIndices,
                     resources_);
 
-    fromDevice<float,2>(outDistances, tmp_d, stream);
-    fromDevice<long,2>(outIndices, tmp_i, stream);
+    fromDevice<float,2>(outDistances, tmpDistances, stream);
+    fromDevice<long,2>(outIndices, tmpIndices, stream);
     if(i) {
           for(int d=0;d<queries.getSize(0);d++) {
             for(int m = 0;m<k;m++) {
-                outDistances_h[d * 2 * k + k + m] = tmp_d[d * k + m];
-                outIndices_h[d * 2 * k + k + m] = tmp_i[d * k + m];
+                hostOutStoreDistances[d * 2 * k + k + m] = tmpDistances[d * k + m];
+                hostOutStoreIndices[d * 2 * k + k + m] = tmpIndices[d * k + m];
             }
-            Usort(outDistances_h + k * 2 * d, outIndices_h + k * 2 * d, 2 * k);
+            Usort(hostOutStoreDistances + k * 2 * d, hostOutStoreIndices + k * 2 * d, 2 * k);
         }
     }
 
     else{
         for(int d = 0; d < queries.getSize(0); d ++) {
             for(int m = 0; m < k; m ++) {
-                outDistances_h[d * 2 * k + m] = tmp_d[d * k + m];
-                outIndices_h[d * 2 * k + m] = tmp_i[d * k + m];
+                hostOutStoreDistances[d * 2 * k + m] = tmpDistances[d * k + m];
+                hostOutStoreIndices[d * 2 * k + m] = tmpIndices[d * k + m];
             }
         }
     }
@@ -530,16 +532,24 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
     for(int d = 0; d < queries.getSize(0); d ++) {
         for(int m = 0; m < k; m ++) {
-            tmp_d[d * k + m] = outDistances_h[d * 2 * k + m];
-            tmp_i[d * k + m] = outIndices_h[d * 2 * k + m];
+            tmpDistances[d * k + m] = hostOutStoreDistances[d * 2 * k + m];
+            tmpIndices[d * k + m] = hostOutStoreIndices[d * 2 * k + m];
         }
     }
-    outIndices.copyFrom(hOutIndices, stream);
-    outDistances.copyFrom(hOutDistances, stream);
+    outIndices.copyFrom(hostOutIndices, stream);
+    outDistances.copyFrom(hostOutDistances, stream);
   // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
   // from the CPU, these are unnecessary copies
+
+  delete [] hostOutIndices;
+  delete [] hostOutDistances;
+  delete [] hostOutStoreDistances;
+  delete [] hostOutStoreIndices;
+  delete [] tmpIndices;
+  delete [] tmpDistances;
+  
   if (indicesOptions_ == INDICES_CPU) {
     HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
 

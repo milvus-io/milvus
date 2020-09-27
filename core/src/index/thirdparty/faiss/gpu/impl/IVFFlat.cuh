@@ -57,12 +57,13 @@ class IVFFlat : public IVFBase {
              Tensor<long, 2, true>& outIndices);
              
     void query(Tensor<float, 2, true>& queries,
-            int nprobe,
-            int k,
-            Tensor<float, 2, true>& outDistances,
-            Tensor<long, 2, true>& outIndices, 
-                             float* distances,
-                             Index::idx_t* labels, Tensor<uint8_t, 1, true>& bitset);
+                Tensor<uint8_t, 1, true>& bitset,
+                int nprobe,
+                int k,
+                Tensor<float, 2, true>& outDistances,
+                Tensor<long, 2, true>& outIndices, 
+                float* distances,
+                Index::idx_t* labels);
  private:
   /// Returns the size of our stored vectors, in bytes
   size_t getVectorMemorySize() const;
