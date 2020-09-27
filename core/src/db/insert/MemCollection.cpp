@@ -207,6 +207,9 @@ MemCollection::ApplyDeleteToFile() {
         for (auto i = 0; i < id_count; ++i) {
             auto id = uids_address[i];
             if (ids_to_check.find(id) != ids_to_check.end()) {
+                if (del_offsets.find(i) != del_offsets.end()) {
+                    continue;  // this id already deleted previously
+                }
                 del_offsets.insert(i);
                 new_deleted_ids.push_back(id);
             }
@@ -254,6 +257,7 @@ MemCollection::ApplyDeleteToFile() {
     return segments_op->Push();
 }
 
+// this method ensure the deleted-doc each offset is unique
 Status
 MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& operation,
                                             const snapshot::ScopedSnapshotT& ss, engine::SegmentVisitorPtr& seg_visitor,

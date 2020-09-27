@@ -11,6 +11,7 @@
 
 #include "segment/Utils.h"
 
+#include <algorithm>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -98,6 +99,56 @@ CopyDataWithRanges(const std::vector<uint8_t>& src_data, int64_t row_width, cons
     }
 
     return true;
+}
+
+void
+GetIDWithoutDeleted(const engine::IDNumbers& entity_ids, const std::vector<int32_t>& offsets,
+                    engine::IDNumbers& result_ids) {
+    result_ids.clear();
+    if (offsets.empty()) {
+        result_ids = entity_ids;
+        return;  // do nothing
+    }
+
+    // typically, the id array can be split into three parts
+    // assume there is a id array: [1, 2, 3, 4, 5, ... , 99, 100]
+    // and the offsets is: [20, 30, 40, 50], means 4 ids will be erased
+    // the id array can be split into three parts: [1 ~ 19], [20 ~ 50], [51 ~ 100]
+    // we can quickly copy the first part and third part
+    // for the second part, do a sort-merge to pick out ids that not been deleted
+    // this approach performance is better than std::vector::erase() method, especially for large number id array
+    std::vector<int32_t> delete_offsets = offsets;
+    std::sort(delete_offsets.begin(), delete_offsets.end());
+
+    int64_t left_count = entity_ids.size() - delete_offsets.size();
+    result_ids.resize(left_count);
+
+    int32_t min_delete_offset = *delete_offsets.begin();
+    int32_t max_delete_offset = *delete_offsets.rbegin();
+
+    // copy the first part
+    if (min_delete_offset > 0) {
+        memcpy(result_ids.data(), entity_ids.data(), min_delete_offset * sizeof(int64_t));
+    }
+
+    // copy the third part
+    if (max_delete_offset < entity_ids.size() - 1) {
+        int64_t copy_count = entity_ids.size() - 1 - max_delete_offset;
+        memcpy(result_ids.data() + left_count - copy_count, entity_ids.data() + max_delete_offset + 1,
+               copy_count * sizeof(int64_t));
+    }
+
+    // sort-merge the second part
+    for (int64_t k = min_delete_offset, n = 0, index = min_delete_offset; n < delete_offsets.size();) {
+        if (k == delete_offsets[n]) {
+            ++k;
+            ++n;
+        } else {
+            result_ids[index] = entity_ids[k];
+            ++index;
+            ++k;
+        }
+    }
 }
 
 }  // namespace segment

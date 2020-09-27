@@ -35,6 +35,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "segment/Utils.h"
 #include "server/ValidationUtil.h"
 #include "utils/Exception.h"
 #include "utils/StringHelpFunctions.h"
@@ -747,44 +748,13 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
     //        }
     //    }
 
-    if (deleted_docs_ptr == nullptr) {
-        return Status::OK();
+    if (deleted_docs_ptr) {
+        // sorted-merge entities id and deleted offsets
+        const std::vector<offset_t>& delete_offsets = deleted_docs_ptr->GetDeletedDocs();
+        IDNumbers result_ids;
+        segment::GetIDWithoutDeleted(entity_ids, delete_offsets, result_ids);
+        entity_ids.swap(result_ids);
     }
-
-    // sorted-merge entities id and deleted offsets
-    std::vector<offset_t> delete_offsets = deleted_docs_ptr->GetDeletedDocs();
-    std::sort(delete_offsets.begin(), delete_offsets.end());
-
-    int64_t left_count = entity_ids.size() - delete_offsets.size();
-    IDNumbers entity_ids_left;
-    entity_ids_left.resize(left_count);
-
-    int32_t min_delete_offset = *delete_offsets.begin();
-    int32_t max_delete_offset = *delete_offsets.rbegin();
-
-    if (min_delete_offset > 0) {
-        memcpy(entity_ids_left.data(), entity_ids.data(), min_delete_offset * sizeof(int64_t));
-    }
-
-    if (max_delete_offset < entity_ids.size() - 1) {
-        int64_t copy_count = entity_ids.size() - 1 - max_delete_offset;
-        memcpy(entity_ids_left.data() + left_count - copy_count, entity_ids.data() + max_delete_offset + 1,
-               copy_count * sizeof(int64_t));
-    }
-
-    for (int64_t k = min_delete_offset, n = 0, index = min_delete_offset;
-         k < entity_ids.size(), n < delete_offsets.size();) {
-        if (k == delete_offsets[n]) {
-            k++;
-            n++;
-        } else {
-            entity_ids_left[index] = entity_ids[k];
-            index++;
-            k++;
-        }
-    }
-
-    entity_ids.swap(entity_ids_left);
 
     return Status::OK();
 }
