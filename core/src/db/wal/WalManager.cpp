@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalManager.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
@@ -224,7 +225,7 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
 
             // id_files arrange id in assendent, we know which file should be read
             for (auto& pair : id_files) {
-                WalFilePtr file = std::make_shared<WalFile>();
+                WalFilePtr file = std::make_shared<WalFile>(sync_mode_);
                 file->OpenFile(pair.second.c_str(), WalFile::READ);
                 idx_t last_id = 0;
                 file->ReadLastOpId(last_id);
@@ -259,6 +260,8 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
 
 Status
 WalManager::Init() {
+    sync_mode_ = config.wal.sync_mode();
+
     try {
         using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
         DirectoryIterator iter(wal_path_);
@@ -312,7 +315,7 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
             std::lock_guard<std::mutex> lock(file_map_mutex_);
             WalFilePtr file = file_map_[operation->collection_name_];
             if (file == nullptr) {
-                file = std::make_shared<WalFile>();
+                file = std::make_shared<WalFile>(sync_mode_);
                 file_map_[operation->collection_name_] = file;
                 file->OpenFile(path, WalFile::APPEND_WRITE);
             } else if (!file->IsOpened() || file->ExceedMaxSize(chunk_size)) {
@@ -353,7 +356,7 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
             std::lock_guard<std::mutex> lock(file_map_mutex_);
             WalFilePtr file = file_map_[operation->collection_name_];
             if (file == nullptr) {
-                file = std::make_shared<WalFile>();
+                file = std::make_shared<WalFile>(sync_mode_);
                 file_map_[operation->collection_name_] = file;
                 file->OpenFile(path, WalFile::APPEND_WRITE);
             } else if (!file->IsOpened() || file->ExceedMaxSize(append_size)) {
