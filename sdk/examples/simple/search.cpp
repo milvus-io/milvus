@@ -19,7 +19,9 @@
 
 const int TOP_K = 10;
 const int LOOP = 1000;
+
 const int DIM = 128;
+
 std::default_random_engine eng(42);
 
 const milvus::VectorParam 

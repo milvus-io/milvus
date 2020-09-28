@@ -21,9 +21,10 @@
 #include "utils/TimeRecorder.h"
 #include <random>
 
-const int N = 6000000;
-const int DIM = 128;
-const int LOOP = 2000;
+int N = 6000000;
+int DIM = 128;
+int LOOP = 2000;
+
 int ID_START = 0;
 std::default_random_engine eng(42);
 
@@ -115,6 +116,7 @@ bool check_schema(const milvus::Mapping & map){
     return true;
 }
 
+
 int
 main(int argc, char* argv[]) {
   TestParameters parameters = milvus_sdk::Utils::ParseTestParameters(argc, argv);
@@ -127,6 +129,33 @@ main(int argc, char* argv[]) {
 	milvus_sdk::Utils::PrintHelp(argc, argv);
 	return 0;
   }
+
+
+  if (parameters.id_start_ < 0){
+	std::cout<< "id_start should >= 0 !" << std::endl;
+	milvus_sdk::Utils::PrintHelp(argc, argv);
+	return 0;
+  }
+
+  if (parameters.id_count_ <= 0){
+	std::cout<< "id_count should > 0 !" << std::endl;
+	milvus_sdk::Utils::PrintHelp(argc, argv);
+	return 0;
+  }
+
+  if (parameters.loop_ <= 0){
+	std::cout<< "loop should > 0 !" << std::endl;
+	milvus_sdk::Utils::PrintHelp(argc, argv);
+	return 0;
+  }
+
+  N = parameters.id_count_;
+  ID_START = parameters.id_start_;
+  LOOP = parameters.loop_;
+
+  std::cout<<"N: " << N << std::endl;
+  std::cout<<"ID_START: " << ID_START << std::endl;
+  std::cout<<"LOOP: " << LOOP << std::endl;
 
     const std::string collection_name = parameters.collection_name_;
     auto client = milvus::ConnectionImpl();
@@ -149,18 +178,26 @@ main(int argc, char* argv[]) {
     int per_count = N / LOOP;
     int failed_count = 0;
 
+    std::cout<<"PER_COUNT: " << per_count << std::endl;
+
     milvus_sdk::TimeRecorder insert_timer("insert");
-    for (int64_t i = 0; i < LOOP; i++) {
-	    std::vector<int64_t> ids_array;
-	    generate_ids(ids_array, per_count);
-	    auto data = GetData(per_count);
+    for (int64_t i = 0, j=0; j < N;) {
+	    i=j;
+	    j += per_count;
+	    if( j > N ) j = N;
+
+            std::vector<int64_t> ids_array;
+	    generate_ids(ids_array, j - i);
+	    auto data = GetData(j - i);
 	    insert_timer.Start();
 	    auto status = client.Insert(collection_name, "default", data, ids_array);
 	    if (!status.ok()){
 		failed_count += 1;
 	    }
 	    insert_timer.End();
+
     }
+
     if (failed_count > 0) {
 	    std::cout <<" test done, failed_count is :" << failed_count<< std::endl;
     }

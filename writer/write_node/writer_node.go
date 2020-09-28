@@ -2,14 +2,18 @@ package write_node
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
+	"log"
+	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type SegmentIdInfo struct {
@@ -20,8 +24,19 @@ type SegmentIdInfo struct {
 
 type MsgCounter struct {
 	InsertCounter int64
-	InsertedRecordSize float64
+	InsertTime    time.Time
+	// InsertedRecordSize float64
+
 	DeleteCounter int64
+	DeleteTime    time.Time
+}
+
+type InsertLog struct {
+	MsgLength              int
+	DurationInMilliseconds int64
+	InsertTime             time.Time
+	NumSince               int64
+	Speed                  float64
 }
 
 type WriteNode struct {
@@ -29,6 +44,7 @@ type WriteNode struct {
 	MessageClient *message_client.MessageClient
 	TimeSync      uint64
 	MsgCounter    *MsgCounter
+	InsertLogs    []InsertLog
 }
 
 func (wn *WriteNode) Close() {
@@ -44,8 +60,10 @@ func NewWriteNode(ctx context.Context,
 
 	msgCounter := MsgCounter{
 		InsertCounter: 0,
+		InsertTime:    time.Now(),
 		DeleteCounter: 0,
-		InsertedRecordSize: 0,
+		DeleteTime:    time.Now(),
+		// InsertedRecordSize: 0,
 	}
 
 	return &WriteNode{
@@ -53,6 +71,7 @@ func NewWriteNode(ctx context.Context,
 		MessageClient: &mc,
 		TimeSync:      timeSync,
 		MsgCounter:    &msgCounter,
+		InsertLogs:    make([]InsertLog, 0),
 	}, err
 }
 
@@ -73,11 +92,13 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
 
-	wn.MsgCounter.InsertCounter += int64(len(timeStamp))
-	if len(timeStamp) > 0 {
-		// assume each record is same size
-		wn.MsgCounter.InsertedRecordSize += float64(len(timeStamp) * len(data[0].RowsData.Blob))
-	}
+	wn.WriterLog(len(timeStamp))
+
+	//wn.MsgCounter.InsertCounter += int64(len(timeStamp))
+	//if len(timeStamp) > 0 {
+	//	// assume each record is same size
+	//	wn.MsgCounter.InsertedRecordSize += float64(len(timeStamp) * len(data[0].RowsData.Blob))
+	//}
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, binaryData, suffixKeys, timeStamp)
 	if error != nil {
 		fmt.Println("Can't insert data!")
@@ -134,14 +155,14 @@ func (wn *WriteNode) DoWriteNode(ctx context.Context) {
 	numInsertData := len(wn.MessageClient.InsertMsg)
 	numGoRoute := conf.Config.Writer.Parallelism
 	batchSize := numInsertData / numGoRoute
-	if numInsertData % numGoRoute != 0 {
+	if numInsertData%numGoRoute != 0 {
 		batchSize += 1
 	}
 	start := 0
 	end := 0
 	wg := sync.WaitGroup{}
 	for end < numInsertData {
-		if end + batchSize >= numInsertData {
+		if end+batchSize >= numInsertData {
 			end = numInsertData
 		} else {
 			end = end + batchSize
@@ -153,4 +174,55 @@ func (wn *WriteNode) DoWriteNode(ctx context.Context) {
 	wg.Wait()
 	wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg)
 	wn.UpdateTimeSync(wn.MessageClient.TimeSync())
+}
+
+func (wn *WriteNode) WriterLog(length int) {
+	wn.MsgCounter.InsertCounter += int64(length)
+	timeNow := time.Now()
+	duration := timeNow.Sub(wn.MsgCounter.InsertTime)
+	speed := float64(length) / duration.Seconds()
+
+	insertLog := InsertLog{
+		MsgLength:              length,
+		DurationInMilliseconds: duration.Milliseconds(),
+		InsertTime:             timeNow,
+		NumSince:               wn.MsgCounter.InsertCounter,
+		Speed:                  speed,
+	}
+
+	wn.InsertLogs = append(wn.InsertLogs, insertLog)
+	wn.MsgCounter.InsertTime = timeNow
+}
+
+func (wn *WriteNode) WriteWriterLog() {
+	f, err := os.OpenFile("/tmp/write_node_insert.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// write logs
+	for _, insertLog := range wn.InsertLogs {
+		insertLogJson, err := json.Marshal(&insertLog)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		writeString := string(insertLogJson) + "\n"
+		fmt.Println(writeString)
+
+		_, err2 := f.WriteString(writeString)
+		if err2 != nil {
+			log.Fatal(err2)
+		}
+	}
+
+	// reset InsertLogs buffer
+	wn.InsertLogs = make([]InsertLog, 0)
+
+	err = f.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("write log done")
 }

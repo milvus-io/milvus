@@ -93,7 +93,7 @@ func (node *QueryNode) QueryLog(length int) {
 }
 
 func (node *QueryNode) WriteQueryLog() {
-	f, err := os.OpenFile("/tmp/query_node.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("/tmp/query_node_insert.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
