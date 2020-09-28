@@ -65,6 +65,22 @@ IsBinaryMetricType(const std::string& metric_type) {
            (metric_type == knowhere::Metric::TANIMOTO);
 }
 
+bool
+IsFlatIndexType(const std::string& index_type) {
+    return (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+            index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
+}
+
+bool
+IsVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+}
+
+bool
+IsBinaryVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_BINARY;
+}
+
 engine::date_t
 GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;

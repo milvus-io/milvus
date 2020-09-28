@@ -307,7 +307,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         std::unordered_map<std::string, engine::DataType> attr_type;
 
         auto segment_visitor = segment_reader_->GetSegmentVisitor();
-        auto field_visitors = segment_visitor->GetFieldVisitors();
+        auto& field_visitors = segment_visitor->GetFieldVisitors();
         for (const auto& name : context.query_ptr_->index_fields) {
             auto field_visitor = segment_visitor->GetFieldVisitor(name);
             if (!field_visitor) {
