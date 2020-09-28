@@ -136,6 +136,7 @@ struct ServerConfig {
 
     struct WAL {
         Bool enable{false};
+        Bool sync_mode{false};
         Bool recovery_error_ignore{false};
         Integer buffer_size{0};
         String path{"unknown"};

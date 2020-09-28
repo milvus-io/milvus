@@ -21,6 +21,9 @@
 namespace milvus {
 namespace engine {
 
+WalFile::WalFile(bool sync) : sync_(sync) {
+}
+
 WalFile::~WalFile() {
     CloseFile();
 }
