@@ -192,6 +192,7 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     }
 
     // check input
+    LOG_ENGINE_DEBUG_ << "check input end";
     for (auto& iter : chunk_ptr->fixed_fields_) {
         if (iter.second == nullptr) {
             return Status(DB_ERROR, "illegal field: " + iter.first);
@@ -206,7 +207,7 @@ Segment::AddChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
             return Status(DB_ERROR, "illegal field: " + iter.first);
         }
     }
-
+    LOG_ENGINE_DEBUG_ << "begin to append chunk";
     // consume
     AppendChunk(chunk_ptr, from, to);
 
@@ -255,10 +256,12 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
         return Status(DB_ERROR, "Invalid input fot segment append");
     }
 
+    LOG_ENGINE_DEBUG_ << "begin to add count";
     int64_t add_count = to - from;
     if (add_count == 0) {
         add_count = 1;  // n ~ n also means append the No.n
     }
+    LOG_ENGINE_DEBUG_ << "begin to add fields";
     for (auto& width_iter : fixed_fields_width_) {
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
         if (input == chunk_ptr->fixed_fields_.end()) {
