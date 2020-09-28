@@ -20,4 +20,18 @@ void runL2SelectMin(Tensor<float, 2, true>& productDistances,
                     int k,
                     cudaStream_t stream);
 
+void runL2SelMn(float* hostOutDistances,
+                int* hostOutIndices,
+                int startPos,
+                int curQuerySize,
+                int i,
+                int nprobe,
+                Tensor<float, 2, true>& productDistances,
+                Tensor<float, 1, true>& centroidDistances,
+                Tensor<uint8_t, 1, true>& bitset,
+                Tensor<float, 2, true>& outDistances,
+                Tensor<int, 2, true>& outIndices,
+                int k,
+                cudaStream_t stream);
+
 } } // namespace

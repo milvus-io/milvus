@@ -35,6 +35,48 @@ void runL2Distance(GpuResources* resources,
                    // take shortcuts.
                    bool ignoreOutDistances = false);
 
+void runL2Dist(GpuResources* resources,
+                   Tensor<float, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   // can be optionally pre-computed; nullptr if we
+                   // have to compute it upon the call
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<float, 2, true>& queries,
+                   bool queriesRowMajor,
+                   Tensor<uint8_t, 1, true>& bitset,
+                   int k,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                    float* hostOutDistances,
+                    int* hostOutIndices,
+                    int pos,
+                    int curTile,
+                    int nprobe,
+
+                    bool ignoreOutDistances = false
+                    );
+
+void runDist(bool computeL2,
+            GpuResources* resources,
+            Tensor<float, 2, true>& centroids,
+            bool centroidsRowMajor,
+            Tensor<float, 1, true>* centroidNorms,
+            Tensor<float, 2, true>& queries,
+            bool queriesRowMajor,
+            Tensor<uint8_t, 1, true>& bitset,
+            int k,
+            Tensor<float, 2, true>& outDistances,
+            Tensor<int, 2, true>& outIndices,
+
+            float* hostOutDistances,
+            int* hostOutIndices,
+            int i,
+            int curTile,
+            int nprobe,
+
+            bool ignoreOutDistances);
+
 /// Calculates brute-force inner product distance between `vectors`
 /// and `queries`, returning the k closest results seen
 void runIPDistance(GpuResources* resources,
@@ -91,6 +133,7 @@ void bfKnnOnDevice(GpuResources* resources,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<int, 2, true>& outIndices,
                    bool ignoreOutDistances) {
+
   // We are guaranteed that all data arguments are resident on our preferred
   // `device` here, and are ordered wrt `stream`
 
@@ -212,5 +255,156 @@ void bfKnnOnDevice(GpuResources* resources,
   }
 }
 
+
+template <typename T>
+void bfKnnOnDev(GpuResources* resources,
+                   int device,
+                   cudaStream_t stream,
+                   Tensor<T, 2, true>& vectors,
+                   bool vectorsRowMajor,
+                   Tensor<float, 1, true>* vectorNorms,
+                   Tensor<T, 2, true>& queries,
+                   bool queriesRowMajor,
+                   Tensor<uint8_t, 1, true>& bitset,
+                   int k,
+                   faiss::MetricType metric,
+                   float metricArg,
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<int, 2, true>& outIndices,
+
+                    float* outDis_h,
+                    int* outInd_h,
+                    int i,
+                    int curTile,
+                    int nprobe,
+
+                   bool ignoreOutDistances) {
+
+  // We are guaranteed that all data arguments are resident on our preferred
+  // `device` here, and are ordered wrt `stream`
+
+  // L2 and IP are specialized to use GEMM and an optimized L2 + selection or
+  // pure k-selection kernel.
+  if ((metric == faiss::MetricType::METRIC_L2) ||
+      (metric == faiss::MetricType::METRIC_Lp &&
+       metricArg == 2)) {
+    runL2Dist(resources,
+                  vectors,
+                  vectorsRowMajor,
+                  vectorNorms,
+                  queries,
+                  queriesRowMajor,
+                  bitset,
+                  k,
+                  outDistances,
+                  outIndices,
+
+                  outDis_h,
+                  outInd_h,
+                  i,
+                  curTile,
+                  nprobe);
+  } else if (metric == faiss::MetricType::METRIC_INNER_PRODUCT) {
+    runIPDistance(resources,
+                  vectors,
+                  vectorsRowMajor,
+                  queries,
+                  queriesRowMajor,
+                  bitset,
+                  k,
+                  outDistances,
+                  outIndices);
+  } else {
+    //
+    // General pairwise distance kernel
+    //
+    // The general distance kernel does not have specializations for
+    // transpositions (NN, NT, TN); instead, the transposition is just handled
+    // upon data load for now, which could result in poor data loading behavior
+    // for NT / TN. This can be fixed at a later date if desired, but efficiency
+    // is low versus GEMM anyways.
+    //
+
+    Tensor<T, 2> tVectorsDimInnermost =
+      vectorsRowMajor ?
+      vectors.transposeInnermost(1) :
+      vectors.transposeInnermost(0);
+    Tensor<T, 2> tQueriesDimInnermost =
+      queriesRowMajor ?
+      queries.transposeInnermost(1) :
+      queries.transposeInnermost(0);
+
+    if ((metric == faiss::MetricType::METRIC_L1) ||
+        (metric == faiss::MetricType::METRIC_Lp &&
+         metricArg == 1)) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         L1Distance(),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_Lp &&
+               metricArg == -1) {
+      // A way to test L2 distance
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         L2Distance(),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_Lp) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         LpDistance(metricArg),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_Linf) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         LinfDistance(),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_Canberra) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         CanberraDistance(),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_BrayCurtis) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         BrayCurtisDistance(),
+                         outDistances,
+                         outIndices);
+    } else if (metric == faiss::MetricType::METRIC_JensenShannon) {
+      runGeneralDistance(resources,
+                         tVectorsDimInnermost,
+                         tQueriesDimInnermost,
+                         bitset,
+                         k,
+                         JensenShannonDistance(),
+                         outDistances,
+                         outIndices);
+    } else {
+      FAISS_THROW_FMT("unsupported metric type %d", metric);
+    }
+  }
+}
 
 } } // namespace

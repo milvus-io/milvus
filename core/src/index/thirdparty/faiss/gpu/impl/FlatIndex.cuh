@@ -67,6 +67,20 @@ class FlatIndex {
              float metricArg,
              Tensor<float, 2, true>& outDistances,
              Tensor<int, 2, true>& outIndices,
+             float* hostOutDistances,
+             int* hostOutIndices,
+             int i,
+             int curTile,
+             int nprobe,
+             bool exactDistance);
+
+  void query(Tensor<float, 2, true>& vecs,
+             Tensor<uint8_t, 1, true>& bitset,
+             int k,
+             faiss::MetricType metric,
+             float metricArg,
+             Tensor<float, 2, true>& outDistances,
+             Tensor<int, 2, true>& outIndices,
              bool exactDistance);
 
 #ifdef FAISS_USE_FLOAT16
