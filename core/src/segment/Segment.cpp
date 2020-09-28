@@ -263,12 +263,16 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     }
     LOG_ENGINE_DEBUG_ << "begin to add fields";
     for (auto& width_iter : fixed_fields_width_) {
+        LOG_ENGINE_DEBUG_ << "width_iter is: " << width_iter.first << "+" <<width_iter.second;
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
+        LOG_ENGINE_DEBUG_ << input;
         if (input == chunk_ptr->fixed_fields_.end()) {
+            LOG_ENGINE_DEBUG_ << "input==fixed_fields_end";
             continue;
         }
         auto& data = fixed_fields_[width_iter.first];
         if (data == nullptr) {
+            LOG_ENGINE_DEBUG_ << "data is null";
             fixed_fields_[width_iter.first] = input->second;
             continue;
         }
@@ -293,8 +297,11 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
                    add_bytes);
         }
     }
+    LOG_ENGINE_DEBUG_ << "add fields end";
 
     row_count_ += add_count;
+
+    LOG_ENGINE_DEBUG_ << "row count";
 
     return Status::OK();
 }
