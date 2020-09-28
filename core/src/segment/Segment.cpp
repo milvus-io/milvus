@@ -263,7 +263,7 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     }
     LOG_ENGINE_DEBUG_ << "begin to add fields";
     for (auto& width_iter : fixed_fields_width_) {
-        LOG_ENGINE_DEBUG_ << "width_iter is: " << width_iter.first << "+" <<width_iter.second;
+        LOG_ENGINE_DEBUG_ << "width_iter is: " << width_iter.first << "+" << width_iter.second;
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
         LOG_ENGINE_DEBUG_ << input;
         if (input == chunk_ptr->fixed_fields_.end()) {
@@ -282,17 +282,21 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
         int64_t previous_bytes = row_count_ * width_iter.second;
         int64_t target_bytes = previous_bytes + add_bytes;
         if (data->data_.size() < target_bytes) {
+            LOG_ENGINE_DEBUG_ << "if datasize<target. data size resize" << data->data_.size() << "+" << target_bytes;
             data->data_.resize(target_bytes);
         }
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
+            LOG_ENGINE_DEBUG_ << "if input == fixed end. data.data memset" << origin_bytes << "+" << target_bytes;
             memset(data->data_.data() + origin_bytes, 0, target_bytes - origin_bytes);
         } else {
             // complicate by 0
             if (origin_bytes < previous_bytes) {
+                LOG_ENGINE_DEBUG_ << "if ori < pre end. data.data memset" << origin_bytes << "+" << previous_bytes;
                 memset(data->data_.data() + origin_bytes, 0, previous_bytes - origin_bytes);
             }
             // copy input into this field
+            LOG_ENGINE_DEBUG_ << "data.data memcpy" << origin_bytes << "+" << add_bytes;
             memcpy(data->data_.data() + previous_bytes, input->second->data_.data() + from * width_iter.second,
                    add_bytes);
         }
