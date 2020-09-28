@@ -83,7 +83,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         LOG_ENGINE_ERROR_ << s.message();
 
         auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
-        build_job->FailedSegments().push_back(segment_id_);
+        build_job->MarkFailedSegment(segment_id_, stat);
 
         return s;
     }
@@ -111,7 +111,7 @@ BuildIndexTask::OnExecute() {
         execution_engine_ = nullptr;
 
         auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
-        build_job->FailedSegments().push_back(segment_id_);
+        build_job->MarkFailedSegment(segment_id_, status);
 
         return status;
     }

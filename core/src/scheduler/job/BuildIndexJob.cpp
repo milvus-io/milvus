@@ -10,11 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/job/BuildIndexJob.h"
+#include "db/SnapshotUtils.h"
+#include "db/Utils.h"
 #include "scheduler/task/BuildIndexTask.h"
+#include "utils/Log.h"
 
 #include <utility>
-
-#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
@@ -25,30 +26,23 @@ namespace {
 void
 WhichFieldsToBuild(const engine::snapshot::ScopedSnapshotT& snapshot, engine::snapshot::ID_TYPE segment_id,
                    std::vector<engine::TargetFields>& field_groups) {
-    auto field_names = snapshot->GetFieldNames();
     engine::TargetFields structured_fields;
-    for (auto& field_name : field_names) {
-        auto field = snapshot->GetField(field_name);
-        auto ftype = static_cast<engine::DataType>(field->GetFtype());
-        bool is_vector = (ftype == engine::DataType::VECTOR_FLOAT || ftype == engine::DataType::VECTOR_BINARY);
-        auto elements = snapshot->GetFieldElementsByField(field_name);
-        for (auto& element : elements) {
-            if (element->GetFEtype() != engine::FieldElementType::FET_INDEX) {
-                continue;  // only check index element
-            }
+    auto segment_visitor = engine::SegmentVisitor::Build(snapshot, segment_id);
+    auto& field_visitors = segment_visitor->GetFieldVisitors();
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        if (!FieldRequireBuildIndex(field_visitor)) {
+            continue;
+        }
 
-            auto element_file = snapshot->GetSegmentFile(segment_id, element->GetID());
-            if (element_file != nullptr) {
-                continue;  // index file has been created, no need to build index for this field
-            }
-
-            // index has been defined, but index file not yet created, this field need to be build index
-            if (is_vector) {
-                engine::TargetFields fields = {field_name};
-                field_groups.emplace_back(fields);
-            } else {
-                structured_fields.insert(field_name);
-            }
+        // index has been defined, but index file not yet created, this field need to be build index
+        auto& field = field_visitor->GetField();
+        bool is_vector = engine::utils::IsVectorType(field->GetFtype());
+        if (is_vector) {
+            engine::TargetFields fields = {field->GetName()};
+            field_groups.emplace_back(fields);
+        } else {
+            structured_fields.insert(field->GetName());
         }
     }
 
@@ -86,5 +80,18 @@ BuildIndexJob::Dump() const {
     ret.insert(base.begin(), base.end());
     return ret;
 }
+
+void
+BuildIndexJob::MarkFailedSegment(engine::snapshot::ID_TYPE segment_id, const Status& status) {
+    std::lock_guard<std::mutex> lock(failed_segments_mutex_);
+    failed_segments_[segment_id] = status;
+}
+
+SegmentFailedMap
+BuildIndexJob::GetFailedSegments() {
+    std::lock_guard<std::mutex> lock(failed_segments_mutex_);
+    return failed_segments_;
+}
+
 }  // namespace scheduler
 }  // namespace milvus
