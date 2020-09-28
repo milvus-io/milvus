@@ -249,6 +249,48 @@ Segment::Reserve(const std::vector<std::string>& field_names, int64_t count) {
 
     return Status::OK();
 }
+int64_t
+ParseLine(char* line) {
+    // This assumes that a digit will be found and the line ends in " Kb".
+    int i = strlen(line);
+    const char* p = line;
+    while (*p < '0' || *p > '9') {
+        p++;
+    }
+    line[i - 3] = '\0';
+    i = atoi(p);
+    return i;
+}
+
+int64_t
+GetProcessUsedMemory() {
+    try {
+        // Note: this value is in KB!
+        FILE* file = fopen("/proc/self/status", "r");
+        int64_t result = 0;
+        if (file) {
+            constexpr int64_t line_length = 128;
+            char line[line_length];
+
+            while (fgets(line, line_length, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    result = ParseLine(line);
+                    break;
+                }
+            }
+            fclose(file);
+        } else {
+            LOG_SERVER_ERROR_ << "Failed to read /proc/self/status";
+        }
+
+        // return value in Byte
+        return (result * KB);
+    } catch (std::exception& ex) {
+        std::string msg = "Failed to read /proc/self/status, reason: " + std::string(ex.what());
+        LOG_SERVER_ERROR_ << msg;
+        return 0;
+    }
+}
 
 Status
 Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
@@ -282,26 +324,31 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
         int64_t previous_bytes = row_count_ * width_iter.second;
         int64_t target_bytes = previous_bytes + add_bytes;
         if (data->data_.size() < target_bytes) {
-            LOG_ENGINE_DEBUG_ << "if datasize<target. data size resize" << data->data_.size() << "+" << target_bytes;
+            LOG_ENGINE_DEBUG_ << "if data_size<target. data size resize" << data->data_.size() << "+" << target_bytes;
             data->data_.resize(target_bytes);
+            LOG_ENGINE_DEBUG_ << "memory use" << GetProcessUsedMemory();
         }
         if (input == chunk_ptr->fixed_fields_.end()) {
             // this field is not provided, complicate by 0
             LOG_ENGINE_DEBUG_ << "if input == fixed end. data.data memset" << origin_bytes << "+" << target_bytes;
             memset(data->data_.data() + origin_bytes, 0, target_bytes - origin_bytes);
+            LOG_ENGINE_DEBUG_ << "memory use 1 " << GetProcessUsedMemory();
         } else {
             // complicate by 0
             if (origin_bytes < previous_bytes) {
                 LOG_ENGINE_DEBUG_ << "if ori < pre end. data.data memset" << origin_bytes << "+" << previous_bytes;
                 memset(data->data_.data() + origin_bytes, 0, previous_bytes - origin_bytes);
+                LOG_ENGINE_DEBUG_ << "memory use 2 " << GetProcessUsedMemory();
             }
             // copy input into this field
             LOG_ENGINE_DEBUG_ << "data.data memcpy" << origin_bytes << "+" << add_bytes;
             memcpy(data->data_.data() + previous_bytes, input->second->data_.data() + from * width_iter.second,
                    add_bytes);
+            LOG_ENGINE_DEBUG_ << "memory use 3 " << GetProcessUsedMemory();
         }
     }
     LOG_ENGINE_DEBUG_ << "add fields end";
+    LOG_ENGINE_DEBUG_ << "process end. memory usage " << GetProcessUsedMemory();
 
     row_count_ += add_count;
 
