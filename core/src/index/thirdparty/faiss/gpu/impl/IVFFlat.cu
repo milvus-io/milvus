@@ -456,10 +456,15 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
   // Find the `nprobe` closest lists; we can use int indices both
   // internally and externally
 
+  HostTensor<int, 2, true> hostOutStoreIndicesTensor ({queries.getSize(0), k * 2})
+  HostTensor<float, 2, true> hostOutStoreDistancesTensor ({queries.getSize(0), k * 2})
+
   float* hostCoarseDistances = new float[queries.getSize(0) * nprobe];
   int* hostCoarseIndices = new int[queries.getSize(0) * nprobe];
-  float* hostOutStoreDistances = new float[queries.getSize(0) * k * 2];  
-  int* hostOutStoreIndices = new int[queries.getSize(0) * k * 2];
+
+  float* hostOutStoreDistances = hostOutStoreDistancesTensor.data();  
+  int* hostOutStoreIndices = hostOutStoreIndicesTensor.data();
+
   HostTensor<long, 2, true> hostOutIndices(outIndices, stream);
   HostTensor<float, 2, true> hostOutDistances(outDistances, stream);
   float* tmpDistances = hostOutDistances.data(); 
