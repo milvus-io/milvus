@@ -158,12 +158,7 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
     }
 
     auto ftype = static_cast<engine::DataType>(field->GetFtype());
-    return IsVectorType(ftype);
-}
-
-bool
-IsVectorType(engine::DataType type) {
-    return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+    return utils::IsVectorType(ftype);
 }
 
 bool
@@ -173,12 +168,7 @@ IsBinaryVectorField(const engine::snapshot::FieldPtr& field) {
     }
 
     auto ftype = static_cast<engine::DataType>(field->GetFtype());
-    return IsBinaryVectorType(ftype);
-}
-
-bool
-IsBinaryVectorType(engine::DataType type) {
-    return type == engine::DataType::VECTOR_BINARY;
+    return utils::IsBinaryVectorType(ftype);
 }
 
 Status
@@ -380,6 +370,23 @@ DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id) {
     drop_seg_context.prev_segment = segment;
     auto drop_op = std::make_shared<snapshot::DropSegmentOperation>(drop_seg_context, ss);
     return drop_op->Push();
+}
+
+bool
+FieldRequireBuildIndex(const engine::SegmentFieldVisitorPtr& field_visitor) {
+    auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    if (element_visitor == nullptr) {
+        return false;  // index undefined
+    }
+    if (element_visitor->GetFile() != nullptr) {
+        return false;  // index already build
+    }
+    auto element = element_visitor->GetElement();
+    if (utils::IsFlatIndexType(element->GetTypeName())) {
+        return false;  // no need to build IDMAP
+    }
+
+    return true;
 }
 
 }  // namespace engine
