@@ -362,9 +362,9 @@ void runL2SelMn(float* hostOutDistances,
       FAISS_ASSERT(false);
     }
 
-    float* tmpDistances = new float[outDistances.getSize(0)*outDistances.getSize(1)];
-    int* tmpIndices = new int[outDistances.getSize(0)*outDistances.getSize(1)];
-    fromDevice<float,2>(outDistances,tmpDistances, stream);
+    float* tmpDistances = new float[outDistances.getSize(0) * outDistances.getSize(1)];
+    int* tmpIndices = new int[outDistances.getSize(0) * outDistances.getSize(1)];
+    fromDevice<float,2>(outDistances, tmpDistances, stream);
     fromDevice<int,2>(outIndices, tmpIndices, stream);
 
     for(int j = 0; j < curQuerySize; j ++) {

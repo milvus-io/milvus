@@ -559,8 +559,6 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
 
   delete [] hostCoarseDistances;
   delete [] hostCoarseIndices;
-  delete [] hostOutStoreDistances;
-  delete [] hostOutStoreIndices;
 
 }
 
