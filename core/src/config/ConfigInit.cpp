@@ -103,6 +103,7 @@ InitConfig() {
 
         /* wal */
         {"wal.enable", CreateBoolConfig("wal.enable", &config.wal.enable.value, true)},
+        {"wal.sync_mode", CreateBoolConfig("wal.sync_mode", &config.wal.sync_mode.value, false)},
         {"wal.recovery_error_ignore",
          CreateBoolConfig("wal.recovery_error_ignore", &config.wal.recovery_error_ignore.value, false)},
         {"wal.buffer_size",
