@@ -92,7 +92,7 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
 
-	wn.WriterLog(len(timeStamp))
+	//wn.WriterLog(len(data))
 
 	//wn.MsgCounter.InsertCounter += int64(len(timeStamp))
 	//if len(timeStamp) > 0 {
@@ -172,6 +172,7 @@ func (wn *WriteNode) DoWriteNode(ctx context.Context) {
 		start = end
 	}
 	wg.Wait()
+	wn.WriterLog(numInsertData)
 	wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg)
 	wn.UpdateTimeSync(wn.MessageClient.TimeSync())
 }
@@ -208,7 +209,7 @@ func (wn *WriteNode) WriteWriterLog() {
 		}
 
 		writeString := string(insertLogJson) + "\n"
-		fmt.Println(writeString)
+		//fmt.Println(writeString)
 
 		_, err2 := f.WriteString(writeString)
 		if err2 != nil {
@@ -224,5 +225,5 @@ func (wn *WriteNode) WriteWriterLog() {
 		log.Fatal(err)
 	}
 
-	fmt.Println("write log done")
+	fmt.Println("write write node log done")
 }

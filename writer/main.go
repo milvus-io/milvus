@@ -9,7 +9,6 @@ import (
 	"github.com/czs007/suvlim/writer/write_node"
 	"log"
 	"strconv"
-	"time"
 )
 
 func main() {
@@ -43,9 +42,6 @@ func main() {
 	}
 
 	const Debug = true
-	const MB = 1024 * 1024
-	const timeInterval = time.Second * 2
-	const CountMsgNum = 10000 * 10
 
 	if Debug {
 		//var shouldBenchmark = false
@@ -75,14 +71,14 @@ func main() {
 			//	start = time.Now()
 			//}
 
+			if wn.MsgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
+				wn.WriteWriterLog()
+				BaselineCounter = wn.MsgCounter.InsertCounter/CountInsertMsgBaseline
+			}
+
 			if msgLength > 0 {
 				wn.DoWriteNode(ctx)
 				fmt.Println("write node do a batch message, storage len: ", msgLength)
-			}
-
-			if wn.MsgCounter.InsertCounter/CountInsertMsgBaseline == BaselineCounter {
-				wn.WriteWriterLog()
-				BaselineCounter++
 			}
 
 			// Test insert time

@@ -274,14 +274,14 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			assert.NotEqual(nil, 0, timeRange.timestampMin)
 			assert.NotEqual(nil, 0, timeRange.timestampMax)
 
+			if node.msgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
+				node.WriteQueryLog()
+				BaselineCounter = node.msgCounter.InsertCounter/CountInsertMsgBaseline
+			}
+
 			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
 				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 				continue
-			}
-
-			if node.msgCounter.InsertCounter/CountInsertMsgBaseline == BaselineCounter {
-				node.WriteQueryLog()
-				BaselineCounter++
 			}
 
 			node.QueryNodeDataInit()
@@ -294,28 +294,28 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			//fmt.Println("DoInsertAndDelete Done")
 			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 		}
-	}
+	} else {
+		for {
+			var msgLen = node.PrepareBatchMsg()
+			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+			assert.NotEqual(nil, 0, timeRange.timestampMin)
+			assert.NotEqual(nil, 0, timeRange.timestampMax)
 
-	for {
-		var msgLen = node.PrepareBatchMsg()
-		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
-		assert.NotEqual(nil, 0, timeRange.timestampMin)
-		assert.NotEqual(nil, 0, timeRange.timestampMax)
+			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+				continue
+			}
 
-		if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+			node.QueryNodeDataInit()
+			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+			//fmt.Println("MessagesPreprocess Done")
+			node.WriterDelete()
+			node.PreInsertAndDelete()
+			//fmt.Println("PreInsertAndDelete Done")
+			node.DoInsertAndDelete()
+			//fmt.Println("DoInsertAndDelete Done")
 			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-			continue
 		}
-
-		node.QueryNodeDataInit()
-		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-		//fmt.Println("MessagesPreprocess Done")
-		node.WriterDelete()
-		node.PreInsertAndDelete()
-		//fmt.Println("PreInsertAndDelete Done")
-		node.DoInsertAndDelete()
-		//fmt.Println("DoInsertAndDelete Done")
-		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 	}
 	wg.Done()
 }
@@ -525,9 +525,10 @@ func (node *QueryNode) DoInsert(segmentID int64, wg *sync.WaitGroup) msgPb.Statu
 	records := node.insertData.insertRecords[segmentID]
 	offsets := node.insertData.insertOffset[segmentID]
 
+	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
+
 	node.QueryLog(len(ids))
 
-	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
