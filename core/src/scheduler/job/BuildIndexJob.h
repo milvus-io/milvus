@@ -29,6 +29,8 @@
 namespace milvus {
 namespace scheduler {
 
+using SegmentFailedMap = std::unordered_map<int64_t, Status>;
+
 class BuildIndexJob : public Job {
  public:
     explicit BuildIndexJob(const engine::snapshot::ScopedSnapshotT&, engine::DBOptions options,
@@ -45,10 +47,11 @@ class BuildIndexJob : public Job {
         return options_;
     }
 
-    engine::snapshot::IDS_TYPE&
-    FailedSegments() {
-        return failed_segment_ids_;
-    }
+    void
+    MarkFailedSegment(engine::snapshot::ID_TYPE segment_id, const Status& status);
+
+    SegmentFailedMap
+    GetFailedSegments();
 
  protected:
     void
@@ -58,7 +61,9 @@ class BuildIndexJob : public Job {
     engine::snapshot::ScopedSnapshotT snapshot_;
     engine::DBOptions options_;
     engine::snapshot::IDS_TYPE segment_ids_;
-    engine::snapshot::IDS_TYPE failed_segment_ids_;
+
+    SegmentFailedMap failed_segments_;
+    std::mutex failed_segments_mutex_;
 };
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;

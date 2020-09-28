@@ -56,7 +56,7 @@ SegmentWriter::Initialize() {
 
     segment_ptr_ = std::make_shared<engine::Segment>();
 
-    const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
+    auto& field_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         STATUS_CHECK(segment_ptr_->AddField(field));
