@@ -179,7 +179,6 @@ Utils::BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, 
     }
 
     int64_t row_num = to - from;
-    std::vector<int8_t> int8_data(row_num);
     std::vector<int64_t> int64_data(row_num);
     std::vector<float> float_data(row_num);
     std::vector<milvus::VectorData> entity_array;
@@ -192,14 +191,12 @@ Utils::BuildEntities(int64_t from, int64_t to, milvus::FieldValue& field_value, 
             vector_data.float_data[i] = (float)((k + 100) % (i + 1));
         }
 
-        int8_data[k - from] = 1;
         int64_data[k - from] = k;
         float_data[k - from] = (float)k + row_num;
 
         entity_array.emplace_back(vector_data);
         entity_ids.push_back(k);
     }
-    field_value.int8_value.insert(std::make_pair("field_3", int8_data));
     field_value.int64_value.insert(std::make_pair("field_1", int64_data));
     field_value.float_value.insert(std::make_pair("field_2", float_data));
     field_value.vector_value.insert(std::make_pair("field_vec", entity_array));
