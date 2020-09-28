@@ -556,14 +556,11 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
     // GPU
     outIndices.copyFrom(hostOutIndices, stream);
   }
-/*
+
   delete [] hostCoarseDistances;
   delete [] hostCoarseIndices;
   delete [] hostOutStoreDistances;
   delete [] hostOutStoreIndices;
-  delete [] tmpIndices;
-  delete [] tmpDistances;
-*/
 
 }
 
