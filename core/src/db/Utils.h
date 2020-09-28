@@ -31,6 +31,15 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 bool
 IsBinaryMetricType(const std::string& metric_type);
 
+bool
+IsFlatIndexType(const std::string& index_type);
+
+bool
+IsVectorType(engine::DataType type);
+
+bool
+IsBinaryVectorType(engine::DataType type);
+
 engine::date_t
 GetDate(const std::time_t& t, int day_delta = 0);
 engine::date_t

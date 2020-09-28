@@ -450,7 +450,7 @@ TEST_F(DBTest, VisitorTest) {
         ASSERT_FALSE(visitor->GetSegment()->IsActive());
 
         int file_num = 0;
-        auto field_visitors = visitor->GetFieldVisitors();
+        auto& field_visitors = visitor->GetFieldVisitors();
         for (auto& kv : field_visitors) {
             auto& field_visitor = kv.second;
             auto field_element_visitors = field_visitor->GetElementVistors();

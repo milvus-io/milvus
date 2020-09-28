@@ -255,8 +255,7 @@ ValidateDimension(int64_t dim, bool is_binary) {
 
 Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
-    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+    if (engine::utils::IsFlatIndexType(index_type)) {
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
@@ -396,8 +395,7 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
 
 Status
 ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type) {
-    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+    if (engine::utils::IsFlatIndexType(index_type)) {
         // pass
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         // binary

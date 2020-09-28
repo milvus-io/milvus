@@ -359,6 +359,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
     if (!utils::IsSameIndex(old_index, new_index)) {
         DropIndex(collection_name, field_name);
+
         WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
         // create field element for new index
@@ -366,6 +367,10 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         if (!status.ok()) {
             return status;
         }
+    }
+
+    if (engine::utils::IsFlatIndexType(index.index_type_)) {
+        return Status::OK();  // for IDMAP type, no need to create index
     }
 
     // step 3: merge segments before create index, since there could be some small segments just flushed
