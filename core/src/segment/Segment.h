@@ -143,6 +143,9 @@ class Segment {
         id_bloom_filter_ptr_ = ptr;
     }
 
+    int64_t
+    GetSize();
+
  private:
     FIELD_TYPE_MAP field_types_;
     FIELD_WIDTH_MAP fixed_fields_width_;

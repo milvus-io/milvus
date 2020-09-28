@@ -415,5 +415,29 @@ Segment::SetStructuredIndex(const std::string& field_name, const knowhere::Index
     return Status::OK();
 }
 
+int64_t
+Segment::GetSize() {
+    int64_t size = 0;
+    for (auto& pair : fixed_fields_) {
+        if (pair.second != nullptr) {
+            size += pair.second->Size();
+        }
+    }
+    for (auto& pair : variable_fields_) {
+        if (pair.second != nullptr) {
+            size += pair.second->Size();
+        }
+    }
+
+    if (deleted_docs_ptr_ != nullptr) {
+        size += deleted_docs_ptr_->Size();
+    }
+    if (id_bloom_filter_ptr_ != nullptr) {
+        size += id_bloom_filter_ptr_->Size();
+    }
+
+    return size;
+}
+
 }  // namespace engine
 }  // namespace milvus

@@ -22,6 +22,7 @@
 #include <set>
 
 #include "SegmentReader.h"
+#include "cache/CachePlaceholder.h"
 #include "codecs/Codec.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -230,7 +231,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // check conflict
-    int64_t src_id = 0, target_id = 0;
+    int64_t src_id = -1, target_id = -2;
     auto status = GetSegmentID(target_id);
     if (!status.ok()) {
         return status;
@@ -268,6 +269,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     recorder.RecordSection("load data");
 
     // the source segment may be used in search, we can't change its data, so copy a new segment for merging
+    cache::CachePlaceholder cache_placeholder(src_segment->GetSize());
     engine::SegmentPtr duplicated_segment = std::make_shared<engine::Segment>();
     src_segment->CopyOutRawData(duplicated_segment);
     if (src_deleted_docs) {
