@@ -265,7 +265,7 @@ Segment::AppendChunk(const DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
     for (auto& width_iter : fixed_fields_width_) {
         LOG_ENGINE_DEBUG_ << "width_iter is: " << width_iter.first << "+" << width_iter.second;
         auto input = chunk_ptr->fixed_fields_.find(width_iter.first);
-        LOG_ENGINE_DEBUG_ << "input is: " << input->first << "+" << input->second;
+        //LOG_ENGINE_DEBUG_ << "input is: " << input->first << "+" << input->second;
         if (input == chunk_ptr->fixed_fields_.end()) {
             LOG_ENGINE_DEBUG_ << "input==fixed_fields_end";
             continue;
