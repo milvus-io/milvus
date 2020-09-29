@@ -262,7 +262,7 @@ namespace NGT {
 
     // for milvus
     void
-    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, faiss::ConcurrentBitsetPtr& bitset) {
+    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, const faiss::ConcurrentBitsetPtr& bitset) {
         LeafNode& ln = *(LeafNode*)getNode(nid);
         rl.clear();
         ObjectDistance r;
