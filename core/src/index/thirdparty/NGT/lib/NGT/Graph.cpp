@@ -599,7 +599,7 @@ NeighborhoodGraph::setupSeeds(NGT::SearchContainer &sc, ObjectDistances &seeds, 
   }
 
   // for milvus
-  void NeighborhoodGraph::search(NGT::SearchContainer & sc, ObjectDistances & seeds, faiss::ConcurrentBitsetPtr & bitset)
+  void NeighborhoodGraph::search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::ConcurrentBitsetPtr & bitset)
   {
       if (sc.explorationCoefficient == 0.0)
       {

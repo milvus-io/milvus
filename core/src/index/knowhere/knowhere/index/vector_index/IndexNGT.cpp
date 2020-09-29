@@ -118,7 +118,7 @@ IndexNGT::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 #endif
 
 DatasetPtr
-IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -132,8 +132,6 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     NGT::Command::SearchParameter sp;
     sp.size = k;
-
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
@@ -157,7 +155,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         sc.setEdgeSize(sp.edgeSize);
 
         try {
-            index_->search(sc, blacklist);
+            index_->search(sc, bitset);
         } catch (NGT::Exception& err) {
             KNOWHERE_THROW_MSG("Query failed");
         }
