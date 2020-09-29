@@ -64,23 +64,32 @@ def args(request):
     ip = request.config.getoption("--ip")
     service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
-    args = {"ip": ip, "port": port, "service_name": service_name, "url": "http://%s:%s/" % (ip, port)}
+    url = "http://%s:%s/" % (ip, port)
+    client = MilvusClient(url)
+    args = {"ip": ip, "port": port, "service_name": service_name, "url": url, "client": client}
     return args
 
 
 @pytest.fixture(scope="function")
-def collection(request, args):
+def client(request, args):
+    client = args["client"]
+    return client
+
+
+@pytest.fixture(scope="function")
+def collection(request, client):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    client = MilvusClient(args["url"])
+    create_params = gen_default_fields()
     try:
-        client.create_collection(collection_name, gen_default_fields())
+        if not client.create_collection(collection_name, create_params):
+            pytest.exit(str(e))
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = client.list_collections()
-        for collection_name in collection_names:
-            client.drop_collection(collection_name, timeout=delete_timeout)
+        collections = client.list_collections()
+        for item in collections:
+            client.drop_collection(item["collection_name"])
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -88,35 +97,33 @@ def collection(request, args):
 
 # customised id
 @pytest.fixture(scope="function")
-def id_collection(request, args):
+def id_collection(request, client):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    client = MilvusClient(args["url"])
     try:
         client.create_collection(collection_name, gen_default_fields(auto_id=False))
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = client.list_collections()
-        for collection_name in collection_names:
-            client.drop_collection(collection_name, timeout=delete_timeout)
+        collections = client.list_collections()
+        for item in collections:
+            client.drop_collection(item["collection_name"])
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
 
 @pytest.fixture(scope="function")
-def binary_collection(request, args):
+def binary_collection(request, client):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
-    client = MilvusClient(args["url"])
     try:
         client.create_collection(collection_name, gen_default_fields(binary=True))
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = client.list_collections()
-        for collection_name in collection_names:
-            client.drop_collection(collection_name, timeout=delete_timeout)
+        collections = client.list_collections()
+        for item in collections:
+            client.drop_collection(item["collection_name"])
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -124,7 +131,7 @@ def binary_collection(request, args):
 
 # customised id
 @pytest.fixture(scope="function")
-def binary_id_collection(request, args):
+def binary_id_collection(request, client):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
     try:
@@ -132,9 +139,9 @@ def binary_id_collection(request, args):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collection_names = client.list_collections()
-        for collection_name in collection_names:
-            client.drop_collection(collection_name, timeout=delete_timeout)
+        collections = client.list_collections()
+        for item in collections:
+            client.drop_collection(item["collection_name"])
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
