@@ -14,7 +14,7 @@ class Request(object):
         self._url = url
 
     def _check_status(self, result):
-        logging.getLogger().info(result.text)
+        # logging.getLogger().info(result.text)
         if result.status_code not in [200, 201, 204]:
             return False
         if not result.text or "code" not in json.loads(result.text):
@@ -43,6 +43,8 @@ class Request(object):
             res_delete = requests.delete(self._url)
         return self._check_status(res_delete)
 
+    def push(self, data):
+        
 
 class MilvusClient(object):
     def __init__(self, url):
@@ -82,6 +84,29 @@ class MilvusClient(object):
         r = Request(url)
         try:
             res_drop = r.delete()
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def flush(self, collection_names):
+        url = self._url+url_system+'/task'
+        r = Request(url)
+        flush_params = {
+            "flush": {"collection_names": collection_names}}
+        try:
+            return r.put()
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def insert(self, collection_name, entities, tag=None):
+        url = self._url+url_collections+'/'+collection_name+'/entities'
+        r = Request(url)
+        insert_params = {"entities": entities}
+        if tag:
+            insert_params.update({"partition_tag": tag})
+        try:
+            return r.post(insert_params)
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
