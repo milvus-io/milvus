@@ -2,6 +2,7 @@ package write_node
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/czs007/suvlim/conf"
@@ -82,23 +83,19 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 	var suffixKeys []string
 	var binaryData [][]byte
 	var timeStamp []uint64
+	byteArr := make([]byte, 8)
+	intData := uint64(0)
+	binary.BigEndian.PutUint64(byteArr, intData)
 
 	for i := 0; i < len(data); i++ {
 		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
 		suffixKey = strconv.FormatUint(uint64(data[i].SegmentId), 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		suffixKeys = append(suffixKeys, suffixKey)
-		binaryData = append(binaryData, []byte(data[i].String()))
+		binaryData = append(binaryData, byteArr)
 		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
 
-	//wn.WriterLog(len(data))
-
-	//wn.MsgCounter.InsertCounter += int64(len(timeStamp))
-	//if len(timeStamp) > 0 {
-	//	// assume each record is same size
-	//	wn.MsgCounter.InsertedRecordSize += float64(len(timeStamp) * len(data[0].RowsData.Blob))
-	//}
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, binaryData, suffixKeys, timeStamp)
 	if error != nil {
 		fmt.Println("Can't insert data!")

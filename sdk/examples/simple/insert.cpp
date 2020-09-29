@@ -22,7 +22,7 @@
 #include <random>
 
 int N = 6000000;
-int DIM = 128;
+int DIM = 512;
 int LOOP = 2000;
 
 int ID_START = 0;

@@ -5,7 +5,7 @@
 #include <interface/ConnectionImpl.h>
 #include "utils/Utils.h"
 
-const int DIM = 128;
+const int DIM = 512;
 
 int main(int argc , char**argv) {
   
