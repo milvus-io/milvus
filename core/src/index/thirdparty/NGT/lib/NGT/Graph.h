@@ -679,7 +679,7 @@ namespace NGT {
 
       void search(NGT::SearchContainer &sc, ObjectDistances &seeds);
       // for milvus
-      void search(NGT::SearchContainer & sc, ObjectDistances & seeds, faiss::ConcurrentBitsetPtr & bitset);
+      void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::ConcurrentBitsetPtr & bitset);
 
 #ifdef NGT_GRAPH_READ_ONLY_GRAPH
       template <typename COMPARATOR, typename CHECK_LIST> void searchReadOnlyGraph(NGT::SearchContainer &sc, ObjectDistances &seeds);
