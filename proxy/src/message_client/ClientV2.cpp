@@ -192,7 +192,9 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
     mut_msg.set_collection_name(request.collection_name());
     mut_msg.set_partition_tag(request.partition_tag());
     uint64_t uid = request.entity_id_array(i);
-    auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
+    // auto channel_id = makeHash(&uid, sizeof(uint64_t)) % topic_num;
+    //TODO:: don't prove the correction
+    auto channel_id = this_thread;
     try {
       mut_msg.set_segment_id(segment_id(request.collection_name(), channel_id, timestamp));
       mut_msg.mutable_rows_data()->CopyFrom(request.rows_data(i));
