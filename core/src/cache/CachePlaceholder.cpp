@@ -19,7 +19,7 @@ namespace cache {
 
 CachePlaceholder::CachePlaceholder(int64_t size) {
     auto id = engine::SafeIDGenerator::GetInstance().GetNextIDNumber();
-    item_key_ = "Placehold_" + std::to_string(id);
+    item_key_ = "Placeholder_" + std::to_string(id);
     DataObjPtr mock_obj = std::make_shared<MockDataObj>(size);
     CpuCacheMgr::GetInstance().InsertItem(item_key_, mock_obj);
 }
