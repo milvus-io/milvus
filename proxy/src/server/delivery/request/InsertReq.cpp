@@ -25,6 +25,7 @@
 #include <vector>
 #include <unistd.h>
 #include "utils/CommonUtil.h"
+#include "nlohmann/json.hpp"
 
 #ifdef ENABLE_CPU_PROFILING
 #include <gperftools/profiler.h>
@@ -95,14 +96,21 @@ InsertReq::OnExecute() {
     ready_log_records += inserted_count;
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0;
     if (duration > interval) {
-      log << "[" << milvus::CommonUtil::TimeToString(start) << "] "
-          << "Insert "
-          << inserted_count << " records, "
-          << "size: " << inserted_size / MB << "MB, "
-          << "cost: " << duration << "s, "
-          << "throughput: "
-          << double(inserted_size) / duration / MB
-          << "M/s\n";
+      nlohmann::json json;
+      json["InsertTime"] = milvus::CommonUtil::TimeToString(start);
+      json["DurationInMilliseconds"] = duration * 1000;
+      json["SizeInMB"] =  inserted_size / MB;
+      json["ThroughputInMB"] = double(inserted_size) / duration / MB;
+      json["NumRecords"] = inserted_count;
+      file << json.dump() << std::endl;
+//      log << "[" << milvus::CommonUtil::TimeToString(start) << "] "
+//          << "Insert "
+//          << inserted_count << " records, "
+//          << "size: " << inserted_size / MB << "MB, "
+//          << "cost: " << duration << "s, "
+//          << "throughput: "
+//          << double(inserted_size) / duration / MB
+//          << "M/s\n";
       auto new_flag = ready_log_records / per_log_records;
       if (new_flag != log_flag) {
         log_flag = new_flag;

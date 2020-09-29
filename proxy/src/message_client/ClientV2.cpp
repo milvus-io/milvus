@@ -8,6 +8,7 @@
 #include <numeric>
 #include <algorithm>
 #include <unistd.h>
+#include "nlohmann/json.hpp"
 #include "log/Log.h"
 
 namespace milvus::message_client {
@@ -222,6 +223,14 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
 //    auto r = getcwd(buff, 128);
     auto path = std::string("/tmp");
     std::ofstream file(path + "/proxy2pulsar.benchmark", std::fstream::app);
+    nlohmann::json json;
+    json["InsertTime"] = milvus::CommonUtil::TimeToString(start);
+    json["DurationInMilliseconds"] = std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count();
+    json["SizeInMB"] =  size_inserted / 1024.0 / 1024.0;
+    json["ThroughputInMB"] = double(size_inserted) / std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() * 1000 / 1024.0 / 1024;
+    json["NumRecords"] = num_inserted;
+    file << json.dump() << std::endl;
+    /*
     file << "[" << milvus::CommonUtil::TimeToString(start) << "]"
         << " Insert " << num_inserted << " records, "
          << "size:" << size_inserted / 1024.0 / 1024.0 << "M, "
@@ -230,6 +239,7 @@ Status MsgClientV2::SendMutMessage(const milvus::grpc::InsertParam &request,
          << double(size_inserted) / std::chrono::duration_cast<std::chrono::milliseconds>(time_cost).count() * 1000 / 1024.0
              / 1024
          << "M/s" << std::endl;
+         */
     time_cost = stdclock::duration(0);
     num_inserted = 0;
     size_inserted = 0;
