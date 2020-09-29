@@ -24,6 +24,7 @@
 
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "cache/CachePlaceholder.h"
 #include "segment/Segment.h"
 #include "segment/SegmentReader.h"
 #include "storage/FSHandler.h"
@@ -108,6 +109,7 @@ class SegmentWriter {
     engine::SegmentVisitorPtr segment_visitor_;
     storage::FSHandlerPtr fs_ptr_;
     engine::SegmentPtr segment_ptr_;
+    cache::CachePlaceholderPtr cache_placeholder_; // the size of segment_ptr_ will be counted into cache
 
     std::string dir_root_;
     std::string dir_collections_;

@@ -14,6 +14,7 @@
 set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_snapshot.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_segment.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_cache.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_db.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_meta.cpp
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_ss_event.cpp

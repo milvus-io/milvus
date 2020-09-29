@@ -418,6 +418,8 @@ Segment::SetStructuredIndex(const std::string& field_name, const knowhere::Index
 int64_t
 Segment::GetSize() {
     int64_t size = 0;
+
+    // raw data size
     for (auto& pair : fixed_fields_) {
         if (pair.second != nullptr) {
             size += pair.second->Size();
@@ -429,6 +431,19 @@ Segment::GetSize() {
         }
     }
 
+    // index data size
+    for (auto& pair : vector_indice_) {
+        if (pair.second != nullptr) {
+            size += pair.second->Size();
+        }
+    }
+    for (auto& pair : structured_indice_) {
+        if (pair.second != nullptr) {
+            size += pair.second->Size();
+        }
+    }
+
+    // deleted-docs size and bloom-filter size
     if (deleted_docs_ptr_ != nullptr) {
         size += deleted_docs_ptr_->Size();
     }

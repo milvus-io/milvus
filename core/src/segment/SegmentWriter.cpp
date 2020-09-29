@@ -68,12 +68,18 @@ SegmentWriter::Initialize() {
 
 Status
 SegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr) {
-    return segment_ptr_->AddChunk(chunk_ptr);
+    auto status = segment_ptr_->AddChunk(chunk_ptr);
+    // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
+    cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
+    return status;
 }
 
 Status
 SegmentWriter::AddChunk(const engine::DataChunkPtr& chunk_ptr, int64_t from, int64_t to) {
-    return segment_ptr_->AddChunk(chunk_ptr, from, to);
+    auto status = segment_ptr_->AddChunk(chunk_ptr, from, to);
+    // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
+    cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
+    return status;
 }
 
 Status
@@ -306,7 +312,10 @@ SegmentWriter::RowCount() {
 
 Status
 SegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::knowhere::VecIndexPtr& index) {
-    return segment_ptr_->SetVectorIndex(field_name, index);
+    auto status = segment_ptr_->SetVectorIndex(field_name, index);
+    // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
+    cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
+    return status;
 }
 
 Status
@@ -373,7 +382,10 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
 Status
 SegmentWriter::SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index) {
-    return segment_ptr_->SetStructuredIndex(field_name, index);
+    auto status = segment_ptr_->SetStructuredIndex(field_name, index);
+    // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
+    cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
+    return status;
 }
 
 Status
