@@ -26,6 +26,7 @@ class DataGen {
     DataGen() {
         std::string cpu_flag;
         faiss::hook_init(cpu_flag);
+        std::cout << cpu_flag << std::endl;
     }
 
  protected:
