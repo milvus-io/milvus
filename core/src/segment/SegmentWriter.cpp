@@ -312,8 +312,13 @@ SegmentWriter::RowCount() {
 
 Status
 SegmentWriter::SetVectorIndex(const std::string& field_name, const milvus::knowhere::VecIndexPtr& index) {
+    if (index == nullptr) {
+        return Status(DB_ERROR, "index is null pointer");
+    }
+
     auto status = segment_ptr_->SetVectorIndex(field_name, index);
     // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
+    index->UpdateIndexSize();
     cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
     return status;
 }
@@ -382,6 +387,10 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
 
 Status
 SegmentWriter::SetStructuredIndex(const std::string& field_name, const knowhere::IndexPtr& index) {
+    if (index == nullptr) {
+        return Status(DB_ERROR, "index is null pointer");
+    }
+
     auto status = segment_ptr_->SetStructuredIndex(field_name, index);
     // re-calculate segment size and record it to cache manager, the previous placeholder will be erased
     cache_placeholder_ = std::make_shared<cache::CachePlaceholder>(segment_ptr_->GetSize());
