@@ -41,8 +41,8 @@ all_index_types = [
     "HNSW",
     # "NSG",
     "ANNOY",
-    # "RHNSW_PQ",
-    # "RHNSW_SQ",
+    "RHNSW_PQ",
+    "RHNSW_SQ",
     "BIN_FLAT",
     "BIN_IVF_FLAT"
 ]
@@ -56,8 +56,8 @@ default_index_params = [
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
-    # {"M": 48, "efConstruction": 500, "PQM": 16},
-    # {"M": 48, "efConstruction": 500},
+    {"M": 48, "efConstruction": 500, "PQM": 64},
+    {"M": 48, "efConstruction": 500},
     {"nlist": 128},
     {"nlist": 128}
 ]

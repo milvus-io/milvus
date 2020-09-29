@@ -14,6 +14,7 @@
 #include "db/Types.h"
 #include "utils/Status.h"
 
+#include <unistd.h>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -24,7 +25,7 @@ namespace engine {
 
 class WalFile {
  public:
-    WalFile() = default;
+    explicit WalFile(bool sync = false);
     virtual ~WalFile();
 
     bool
@@ -107,7 +108,12 @@ class WalFile {
     inline void
     Flush() {
         if (file_ && mode_ != OpenMode::READ) {
-            fflush(file_);
+            if (sync_) {
+                int fd = fileno(file_);
+                fsync(fd);
+            } else {
+                fflush(file_);
+            }
         }
     }
 
@@ -136,6 +142,11 @@ class WalFile {
     OpenMode mode_ = OpenMode::NA;
     int64_t file_size_ = 0;
     std::string file_path_;
+
+    // fflush() or fsync() to flush data into storage
+    // fflush() flush data to system kernel buffer, ensure data safety even milvus crashed
+    // fsync() flush data into to hard disk(much slower), ensure data safety even the machine shutdown or blackout
+    bool sync_ = false;
 };
 
 using WalFilePtr = std::shared_ptr<WalFile>;

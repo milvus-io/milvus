@@ -14,6 +14,7 @@
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
@@ -51,19 +52,16 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 
     auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
     if (field_name_.empty()) {
-        auto field_visitors = segment_visitor->GetFieldVisitors();
+        auto& field_visitors = segment_visitor->GetFieldVisitors();
         for (auto& pair : field_visitors) {
-            auto& field_visitor = pair.second;
-            auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-            if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            if (FieldRequireBuildIndex(pair.second)) {
                 segment_ids_.push_back(segment_commit->GetSegmentId());
                 break;
             }
         }
     } else {
         auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
-        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+        if (FieldRequireBuildIndex(field_visitor)) {
             segment_ids_.push_back(segment_commit->GetSegmentId());
         }
     }
@@ -85,7 +83,7 @@ SegmentsToMergeCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 
     // if any field has build index, don't merge this segment
     auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
-    auto field_visitors = segment_visitor->GetFieldVisitors();
+    auto& field_visitors = segment_visitor->GetFieldVisitors();
     bool has_index = false;
     for (auto& kv : field_visitors) {
         auto element_visitor = kv.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
@@ -123,8 +121,9 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     }
     segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
-    std::vector<int64_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uids));
+    engine::idx_t* uids_address = nullptr;
+    int64_t id_count = 0;
+    STATUS_CHECK(segment_reader.LoadUids(&uids_address, id_count));
 
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
@@ -143,14 +142,14 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         // check if id really exists in uids
-        auto found = std::find(uids.begin(), uids.end(), id);
-        if (found == uids.end()) {
+        auto found = std::find(uids_address, uids_address + id_count, id);
+        int64_t offset = found - uids_address;
+        if (offset >= id_count) {
             ++it;
-            continue;
+            continue;  // not found
         }
 
         // check if this id is deleted
-        auto offset = std::distance(uids.begin(), found);
         if (deleted_docs_ptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
@@ -247,7 +246,7 @@ LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
         segment_ptr->GetFieldType(field_name, ftype);
 
         knowhere::IndexPtr index_ptr;
-        if (IsVectorType(ftype)) {
+        if (utils::IsVectorType(ftype)) {
             knowhere::VecIndexPtr vec_index_ptr;
             segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
             index_ptr = vec_index_ptr;
