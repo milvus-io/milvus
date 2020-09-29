@@ -35,6 +35,8 @@ default_partition_name = "_default"
 default_tag = "1970_01_01"
 default_other_fields = ["INT64", "FLOAT"]
 
+default_unknown_cmd = "Unknown command"
+
 # TODO:
 # TODO: disable RHNSW_SQ/PQ in 0.11.0
 all_index_types = [
@@ -247,9 +249,9 @@ def gen_default_fields(auto_id=True, binary=False):
         {"field_name": "float", "field_type": "FLOAT"}
     ]
     if binary is False:
-        field = {"field_name": default_float_vec_field_name, "field_type": "VECTOR_FLOAT", "extra_params": {"dimension": default_dim}}
+        field = {"field_name": default_float_vec_field_name, "field_type": "VECTOR_FLOAT", "extra_params": {"dim": default_dim}}
     else:
-        field = {"field_name": default_binary_vec_field_name, "field_type": "BINARY_FLOAT", "extra_params": {"dimension": default_dim}}
+        field = {"field_name": default_binary_vec_field_name, "field_type": "BINARY_FLOAT", "extra_params": {"dim": default_dim}}
     fields.append(field)
     default_fields = {
         "fields": fields,
