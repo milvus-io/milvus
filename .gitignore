@@ -27,6 +27,7 @@ proxy/milvus
 proxy/cmake_build
 proxy/cmake-build-debug
 proxy/cmake-build-release
+proxy/cmake_build_release
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
 proxy/milvus/*
