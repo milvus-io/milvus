@@ -169,6 +169,10 @@ JobMgr::calculate_path(const ResourceMgrPtr& res_mgr, const TaskPtr& task) {
     auto dest = spec_label->resource();
     ShortestPath(src.lock(), dest.lock(), res_mgr, path);
     task->path() = Path(path, path.size() - 1);
+	for(int i=0;i<path.size();i++)
+    {
+        LOG_ENGINE_DEBUG_ <<spec_label->name() <<path[i];
+    }
 }
 
 }  // namespace scheduler

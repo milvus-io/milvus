@@ -39,7 +39,14 @@ macro(define_option_string name description default)
         set_property(CACHE ${name} PROPERTY STRINGS ${ARGN})
     endif ()
 endmacro()
+#-------------------------------------------------
+set_option_category("FPGA version")
 
+if (MILVUS_FPGA_VERSION)
+    define_option(KNOWHERE_FPGA_VERSION "Build GPU version" ON)
+else ()
+    define_option(KNOWHERE_FPGA_VERSION "Build GPU version" OFF)
+endif ()
 #----------------------------------------------------------------------
 set_option_category("GPU version")
 

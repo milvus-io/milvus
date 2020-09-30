@@ -117,7 +117,21 @@ const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
 const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ = "search_combine_nq";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT = "64";
-
+/* fpga resource config */
+const char* CONFIG_FPGA_RESOURCE = "fpga";
+const char* CONFIG_FPGA_RESOURCE_ENABLE = "enable";
+const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY = "cache_size";
+const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824"; /* 1 GB */
+const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
+const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
+#ifdef MILVUS_FPGA_VERSION
+const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT = "true";
+#else
+const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT = "false";
+#endif
+const char* CONFIG_FPGA_RESOURCE_DELIMITER = ",";
+const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES = "search_devices";
+const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES_DEFAULT = "fpga0";
 /* gpu resource config */
 const char* CONFIG_GPU_RESOURCE = "gpu";
 const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
@@ -1324,7 +1338,21 @@ Config::CheckMetricConfigPort(const std::string& value) {
     }
     return Status::OK();
 }
+#ifdef MILVUS_FPGA_VERSION
+Status
+Config::CheckFpgaResourceConfigEnable(const std::string& value) {
+    fiu_return_on("check_config_fpga_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
+   /* if (!ValidateStringIsBool(value).ok()) {
+        std::string msg = "Invalid fpga resource config: " + value + ". Possible reason: fpga.enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }*/
+    return Status::OK();
+}
+
+
+
+#endif
 /* cache config */
 Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
@@ -2051,7 +2079,71 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
     value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, CONFIG_GENERAL_METAURI_DEFAULT);
     return CheckGeneralConfigMetaURI(value);
 }
+#ifdef MILVUS_FPGA_VERSION
+Status
+Config::GetFpgaResourceConfigEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_ENABLE, CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT);
+    
+    STATUS_CHECK(CheckFpgaResourceConfigEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+Status
+Config::GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value){
+    value.push_back(0);
+    return Status::OK();
 
+}
+Status
+Config::GetFpgaResourceConfigCacheCapacity(int64_t& value) {
+    bool fpga_resource_enable = false;
+    STATUS_CHECK(GetFpgaResourceConfigEnable(fpga_resource_enable));
+    fiu_do_on("Config.GetFpgaResourceConfigCacheCapacity.diable_fpga_resource", fpga_resource_enable = false);
+    if (!fpga_resource_enable) {
+        std::string msg = "FPGA not supported. Possible reason: fpga.enable is set to false.";
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+    }
+    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_CACHE_CAPACITY,
+                                   CONFIG_FPGA_RESOURCE_CACHE_CAPACITY_DEFAULT);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
+    return Status::OK();
+}
+Status
+Config::GetFpgaResourceConfigCacheThreshold(float& value) {
+    bool fpga_resource_enable = false;
+    STATUS_CHECK(GetFpgaResourceConfigEnable(fpga_resource_enable));
+    fiu_do_on("Config.GetFpgaResourceConfigCacheThreshold.diable_fpga_resource", fpga_resource_enable = false);
+    if (!fpga_resource_enable) {
+        std::string msg = "FPGA not supported. Possible reason: fpga.enable is set to false.";
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+    }
+    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD,
+                                   CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD_DEFAULT);
+    STATUS_CHECK(CheckFpgaResourceConfigCacheThreshold(str));
+    value = std::stof(str);
+    return Status::OK();
+}
+Status
+Config::CheckFpgaResourceConfigCacheThreshold(const std::string& value) {
+    fiu_return_on("check_config_fpga_resource_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+   /* if (!ValidateStringIsFloat(value).ok()) {
+        std::string msg = "Invalid fpga cache threshold: " + value +
+                          ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    } else {
+        float fpga_cache_threshold = std::stof(value);
+        if (fpga_cache_threshold <= 0.0 || fpga_cache_threshold >= 1.0) {
+            std::string msg = "Invalid fpga cache threshold: " + value +
+                              ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+    }*/
+    return Status::OK();
+}
+#endif
 /* network config */
 Status
 Config::GetNetworkConfigBindAddress(std::string& value) {
