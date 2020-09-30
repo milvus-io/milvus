@@ -28,6 +28,7 @@ enum class LoadType {
     CPU2GPU,
     GPU2CPU,
     TEST,
+    CPU2FPGA
 };
 
 enum class TaskType {

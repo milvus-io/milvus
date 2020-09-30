@@ -22,6 +22,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
+#include"cache/FpgaCacheMgr.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
@@ -31,6 +32,12 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#ifdef MILVUS_FPGA_VERSION
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
+#include <faiss/index_io.h>
+#include"knowhere/index/vector_index/fpga/utils.h"
+#endif
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
@@ -168,7 +175,22 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         mode = knowhere::IndexMode::MODE_GPU;
     }
 #endif
-
+#ifdef MILVUS_FPGA_VERSION
+    server::Config& config = server::Config::GetInstance();
+    bool fpga_resource_enable = true;
+    
+    config.GetFpgaResourceConfigEnable(fpga_resource_enable);
+    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.fpga_res_disabled", fpga_resource_enable = false);
+    if(fpga_resource_enable)
+        LOG_ENGINE_DEBUG_ << "fpga enable indexmode::mode_fpga ";
+    else
+    {
+        LOG_ENGINE_DEBUG_ << "fpga not enable indexmode::mode_fpga ";
+    }
+    if (fpga_resource_enable) {
+        mode = knowhere::IndexMode::MODE_FPGA;
+    } 
+#endif
     fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
@@ -387,6 +409,14 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
+#ifdef MILVUS_FPGA_VERSION
+    auto  cache_index__ = std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    bool already_in_caches = (cache_index__ != nullptr);
+    if (already_in_caches) {
+      LOG_ENGINE_DEBUG_ << "fpga cache no need to load again" ;
+      return Status::OK();
+    }
+#endif
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
@@ -500,12 +530,13 @@ ExecutionEngineImpl::Load(bool to_cache) {
                             }
                         }
                     }
-
+#ifndef MILVUS_FPGA_VERSION
                     index_->SetBlacklist(concurrent_bitset_ptr);
 
                     std::vector<segment::doc_id_t> uids;
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
+#endif
                     LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
 
                     LOG_ENGINE_DEBUG_ << "Finished loading index file from segment " << segment_dir;
@@ -673,6 +704,58 @@ ExecutionEngineImpl::CopyToCpu() {
 #endif
 }
 
+Status
+    ExecutionEngineImpl::CopyToFpga() 
+{
+#ifdef MILVUS_FPGA_VERSION
+    auto  cache_index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    bool already_in_cache = (cache_index_ != nullptr);
+    if (!already_in_cache) {  
+    int64_t indexsize=index_->IndexSize();
+    std::shared_ptr<knowhere::IVFPQ> ivfpq =  std::static_pointer_cast<knowhere::IVFPQ>(index_);
+    std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga= std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
+    indexFpga->SetIndexSize(indexsize);
+    indexFpga->CopyIndexToFpga(); 
+    
+
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+    segment::SegmentPtr segment_ptr;
+    segment_reader_ptr->GetSegment(segment_ptr);
+    segment::DeletedDocsPtr deleted_docs_ptr;
+    auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+    if (!status.ok()) {
+        std::string msg = "Failed to load deleted docs from " + location_;
+        LOG_ENGINE_ERROR_ << msg;
+        return Status(DB_ERROR, msg);
+    }
+    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
+        std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+    for (auto& offset : deleted_docs) {
+        if (!concurrent_bitset_ptr->test(offset)) {
+            concurrent_bitset_ptr->set(offset);
+        }
+    }
+    index_=indexFpga;  
+    index_->SetBlacklist(concurrent_bitset_ptr);
+
+    std::vector<segment::doc_id_t> uids;
+    segment_reader_ptr->LoadUids(uids);
+    index_->SetUids(uids);
+    FpgaCache();
+    }
+    else
+    {
+        index_=cache_index_;
+    }
+    LOG_ENGINE_DEBUG_<<"copy to fpga time ";   
+#endif
+    return Status::OK();
+
+}
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
@@ -724,14 +807,14 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         to_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
-
+#ifndef MILVUS_FPGA_VERSION
     to_index->SetUids(uids);
     LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids().size() << "uids for " << location;
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
     }
-
+#endif
     LOG_ENGINE_DEBUG_ << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
@@ -1258,7 +1341,15 @@ ExecutionEngineImpl::Cache() {
     cpu_cache_mgr->InsertItem(location_, obj);
     return Status::OK();
 }
-
+Status
+ExecutionEngineImpl::FpgaCache() {
+#ifdef MILVUS_FPGA_VERSION
+    auto fpga_cache_mgr = milvus::cache::FpgaCacheMgr::GetInstance();
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
+    fpga_cache_mgr->InsertItem(location_, obj);
+#endif
+    return Status::OK();
+}
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
