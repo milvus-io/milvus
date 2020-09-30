@@ -33,10 +33,10 @@ SnapshotVisitor::SnapshotVisitor(snapshot::ID_TYPE collection_id) {
 }
 
 Status
-SnapshotVisitor::SegmentsToSearch(snapshot::IDS_TYPE& segment_ids) {
+SnapshotVisitor::SegmentsToSearch(const std::vector<std::string>& partitions, snapshot::IDS_TYPE& segment_ids) {
     STATUS_CHECK(status_);
 
-    auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, segment_ids);
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss_, partitions, segment_ids);
     handler->Iterate();
 
     return handler->GetStatus();
