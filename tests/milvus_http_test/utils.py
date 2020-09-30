@@ -262,12 +262,15 @@ def gen_default_fields(auto_id=True, binary=False):
 
 
 def gen_entities(nb, is_normal=False):
+    entities = []
     vectors = gen_vectors(nb, default_dim, is_normal)
-    entities = [
-        {"int64": [i for i in range(nb)]},
-        {"float": [float(i) for i in range(nb)]},
-        {default_float_vec_field_name: vectors}
-    ]
+    for i in range(nb):
+        entity = {
+            "int64": i,
+            "float": float(i),
+            default_float_vec_field_name: vectors[i]
+        }
+        entities.append(entity)
     return entities
 
 

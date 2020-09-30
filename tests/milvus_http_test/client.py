@@ -14,7 +14,7 @@ class Request(object):
         self._url = url
 
     def _check_status(self, result):
-        # logging.getLogger().info(result.text)
+        logging.getLogger().info(result.text)
         if result.status_code not in [200, 201, 204]:
             return False
         if not result.text or "code" not in json.loads(result.text):
@@ -43,11 +43,17 @@ class Request(object):
             res_delete = requests.delete(self._url)
         return self._check_status(res_delete)
 
-    def push(self, data):
-        
+    def put(self, data=None):
+        if data:
+            res_put = requests.put(self._url, data=json.dumps(data))
+        else:
+            res_put = requests.put(self._url)
+        return self._check_status(res_put)
+
 
 class MilvusClient(object):
     def __init__(self, url):
+        logging.getLogger().debug(url)
         self._url = url
 
     def create_collection(self, collection_name, fields):
@@ -88,13 +94,44 @@ class MilvusClient(object):
             logging.getLogger().error(str(e))
             return False
 
+    def info_collection(self, collection_name):
+        url = self._url+url_collections+'/'+collection_name
+        r = Request(url)
+        try:
+            return r.get()
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def stat_collection(self, collection_name):
+        url = self._url+url_collections+'/'+collection_name
+        r = Request(url)
+        try:
+            return r.get(data={"info": "stat"})
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def count_collection(self, collection_name):
+        return self.stat_collection(collection_name)["row_count"]
+
+    def create_partition(self, collection_name, tag):
+        url = self._url+url_collections+'/'+collection_name+'/partitions'
+        r = Request(url)
+        create_params = {"partition_tag": tag}
+        try:
+            return r.post(create_params)
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
     def flush(self, collection_names):
         url = self._url+url_system+'/task'
         r = Request(url)
         flush_params = {
             "flush": {"collection_names": collection_names}}
         try:
-            return r.put()
+            return r.put(data=flush_params)
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -111,6 +148,17 @@ class MilvusClient(object):
             logging.getLogger().error(str(e))
             return False
 
+    def delete(self, collection_name, ids):
+        url = self._url+url_collections+'/'+collection_name+'/entities'
+        r = Request(url)
+        delete_params = {
+            "delete": {"ids": ids}}
+        try:
+            res_drop = r.put(data=delete_params)
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
     def get_entity(self, ids):
         url = None
         r = Request(url)
@@ -119,6 +167,11 @@ class MilvusClient(object):
         except Exception as e:
             logging.getLogger().error(str(e))
             return False 
+
+    def clear_db(self):
+        collections = self.list_collections()
+        for item in collections:
+            self.drop_collection(item["collection_name"])
 
     def system_cmd(self, cmd):
         url = self._url+url_system+cmd

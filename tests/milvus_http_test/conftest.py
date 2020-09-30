@@ -87,9 +87,7 @@ def collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -105,9 +103,7 @@ def id_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -121,9 +117,7 @@ def binary_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -139,9 +133,7 @@ def binary_id_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
