@@ -96,9 +96,6 @@ auto SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_times
                 if (offset >= insert_barrier) {
                     continue;
                 }
-                if (offset >= insert_barrier) {
-                    continue;
-                }
                 if (record_.timestamps_[offset] < query_timestamp) {
                     Assert(offset < insert_barrier);
                     the_offset = std::max(the_offset, offset);
