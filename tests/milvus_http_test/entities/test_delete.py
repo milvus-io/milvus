@@ -51,7 +51,7 @@ class TestDeleteBase:
         '''
         ids = client.insert(collection, default_entity)
         client.flush([collection])
-        status = client.delete(collection, [0])
+        status = client.delete(collection, ["0"])
         assert status
 
     def test_delete_empty_collection(self, client, collection):
@@ -60,7 +60,7 @@ class TestDeleteBase:
         method: add entity and delete
         expected: status DELETED
         '''
-        status = client.delete(collection, [0])
+        status = client.delete(collection, ["0"])
         assert status
 
     def test_delete_entity_collection_not_existed(self, client, collection):
@@ -70,20 +70,8 @@ class TestDeleteBase:
         expected: error raised
         '''
         collection_new = gen_unique_str()
-        with pytest.raises(Exception) as e:
-            status = client.delete(collection_new, [0])
-
-    def test_delete_entity_collection_not_existed(self, client, collection):
-        '''
-        target: test delete entity, params collection_name not existed
-        method: add entity and delete
-        expected: error raised
-        '''
-        ids = client.insert(collection, default_entity)
-        client.flush([collection])
-        collection_new = gen_unique_str()
-        with pytest.raises(Exception) as e:
-            status = client.delete(collection_new, [0])
+        status = client.delete(collection_new, ["0"])
+        assert not status
 
     def test_insert_delete(self, client, collection):
         '''

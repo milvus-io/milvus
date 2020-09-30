@@ -151,10 +151,10 @@ class MilvusClient(object):
     def delete(self, collection_name, ids):
         url = self._url+url_collections+'/'+collection_name+'/entities'
         r = Request(url)
-        delete_params = {
-            "delete": {"ids": ids}}
+        delete_params = {"ids": ids}
         try:
-            res_drop = r.put(data=delete_params)
+            res_delete = r.delete(data=delete_params)
+            return res_delete
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
