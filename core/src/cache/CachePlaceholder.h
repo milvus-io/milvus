@@ -27,6 +27,11 @@ class CachePlaceholder {
     void
     Erase();
 
+    std::string
+    ItemKey() const {
+        return item_key_;
+    }
+
  private:
     class MockDataObj : public DataObj {
      public:

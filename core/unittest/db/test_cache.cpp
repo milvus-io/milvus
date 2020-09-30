@@ -35,6 +35,8 @@ TEST(CacheTest, CachePlaceholderTest) {
         CahcePlaceholderPtr holder = std::make_shared<CahcePlaceholder>(cache_size);
         ASSERT_EQ(cache_mgr.ItemCount(), 1);
         ASSERT_EQ(cache_mgr.CacheUsage(), cache_size);
+        auto key = holder->ItemKey();
+        ASSERT_FALSE(key.empty());
     }
 
     ASSERT_EQ(cache_mgr.ItemCount(), 0);
