@@ -4,6 +4,7 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.10.4 (TBD)
 ## Bug
+-   \#3906 Change DeleteTask state when loaded to avoid server crash.
 
 ## Feature
 
