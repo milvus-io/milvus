@@ -508,10 +508,11 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.ShowPartitions(collection_name, query_params, partition_list_dto);
+        String result;
+        auto status_dto = handler.ShowPartitions(collection_name, query_params, result);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
-                response = createDtoResponse(Status::CODE_200, partition_list_dto);
+                response = createResponse(Status::CODE_200, result);
                 break;
             case StatusCode::COLLECTION_NOT_EXISTS:
                 response = createDtoResponse(Status::CODE_404, status_dto);

@@ -6,12 +6,6 @@
 - [API Reference](#api-reference)
   - [`/state`](#state)
   - [`/devices`](#devices)
-  - [`/config/advanced` (GET)](#configadvanced-get)
-  - [`/config/advanced` (PUT)](#configadvanced-put)
-  - [`/config/advanced` (OPTIONS)](#configadvanced-options)
-  - [`/config/gpu_resources` (GET)](#configgpu_resources-get)
-  - [`/config/gpu_resources` (PUT)](#configgpu_resources-put)
-  - [`/config/gpu_resources` (OPTIONS)](#configgpu_resources-options)
   - [`/collections` (GET)](#collections-get)
   - [`/collections` (POST)](#collections-post)
   - [`/collections` (OPTIONS)](#collections-options)
@@ -106,242 +100,6 @@ $ curl -X GET "http://127.0.0.1:19121/devices" -H "accept: application/json"
 
 ##### Response
 
-```json
-{ "cpu": { "memory": 31 }, "gpus": { "GPU0": { "memory": 5 } } }
-```
-
-### `/config/advanced` (GET)
-
-Gets the values of parameters in `cache_config` and `engine_config` of the Milvus configuration file.
-
-#### Request
-
-| Request Component | Value                      |
-| ----------------- | -------------------------- |
-| Name              | `/config/advanced`         |
-| Header            | `accept: application/json` |
-| Body              | N/A                        |
-| Method            | GET                        |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/config/advanced" -H "accept: application/json"
-```
-
-##### Response
-
-```json
-{
-  "cpu_cache_capacity": 4,
-  "cache_insert_data": false,
-  "use_blas_threshold": 1100,
-  "gpu_search_threshold": 1000
-}
-```
-
-### `/config/advanced` (PUT)
-
-Updates the values of parameters in `cache_config` and `engine_config` of the Milvus configuration file.
-
-#### Request
-
-<table>
-<tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/config/advanced</code></pre></td></tr>
-<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
-<tr><td>Body</td><td><pre><code>
-{
-  "cpu_cache_capacity": integer($int64),
-  "cache_insert_data": boolean,
-  "use_blas_threshold": integer($int64),
-  "gpu_search_threshold": integer($int64)
-} 
-</code></pre> </td></tr>
-<tr><td>Method</td><td>PUT</td></tr>
-
-</table>
-
-> Note: `gpu_search_config` is available only in GPU-supported Milvus.
-
-##### Body Parameters
-
-| Parameter              | Description                                                                            | Required? |
-| ---------------------- | -------------------------------------------------------------------------------------- | --------- |
-| `cpu_cache_capacity`   | Value of `cpu_cache_capacity` in the Milvus configuration file. The default is 4.      | No        |
-| `cache_insert_data`    | Value of `cache_insert_data` in the Milvus configuration file. The default is false.   | No        |
-| `use_blas_threshold`   | Value of `use_blas_threshold` in the Milvus configuration file. The default is 1100.   | No        |
-| `gpu_search_threshold` | Value of `gpu_search_threshold` in the Milvus configuration file. The default is 1000. | No        |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X PUT "http://127.0.0.1:19121/config/advanced" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"cpu_cache_capacity\":4,\"cache_insert_data\":false,\"use_blas_threshold\":1100,\"gpu_search_threshold\":1000}"
-```
-
-##### Response
-
-```json
-{ "message": "OK", "code": 0 }
-```
-
-### `/config/advanced` (OPTIONS)
-
-Use this API for Cross-Origin Resource Sharing (CORS).
-
-#### Request
-
-| Request Component | Value              |
-| ----------------- | ------------------ |
-| Name              | `/config/advanced` |
-| Header            | N/A                |
-| Body              | N/A                |
-| Method            | OPTIONS            |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X OPTIONS "http://127.0.0.1:19121/config/advanced"
-```
-
-### `/config/gpu_resources` (GET)
-
-Gets the parameter values in `gpu_resource_config` of the Milvus configuration file.
-
-> Note: This method is available only for GPU-supported Milvus.
-
-#### Request
-
-| Request Component | Value                      |
-| ----------------- | -------------------------- |
-| Name              | `/config/gpu_resources`    |
-| Header            | `accept: application/json` |
-| Body              | N/A                        |
-| Method            | GET                        |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X GET "http://127.0.0.1:19121/config/gpu_resources" -H "accept: application/json"
-```
-
-##### Response
-
-```json
-{
-  "enable": true,
-  "cache_capacity": 1,
-  "search_resources": ["GPU0"],
-  "build_index_resources": ["GPU0"]
-}
-```
-
-### `/config/gpu_resources` (PUT)
-
-Updates the parameter values in `gpu_resource_config` of the Milvus configuration file.
-
-> Note: This method is available only for GPU-supported Milvus.
-
-#### Request
-
-<table>
-<tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/config/gpu_resources</code></pre></td></tr>
-<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
-<tr><td>Body</td><td><pre><code>
-{
-  "enable": boolean,
-  "cache_capacity": integer($int64),
-  "search_resources": [string],
-  "build_index_resources": [string]
-}
-</code></pre> </td></tr>
-<tr><td>Method</td><td>PUT</td></tr>
-
-</table>
-
-##### Body Parameters
-
-| Parameter               | Description                                                        | Required? |
-| ----------------------- | ------------------------------------------------------------------ | --------- |
-| `enable`                | Specifies whether to enable GPU resources.                         | Yes       |
-| `cache_capacity`        | Size of GPU memory per card used for cache in GBs.                 | Yes       |
-| `search_resources`      | GPU devices used for search computation, must be in format `gpux`. | Yes       |
-| `build_index_resources` | GPU devices used for index building, must be in format `gpux`.     | Yes       |
-
-#### Response
-
-| Status code | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| 200         | The request is successful.                                        |
-| 400         | The request is incorrect. Refer to the error message for details. |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X PUT "http://127.0.0.1:19121/config/gpu_resources" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"enable\":true,\"cache_capacity\":1,\"search_resources\":[\"GPU0\"],\"build_index_resources\":[\"GPU0\"]}"
-```
-
-##### Response
-
-```json
-{ "message": "OK", "code": 0 }
-```
-
-### `/config/gpu_resources` (OPTIONS)
-
-Use this API for Cross-Origin Resource Sharing (CORS).
-
-> Note: This method is available only for GPU-supported Milvus.
-
-#### Request
-
-| Request Component | Value                   |
-| ----------------- | ----------------------- |
-| Name              | `/config/gpu_resources` |
-| Header            | N/A                     |
-| Body              | N/A                     |
-| Method            | OPTIONS                 |
-
-#### Example
-
-##### Request
-
-```shell
-$ curl -X OPTIONS "http://127.0.0.1:19121/config/gpu_resources"
-```
-
 ### `/collections` (GET)
 
 Gets all collections starting from `offset` and ends with `page_size`.
@@ -381,21 +139,25 @@ $ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "acce
 
 ```json
 {
-    "collections": [
-        {
-            "collection_name": "test_collection",
-            "fields": [
-                {
-                "field_name": "field_vec",
-                "field_type": "VECTOR_FLOAT",
-                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-                "extra_params": {"dimension": 128, "metric_type":  "L2"}
-                }
-            ],
-            "segment_size": 1024
-        }
-    ],
-    "count": 58
+    "code": 0,
+    "message": "OK",
+    "data": {
+        "collections": [
+            {
+                "collection_name": "test_collection",
+                "fields": [
+                    {
+                    "name": "field_vec",
+                    "type": "VECTOR_FLOAT",
+                    "params": {"dime": 128}
+                    }
+                ],
+                "segment_size": 1024,
+                "auto_id": true
+            }
+        ],
+        "total": 58
+    }
 }
 ```
 
@@ -414,12 +176,13 @@ Creates a collection.
     "collection_name": "test_collection",
     "fields": [
         {
-            "field_name": "field_vec",
-            "field_type": "VECTOR_FLOAT",
-            "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-            "extra_params": {"dimension": 128, "metric_type":  "L2"}
+            "name": "field_vec",
+            "type": "VECTOR_FLOAT",
+            "params": {"dim": 128}
         } 
-    ]
+    ],
+    "segment_row_limit": 10000,
+    "auto_id": true
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -431,9 +194,7 @@ Creates a collection.
 | Parameter         | Description                                                                               | Required? |
 | ----------------- | ----------------------------------------------------------------------------------------- | --------- |
 | `collection_name` | The name of the collection to create, which must be unique within its database.           | Yes       |
-| `dimension`       | The dimension of the vectors that are to be inserted into the created collection.         | Yes       |
-| `index_file_size` | Threshold value that triggers index building for raw data files. The default is 1024.     | No        |
-| `metric_type`     | The method vector distances are compared in Milvus. The default is L2.                    | No        |
+| `fields`          | The fields of a collections.                                                              | Yes       |
 
 * Currently supported metrics include:
     - `L2` (Euclidean distance),
@@ -528,16 +289,18 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection" -H "accept: a
 {
     "code": 0,
     "message":"OK",
-    "collection_name": "test_collection",
-    "fields": [
-        {
-            "field_name": "field_vec",
-            "field_type": "VECTOR_FLOAT",
-            "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-            "extra_params": {"dimension": 128, "metric_type":  "L2"}
-        } 
-    ],
-    "row_count": 10000
+    "data": {
+      "collection_name": "test_collection",
+        "fields": [
+            {
+                "name": "field_vec",
+                "type": "VECTOR_FLOAT",
+                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
+                "params": {"dimension": 128, "metric_type":  "L2"}
+            } 
+        ],
+        "row_count": 10000
+    }
 }
 ```
 
@@ -551,21 +314,24 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection?info=stat" -H 
 
 ```json
 {
-  "partitions":[
-    {
-      "row_count":10000,
-      "segments":[
+  "code": 0,
+  "message": "OK",
+  "data": {
+      "partitions":[
         {
-          "data_size":5284922,
-          "index_name":"IVFFLAT",
-          "name":"1589468453228582000",
-          "row_count":10000
+          "row_count":10000,
+          "segments":[
+            {
+              "data_size":5284922,
+              "name":"1589468453228582000",
+              "row_count":10000
+            }
+          ],
+          "tag":"_default"
         }
       ],
-      "tag":"_default"
-    }
-  ],
-  "row_count":10000
+      "row_count":10000
+  }
 }
 
 ```
@@ -798,12 +564,16 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/partitions?off
 
 ```json
 {
-  "partitions": [
-    { "partition_tag": "_default" },
-    { "partition_tag": "test_tag" },
-    { "partition_tag": "test_2" }
-  ],
-  "count": 10
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "partitions": [
+        { "partition_tag": "_default" },
+        { "partition_tag": "test_tag" },
+        { "partition_tag": "test_2" }
+      ],
+      "total": 10
+  }
 }
 ```
 
@@ -892,7 +662,7 @@ Deletes a partition by tag.
 
 | Parameter         | Description                                         | Required? |
 | ----------------- | --------------------------------------------------- | --------- |
-| `collection_name` | Name of the collection that contains the partition. | Yes       |
+| `collection_name` | Name of the collection that contains the partition. | yes       |
 | `partition_tag`   | Tag of the partition to delete.                     | yes       |
 
 #### Response
@@ -918,18 +688,22 @@ The deletion is successful if no information is returned.
 
 ```json
 {
-    "entities": [
-        {
-            "__id": "1578989029645098000",
-            "field_1": 1,
-            "field_vec": []
-        },
-        {
-            "__id": "1578989029645098001",
-            "field_1": 2,
-            "field_vec": []
-        }
-    ]
+    "code": 0,
+    "message": "OK",
+    "data": {
+        "entities": [
+            {
+                "__id": "1578989029645098000",
+                "field_1": 1,
+                "field_vec": []
+            },
+            {
+                "__id": "1578989029645098001",
+                "field_1": 2,
+                "field_vec": []
+            }
+        ]
+    }
 }
 ```
 
@@ -977,7 +751,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ```json
 {
   "ids": ["1583727470435045000"],
-  "count": 10000
+  "total": 10000
 }
 ```
 
@@ -1053,29 +827,33 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "
 
 ```json
 {
-    "num": 2,
-    "result": [
-        [
-            {
-                "id": "1578989029645098000",
-                "distance": "0.000000",
-                "entity": {
-                    "field_1": 1,
-                    "field_2": 2,
-                    "field_vec": []
-                } 
-            },
-            {
-                "id": "1578989029645098001",
-                "distance": "0.010000",
-                "entity": {
-                    "field_1": 10,
-                    "field_2": 20,
-                    "field_vec": []
-                } 
-            }
+    "code": 0,
+    "message": "OK",
+    "data": {
+        "num": 2,
+        "result": [
+            [
+                {
+                    "id": "1578989029645098000",
+                    "distance": "0.000000",
+                    "entity": {
+                        "field_1": 1,
+                        "field_2": 2,
+                        "field_vec": []
+                    } 
+                },
+                {
+                    "id": "1578989029645098001",
+                    "distance": "0.010000",
+                    "entity": {
+                        "field_1": 10,
+                        "field_2": 20,
+                        "field_vec": []
+                    } 
+                }
+            ]
         ]
-    ]
+    }
 }
 ```
 
@@ -1117,18 +895,22 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/entities?ids=1
 
 ```json
 {
-    "entities": [
-        {
-            "__id": "1578989029645098000",
-            "field_1": 1,
-            "field_vec": []
-        },
-        {
-            "__id": "1578989029645098001",
-            "field_1": 2,
-            "field_vec": []
-        }
-    ]
+    "code": 0,
+    "message": "OK",
+    "data": {
+       "entities": [
+           {
+               "__id": "1578989029645098000",
+               "field_1": 1,
+               "field_vec": []
+           },
+           {
+               "__id": "1578989029645098001",
+               "field_1": 2,
+               "field_vec": []
+           }
+       ] 
+    }
 }
 ```
 
@@ -1171,18 +953,22 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/entities?page_
 
 ```json
 {
-    "entities": [
-        {
-            "__id": "1578989029645098000",
-            "field_1": 1,
-            "field_vec": []
-        },
-        {
-            "__id": "1578989029645098001",
-            "field_1": 2,
-            "field_vec": []
-        }
-    ]
+    "code": 0,
+    "message": "OK",
+    "data": {
+        "entities": [
+            {
+                "__id": "1578989029645098000",
+                "field_1": 1,
+                "field_vec": []
+            },
+            {
+                "__id": "1578989029645098001",
+                "field_1": 2,
+                "field_vec": []
+            }
+        ]
+    }
 }
 ```
 
@@ -1198,12 +984,10 @@ Delete entities
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
-  "delete": {
-     "ids": [$string]
-  }
+    "ids": [$string]
 }
 </code></pre> </td></tr>
-<tr><td>Method</td><td>PUT</td></tr>
+<tr><td>Method</td><td>DELETE</td></tr>
 </table>
 
 ##### Body Parameters
@@ -1257,7 +1041,7 @@ Inserts entities to a collection.
     "partition_tag": "part",
     "entities": {
         "__id": [123456789,234567]
-        "field_1": [1, 2]
+        "field_1": 1
         "field_vec": [[], []]
     }
 }
