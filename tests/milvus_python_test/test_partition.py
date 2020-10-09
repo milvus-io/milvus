@@ -292,8 +292,7 @@ class TestDropBase:
         connect.create_partition(collection, default_tag)
         connect.drop_partition(collection, default_tag)
         res = connect.list_partitions(collection)
-        tag_list = []
-        assert default_tag not in tag_list
+        assert default_tag not in res
 
     def test_drop_partition_tag_not_existed(self, connect, collection):
         '''

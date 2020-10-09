@@ -11,6 +11,7 @@ url_system = "system/"
 
 class Request(object):
     def __init__(self, url):
+        logging.getLogger().error(url)
         self._url = url
 
     def _check_status(self, result):
@@ -178,15 +179,24 @@ class MilvusClient(object):
             logging.getLogger().error(str(e))
             return False
 
-    def get_entity(self, ids):
-        url = None
+    '''
+    method: get entities by ids
+    '''
+    def get_entities(self, collection_name, ids):
+        ids = ','.join(str(i) for i in ids)
+        url = self._url+url_collections+'/'+collection_name+'/entities?ids='+ids
+        # url = self._url+url_collections+'/'+collection_name+'/entities'
         r = Request(url)
         try:
-            collections = r.get()["entity"]
+            collections = r.get()
+            return collections["entities"]
         except Exception as e:
             logging.getLogger().error(str(e))
             return False 
 
+    '''
+    method: drop all collections in db
+    '''
     def clear_db(self):
         collections = self.list_collections()
         for item in collections:
