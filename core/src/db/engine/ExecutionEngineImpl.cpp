@@ -132,7 +132,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
         segment_ptr->GetFieldType(name, field_type);
 
         bool index_exist = false;
-        if (field_type == DataType::VECTOR_FLOAT || field_type == DataType::VECTOR_BINARY) {
+        if (utils::IsVectorType(field_type)) {
             bool valid_metric_type = false;
             if (!context_.query_ptr_) {
                 valid_metric_type = true;
