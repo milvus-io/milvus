@@ -200,7 +200,8 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
     // just ensure segments listed in id order
     snapshot::IDS_TYPE segment_ids;
-    auto handler = std::make_shared<SegmentsToSearchCollector>(ss, segment_ids);
+    std::vector<std::string> partition_tags;
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss, partition_tags, segment_ids);
     handler->Iterate();
     std::sort(segment_ids.begin(), segment_ids.end());
 
