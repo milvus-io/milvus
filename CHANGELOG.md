@@ -50,6 +50,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3689 Client get stuck if drop collection during creating index
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
 -   \#3741 Inconsistent parameter names
+-   \#3811 c++ sdk segmentation fault
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -62,6 +63,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3463 Restrict the content of partition_tag
 -   \#3502 Normalize http method in web sever
 -   \#3732 Add new operation supporting multi-segments
+-   \#3828 Limit the number of insert requests processing concurrently.
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

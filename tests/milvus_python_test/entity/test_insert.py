@@ -1,3 +1,4 @@
+import logging
 import time
 import pdb
 import copy
@@ -6,21 +7,16 @@ from multiprocessing import Pool, Process
 import pytest
 from milvus import DataType
 from utils import *
+from constants import *
 
-collection_id = "test_insert"
 ADD_TIMEOUT = 60
-tag = "1970_01_01"
-insert_interval_time = 1.5
+uid = "test_insert"
 field_name = default_float_vec_field_name
-entity = gen_entities(1)
-raw_vector, binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-default_fields = gen_default_fields()
+binary_field_name = default_binary_vec_field_name
 default_single_query = {
     "bool": {
         "must": [
-            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, dim),"metric_type":"L2",
+            {"vector": {field_name: {"topk": 10, "query": gen_vectors(1, default_dim), "metric_type": "L2",
                                      "params": {"nprobe": 10}}}}
         ]
     }
@@ -85,9 +81,9 @@ class TestInsertBase:
         method: insert entity into a random named collection
         expected: error raised 
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
-            connect.insert(collection_name, entities)
+            connect.insert(collection_name, default_entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_drop_collection(self, connect, collection):
@@ -96,7 +92,7 @@ class TestInsertBase:
         method: insert vector and delete collection
         expected: no error raised
         '''
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         assert len(ids) == 1
         connect.drop_collection(collection)
 
@@ -107,7 +103,7 @@ class TestInsertBase:
         method: insert vector, sleep, and delete collection
         expected: no error raised 
         '''
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         assert len(ids) == 1
         connect.flush([collection])
         connect.drop_collection(collection)
@@ -119,10 +115,15 @@ class TestInsertBase:
         method: insert vector and build index
         expected: no error raised
         '''
-        ids = connect.insert(collection, entities)
-        assert len(ids) == nb
+        ids = connect.insert(collection, default_entities)
+        assert len(ids) == default_nb
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
+        info = connect.get_collection_info(collection)
+        fields = info["fields"]
+        for field in fields:
+            if field["field"] == field_name:
+                assert field["indexes"][0] == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
@@ -132,8 +133,13 @@ class TestInsertBase:
         expected: no error raised
         '''
         connect.create_index(collection, field_name, get_simple_index)
-        ids = connect.insert(collection, entities)
-        assert len(ids) == nb
+        ids = connect.insert(collection, default_entities)
+        assert len(ids) == default_nb
+        info = connect.get_collection_info(collection)
+        fields = info["fields"]
+        for field in fields:
+            if field["field"] == field_name:
+                assert field["indexes"][0] == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
@@ -142,27 +148,27 @@ class TestInsertBase:
         method: insert vector, sleep, and search collection
         expected: no error raised 
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
         assert res
 
-    def test_insert_segment_row_limit(self, connect, collection):
-        nb = segment_row_limit + 1
+    def test_insert_segment_row_count(self, connect, collection):
+        nb = default_segment_row_limit + 1
         res_ids = connect.insert(collection, gen_entities(nb))
         connect.flush([collection])
         assert len(res_ids) == nb
         stats = connect.get_collection_stats(collection)
         assert len(stats['partitions'][0]['segments']) == 2
         for segment in stats['partitions'][0]['segments']:
-            assert segment['row_count'] in [segment_row_limit, 1]
+            assert segment['row_count'] in [default_segment_row_limit, 1]
 
     @pytest.fixture(
         scope="function",
         params=[
             1,
-            6000
+            2000
         ],
     )
     def insert_count(self, request):
@@ -213,7 +219,7 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_limit": segment_row_limit,
+            "segment_row_limit": default_segment_row_limit,
             "auto_id": True
         }
         connect.create_collection(collection_name, fields)
@@ -234,10 +240,10 @@ class TestInsertBase:
         method: test insert vectors twice, use customize ids first, and then use no ids
         expected:  error raised
         '''
-        ids = [i for i in range(nb)]
-        res_ids = connect.insert(id_collection, entities, ids)
+        ids = [i for i in range(default_nb)]
+        res_ids = connect.insert(id_collection, default_entities, ids)
         with pytest.raises(Exception) as e:
-            res_ids_new = connect.insert(id_collection, entities)
+            res_ids_new = connect.insert(id_collection, default_entities)
 
     # TODO: assert exception && enable
     @pytest.mark.level(2)
@@ -249,7 +255,7 @@ class TestInsertBase:
         expected:  error raised
         '''
         with pytest.raises(Exception) as e:
-            res_ids = connect.insert(id_collection, entities)
+            res_ids = connect.insert(id_collection, default_entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_length_not_match_batch(self, connect, id_collection):
@@ -258,10 +264,10 @@ class TestInsertBase:
         method: create collection and insert vectors in it
         expected: raise an exception
         '''
-        ids = [i for i in range(1, nb)]
+        ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
         with pytest.raises(Exception) as e:
-            res_ids = connect.insert(id_collection, entities, ids)
+            res_ids = connect.insert(id_collection, default_entities, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_length_not_match_single(self, connect, collection):
@@ -270,10 +276,10 @@ class TestInsertBase:
         method: create collection and insert vectors in it
         expected: raise an exception
         '''
-        ids = [i for i in range(1, nb)]
+        ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
         with pytest.raises(Exception) as e:
-            res_ids = connect.insert(collection, entity, ids)
+            res_ids = connect.insert(collection, default_entity, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
@@ -288,10 +294,10 @@ class TestInsertBase:
         collection_name = gen_unique_str("test_collection")
         fields = {
             "fields": [filter_field, vector_field],
-            "segment_row_limit": segment_row_limit
+            "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields["fields"], nb, dim)
+        entities = gen_entities_by_fields(fields["fields"], nb, default_dim)
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res_count = connect.count_entities(collection_name)
@@ -304,9 +310,10 @@ class TestInsertBase:
         method: create collection and insert entities in it, with the partition_tag param
         expected: the collection row count equals to nq
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
-        assert len(ids) == nb
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        assert len(ids) == default_nb
+        assert connect.has_partition(collection, default_tag)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_with_ids(self, connect, id_collection):
@@ -315,9 +322,9 @@ class TestInsertBase:
         method: create collection and insert entities in it, with the partition_tag param
         expected: the collection row count equals to nq
         '''
-        connect.create_partition(id_collection, tag)
-        ids = [i for i in range(nb)]
-        res_ids = connect.insert(id_collection, entities, ids, partition_tag=tag)
+        connect.create_partition(id_collection, default_tag)
+        ids = [i for i in range(default_nb)]
+        res_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
         assert res_ids == ids
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -327,12 +334,12 @@ class TestInsertBase:
         method: create partition and insert info collection without tag params
         expected: the collection row count equals to nb
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
-        assert len(ids) == nb
+        assert len(ids) == default_nb
         res_count = connect.count_entities(collection)
-        assert res_count == nb
+        assert res_count == default_nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_not_existed(self, connect, collection):
@@ -343,7 +350,7 @@ class TestInsertBase:
         '''
         tag = gen_unique_str()
         with pytest.raises(Exception) as e:
-            ids = connect.insert(collection, entities, partition_tag=tag)
+            ids = connect.insert(collection, default_entities, partition_tag=tag)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_existed(self, connect, collection):
@@ -352,12 +359,12 @@ class TestInsertBase:
         method: create collection and insert entities in it repeatly, with the partition_tag param
         expected: the collection row count equals to nq
         '''
-        connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        connect.create_partition(collection, default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
-        assert res_count == 2 * nb
+        assert res_count == 2 * default_nb
 
     @pytest.mark.level(2)
     def test_insert_without_connect(self, dis_connect, collection):
@@ -367,7 +374,7 @@ class TestInsertBase:
         expected: raise exception
         '''
         with pytest.raises(Exception) as e:
-            ids = dis_connect.insert(collection, entities)
+            ids = dis_connect.insert(collection, default_entities)
 
     def test_insert_collection_not_existed(self, connect):
         '''
@@ -376,7 +383,7 @@ class TestInsertBase:
         expected: error raised
         '''
         with pytest.raises(Exception) as e:
-            ids = connect.insert(gen_unique_str("not_exist_collection"), entities)
+            ids = connect.insert(gen_unique_str("not_exist_collection"), default_entities)
 
     def test_insert_dim_not_matched(self, connect, collection):
         '''
@@ -384,8 +391,8 @@ class TestInsertBase:
         method: the entities dimension is half of the collection dimension, check the status
         expected: error raised
         '''
-        vectors = gen_vectors(nb, int(dim) // 2)
-        insert_entities = copy.deepcopy(entities)
+        vectors = gen_vectors(default_nb, int(default_dim) // 2)
+        insert_entities = copy.deepcopy(default_entities)
         insert_entities[-1]["values"] = vectors
         with pytest.raises(Exception) as e:
             ids = connect.insert(collection, insert_entities)
@@ -396,7 +403,7 @@ class TestInsertBase:
         method: update entity field name
         expected: error raised
         '''
-        tmp_entity = update_field_name(copy.deepcopy(entity), "int64", "int64new")
+        tmp_entity = update_field_name(copy.deepcopy(default_entity), "int64", "int64new")
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -407,7 +414,7 @@ class TestInsertBase:
         method: update entity field type
         expected: error raised
         '''
-        tmp_entity = update_field_type(copy.deepcopy(entity), "int64", DataType.FLOAT)
+        tmp_entity = update_field_type(copy.deepcopy(default_entity), "int64", DataType.FLOAT)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -418,7 +425,7 @@ class TestInsertBase:
         method: update entity field value
         expected: error raised
         '''
-        tmp_entity = update_field_value(copy.deepcopy(entity), DataType.FLOAT, 's')
+        tmp_entity = update_field_value(copy.deepcopy(default_entity), DataType.FLOAT, 's')
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -428,7 +435,7 @@ class TestInsertBase:
         method: add entity field
         expected: error raised
         '''
-        tmp_entity = add_field(copy.deepcopy(entity))
+        tmp_entity = add_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -438,7 +445,7 @@ class TestInsertBase:
         method: add entity vector field
         expected: error raised
         '''
-        tmp_entity = add_vector_field(nb, dim)
+        tmp_entity = add_vector_field(default_nb, default_dim)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -448,7 +455,7 @@ class TestInsertBase:
         method: remove entity field
         expected: error raised
         '''
-        tmp_entity = remove_field(copy.deepcopy(entity))
+        tmp_entity = remove_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -458,7 +465,7 @@ class TestInsertBase:
         method: remove entity vector field
         expected: error raised
         '''
-        tmp_entity = remove_vector_field(copy.deepcopy(entity))
+        tmp_entity = remove_vector_field(copy.deepcopy(default_entity))
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -468,7 +475,7 @@ class TestInsertBase:
         method: remove entity vector field
         expected: error raised
         '''
-        tmp_entity = copy.deepcopy(entity)
+        tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["values"]
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
@@ -479,7 +486,7 @@ class TestInsertBase:
         method: remove entity vector field
         expected: error raised
         '''
-        tmp_entity = copy.deepcopy(entity)
+        tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["type"]
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
@@ -490,7 +497,7 @@ class TestInsertBase:
         method: remove entity vector field
         expected: error raised
         '''
-        tmp_entity = copy.deepcopy(entity)
+        tmp_entity = copy.deepcopy(default_entity)
         del tmp_entity[-1]["field"]
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
@@ -512,7 +519,7 @@ class TestInsertBase:
 
         def insert(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
-            res_ids = milvus.insert(collection, entities)
+            res_ids = milvus.insert(collection, default_entities)
             milvus.flush([collection])
 
         for i in range(thread_num):
@@ -522,7 +529,7 @@ class TestInsertBase:
         for th in threads:
             th.join()
         res_count = milvus.count_entities(collection)
-        assert res_count == thread_num * nb
+        assert res_count == thread_num * default_nb
 
     # TODO: unable to set config
     @pytest.mark.level(2)
@@ -534,10 +541,100 @@ class TestInsertBase:
         '''
         delete_nums = 500
         disable_flush(connect)
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         res = connect.get_entity_by_id(collection, ids[:delete_nums])
         assert len(res) == delete_nums
         assert res[0] is None
+
+
+class TestInsertBinary:
+    @pytest.fixture(
+        scope="function",
+        params=gen_binary_index()
+    )
+    def get_binary_index(self, request):
+        request.param["metric_type"] = "JACCARD"
+        return request.param
+
+    def test_insert_binary_entities(self, connect, binary_collection):
+        '''
+        target: test insert entities in binary collection
+        method: create collection and insert binary entities in it
+        expected: the collection row count equals to nb
+        '''
+        ids = connect.insert(binary_collection, default_binary_entities)
+        assert len(ids) == default_nb
+        connect.flush()
+        assert connect.count_entities(binary_collection) == default_nb
+
+    def test_insert_binary_tag(self, connect, binary_collection):
+        '''
+        target: test insert entities and create partition tag
+        method: create collection and insert binary entities in it, with the partition_tag param
+        expected: the collection row count equals to nb
+        '''
+        connect.create_partition(binary_collection, default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        assert len(ids) == default_nb
+        assert connect.has_partition(binary_collection, default_tag)
+
+    def test_insert_binary_multi_times(self, connect, binary_collection):
+        '''
+        target: test insert entities multi times and final flush
+        method: create collection and insert binary entity multi and final flush
+        expected: the collection row count equals to nb
+        '''
+        for i in range(default_nb):
+            ids = connect.insert(binary_collection, default_binary_entity)
+            assert len(ids) == 1
+        connect.flush([binary_collection])
+        assert connect.count_entities(binary_collection) == default_nb
+
+    def test_insert_binary_after_create_index(self, connect, binary_collection, get_binary_index):
+        '''
+        target: test insert binary entities after build index
+        method: build index and insert entities
+        expected: no error raised
+        '''
+        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        ids = connect.insert(binary_collection, default_binary_entities)
+        assert len(ids) == default_nb
+        connect.flush([binary_collection])
+        info = connect.get_collection_info(binary_collection)
+        fields = info["fields"]
+        for field in fields:
+            if field["field"] == binary_field_name:
+                assert field["indexes"][0] == get_binary_index
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
+        '''
+        target: test build index insert after vector
+        method: insert vector and build index
+        expected: no error raised
+        '''
+        ids = connect.insert(binary_collection, default_binary_entities)
+        assert len(ids) == default_nb
+        connect.flush([binary_collection])
+        connect.create_index(binary_collection, binary_field_name, get_binary_index)
+        info = connect.get_collection_info(binary_collection)
+        fields = info["fields"]
+        for field in fields:
+            if field["field"] == binary_field_name:
+                assert field["indexes"][0] == get_binary_index
+
+    def test_insert_binary_search(self, connect, binary_collection):
+        '''
+        target: test search vector after insert vector after a while
+        method: insert vector, sleep, and search collection
+        expected: no error raised
+        '''
+        ids = connect.insert(binary_collection, default_binary_entities)
+        connect.flush([binary_collection])
+        query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, 1, metric_type="JACCARD")
+        res = connect.search(binary_collection, query)
+        logging.getLogger().debug(res)
+        assert res
 
 
 class TestInsertAsync:
@@ -636,7 +733,7 @@ class TestInsertAsync:
         expected: length of ids is equal to the length of vectors
         '''
         collection_new = gen_unique_str()
-        future = connect.insert(collection_new, entities, _async=True)
+        future = connect.insert(collection_new, default_entities, _async=True)
         with pytest.raises(Exception) as e:
             result = future.result()
 
@@ -679,15 +776,14 @@ class TestInsertMultiCollections:
         collection_num = 10
         collection_list = []
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            ids = connect.insert(collection_name, entities)
+            ids = connect.insert(collection_name, default_entities)
             connect.flush([collection_name])
-            assert len(ids) == nb
+            assert len(ids) == default_nb
             count = connect.count_entities(collection_name)
-            assert count == nb
-            connect.drop_collection(collection_name)
+            assert count == default_nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_drop_collection_insert_vector_another(self, connect, collection):
@@ -696,10 +792,10 @@ class TestInsertMultiCollections:
         method: delete collection_2 and insert vector to collection_1
         expected: row count equals the length of entities inserted
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.drop_collection(collection)
-        ids = connect.insert(collection_name, entity)
+        ids = connect.insert(collection_name, default_entity)
         connect.flush([collection_name])
         assert len(ids) == 1
 
@@ -710,10 +806,10 @@ class TestInsertMultiCollections:
         method: build index and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         connect.create_index(collection, field_name, get_simple_index)
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         connect.drop_collection(collection_name)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -723,9 +819,9 @@ class TestInsertMultiCollections:
         method: build index and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         connect.create_index(collection, field_name, get_simple_index)
         count = connect.count_entities(collection_name)
         assert count == 0
@@ -737,9 +833,9 @@ class TestInsertMultiCollections:
         method: build index and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         count = connect.count_entities(collection)
@@ -752,11 +848,11 @@ class TestInsertMultiCollections:
         method: search collection and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
         res = connect.search(collection, default_single_query)
         logging.getLogger().debug(res)
-        ids = connect.insert(collection_name, entity)
+        ids = connect.insert(collection_name, default_entity)
         connect.flush()
         count = connect.count_entities(collection_name)
         assert count == 1
@@ -768,9 +864,9 @@ class TestInsertMultiCollections:
         method: search collection and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         result = connect.search(collection_name, default_single_query)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -780,9 +876,9 @@ class TestInsertMultiCollections:
         method: search collection , sleep, and insert vector
         expected: status ok
         '''
-        collection_name = gen_unique_str(collection_id)
+        collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
-        ids = connect.insert(collection, entity)
+        ids = connect.insert(collection, default_entity)
         connect.flush([collection])
         result = connect.search(collection_name, default_single_query)
 
@@ -848,44 +944,44 @@ class TestInsertInvalid(object):
         expected: raise an exception
         '''
         entity_id = get_entity_id
-        ids = [entity_id for _ in range(nb)]
+        ids = [entity_id for _ in range(default_nb)]
         with pytest.raises(Exception):
-            connect.insert(id_collection, entities, ids)
+            connect.insert(id_collection, default_entities, ids)
 
     def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception):
-            connect.insert(collection_name, entity)
+            connect.insert(collection_name, default_entity)
 
     def test_insert_with_invalid_tag_name(self, connect, collection, get_tag_name):
         tag_name = get_tag_name
-        connect.create_partition(collection, tag)
+        connect.create_partition(collection, default_tag)
         if tag_name is not None:
             with pytest.raises(Exception):
-                connect.insert(collection, entity, partition_tag=tag_name)
+                connect.insert(collection, default_entity, partition_tag=tag_name)
         else:
-            connect.insert(collection, entity, partition_tag=tag_name)
+            connect.insert(collection, default_entity, partition_tag=tag_name)
 
     def test_insert_with_invalid_field_name(self, connect, collection, get_field_name):
         field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(entity), "int64", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(default_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     def test_insert_with_invalid_field_type(self, connect, collection, get_field_type):
         field_type = get_field_type
-        tmp_entity = update_field_type(copy.deepcopy(entity), 'float', field_type)
+        tmp_entity = update_field_type(copy.deepcopy(default_entity), 'float', field_type)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     def test_insert_with_invalid_field_value(self, connect, collection, get_field_int_value):
         field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(entity), 'int64', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(default_entity), 'int64', field_value)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
     def test_insert_with_invalid_field_vector_value(self, connect, collection, get_field_vectors_value):
-        tmp_entity = copy.deepcopy(entity)
+        tmp_entity = copy.deepcopy(default_entity)
         src_vector = tmp_entity[-1]["values"]
         src_vector[0][1] = get_field_vectors_value
         with pytest.raises(Exception):
@@ -948,21 +1044,19 @@ class TestInsertInvalidBinary(object):
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):
-        field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
+        tmp_entity = update_field_name(copy.deepcopy(default_binary_entity), "int64", get_field_name)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_value(self, connect, binary_collection, get_field_int_value):
-        field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(default_binary_entity), 'int64', get_field_int_value)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_vector_value(self, connect, binary_collection, get_field_vectors_value):
-        tmp_entity = copy.deepcopy(binary_entity)
+        tmp_entity = copy.deepcopy(default_binary_entity)
         src_vector = tmp_entity[-1]["values"]
         src_vector[0][1] = get_field_vectors_value
         with pytest.raises(Exception):
@@ -976,34 +1070,20 @@ class TestInsertInvalidBinary(object):
         expected: raise an exception
         '''
         entity_id = get_entity_id
-        ids = [entity_id for _ in range(nb)]
+        ids = [entity_id for _ in range(default_nb)]
         with pytest.raises(Exception):
-            connect.insert(binary_id_collection, binary_entities, ids)
-
-    @pytest.mark.level(2)
-    def test_insert_with_invalid_field_name(self, connect, binary_collection, get_field_name):
-        field_name = get_field_name
-        tmp_entity = update_field_name(copy.deepcopy(binary_entity), "int64", get_field_name)
-        with pytest.raises(Exception):
-            connect.insert(binary_collection, tmp_entity)
+            connect.insert(binary_id_collection, default_binary_entities, ids)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_type(self, connect, binary_collection, get_field_type):
         field_type = get_field_type
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_type)
-        with pytest.raises(Exception):
-            connect.insert(binary_collection, tmp_entity)
-
-    @pytest.mark.level(2)
-    def test_insert_with_invalid_field_value(self, connect, binary_collection, get_field_int_value):
-        field_value = get_field_int_value
-        tmp_entity = update_field_type(copy.deepcopy(binary_entity), 'int64', field_value)
+        tmp_entity = update_field_type(copy.deepcopy(default_binary_entity), 'int64', field_type)
         with pytest.raises(Exception):
             connect.insert(binary_collection, tmp_entity)
 
     @pytest.mark.level(2)
     def test_insert_with_invalid_field_vector_value(self, connect, binary_collection, get_field_vectors_value):
-        tmp_entity = copy.deepcopy(binary_entities)
+        tmp_entity = copy.deepcopy(default_binary_entities)
         src_vector = tmp_entity[-1]["values"]
         src_vector[1] = get_field_vectors_value
         with pytest.raises(Exception):

@@ -58,6 +58,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
             // no need to copy flat to gpu,
             //            stat = execution_engine_->CopyToGpu(device_id);
             //            type_str = "CPU2GPU:" + std::to_string(device_id);
+            gpu_device_id = device_id;
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -82,7 +83,7 @@ BuildIndexTask::OnLoad(milvus::scheduler::LoadType type, uint8_t device_id) {
         LOG_ENGINE_ERROR_ << s.message();
 
         auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
-        build_job->FailedSegments().push_back(segment_id_);
+        build_job->MarkFailedSegment(segment_id_, stat);
 
         return s;
     }
@@ -100,7 +101,7 @@ BuildIndexTask::OnExecute() {
 
     Status status;
     try {
-        status = execution_engine_->BuildIndex();
+        status = execution_engine_->BuildIndex(gpu_device_id);
     } catch (std::exception& e) {
         status = Status(DB_ERROR, e.what());
     }
@@ -110,7 +111,7 @@ BuildIndexTask::OnExecute() {
         execution_engine_ = nullptr;
 
         auto build_job = static_cast<scheduler::BuildIndexJob*>(job_);
-        build_job->FailedSegments().push_back(segment_id_);
+        build_job->MarkFailedSegment(segment_id_, status);
 
         return status;
     }

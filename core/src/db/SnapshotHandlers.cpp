@@ -14,11 +14,13 @@
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SegmentReader.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <unordered_map>
 #include <utility>
@@ -27,13 +29,35 @@ namespace milvus {
 namespace engine {
 
 ///////////////////////////////////////////////////////////////////////////////
-SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
-    : BaseT(ss), segment_ids_(segment_ids) {
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss,
+                                                     const std::vector<std::string>& partitions,
+                                                     snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), partitions_(partitions), segment_ids_(segment_ids) {
 }
 
 Status
 SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    segment_ids_.push_back(segment_commit->GetSegmentId());
+    auto p_id = segment_commit->GetPartitionId();
+    auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
+    auto& p_name = p_ptr->GetName();
+
+    /* check partition match pattern */
+    bool match = false;
+    if (partitions_.empty()) {
+        match = true;
+    } else {
+        for (auto& pattern : partitions_) {
+            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                match = true;
+                break;
+            }
+        }
+    }
+
+    if (match) {
+        segment_ids_.push_back(segment_commit->GetSegmentId());
+    }
+
     return Status::OK();
 }
 
@@ -51,19 +75,16 @@ SegmentsToIndexCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 
     auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
     if (field_name_.empty()) {
-        auto field_visitors = segment_visitor->GetFieldVisitors();
+        auto& field_visitors = segment_visitor->GetFieldVisitors();
         for (auto& pair : field_visitors) {
-            auto& field_visitor = pair.second;
-            auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-            if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+            if (FieldRequireBuildIndex(pair.second)) {
                 segment_ids_.push_back(segment_commit->GetSegmentId());
                 break;
             }
         }
     } else {
         auto field_visitor = segment_visitor->GetFieldVisitor(field_name_);
-        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
-        if (element_visitor != nullptr && element_visitor->GetFile() == nullptr) {
+        if (FieldRequireBuildIndex(field_visitor)) {
             segment_ids_.push_back(segment_commit->GetSegmentId());
         }
     }
@@ -85,7 +106,7 @@ SegmentsToMergeCollector::Handle(const snapshot::SegmentCommitPtr& segment_commi
 
     // if any field has build index, don't merge this segment
     auto segment_visitor = engine::SegmentVisitor::Build(ss_, segment_commit->GetSegmentId());
-    auto field_visitors = segment_visitor->GetFieldVisitors();
+    auto& field_visitors = segment_visitor->GetFieldVisitors();
     bool has_index = false;
     for (auto& kv : field_visitors) {
         auto element_visitor = kv.second->GetElementVisitor(engine::FieldElementType::FET_INDEX);
@@ -110,6 +131,7 @@ GetEntityByIdSegmentHandler::GetEntityByIdSegmentHandler(const std::shared_ptr<m
                                                          std::vector<bool>& valid_row)
     : BaseT(ss), context_(context), dir_root_(dir_root), ids_(ids), field_names_(field_names), valid_row_(valid_row) {
     ids_left_ = ids_;
+    data_chunk_ = std::make_shared<engine::DataChunk>();
 }
 
 Status
@@ -122,14 +144,15 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
     }
     segment::SegmentReader segment_reader(dir_root_, segment_visitor);
 
-    std::vector<int64_t> uids;
-    STATUS_CHECK(segment_reader.LoadUids(uids));
+    engine::idx_t* uids_address = nullptr;
+    int64_t id_count = 0;
+    STATUS_CHECK(segment_reader.LoadUids(&uids_address, id_count));
 
     segment::IdBloomFilterPtr id_bloom_filter_ptr;
     STATUS_CHECK(segment_reader.LoadBloomFilter(id_bloom_filter_ptr));
 
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader.LoadDeletedDocs(deleted_docs_ptr));
+    segment_reader.LoadDeletedDocs(deleted_docs_ptr);
 
     std::vector<idx_t> ids_in_this_segment;
     std::vector<int64_t> offsets;
@@ -142,14 +165,14 @@ GetEntityByIdSegmentHandler::Handle(const snapshot::SegmentPtr& segment) {
         }
 
         // check if id really exists in uids
-        auto found = std::find(uids.begin(), uids.end(), id);
-        if (found == uids.end()) {
+        auto found = std::find(uids_address, uids_address + id_count, id);
+        int64_t offset = found - uids_address;
+        if (offset >= id_count) {
             ++it;
-            continue;
+            continue;  // not found
         }
 
         // check if this id is deleted
-        auto offset = std::distance(uids.begin(), found);
         if (deleted_docs_ptr) {
             auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
             auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
@@ -213,7 +236,6 @@ GetEntityByIdSegmentHandler::PostIterate() {
         }
     }
 
-    data_chunk_ = std::make_shared<engine::DataChunk>();
     data_chunk_->count_ = temp_segment.GetRowCount();
     data_chunk_->fixed_fields_.swap(temp_segment.GetFixedFields());
     data_chunk_->variable_fields_.swap(temp_segment.GetVariableFields());
@@ -247,7 +269,7 @@ LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
         segment_ptr->GetFieldType(field_name, ftype);
 
         knowhere::IndexPtr index_ptr;
-        if (IsVectorField(ftype)) {
+        if (utils::IsVectorType(ftype)) {
             knowhere::VecIndexPtr vec_index_ptr;
             segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
             index_ptr = vec_index_ptr;

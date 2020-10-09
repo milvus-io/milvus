@@ -10,23 +10,16 @@ from milvus import IndexType, MetricType
 from utils import *
 
 
-collection_id = "wal"
+uid = "wal"
 TIMEOUT = 120
-tag = "1970_01_01"
 insert_interval_time = 1.5
 big_nb = 100000
 field_name = "float_vector"
-entity = gen_entities(1)
-binary_entity = gen_binary_entities(1)
-entities = gen_entities(nb)
 big_entities = gen_entities(big_nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-default_fields = gen_default_fields() 
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
 class TestRestartBase:
-
     """
     ******************************************************************
       The following cases are used to test `create_partition` function 
@@ -45,15 +38,15 @@ class TestRestartBase:
             pytest.skip(reason)
 
     @pytest.mark.level(2)
-    def test_insert_flush(self, connect, collection, args):
+    def _test_insert_flush(self, connect, collection, args):
         '''
         target: return the same row count after server restart
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
         '''
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
-        ids = connect.insert(collection, entities)
+        ids = connect.insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -68,7 +61,7 @@ class TestRestartBase:
         assert res_count == 2 * nb
 
     @pytest.mark.level(2)
-    def test_insert_during_flushing(self, connect, collection, args):
+    def _test_insert_during_flushing(self, connect, collection, args):
         '''
         target: flushing will recover
         method: call function: create collection, then insert/flushing, restart server and assert row count
@@ -96,7 +89,7 @@ class TestRestartBase:
             assert res_count_3 == big_nb
 
     @pytest.mark.level(2)
-    def test_delete_during_flushing(self, connect, collection, args):
+    def _test_delete_during_flushing(self, connect, collection, args):
         '''
         target: flushing will recover
         method: call function: create collection, then delete/flushing, restart server and assert row count
@@ -129,7 +122,7 @@ class TestRestartBase:
             assert res_count_3 == big_nb - delete_length
 
     @pytest.mark.level(2)
-    def test_during_indexed(self, connect, collection, args):
+    def _test_during_indexed(self, connect, collection, args):
         '''
         target: flushing will recover
         method: call function: create collection, then indexed, restart server and assert row count
@@ -159,7 +152,7 @@ class TestRestartBase:
                     assert True
 
     @pytest.mark.level(2)
-    def test_during_indexing(self, connect, collection, args):
+    def _test_during_indexing(self, connect, collection, args):
         '''
         target: flushing will recover
         method: call function: create collection, then indexing, restart server and assert row count
@@ -206,7 +199,7 @@ class TestRestartBase:
         #             assert True
 
     @pytest.mark.level(2)
-    def test_delete_flush_during_compacting(self, connect, collection, args):
+    def _test_delete_flush_during_compacting(self, connect, collection, args):
         '''
         target: verify server work after restart during compaction
         method: call function: create collection, then delete/flush/compacting, restart server and assert row count
@@ -246,7 +239,7 @@ class TestRestartBase:
 
 
     @pytest.mark.level(2)
-    def test_insert_during_flushing_multi_collections(self, connect, args):
+    def _test_insert_during_flushing_multi_collections(self, connect, args):
         '''
         target: flushing will recover
         method: call function: create collections, then insert/flushing, restart server and assert row count
@@ -256,7 +249,7 @@ class TestRestartBase:
         collection_num = 2
         collection_list = []
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             ids = connect.insert(collection_name, big_entities)
@@ -289,7 +282,7 @@ class TestRestartBase:
                 assert new_connect.count_entities(name) == big_nb
 
     @pytest.mark.level(2)
-    def test_insert_during_flushing_multi_partitions(self, connect, collection, args):
+    def _test_insert_during_flushing_multi_partitions(self, connect, collection, args):
         '''
         target: flushing will recover
         method: call function: create collection/partition, then insert/flushing, restart server and assert row count

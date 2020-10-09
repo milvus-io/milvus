@@ -100,7 +100,7 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     bs.Append(RAW_DATA, bptr);
     index_->Load(bs);
 
-    auto result = index_->Query(query_dataset, conf_);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, k);
 
 #ifdef MILVUS_GPU_VERSION
@@ -108,7 +108,7 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     {
         EXPECT_NO_THROW({
             auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf_);
-            auto clone_result = clone_index->Query(query_dataset, conf_);
+            auto clone_result = clone_index->Query(query_dataset, conf_, nullptr);
             AssertAnns(clone_result, nq, k);
             std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
         });
@@ -120,9 +120,8 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
-    index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result_bs_1 = index_->Query(query_dataset, conf_);
+    auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
 #ifdef MILVUS_GPU_VERSION

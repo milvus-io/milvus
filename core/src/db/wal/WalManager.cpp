@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalManager.h"
+#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
@@ -83,6 +84,8 @@ WalManager::Start(const DBOptions& options) {
         return status;
     }
 
+    LOG_ENGINE_DEBUG_ << "WalManager started";
+
     return Status::OK();
 }
 
@@ -94,6 +97,8 @@ WalManager::Stop() {
     }
 
     WaitCleanupFinish();
+
+    LOG_ENGINE_DEBUG_ << "WalManager stopped";
 
     return Status::OK();
 }
@@ -220,13 +225,13 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
 
             // id_files arrange id in assendent, we know which file should be read
             for (auto& pair : id_files) {
-                WalFilePtr file = std::make_shared<WalFile>();
+                WalFilePtr file = std::make_shared<WalFile>(sync_mode_);
                 file->OpenFile(pair.second.c_str(), WalFile::READ);
                 idx_t last_id = 0;
                 file->ReadLastOpId(last_id);
                 if (last_id <= max_op_id) {
                     file->CloseFile();
-                    std::experimental::filesystem::remove(pair.second);
+                    OperationDone(collection_name, max_op_id);
                     continue;  // skip and delete this file since all its operations already done
                 }
 
@@ -244,19 +249,19 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
         }
 
         // flush to makesure data is serialized
-        return db->Flush();
+        auto status = db->Flush();
+        LOG_ENGINE_DEBUG_ << "End wal recovery";
+        return status;
     } catch (std::exception& ex) {
         std::string msg = "Failed to recovery wal, reason: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
     }
-
-    LOG_ENGINE_DEBUG_ << "Wal recovery finished";
-
-    return Status::OK();
 }
 
 Status
 WalManager::Init() {
+    sync_mode_ = config.wal.sync_mode();
+
     try {
         using DirectoryIterator = std::experimental::filesystem::recursive_directory_iterator;
         DirectoryIterator iter(wal_path_);
@@ -310,7 +315,7 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
             std::lock_guard<std::mutex> lock(file_map_mutex_);
             WalFilePtr file = file_map_[operation->collection_name_];
             if (file == nullptr) {
-                file = std::make_shared<WalFile>();
+                file = std::make_shared<WalFile>(sync_mode_);
                 file_map_[operation->collection_name_] = file;
                 file->OpenFile(path, WalFile::APPEND_WRITE);
             } else if (!file->IsOpened() || file->ExceedMaxSize(chunk_size)) {
@@ -351,7 +356,7 @@ WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, con
             std::lock_guard<std::mutex> lock(file_map_mutex_);
             WalFilePtr file = file_map_[operation->collection_name_];
             if (file == nullptr) {
-                file = std::make_shared<WalFile>();
+                file = std::make_shared<WalFile>(sync_mode_);
                 file_map_[operation->collection_name_] = file;
                 file->OpenFile(path, WalFile::APPEND_WRITE);
             } else if (!file->IsOpened() || file->ExceedMaxSize(append_size)) {
@@ -474,6 +479,7 @@ WalManager::CleanupThread() {
                 // remove collection folder
                 // do this under the lock to avoid multi-thread conflict
                 std::experimental::filesystem::remove_all(collection_path);
+                LOG_ENGINE_DEBUG_ << "WAL cleanup: " << collection_path;
             }
 
             TakeCleanupTask(target_collection);
@@ -522,6 +528,7 @@ WalManager::CleanupThread() {
                 }
 
                 std::experimental::filesystem::remove(pair.second);
+                LOG_ENGINE_DEBUG_ << "WAL cleanup: " << pair.second;
             }
         }
 

@@ -56,7 +56,7 @@ SegmentWriter::Initialize() {
 
     segment_ptr_ = std::make_shared<engine::Segment>();
 
-    const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
+    auto& field_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         STATUS_CHECK(segment_ptr_->AddField(field));
@@ -255,11 +255,9 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // merge deleted docs (Note: this step must before merge raw data)
+    // Note: deleted docs file could not exist, that means the segment has no deleted entities
     segment::DeletedDocsPtr src_deleted_docs;
-    status = segment_reader->LoadDeletedDocs(src_deleted_docs);
-    if (!status.ok()) {
-        return status;
-    }
+    segment_reader->LoadDeletedDocs(src_deleted_docs);
 
     engine::SegmentPtr src_segment;
     status = segment_reader->GetSegment(src_segment);
@@ -302,32 +300,6 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 size_t
 SegmentWriter::RowCount() {
     return segment_ptr_->GetRowCount();
-}
-
-Status
-SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
-    engine::BinaryDataPtr raw;
-    auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    if (raw == nullptr) {
-        return Status(DB_ERROR, "Invalid id field");
-    }
-
-    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
-        std::string err_msg = "Failed to load uids: illegal file size";
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-
-    uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
-    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
-
-    return Status::OK();
 }
 
 Status

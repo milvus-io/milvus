@@ -32,55 +32,78 @@
 namespace milvus {
 namespace server {
 
+namespace {
+Status
+ConvertToChunk(const InsertParam& insert_param, engine::DataChunkPtr& data_chunk) {
+    TimeRecorderAuto rc("Copy insert data to chunk");
+    data_chunk = std::make_shared<engine::DataChunk>();
+    data_chunk->count_ = insert_param.row_count_;
+    for (auto& pair : insert_param.fields_data_) {
+        engine::BinaryDataPtr bin = std::make_shared<engine::BinaryData>();
+
+        // calculate data size
+        int64_t bytes = 0;
+        for (auto& data_segment : pair.second) {
+            bytes += data_segment.second;
+        }
+        bin->data_.resize(bytes);
+
+        // copy data
+        int64_t offset = 0;
+        for (auto& data_segment : pair.second) {
+            memcpy(bin->data_.data() + offset, data_segment.first, data_segment.second);
+            offset += data_segment.second;
+        }
+
+        data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
+    }
+
+    return Status::OK();
+}
+}  // namespace
+
 InsertReq::InsertReq(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-                     const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data)
+                     InsertParam& insert_param)
     : BaseReq(context, ReqType::kInsert),
       collection_name_(collection_name),
       partition_name_(partition_name),
-      row_count_(row_count),
-      chunk_data_(chunk_data) {
+      insert_param_(insert_param) {
 }
 
 BaseReqPtr
 InsertReq::Create(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-                  const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
-    return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, row_count, chunk_data));
+                  InsertParam& insert_param) {
+    return std::shared_ptr<BaseReq>(new InsertReq(context, collection_name, partition_name, insert_param));
 }
 
 Status
 InsertReq::OnExecute() {
     LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
     try {
-        std::string hdr = "InsertReq(table=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
+        std::string hdr = "InsertReq(collection=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
         TimeRecorder rc(hdr);
 
-        if (chunk_data_.empty()) {
-            return Status{SERVER_INVALID_ARGUMENT,
-                          "The vector field is empty, Make sure you have entered vector records"};
+        if (insert_param_.row_count_ == 0 || insert_param_.fields_data_.empty()) {
+            return Status{SERVER_INVALID_ARGUMENT, "The field is empty, make sure you have entered entities"};
         }
 
         // step 1: check collection existence
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
-            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection doesn't exist: " + collection_name_);
         }
 
-        // step 2: construct insert data
-        engine::DataChunkPtr data_chunk = std::make_shared<engine::DataChunk>();
-        data_chunk->count_ = row_count_;
-        for (auto& pair : chunk_data_) {
-            engine::BinaryDataPtr bin = std::make_shared<engine::BinaryData>();
-            bin->data_.swap(pair.second);
-            data_chunk->fixed_fields_.insert(std::make_pair(pair.first, bin));
-        }
-
-        // step 3: check insert data limitation
-        auto status = ValidateInsertDataSize(data_chunk);
+        // step 2: check insert data limitation
+        auto status = ValidateInsertDataSize(insert_param_);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
             return status;
         }
+
+        // step 3: construct insert data
+        engine::DataChunkPtr data_chunk;
+        STATUS_CHECK(ConvertToChunk(insert_param_, data_chunk));
 
         // step 4: insert data into db
         status = DBWrapper::DB()->Insert(collection_name_, partition_name_, data_chunk);
@@ -94,7 +117,10 @@ InsertReq::OnExecute() {
         if (iter == data_chunk->fixed_fields_.end() || iter->second == nullptr) {
             return Status(SERVER_UNEXPECTED_ERROR, "Insert action return empty id array");
         }
-        chunk_data_[engine::FIELD_UID] = iter->second->data_;
+
+        int64_t num = iter->second->data_.size() / sizeof(int64_t);
+        insert_param_.id_returned_.resize(num);
+        memcpy(insert_param_.id_returned_.data(), iter->second->data_.data(), iter->second->data_.size());
 
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

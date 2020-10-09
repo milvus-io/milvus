@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
 #include <memory>
 
 #include <faiss/gpu/GpuCloner.h>
@@ -136,13 +137,14 @@ GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                  const faiss::ConcurrentBitsetPtr& bitset) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
-        device_index->nprobe = config[IndexParams::nprobe];
+        device_index->nprobe = std::min(static_cast<int>(config[IndexParams::nprobe]), device_index->nlist);
         ResScope rs(res_, gpu_id_);
 
         // if query size > 2048 we search by blocks to avoid malloc issue
@@ -151,7 +153,7 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
             device_index->search(search_size, reinterpret_cast<const float*>(data) + i * dim, k, distances + i * k,
-                                 labels + i * k, bitset_);
+                                 labels + i * k, bitset);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

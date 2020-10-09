@@ -96,6 +96,7 @@ class WalManager {
     SafeIDGenerator id_gen_;
 
     bool enable_ = false;
+    bool sync_mode_ = false;
     std::string wal_path_;
     int64_t insert_buffer_size_ = 0;
 

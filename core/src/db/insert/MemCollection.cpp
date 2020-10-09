@@ -141,21 +141,11 @@ MemCollection::Serialize() {
     recorder.RecordSection("ApplyDeleteToFile");
 
     // serialize mem to new segment files
-    // delete ids will be applied in MemSegment::Serialize() method
-    std::lock_guard<std::mutex> lock(mem_mutex_);
-    for (auto& partition_segments : mem_segments_) {
-        MemSegmentList& segments = partition_segments.second;
-        for (auto& segment : segments) {
-            auto status = segment->Serialize();
-            if (!status.ok()) {
-                return status;
-            }
-        }
+    auto status = SerializeSegments();
+    if (!status.ok()) {
+        LOG_ENGINE_ERROR_ << "Failed to serialize segments: " << status.message();
     }
-
-    mem_segments_.clear();
-
-    recorder.RecordSection("Finished flushing");
+    recorder.RecordSection("SerializeSegments");
 
     return Status::OK();
 }
@@ -173,16 +163,15 @@ MemCollection::ApplyDeleteToFile() {
     snapshot::OperationContext context;
     auto segments_op = std::make_shared<snapshot::CompoundSegmentsOperation>(context, ss);
 
-    int64_t segment_iterated = 0;
+    int64_t segment_changed = 0;
     auto segment_executor = [&](const snapshot::SegmentPtr& segment, snapshot::SegmentIterator* iterator) -> Status {
         TimeRecorder recorder("MemCollection::ApplyDeleteToFile collection " + std::to_string(collection_id_) +
                               " segment " + std::to_string(segment->GetID()));
-        segment_iterated++;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, segment->GetID());
         segment::SegmentReaderPtr segment_reader =
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, seg_visitor);
 
-        // Step 1: Check to-delete id possibly in this segment
+        // Step 1: Check to-delete id possissbly in this segment
         std::unordered_set<idx_t> ids_to_check;
         segment::IdBloomFilterPtr pre_bloom_filter;
         STATUS_CHECK(segment_reader->LoadBloomFilter(pre_bloom_filter));
@@ -196,13 +185,15 @@ MemCollection::ApplyDeleteToFile() {
             return Status::OK();  // nothing change for this segment
         }
 
+        // Step 2: Calculate deleted id offset
         // load entity ids
-        std::vector<engine::idx_t> uids;
-        STATUS_CHECK(segment_reader->LoadUids(uids));
+        engine::idx_t* uids_address = nullptr;
+        int64_t id_count = 0;
+        STATUS_CHECK(segment_reader->LoadUids(&uids_address, id_count));
 
         // Load previous deleted offsets
         segment::DeletedDocsPtr prev_del_docs;
-        STATUS_CHECK(segment_reader->LoadDeletedDocs(prev_del_docs));
+        segment_reader->LoadDeletedDocs(prev_del_docs);
         std::unordered_set<engine::offset_t> del_offsets;
         if (prev_del_docs) {
             auto prev_del_offsets = prev_del_docs->GetDeletedDocs();
@@ -210,38 +201,47 @@ MemCollection::ApplyDeleteToFile() {
                 del_offsets.insert(offset);
             }
         }
-        uint64_t prev_del_count = del_offsets.size();
 
-        // if the to-delete id is actually in this segment, remove it from bloom filter, and record its offset
-        segment::IdBloomFilterPtr bloom_filter;
-        pre_bloom_filter->Clone(bloom_filter);
-
-        for (size_t i = 0; i < uids.size(); i++) {
-            auto id = uids[i];
+        // if the to-delete id is actually in this segment, record its offset
+        std::vector<engine::idx_t> new_deleted_ids;
+        for (auto i = 0; i < id_count; ++i) {
+            auto id = uids_address[i];
             if (ids_to_check.find(id) != ids_to_check.end()) {
+                if (del_offsets.find(i) != del_offsets.end()) {
+                    continue;  // this id already deleted previously
+                }
                 del_offsets.insert(i);
-                bloom_filter->Remove(id);
+                new_deleted_ids.push_back(id);
             }
         }
 
-        uint64_t new_deleted = del_offsets.size() - prev_del_count;
+        uint64_t new_deleted = new_deleted_ids.size();
         if (new_deleted == 0) {
             return Status::OK();  // nothing change for this segment
         }
 
-        recorder.RecordSection("detect deleted " + std::to_string(new_deleted) + " entities");
+        recorder.RecordSection("detect " + std::to_string(new_deleted) + " entities will be deleted");
 
-        // Step 3:
-        // all entities have been deleted? drop this segment
-        if (del_offsets.size() == uids.size()) {
-            return DropSegment(ss, segment->GetID());
+        // Step 3: drop empty segment or write new deleted-doc and bloom filter file
+        if (del_offsets.size() == id_count) {
+            // all entities have been deleted? drop this segment
+            STATUS_CHECK(DropSegment(ss, segment->GetID()));
+        } else {
+            // clone a new bloom filter, remove deleted ids from it
+            segment::IdBloomFilterPtr bloom_filter;
+            pre_bloom_filter->Clone(bloom_filter);
+            for (auto id : new_deleted_ids) {
+                bloom_filter->Remove(id);
+            }
+
+            // create new deleted docs file and bloom filter file
+            STATUS_CHECK(
+                CreateDeletedDocsBloomFilter(segments_op, ss, seg_visitor, del_offsets, new_deleted, bloom_filter));
+
+            segment_changed++;
+            recorder.RecordSection("write deleted docs and bloom filter");
         }
 
-        // create new deleted docs file and bloom filter file
-        STATUS_CHECK(
-            CreateDeletedDocsBloomFilter(segments_op, ss, seg_visitor, del_offsets, new_deleted, bloom_filter));
-
-        recorder.RecordSection("write deleted docs and bloom filter");
         return Status::OK();
     };
 
@@ -249,7 +249,7 @@ MemCollection::ApplyDeleteToFile() {
     segment_iterator->Iterate();
     STATUS_CHECK(segment_iterator->GetStatus());
 
-    if (segment_iterated == 0) {
+    if (segment_changed == 0) {
         return Status::OK();  // no segment, nothing to do
     }
 
@@ -257,8 +257,9 @@ MemCollection::ApplyDeleteToFile() {
     return segments_op->Push();
 }
 
+// this method ensure the deleted-doc each offset is unique
 Status
-MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& segments_op,
+MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& operation,
                                             const snapshot::ScopedSnapshotT& ss, engine::SegmentVisitorPtr& seg_visitor,
                                             const std::unordered_set<engine::offset_t>& del_offsets,
                                             uint64_t new_deleted, segment::IdBloomFilterPtr& bloom_filter) {
@@ -276,7 +277,7 @@ MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::Comp
         if (segment_file->GetSegmentId() == segment->GetID() &&
             (segment_file->GetFieldElementId() == del_docs_element->GetID() ||
              segment_file->GetFieldElementId() == blm_filter_element->GetID())) {
-            segments_op->AddStaleSegmentFile(segment_file);
+            operation->AddStaleSegmentFile(segment_file);
         }
 
         return Status::OK();
@@ -294,7 +295,7 @@ MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::Comp
     del_file_context.partition_id = segment->GetPartitionId();
     del_file_context.segment_id = segment->GetID();
     snapshot::SegmentFilePtr delete_file;
-    STATUS_CHECK(segments_op->CommitNewSegmentFile(del_file_context, delete_file));
+    STATUS_CHECK(operation->CommitNewSegmentFile(del_file_context, delete_file));
 
     std::string collection_root_path = options_.meta_.path_ + COLLECTIONS_FOLDER;
     auto segment_writer = std::make_shared<segment::SegmentWriter>(options_.meta_.path_, seg_visitor);
@@ -309,13 +310,13 @@ MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::Comp
     bloom_file_context.segment_id = segment->GetID();
 
     engine::snapshot::SegmentFile::Ptr bloom_filter_file;
-    STATUS_CHECK(segments_op->CommitNewSegmentFile(bloom_file_context, bloom_filter_file));
+    STATUS_CHECK(operation->CommitNewSegmentFile(bloom_file_context, bloom_filter_file));
 
     std::string bloom_filter_file_path =
         snapshot::GetResPath<snapshot::SegmentFile>(collection_root_path, bloom_filter_file);
 
     // Step 3: update delete docs and bloom filter
-    STATUS_CHECK(segments_op->CommitRowCountDelta(segment->GetID(), new_deleted, true));
+    STATUS_CHECK(operation->CommitRowCountDelta(segment->GetID(), new_deleted, true));
 
     std::vector<int32_t> vec_del_offsets;
     vec_del_offsets.reserve(del_offsets.size());
@@ -329,6 +330,56 @@ MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::Comp
     delete_file->SetSize(CommonUtil::GetFileSize(del_docs_path + codec::DeletedDocsFormat::FilePostfix()));
     bloom_filter_file->SetSize(
         CommonUtil::GetFileSize(bloom_filter_file_path + codec::IdBloomFilterFormat::FilePostfix()));
+
+    return Status::OK();
+}
+
+Status
+MemCollection::SerializeSegments() {
+    std::lock_guard<std::mutex> lock(mem_mutex_);
+    if (mem_segments_.empty()) {
+        return Status::OK();
+    }
+
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
+
+    snapshot::OperationContext context;
+    auto operation = std::make_shared<snapshot::MultiSegmentsOperation>(context, ss);
+
+    // serialize each segment in buffer
+    // delete ids will be applied in MemSegment::Serialize() method
+    idx_t max_op_id = 0;
+    for (auto& partition_segments : mem_segments_) {
+        MemSegmentList& segments = partition_segments.second;
+        for (auto iter = segments.begin(); iter != segments.end();) {
+            auto& segment = *iter;
+            auto status = segment->Serialize(ss, operation);
+            idx_t segment_max_op_id = segment->GetMaxOpID();
+            if (max_op_id < segment_max_op_id) {
+                max_op_id = segment_max_op_id;
+            }
+
+            // if the partition or collection has been deleted, the Serialize method will failed
+            // that means no need to serialize this segment, remove it from segment list
+            if (status.ok()) {
+                ++iter;
+            } else {
+                iter = segments.erase(iter);
+            }
+        }
+    }
+    operation->SetContextLsn(max_op_id);
+
+    // if any segment is actually created, call push() method
+    // sometimes segment might be ignored since its row count is 0 (all deleted)
+    if (!operation->GetContext().new_segments.empty()) {
+        STATUS_CHECK(operation->Push());
+    }
+    mem_segments_.clear();
+
+    // notify wal the max operation id is done
+    WalManager::GetInstance().OperationDone(ss->GetName(), max_op_id);
 
     return Status::OK();
 }

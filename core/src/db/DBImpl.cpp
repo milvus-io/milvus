@@ -20,7 +20,6 @@
 #include "db/merge/MergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
@@ -35,9 +34,9 @@
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
+#include "segment/Utils.h"
 #include "server/ValidationUtil.h"
 #include "utils/Exception.h"
-#include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu/fiu-local.h>
@@ -65,7 +64,11 @@ static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown
     }
 
 DBImpl::DBImpl(const DBOptions& options)
-    : options_(options), initialized_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1) {
+    : options_(options),
+      initialized_(false),
+      merge_thread_pool_(1, 1),
+      index_thread_pool_(1, 1),
+      index_task_tracker_(3) {
     mem_mgr_ = MemManagerFactory::Build(options_);
     merge_mgr_ptr_ = MergeManagerFactory::SSBuild(options_);
 
@@ -205,7 +208,7 @@ DBImpl::DropCollection(const std::string& collection_name) {
     ClearCollectionCache(ss, options_.meta_.path_);
 
     // clear index failed retry map of this collection
-    ClearIndexFailedRecord(collection_name);
+    index_task_tracker_.ClearFailedRecords(collection_name);
 
     return snapshots.DropCollection(ss->GetCollectionId(), std::numeric_limits<snapshot::LSN_TYPE>::max());
 }
@@ -354,6 +357,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
     if (!utils::IsSameIndex(old_index, new_index)) {
         DropIndex(collection_name, field_name);
+
         WaitMergeFileFinish();  // let merge file thread finish since DropIndex start a merge task
 
         // create field element for new index
@@ -361,6 +365,10 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
         if (!status.ok()) {
             return status;
         }
+    }
+
+    if (engine::utils::IsFlatIndexType(index.index_type_)) {
+        return Status::OK();  // for IDMAP type, no need to create index
     }
 
     // step 3: merge segments before create index, since there could be some small segments just flushed
@@ -373,7 +381,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
     }
 
     // clear index failed retry map of this collection
-    ClearIndexFailedRecord(collection_name);
+    index_task_tracker_.ClearFailedRecords(collection_name);
 
     // step 4: iterate segments need to be build index, wait until all segments are built
     while (true) {
@@ -389,7 +397,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
             break;  // all segments build index finished
         }
 
-        IgnoreIndexFailedSegments(collection_name, segment_ids);
+        index_task_tracker_.IgnoreFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             break;  // some segments failed to build index, and ignored
         }
@@ -401,6 +409,20 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
             LOG_ENGINE_DEBUG_ << "Client connection broken, build index in background";
             break;  // just break, not return, continue to update partitions files to to_index
         }
+    }
+
+    // step 5: return error message to client if any segment failed to build index
+    SegmentFailedMap failed_map;
+    index_task_tracker_.GetFailedRecords(collection_name, failed_map);
+    if (!failed_map.empty()) {
+        auto pair = failed_map.begin();
+        std::string msg =
+            "Failed to build segment " + std::to_string(pair->first) + " for collection " + collection_name;
+        msg += ", reason: ";
+        msg += pair->second.message();
+        LOG_ENGINE_ERROR_ << msg;
+
+        return Status(DB_ERROR, msg);
     }
 
     return Status::OK();
@@ -517,6 +539,8 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
     // generate id
     if (auto_genid) {
+        LOG_SERVER_DEBUG_ << "Auto generate entities id";
+
         SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
         IDNumbers ids;
         STATUS_CHECK(id_generator.GetNextIDNumbers(consume_chunk->count_, ids));
@@ -541,6 +565,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     std::vector<DataChunkPtr> chunks;
     STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_count, chunks));
 
+    LOG_ENGINE_DEBUG_ << "Insert entities into mem manager";
     for (auto& chunk : chunks) {
         auto status = mem_mgr_->InsertEntities(collection_id, partition_id, chunk, op_id);
         if (!status.ok()) {
@@ -622,46 +647,10 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
 
-    /* collect all valid segment */
-    std::vector<SegmentVisitor::Ptr> segment_visitors;
-    auto exec = [&](const snapshot::Segment::Ptr& segment, snapshot::SegmentIterator* handler) -> Status {
-        auto p_id = segment->GetPartitionId();
-        auto p_ptr = ss->GetResource<snapshot::Partition>(p_id);
-        auto& p_name = p_ptr->GetName();
-
-        /* check partition match pattern */
-        bool match = false;
-        if (query_ptr->partitions.empty()) {
-            match = true;
-        } else {
-            for (auto& pattern : query_ptr->partitions) {
-                if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
-                    match = true;
-                    break;
-                }
-            }
-        }
-
-        if (match) {
-            auto visitor = SegmentVisitor::Build(ss, segment->GetID());
-            if (!visitor) {
-                return Status(milvus::SS_ERROR, "Cannot build segment visitor");
-            }
-            segment_visitors.push_back(visitor);
-        }
-        return Status::OK();
-    };
-
-    auto segment_iter = std::make_shared<snapshot::SegmentIterator>(ss, exec);
-    segment_iter->Iterate();
-    STATUS_CHECK(segment_iter->GetStatus());
-
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_visitors.size());
-
-    engine::snapshot::IDS_TYPE segment_ids;
-    for (auto& sv : segment_visitors) {
-        segment_ids.emplace_back(sv->GetSegment()->GetID());
-    }
+    SnapshotVisitor ss_visitor(ss);
+    snapshot::IDS_TYPE segment_ids;
+    STATUS_CHECK(ss_visitor.SegmentsToSearch(query_ptr->partitions, segment_ids));
+    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_ids.size());
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
@@ -732,16 +721,13 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 
     // remove delete id from the id list
     segment::DeletedDocsPtr deleted_docs_ptr;
-    STATUS_CHECK(segment_reader->LoadDeletedDocs(deleted_docs_ptr));
+    segment_reader->LoadDeletedDocs(deleted_docs_ptr);
     if (deleted_docs_ptr) {
-        const std::vector<offset_t>& delete_ids = deleted_docs_ptr->GetDeletedDocs();
-        std::vector<offset_t> temp_ids;
-        temp_ids.reserve(delete_ids.size());
-        std::copy(delete_ids.begin(), delete_ids.end(), std::back_inserter(temp_ids));
-        std::sort(temp_ids.begin(), temp_ids.end(), std::greater<>());
-        for (auto offset : temp_ids) {
-            entity_ids.erase(entity_ids.begin() + offset, entity_ids.begin() + offset + 1);
-        }
+        // sorted-merge entities id and deleted offsets
+        const std::vector<offset_t>& delete_offsets = deleted_docs_ptr->GetDeletedDocs();
+        IDNumbers result_ids;
+        segment::GetIDWithoutDeleted(entity_ids, delete_offsets, result_ids);
+        entity_ids.swap(result_ids);
     }
 
     return Status::OK();
@@ -840,11 +826,12 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             std::make_shared<segment::SegmentReader>(options_.meta_.path_, read_visitor);
 
         segment::DeletedDocsPtr deleted_docs;
-        status = segment_reader->LoadDeletedDocs(deleted_docs);
-        if (!status.ok() || deleted_docs == nullptr) {
+        segment_reader->LoadDeletedDocs(deleted_docs);
+        if (deleted_docs == nullptr) {
             continue;  // no deleted docs, no need to compact
         }
 
+        // the segment row count is zero, drop it
         auto segment_commit = latest_ss->GetSegmentCommitBySegmentId(segment_id);
         auto row_count = segment_commit->GetRowCount();
         if (row_count == 0) {
@@ -860,11 +847,13 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
             continue;
         }
 
+        // delete rate less than threshold, skip compact
         auto deleted_count = deleted_docs->GetCount();
         if (double(deleted_count) / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
 
+        // compact segment, the compact action is same as merge
         snapshot::IDS_TYPE ids = {segment_id};
         MergeTask merge_task(options_, latest_ss, ids);
         status = merge_task.Execute();
@@ -1032,7 +1021,7 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         }
 
         // check index retry times
-        IgnoreIndexFailedSegments(collection_name, segment_ids);
+        index_task_tracker_.IgnoreFailedSegments(collection_name, segment_ids);
         if (segment_ids.empty()) {
             continue;
         }
@@ -1050,8 +1039,8 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after build index
 
         // record failed segments, avoid build index hang
-        snapshot::IDS_TYPE& failed_ids = job->FailedSegments();
-        MarkIndexFailedSegments(collection_name, failed_ids);
+        auto failed_segments = job->GetFailedSegments();
+        index_task_tracker_.MarkFailedSegments(collection_name, failed_segments);
 
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
@@ -1191,34 +1180,6 @@ DBImpl::ConfigUpdate(const std::string& name) {
     if (name == "storage.auto_flush_interval") {
         options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }
-}
-
-void
-DBImpl::MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids) {
-    std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
-    for (auto& id : failed_ids) {
-        retry_map[id]++;
-    }
-}
-
-void
-DBImpl::IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids) {
-    std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    SegmentIndexRetryMap& retry_map = index_retry_map_[collection_name];
-    snapshot::IDS_TYPE segment_ids_to_build;
-    for (auto id : segment_ids) {
-        if (retry_map[id] < BUILD_INEDX_RETRY_TIMES) {
-            segment_ids_to_build.push_back(id);
-        }
-    }
-    segment_ids.swap(segment_ids_to_build);
-}
-
-void
-DBImpl::ClearIndexFailedRecord(const std::string& collection_name) {
-    std::lock_guard<std::mutex> lock(index_retry_mutex_);
-    index_retry_map_.erase(collection_name);
 }
 
 }  // namespace engine

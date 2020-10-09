@@ -65,8 +65,9 @@ CopyCpuToGpu(const VecIndexPtr& index, const int64_t device_id, const Config& co
     } else {
         KNOWHERE_THROW_MSG("this index type not support transfer to gpu");
     }
-
-    CopyIndexData(result, index);
+    if (result != nullptr) {
+        CopyIndexData(result, index);
+    }
     return result;
 }
 

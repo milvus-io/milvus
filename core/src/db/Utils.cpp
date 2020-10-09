@@ -27,8 +27,11 @@
 #include "db/Types.h"
 
 #ifdef MILVUS_GPU_VERSION
+
 #include "cache/GpuCacheMgr.h"
+
 #endif
+
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -60,6 +63,22 @@ IsBinaryMetricType(const std::string& metric_type) {
     return (metric_type == knowhere::Metric::HAMMING) || (metric_type == knowhere::Metric::JACCARD) ||
            (metric_type == knowhere::Metric::SUBSTRUCTURE) || (metric_type == knowhere::Metric::SUPERSTRUCTURE) ||
            (metric_type == knowhere::Metric::TANIMOTO);
+}
+
+bool
+IsFlatIndexType(const std::string& index_type) {
+    return (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+            index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
+}
+
+bool
+IsVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+}
+
+bool
+IsBinaryVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_BINARY;
 }
 
 engine::date_t
@@ -212,6 +231,8 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         }
     }
 
+    LOG_SERVER_DEBUG_ << "Split chunk since the chunk row count greater than segment_row_limit";
+
     // secondly, copy new chunk
     int64_t copied_count = 0;
     while (copied_count < chunk_count) {
@@ -245,6 +266,11 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         copied_count += count_to_copy;
         chunks.emplace_back(new_chunk);
     }
+
+    // data has been copied, do this to free memory
+    chunk->fixed_fields_.clear();
+    chunk->variable_fields_.clear();
+    chunk->count_ = 0;
 
     return Status::OK();
 }

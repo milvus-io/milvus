@@ -167,7 +167,7 @@ ValidateFieldName(const std::string& field_name) {
 }
 
 Status
-ValidateIndexType(std::string& index_type) {
+ValidateVectorIndexType(std::string& index_type, bool is_binary) {
     // Index name shouldn't be empty.
     if (index_type.empty()) {
         std::string msg = "Index type should not be empty.";
@@ -175,29 +175,58 @@ ValidateIndexType(std::string& index_type) {
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
 
+    // string case insensitive
     std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
-    static std::set<std::string> s_valid_index_names = {
+    static std::set<std::string> s_vector_index_type = {
         knowhere::IndexEnum::INVALID,
         knowhere::IndexEnum::INDEX_FAISS_IDMAP,
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+#ifdef MILVUS_GPU_VERSION
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+#endif
         knowhere::IndexEnum::INDEX_NSG,
         knowhere::IndexEnum::INDEX_HNSW,
         knowhere::IndexEnum::INDEX_ANNOY,
         knowhere::IndexEnum::INDEX_RHNSWFlat,
         knowhere::IndexEnum::INDEX_RHNSWPQ,
         knowhere::IndexEnum::INDEX_RHNSWSQ,
+    };
 
-        // structured index names
+    static std::set<std::string> s_binary_index_types = {
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+        knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+    };
+
+    std::set<std::string>& index_types = is_binary ? s_binary_index_types : s_vector_index_type;
+    if (index_types.find(index_type) == index_types.end()) {
+        std::string msg = "Invalid index type: " + index_type;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_INDEX_TYPE, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidateStructuredIndexType(std::string& index_type) {
+    // Index name shouldn't be empty.
+    if (index_type.empty()) {
+        std::string msg = "Index type should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_FIELD_NAME, msg);
+    }
+
+    // string case insensitive
+    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
+
+    static std::set<std::string> s_index_types = {
         engine::DEFAULT_STRUCTURED_INDEX,
     };
 
-    if (s_valid_index_names.find(index_type) == s_valid_index_names.end()) {
+    if (s_index_types.find(index_type) == s_index_types.end()) {
         std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
@@ -226,19 +255,18 @@ ValidateDimension(int64_t dim, bool is_binary) {
 
 Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
-    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+    if (engine::utils::IsFlatIndexType(index_type)) {
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 999999);
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
@@ -249,7 +277,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         }
 
         // special check for 'm' parameter
-        std::vector<int64_t> resset;
+        int64_t m_value = index_params[knowhere::IndexParams::m];
+        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, m_value)) {
+            std::string msg = "Invalid m, dimension can't not be divided by m ";
+            LOG_SERVER_ERROR_ << msg;
+            return Status(SERVER_INVALID_ARGUMENT, msg);
+        }
+        /*std::vector<int64_t> resset;
         milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
         int64_t m_value = index_params[knowhere::IndexParams::m];
         if (resset.empty()) {
@@ -271,7 +305,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
+        }*/
     } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
         if (!status.ok()) {
@@ -308,9 +342,13 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             }
 
             // special check for 'PQM' parameter
-            std::vector<int64_t> resset;
-            milvus::knowhere::IVFPQConfAdapter::GetValidMList(dimension, resset);
             int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
+            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, pqm_value)) {
+                std::string msg = "Invalid m, dimension can't not be divided by m ";
+                LOG_SERVER_ERROR_ << msg;
+                return Status(SERVER_INVALID_ARGUMENT, msg);
+            }
+            /*int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
             if (resset.empty()) {
                 std::string msg = "Invalid collection dimension, unable to get reasonable values for 'PQM'";
                 LOG_SERVER_ERROR_ << msg;
@@ -330,7 +368,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
+            }*/
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
@@ -357,8 +395,7 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
 
 Status
 ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type) {
-    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+    if (engine::utils::IsFlatIndexType(index_type)) {
         // pass
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         // binary
@@ -406,7 +443,7 @@ Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
         std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
@@ -475,8 +512,14 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
 }
 
 Status
-ValidateInsertDataSize(const engine::DataChunkPtr& data) {
-    int64_t chunk_size = engine::utils::GetSizeOfChunk(data);
+ValidateInsertDataSize(const InsertParam& insert_param) {
+    int64_t chunk_size = 0;
+    for (auto& pair : insert_param.fields_data_) {
+        for (auto& data : pair.second) {
+            chunk_size += data.second;
+        }
+    }
+
     if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
         std::string msg = "The amount of data inserted each time cannot exceed " +
                           std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";

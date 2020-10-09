@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
 #include "db/snapshot/Resources.h"
 #include "db/snapshot/Snapshot.h"
@@ -48,7 +49,7 @@ bool
 IsVectorField(const engine::snapshot::FieldPtr& field);
 
 bool
-IsVectorField(engine::DataType type);
+IsBinaryVectorField(const engine::snapshot::FieldPtr& field);
 
 Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
@@ -73,6 +74,9 @@ ClearIndexCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root, cons
 
 Status
 DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id);
+
+bool
+FieldRequireBuildIndex(const engine::SegmentFieldVisitorPtr& field_visitor);
 
 }  // namespace engine
 }  // namespace milvus
