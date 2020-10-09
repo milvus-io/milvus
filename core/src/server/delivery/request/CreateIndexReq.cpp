@@ -121,6 +121,11 @@ CreateIndexReq::OnExecute() {
             index.index_type_ = index_type;
         }
 
+        // avoid empty index name
+        if (index.index_name_.empty()) {
+            index.index_name_ = index.index_type_;
+        }
+
         STATUS_CHECK(DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index));
         rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {

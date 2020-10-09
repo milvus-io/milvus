@@ -230,7 +230,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // check conflict
-    int64_t src_id = 0, target_id = 0;
+    int64_t src_id = -1, target_id = -2;
     auto status = GetSegmentID(target_id);
     if (!status.ok()) {
         return status;
