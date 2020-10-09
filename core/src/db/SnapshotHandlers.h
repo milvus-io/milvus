@@ -30,11 +30,13 @@ namespace engine {
 struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids);
+    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, const std::vector<std::string>& partitions,
+                              snapshot::IDS_TYPE& segment_ids);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
+    std::vector<std::string> partitions_;
     snapshot::IDS_TYPE& segment_ids_;
 };
 

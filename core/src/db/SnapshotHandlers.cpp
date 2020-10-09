@@ -20,6 +20,7 @@
 #include "db/snapshot/Snapshot.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/SegmentReader.h"
+#include "utils/StringHelpFunctions.h"
 
 #include <unordered_map>
 #include <utility>
@@ -28,13 +29,35 @@ namespace milvus {
 namespace engine {
 
 ///////////////////////////////////////////////////////////////////////////////
-SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids)
-    : BaseT(ss), segment_ids_(segment_ids) {
+SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss,
+                                                     const std::vector<std::string>& partitions,
+                                                     snapshot::IDS_TYPE& segment_ids)
+    : BaseT(ss), partitions_(partitions), segment_ids_(segment_ids) {
 }
 
 Status
 SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    segment_ids_.push_back(segment_commit->GetSegmentId());
+    auto p_id = segment_commit->GetPartitionId();
+    auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
+    auto& p_name = p_ptr->GetName();
+
+    /* check partition match pattern */
+    bool match = false;
+    if (partitions_.empty()) {
+        match = true;
+    } else {
+        for (auto& pattern : partitions_) {
+            if (StringHelpFunctions::IsRegexMatch(p_name, pattern)) {
+                match = true;
+                break;
+            }
+        }
+    }
+
+    if (match) {
+        segment_ids_.push_back(segment_commit->GetSegmentId());
+    }
+
     return Status::OK();
 }
 
