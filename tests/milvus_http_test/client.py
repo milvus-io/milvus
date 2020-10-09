@@ -125,6 +125,25 @@ class MilvusClient(object):
             logging.getLogger().error(str(e))
             return False
 
+    def list_partitions(self, collection_name):
+        url = self._url+url_collections+'/'+collection_name+'/partitions'
+        r = Request(url)
+        try:
+            ret = r.get()
+            return ret["partitions"]
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def drop_partition(self, collection_name, tag):
+        url = self._url+url_collections+'/'+collection_name+'/partitions/'+tag;
+        r = Request(url)
+        try:
+            res_drop = r.delete()
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
     def flush(self, collection_names):
         url = self._url+url_system+'/task'
         r = Request(url)
