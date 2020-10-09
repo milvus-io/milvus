@@ -8,7 +8,7 @@ import pytest
 from utils import *
 from constants import *
 
-INDEX_TIMEOUT = 120
+BUILD_TIMEOUT = 120
 uid = "test_index"
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
@@ -50,10 +50,12 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.insert(collection, default_entities)
-        assert client.create_index(collection, default_float_vec_field_name, default_index)
+        ids = client.insert(collection, default_entities)
+        res = client.create_index(collection, default_float_vec_field_name, default_index)
         # get index info
-        
+        logging.getLogger().info(res)
+        res_info_index = client.describe_index(collection, default_float_vec_field_name)
+        assert res_info_index == default_index
 
     def test_create_index_on_field_not_existed(self, client, collection):
         '''
@@ -74,16 +76,36 @@ class TestIndexBase:
         '''
         tmp_field_name = "int64"
         ids = client.insert(collection, default_entities)
-        assert not create_index(collection, tmp_field_name, default_index)
+        assert not client.create_index(collection, tmp_field_name, default_index)
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_partition(self, client, collection):
+    def test_create_index_collection_not_existed(self, client):
         '''
-        target: test create index interface
-        method: create collection, create partition, and add entities in it, create index
-        expected: return search success
+        target: test create index interface when collection name not existed
+        method: create collection and add entities in it, create index
+            , make sure the collection name not in index
+        expected: create index failed
         '''
-        client.create_partition(collection, default_tag)
-        ids = client.insert(collection, default_entities, partition_tag=default_tag)
-        client.flush([collection])
-        client.create_index(collection, field_name, default_index)
+        collection_name = gen_unique_str(uid)
+        assert not client.create_index(collection_name, default_float_vec_field_name, default_index)
+
+    def test_drop_index(self, client, collection):
+        '''
+        target: test drop index interface
+        method: create collection and add entities in it, create index, call drop index
+        expected: return code 0, and default index param
+        '''
+        # ids = connect.insert(collection, entities)
+        client.create_index(collection, default_float_vec_field_name, default_index)
+        client.drop_index(collection, default_float_vec_field_name)
+        res_info_index = client.describe_index(collection, default_float_vec_field_name)
+        assert not res_info_index
+
+    def test_drop_index_collection_not_existed(self, client):
+        '''
+        target: test drop index interface when collection name not existed
+        method: create collection and add entities in it, create index
+            , make sure the collection name not in index, and then drop it
+        expected: return code not equals to 0, drop index failed
+        '''
+        collection_name = gen_unique_str(uid)
+        assert not client.drop_index(collection_name, default_float_vec_field_name)

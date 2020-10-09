@@ -195,6 +195,33 @@ class MilvusClient(object):
             return False 
 
     '''
+    method: create index
+    '''
+    def create_index(self, collection_name, field_name, index_params):
+        url = self._url+url_collections+'/'+collection_name+'/fields/'+field_name+'/indexes'
+        r = Request(url)
+        try:
+            return r.post(index_params)
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def drop_index(self, collection_name, field_name):
+        url = self._url+url_collections+'/'+collection_name+'/fields/'+field_name+'/indexes'
+        r = Request(url)
+        try:
+            return r.delete()
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
+
+    def describe_index(self, collection_name, field_name):
+        info = self.info_collection(collection_name)
+        for field in info["fields"]:
+            if field["field_name"] == field_name:
+                return field["index_params"]
+
+    '''
     method: drop all collections in db
     '''
     def clear_db(self):

@@ -45,14 +45,14 @@ class TestDeleteBase:
 
     def test_delete_entity_id_not_exised(self, client, collection):
         '''
-        target: test delete entity, params entity_id not existed
-        method: add entity and delete
-        expected: status DELETED
+        target: test get entity, params entity_id not existed
+        method: get entity 
+        expected: result empty
         '''
-        ids = client.insert(collection, default_entity)
-        client.flush([collection])
-        status = client.delete(collection, ["0"])
-        assert status
+        assert client.insert(collection, default_entity)
+        res_flush = client.flush([collection])
+        entities = client.get_entities(collection, 1)
+        assert entities
 
     def test_delete_empty_collection(self, client, collection):
         '''
