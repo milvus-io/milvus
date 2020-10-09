@@ -43,9 +43,9 @@ endmacro()
 set_option_category("FPGA version")
 
 if (MILVUS_FPGA_VERSION)
-    define_option(KNOWHERE_FPGA_VERSION "Build GPU version" ON)
+    define_option(KNOWHERE_FPGA_VERSION "Build FPGA version" ON)
 else ()
-    define_option(KNOWHERE_FPGA_VERSION "Build GPU version" OFF)
+    define_option(KNOWHERE_FPGA_VERSION "Build FPGA version" OFF)
 endif ()
 #----------------------------------------------------------------------
 set_option_category("GPU version")

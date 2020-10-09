@@ -26,20 +26,7 @@ set(external_srcs
         knowhere/common/Log.cpp
         knowhere/common/Timer.cpp
         )
-if (KNOWHERE_FPGA_VERSION)
-    set(depend_libs 
-              armadillo
-             ${depend_libs}             
-    )
-    set(vector_index_srcs ${vector_index_srcs}
-            knowhere/index/vector_index/fpga/Fpga.cpp
-            knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
-            knowhere/index/vector_index/fpga/xilinx_c.cpp
-            knowhere/index/vector_index/fpga/utils.cpp
-            knowhere/index/vector_index/fpga/FpgaInst.cpp
-    )
 
-endif ()
 set(index_srcs
         knowhere/index/vector_index/adapter/SptagAdapter.cpp
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
@@ -69,11 +56,7 @@ set(index_srcs
         knowhere/index/vector_index/IndexNGT.cpp
         knowhere/index/vector_index/IndexNGTPANNG.cpp
         knowhere/index/vector_index/IndexNGTONNG.cpp
-        knowhere/index/vector_index/fpga/Fpga.cpp
-        knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
-        knowhere/index/vector_index/fpga/xilinx_c.cpp
-        knowhere/index/vector_index/fpga/utils.cpp
-	knowhere/index/vector_index/fpga/FpgaInst.cpp
+        
         )
 
 set(depend_libs
@@ -97,6 +80,20 @@ else ()
             ${OpenBLAS_LIBRARIES}
             ${LAPACK_LIBRARIES}
             )
+endif ()
+if (MILVUS_FPGA_VERSION)
+    set(depend_libs 
+              armadillo
+             ${depend_libs}             
+    )
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/fpga/Fpga.cpp
+            knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
+            knowhere/index/vector_index/fpga/xilinx_c.cpp
+            knowhere/index/vector_index/fpga/utils.cpp
+            knowhere/index/vector_index/fpga/FpgaInst.cpp
+    )
+
 endif ()
 
 if (KNOWHERE_GPU_VERSION)
