@@ -559,9 +559,15 @@ class WebController : public oatpp::web::server::api::ApiController {
     ADD_DEFAULT_CORS(EntityOp)
 
     ENDPOINT("GET", "/collections/{collection_name}/entities", EntityOp, PATH(String, collection_name),
-             QUERIES(QueryParams, query_params), BODY_STRING(String, body_str)) {
-        auto handler = WebRequestHandler();
+             QUERIES(QueryParams, query_params), REQUEST(std::shared_ptr<IncomingRequest>, request)) {
+        String body_str;
+        try {
+            body_str = request->readBodyToString();
+        } catch (...) {
+            body_str = "";
+        }
 
+        auto handler = WebRequestHandler();
         String response;
         auto status_dto = handler.EntityOp(collection_name, query_params, body_str, response);
         switch (*(status_dto->code)) {
