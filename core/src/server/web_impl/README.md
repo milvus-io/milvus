@@ -786,12 +786,12 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
                     }
                 }
             ],
-        }
-    },
-    "fields": ["field_vec"]
+        },
+        "fields": ["field_vec"]
+    }
 }
 </code></pre> </td></tr>
-<tr><td>Method</td><td>PUT</td></tr>
+<tr><td>Method</td><td>GET</td></tr>
 </table>
 
 ##### Body Parameters
