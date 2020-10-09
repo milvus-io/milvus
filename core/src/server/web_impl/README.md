@@ -459,7 +459,7 @@ $ curl -X POST "http://127.0.0.1:19121/collections/test_collection/indexes" -H "
 { "message": "OK", "code": 0 }
 ```
 
-### `/collections/{collection_name}/fields/{field_name}/indexes/{index_name}` (DELETE)
+### `/collections/{collection_name}/fields/{field_name}/indexes` (DELETE)
 
 Drops an index for a collection.
 
