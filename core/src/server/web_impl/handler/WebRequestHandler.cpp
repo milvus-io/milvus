@@ -1734,7 +1734,7 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             }
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
-                json_out["entities"] = json::array();
+                json_out["data"]["entities"] = json::array();
             }
             AddStatusToJson(json_out, status.code(), status.message());
             response = json_out.dump().c_str();
@@ -1762,21 +1762,23 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         }
 
         std::vector<bool> valid_row;
-        nlohmann::json entity_result_json;
+        milvus::json entity_result_json;
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
             return status;
         }
 
-        nlohmann::json json;
-        AddStatusToJson(json, status.code(), status.message());
+        milvus::json data_json;
+        milvus::json json;
+        AddStatusToJson(data_json, status.code(), status.message());
         if (entity_result_json.empty()) {
             json = std::vector<int64_t>();
         } else {
             json = entity_result_json;
         }
-        response = json.dump().c_str();
+        data_json["data"] = json;
+        response = data_json.dump().c_str();
     } catch (std::exception& e) {
         return Status(SERVER_UNEXPECTED_ERROR, e.what());
     }
