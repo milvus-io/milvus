@@ -3,13 +3,12 @@ package minio_driver
 import (
 	"bytes"
 	"context"
-	"github.com/czs007/suvlim/conf"
-	. "github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/minio/minio-go/v7"
 	"io"
+	. "github.com/czs007/suvlim/storage/pkg/types"
 )
 
-var bucketName = conf.Config.Writer.Bucket
+var bucketName = "zilliz"
 
 type minioStore struct {
 	client *minio.Client

@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	cloud.google.com/go/bigquery v1.4.0 // indirect
-	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
+	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/99designs/keyring v1.1.5 // indirect
 	github.com/BurntSushi/toml v0.3.1
 	github.com/DataDog/zstd v1.4.6-0.20200617134701-89f69fb7df32 // indirect
@@ -26,7 +26,7 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/google/martian/v3 v3.0.0 // indirect
 	github.com/google/pprof v0.0.0-20200708004538-1a94d8640e99 // indirect
-	github.com/google/uuid v1.1.1
+	github.com/google/uuid v1.1.1 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.10
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
@@ -47,12 +47,14 @@ require (
 	github.com/prometheus/procfs v0.1.3 // indirect
 	github.com/rs/xid v1.2.1
 	github.com/sirupsen/logrus v1.6.0
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.6.1
 	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b
 	github.com/tikv/pd v2.1.19+incompatible
 	github.com/yahoo/athenz v1.9.16 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.opencensus.io v0.22.4 // indirect
+	go.uber.org/atomic v1.6.0
 	go.uber.org/zap v1.15.0
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a // indirect
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6 // indirect

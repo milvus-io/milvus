@@ -42,7 +42,11 @@ type MessageClient struct {
 }
 
 func (mc *MessageClient) GetTimeNow() uint64 {
-	return mc.timestampBatchEnd
+	msg, ok := <-mc.timeSyncCfg.TimeSync()
+	if !ok {
+		fmt.Println("cnn't get data from timesync chan")
+	}
+	return msg.Timestamp
 }
 
 func (mc *MessageClient) TimeSyncStart() uint64 {
@@ -182,7 +186,7 @@ func (mc *MessageClient) InitClient(url string) {
 	timeSyncSubName := "reader" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
 	for i := conf.Config.Reader.TopicStart; i < conf.Config.Reader.TopicEnd; i++ {
-		str := "InsertOrDelete-"
+		str := "ManipulationReqMsg-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
@@ -200,7 +204,6 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
-	mc.timeSyncCfg.RoleType = timesync.Reader
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0

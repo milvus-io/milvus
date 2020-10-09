@@ -19,10 +19,11 @@ func (node *QueryNode) SegmentsManagement() {
 		for _, partition := range collection.Partitions {
 			for _, segment := range partition.Segments {
 				if segment.SegmentStatus != SegmentOpened {
+					log.Println("Segment have been closed")
 					continue
 				}
 
-				// fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
+				fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
 				if timeNow >= segment.SegmentCloseTime {
 					go segment.CloseSegment(collection)
 				}

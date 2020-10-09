@@ -10,11 +10,11 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 master:
-  address: localhost
+  adress: localhost
   port: 53100
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
-  segmentthreshole: 1073741824
+  segmentthreshole: 104857600
   proxyidlist: [0]
   querynodenum: 1
   writenodenum: 1
@@ -25,7 +25,7 @@ etcd:
   rootpath: by-dev
   segthreshold: 10000
 
-timesync: 
+timesync:
   interval: 400
 
 storage:
@@ -54,14 +54,24 @@ writer:
   stopflag: -2
   readerqueuesize: 10000
   searchbyidchansize: 10000
-  parallelism: 100
   topicstart: 0
   topicend: 128
-  bucket: "zilliz-hz"
 
 proxy:
   timezone: UTC+8
-  proxy_id: 0
+  proxy_id: 1
+  numReaderNodes: 2
+  tsoSaveInterval: 200
+  timeTickInterval: 200
+
+  pulsarTopics:
+    readerTopicPrefix: "milvusReader"
+    numReaderTopics: 2
+    deleteTopic: "milvusDeleter"
+    queryTopic: "milvusQuery"
+    resultTopic: "milvusResult"
+    resultGroup: "milvusResultGroup"
+    timeTickTopic: "milvusTimeTick"
 
   network:
     address: 0.0.0.0

@@ -9,6 +9,8 @@ import (
 	"github.com/czs007/suvlim/writer/write_node"
 	"log"
 	"strconv"
+	"sync"
+	"time"
 )
 
 func main() {
@@ -22,6 +24,7 @@ func main() {
 	//TODO::close client / consumer/ producer
 
 	mc.ReceiveMessage()
+	wg := sync.WaitGroup{}
 	ctx := context.Background()
 	kv, err := storage.NewStore(ctx, conf.Config.Storage.Driver)
 	// TODO:: if err != nil, should retry link
@@ -42,25 +45,34 @@ func main() {
 	}
 
 	const Debug = true
+	const CountMsgNum = 1000 * 1000
 
 	if Debug {
-		const CountInsertMsgBaseline = 1000 * 1000
-		var BaselineCounter int64 = 0
+		var printFlag = true
+		var startTime = true
+		var start time.Time
 
 		for {
 			if ctx.Err() != nil {
 				break
 			}
 			msgLength := wn.MessageClient.PrepareBatchMsg()
+			if msgLength > 0 {
+				if startTime {
+					fmt.Println("============> Start Test <============")
+					startTime = false
+					start = time.Now()
+				}
 
-			if wn.MsgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
-				wn.WriteWriterLog()
-				BaselineCounter = wn.MsgCounter.InsertCounter/CountInsertMsgBaseline
+				wn.DoWriteNode(ctx, &wg)
+				fmt.Println("write node do a batch message, storage len: ", msgLength)
 			}
 
-			if msgLength > 0 {
-				wn.DoWriteNode(ctx)
-				fmt.Println("write node do a batch message, storage len: ", msgLength)
+			// Test insert time
+			if printFlag && wn.MsgCounter.InsertCounter >= CountMsgNum {
+				printFlag = false
+				timeSince := time.Since(start)
+				fmt.Println("============> Do", wn.MsgCounter.InsertCounter, "Insert in", timeSince, "<============")
 			}
 		}
 	}
@@ -72,7 +84,7 @@ func main() {
 		}
 		msgLength := wn.MessageClient.PrepareBatchMsg()
 		if msgLength > 0 {
-			wn.DoWriteNode(ctx)
+			wn.DoWriteNode(ctx, &wg)
 			fmt.Println("write node do a batch message, storage len: ", msgLength)
 		}
 	}

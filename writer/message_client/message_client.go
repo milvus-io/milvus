@@ -87,7 +87,7 @@ func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "writer" + strconv.Itoa(mc.MessageClientID),
+		SubscriptionName: "writer",
 	})
 
 	if err != nil {
@@ -131,7 +131,7 @@ func (mc *MessageClient) InitClient(url string) {
 	timeSyncSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
 	for i := conf.Config.Writer.TopicStart; i < conf.Config.Writer.TopicEnd; i++ {
-		str := "InsertOrDelete-"
+		str := "ManipulationReqMsg-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
@@ -149,7 +149,6 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
-	mc.timeSyncCfg.RoleType = timesync.Writer
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0
