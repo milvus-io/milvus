@@ -15,7 +15,6 @@ class Request(object):
         self._url = url
 
     def _check_status(self, result):
-        logging.getLogger().info(result.text)
         if result.status_code not in [200, 201, 204]:
             return False
         if not result.text or "code" not in json.loads(result.text):
@@ -220,6 +219,19 @@ class MilvusClient(object):
         for field in info["fields"]:
             if field["field_name"] == field_name:
                 return field["index_params"]
+
+    def search(self, collection_name, query_expr, fields=None):
+        url = self._url+url_collections+'/'+collection_name+'/entities'
+        r = Request(url)
+        search_params = {
+            "query": query_expr,
+            "fields": fields
+        }
+        try:
+            return r.post(search_params)
+        except Exception as e:
+            logging.getLogger().error(str(e))
+            return False
 
     '''
     method: drop all collections in db
