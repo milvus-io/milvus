@@ -64,3 +64,16 @@ class TestCreateCollection:
         fields["segment_row_limit"] = segment_row_limit
         client.create_collection(collection_name, fields)
         assert not client.has_collection(collection_name)
+
+    def test_create_collection_id(self, client):
+        '''
+        target: test create id collection
+        method: create collection with auto_id false
+        expected: no exception raised
+        '''
+        collection_name = gen_unique_str(uid)
+        fields = copy.deepcopy(default_fields)
+        fields["auto_id"] = False
+        # fields = gen_default_fields(auto_id=False)
+        client.create_collection(collection_name, fields)
+        assert client.has_collection(collection_name)

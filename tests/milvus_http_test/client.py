@@ -67,8 +67,8 @@ class MilvusClient(object):
             logging.getLogger().error(str(e))
             return False
 
-    def list_collections(self):
-        url = self._url+url_collections
+    def list_collections(self, offset=0, page_size=10):
+        url = self._url+url_collections+'?'+'offset='+str(offset)+'&page_size='+str(page_size)
         r = Request(url)
         try:
             collections = r.get()
@@ -87,7 +87,7 @@ class MilvusClient(object):
             return False 
 
     def drop_collection(self, collection_name):
-        url = self._url+url_collections+'/'+collection_name
+        url = self._url+url_collections+'/'+str(collection_name)
         r = Request(url)
         try:
             res_drop = r.delete()
@@ -225,7 +225,7 @@ class MilvusClient(object):
     method: drop all collections in db
     '''
     def clear_db(self):
-        collections = self.list_collections()
+        collections = self.list_collections(page_size=10000)
         for item in collections:
             self.drop_collection(item["collection_name"])
 

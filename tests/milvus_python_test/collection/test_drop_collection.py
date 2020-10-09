@@ -90,14 +90,14 @@ class TestDropCollectionInvalid(object):
     def test_drop_collection_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+            connect.drop_collection(collection_name)
 
     def test_drop_collection_with_empty_collectionname(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+            connect.drop_collection(collection_name)
 
     def test_drop_collection_with_none_collectionname(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+            connect.drop_collection(collection_name)
