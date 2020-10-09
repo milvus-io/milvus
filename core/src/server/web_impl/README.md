@@ -773,7 +773,9 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
                 {"vector": 
                     {
                         "field_vec": {
-                            "nprobe": 64,
+                            "params": {
+                                "nprobe": 64
+                            }
                             "topk": 100,
                             "metric_type": "L2"
                             "values": [
