@@ -209,7 +209,7 @@ message QueryResult {
     repeated float distances = 5;
     repeated KeyValuePair extra_params = 6;
     uint64 query_id = 7;
-    uint64 proxy_id = 8;
+    int64 proxy_id = 8;
 }
 
 /**
@@ -719,7 +719,7 @@ message QueryReqMsg {
     string dsl = 4;
     repeated KeyValuePair extra_params = 5;
     uint64 timestamp =6;
-    uint64 proxy_id = 7;
+    int64 proxy_id = 7;
     uint64 query_id = 8;
     ReqType req_type = 9;
 }
@@ -734,7 +734,7 @@ message ManipulationReqMsg {
     uint64 segment_id = 6;
     uint64 channel_id = 7;
     ReqType req_type = 8;
-    uint64 proxy_id = 9;
+    int64 proxy_id = 9;
     repeated KeyValuePair extra_params = 10;
 }
 
