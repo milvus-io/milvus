@@ -2,13 +2,19 @@ package write_node
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	storage "github.com/czs007/suvlim/storage/pkg"
 	"github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/czs007/suvlim/writer/message_client"
+	"log"
+	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type SegmentIdInfo struct {
@@ -19,7 +25,19 @@ type SegmentIdInfo struct {
 
 type MsgCounter struct {
 	InsertCounter int64
+	InsertTime    time.Time
+	// InsertedRecordSize float64
+
 	DeleteCounter int64
+	DeleteTime    time.Time
+}
+
+type InsertLog struct {
+	MsgLength              int
+	DurationInMilliseconds int64
+	InsertTime             time.Time
+	NumSince               int64
+	Speed                  float64
 }
 
 type WriteNode struct {
@@ -27,6 +45,7 @@ type WriteNode struct {
 	MessageClient *message_client.MessageClient
 	TimeSync      uint64
 	MsgCounter    *MsgCounter
+	InsertLogs    []InsertLog
 }
 
 func (wn *WriteNode) Close() {
@@ -42,7 +61,10 @@ func NewWriteNode(ctx context.Context,
 
 	msgCounter := MsgCounter{
 		InsertCounter: 0,
+		InsertTime:    time.Now(),
 		DeleteCounter: 0,
+		DeleteTime:    time.Now(),
+		// InsertedRecordSize: 0,
 	}
 
 	return &WriteNode{
@@ -50,6 +72,7 @@ func NewWriteNode(ctx context.Context,
 		MessageClient: &mc,
 		TimeSync:      timeSync,
 		MsgCounter:    &msgCounter,
+		InsertLogs:    make([]InsertLog, 0),
 	}, err
 }
 
@@ -60,17 +83,18 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 	var suffixKeys []string
 	var binaryData [][]byte
 	var timeStamp []uint64
+	byteArr := make([]byte, 8)
+	intData := uint64(0)
+	binary.BigEndian.PutUint64(byteArr, intData)
 
 	for i := 0; i < len(data); i++ {
 		prefixKey = data[i].CollectionName + "-" + strconv.FormatUint(uint64(data[i].Uid), 10)
 		suffixKey = strconv.FormatUint(uint64(data[i].SegmentId), 10)
 		prefixKeys = append(prefixKeys, []byte(prefixKey))
 		suffixKeys = append(suffixKeys, suffixKey)
-		binaryData = append(binaryData, []byte(data[i].String()))
+		binaryData = append(binaryData, byteArr)
 		timeStamp = append(timeStamp, uint64(data[i].Timestamp))
 	}
-
-	wn.MsgCounter.InsertCounter += int64(len(timeStamp))
 
 	error := (*wn.KvStore).PutRows(ctx, prefixKeys, binaryData, suffixKeys, timeStamp)
 	if error != nil {
@@ -82,7 +106,7 @@ func (wn *WriteNode) InsertBatchData(ctx context.Context, data []*msgpb.InsertOr
 	return nil
 }
 
-func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg, wg *sync.WaitGroup) error {
+func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOrDeleteMsg) error {
 	var prefixKey string
 	var prefixKeys [][]byte
 	var timeStamps []uint64
@@ -115,10 +139,8 @@ func (wn *WriteNode) DeleteBatchData(ctx context.Context, data []*msgpb.InsertOr
 	err := (*wn.KvStore).DeleteRows(ctx, prefixKeys, timeStamps)
 	if err != nil {
 		fmt.Println("Can't delete data")
-		wg.Done()
 		return err
 	}
-	wg.Done()
 	return nil
 }
 
@@ -126,10 +148,79 @@ func (wn *WriteNode) UpdateTimeSync(timeSync uint64) {
 	wn.TimeSync = timeSync
 }
 
-func (wn *WriteNode) DoWriteNode(ctx context.Context, wg *sync.WaitGroup) {
-	wg.Add(2)
-	go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg, wg)
-	go wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg, wg)
+func (wn *WriteNode) DoWriteNode(ctx context.Context) {
+	numInsertData := len(wn.MessageClient.InsertMsg)
+	numGoRoute := conf.Config.Writer.Parallelism
+	batchSize := numInsertData / numGoRoute
+	if numInsertData%numGoRoute != 0 {
+		batchSize += 1
+	}
+	start := 0
+	end := 0
+	wg := sync.WaitGroup{}
+	for end < numInsertData {
+		if end+batchSize >= numInsertData {
+			end = numInsertData
+		} else {
+			end = end + batchSize
+		}
+		wg.Add(1)
+		go wn.InsertBatchData(ctx, wn.MessageClient.InsertMsg[start:end], &wg)
+		start = end
+	}
 	wg.Wait()
+	wn.WriterLog(numInsertData)
+	wn.DeleteBatchData(ctx, wn.MessageClient.DeleteMsg)
 	wn.UpdateTimeSync(wn.MessageClient.TimeSync())
+}
+
+func (wn *WriteNode) WriterLog(length int) {
+	wn.MsgCounter.InsertCounter += int64(length)
+	timeNow := time.Now()
+	duration := timeNow.Sub(wn.MsgCounter.InsertTime)
+	speed := float64(length) / duration.Seconds()
+
+	insertLog := InsertLog{
+		MsgLength:              length,
+		DurationInMilliseconds: duration.Milliseconds(),
+		InsertTime:             timeNow,
+		NumSince:               wn.MsgCounter.InsertCounter,
+		Speed:                  speed,
+	}
+
+	wn.InsertLogs = append(wn.InsertLogs, insertLog)
+	wn.MsgCounter.InsertTime = timeNow
+}
+
+func (wn *WriteNode) WriteWriterLog() {
+	f, err := os.OpenFile("/tmp/write_node_insert.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// write logs
+	for _, insertLog := range wn.InsertLogs {
+		insertLogJson, err := json.Marshal(&insertLog)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		writeString := string(insertLogJson) + "\n"
+		//fmt.Println(writeString)
+
+		_, err2 := f.WriteString(writeString)
+		if err2 != nil {
+			log.Fatal(err2)
+		}
+	}
+
+	// reset InsertLogs buffer
+	wn.InsertLogs = make([]InsertLog, 0)
+
+	err = f.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("write write node log done")
 }

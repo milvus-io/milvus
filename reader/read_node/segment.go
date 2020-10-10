@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"github.com/czs007/suvlim/errors"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/stretchr/testify/assert"
 	"strconv"
 	"unsafe"
 )
@@ -83,15 +84,16 @@ func (s *Segment) CloseSegment(collection* Collection) error {
 	}
 
 	// Build index after closing segment
-	s.SegmentStatus = SegmentIndexing
-	fmt.Println("Building index...")
-	s.buildIndex(collection)
+	//s.SegmentStatus = SegmentIndexing
+	//fmt.Println("Building index...")
+	//s.buildIndex(collection)
 
 	// TODO: remove redundant segment indexed status
 	// Change segment status to indexed
-	s.SegmentStatus = SegmentIndexed
-	fmt.Println("Segment closed and indexed")
+	//s.SegmentStatus = SegmentIndexed
+	//fmt.Println("Segment closed and indexed")
 
+	fmt.Println("Segment closed")
 	return nil
 }
 
@@ -142,9 +144,13 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0])
 
-	var rawData = make([]byte, numOfRow*sizeofPerRow)
+	assert.Equal(nil, numOfRow, len(*records))
+
+	var rawData = make([]byte, numOfRow * sizeofPerRow)
+	var copyOffset = 0
 	for i := 0; i < len(*records); i++ {
-		copy(rawData, (*records)[i])
+		copy(rawData[copyOffset:], (*records)[i])
+		copyOffset += sizeofPerRow
 	}
 
 	var cOffset = C.long(offset)
@@ -236,7 +242,7 @@ func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord
 		return nil, errors.New("Search failed, error code = " + strconv.Itoa(int(status)))
 	}
 
-	fmt.Println("Search Result---- Ids =", resultIds, ", Distances =", resultDistances)
+	//fmt.Println("Search Result---- Ids =", resultIds, ", Distances =", resultDistances)
 
 	return &SearchResult{ResultIds: resultIds, ResultDistances: resultDistances}, nil
 }

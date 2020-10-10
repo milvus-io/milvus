@@ -19,12 +19,16 @@ namespace milvus_sdk {
 class TimeRecorder {
  public:
     explicit TimeRecorder(const std::string& title);
-
+    void Start();
+    void End();
+    void Print(int loop);
     ~TimeRecorder();
 
  private:
     std::string title_;
     std::chrono::system_clock::time_point start_;
+    std::chrono::system_clock::time_point end_;
+    int64_t total_time_ = 0;
 };
 
 }  // namespace milvus_sdk

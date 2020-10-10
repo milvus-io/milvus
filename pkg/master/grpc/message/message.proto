@@ -208,8 +208,8 @@ message QueryResult {
     repeated float scores = 4;
     repeated float distances = 5;
     repeated KeyValuePair extra_params = 6;
-    uint64 query_id = 7;
-    int64 proxy_id = 8;
+    int64 query_id = 7;
+    int64 client_id = 8;
 }
 
 /**
@@ -673,69 +673,6 @@ service MilvusService {
 enum OpType {
     INSERT = 0;
     DELETE = 1;
-}
-
-enum ReqType {
-    // general operations
-    kCmd = 0;
-
-    /* collection operations */
-    kCreateCollection = 100;
-    kDropCollection = 101;
-    kHasCollection = 102;
-    kListCollections = 103;
-    kGetCollectionInfo = 104;
-    kGetCollectionStats = 105;
-    kCountEntities = 106;
-
-    /* partition operations */
-    kCreatePartition = 200;
-    kDropPartition = 201;
-    kHasPartition = 202;
-    kListPartitions = 203;
-
-    /* index operations */
-    kCreateIndex = 300;
-    kDropIndex = 301;
-    kDescribeIndex = 302;
-
-    /* data operations */
-    kInsert = 400;
-    kGetEntityByID = 401;
-    kDeleteEntityByID = 402;
-    kSearch = 403;
-    kListIDInSegment = 404;
-
-    /* other operations */
-    kLoadCollection = 500;
-    kFlush = 501;
-    kCompact = 502;
-}
-
-message QueryReqMsg {
-    string collection_name = 1;
-    repeated VectorParam vector_param = 2;
-    repeated string partition_tags = 3;
-    string dsl = 4;
-    repeated KeyValuePair extra_params = 5;
-    uint64 timestamp =6;
-    int64 proxy_id = 7;
-    uint64 query_id = 8;
-    ReqType req_type = 9;
-}
-
-
-message ManipulationReqMsg {
-    string collection_name = 1;
-    string partition_tag = 2;
-    repeated uint64 primary_keys = 3;
-    repeated RowData rows_data = 4;
-    uint64 timestamp =5;
-    uint64 segment_id = 6;
-    uint64 channel_id = 7;
-    ReqType req_type = 8;
-    int64 proxy_id = 9;
-    repeated KeyValuePair extra_params = 10;
 }
 
 message InsertOrDeleteMsg {

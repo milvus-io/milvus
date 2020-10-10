@@ -81,6 +81,12 @@ ConfigMgr::ConfigMgr() {
 
 
         /* pulsar */
+        {"pulsar.authentication", CreateBoolConfig("pulsar.authentication", false, &config.pulsar.authentication,
+                                            false, nullptr, nullptr)},
+        {"pulsar.user", CreateStringConfig("pulsar.user", false, &config.pulsar.user.value,
+                                              "user-default", nullptr, nullptr)},
+        {"pulsar.token", CreateStringConfig("pulsar.token", false, &config.pulsar.token.value,
+                                           "fake-token", nullptr, nullptr)},
         {"pulsar.address", CreateStringConfig("pulsar.address", false, &config.pulsar.address.value,
                                                     "localhost", nullptr, nullptr)},
         {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,

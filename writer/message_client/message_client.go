@@ -87,7 +87,7 @@ func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "writer",
+		SubscriptionName: "writer" + strconv.Itoa(mc.MessageClientID),
 	})
 
 	if err != nil {
@@ -97,7 +97,20 @@ func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 }
 
 func (mc *MessageClient) createClient(url string) pulsar.Client {
-	// create client
+	if conf.Config.Pulsar.Authentication {
+		// create client with Authentication
+		client, err := pulsar.NewClient(pulsar.ClientOptions{
+			URL: url,
+			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
+		})
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		return client
+	}
+
+	// create client without Authentication
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL: url,
 	})
@@ -113,11 +126,23 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.client = mc.createClient(url)
 	mc.MessageClientID = conf.Config.Writer.ClientId
 
+	key2SegTopicName := "Key2Seg"
+	searchByIdTopicName := "SearchById"
+	timeSyncTopicName := "TimeSync"
+	insertOrDeleteTopicName := "InsertOrDelete-"
+
+	if conf.Config.Pulsar.Authentication {
+		key2SegTopicName = "Key2Seg-" + conf.Config.Pulsar.User
+		searchByIdTopicName = "Search-" + conf.Config.Pulsar.User
+		// timeSyncTopicName = "TimeSync-" + conf.Config.Pulsar.User
+		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
+	}
+
 	//create producer
-	mc.key2segProducer = mc.creatProducer("Key2Seg")
+	mc.key2segProducer = mc.creatProducer(key2SegTopicName)
 
 	//create consumer
-	mc.searchByIdConsumer = mc.createConsumer("SearchById")
+	mc.searchByIdConsumer = mc.createConsumer(searchByIdTopicName)
 
 	//init channel
 	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, conf.Config.Writer.SearchByIdChanSize)
@@ -127,11 +152,11 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 
 	//init timesync
-	timeSyncTopic := "TimeSync"
+	timeSyncTopic := timeSyncTopicName
 	timeSyncSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
 	for i := conf.Config.Writer.TopicStart; i < conf.Config.Writer.TopicEnd; i++ {
-		str := "ManipulationReqMsg-"
+		str := insertOrDeleteTopicName
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
@@ -149,6 +174,7 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
+	mc.timeSyncCfg.RoleType = timesync.Writer
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0

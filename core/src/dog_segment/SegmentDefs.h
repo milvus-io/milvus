@@ -171,9 +171,7 @@ class Schema {
     const FieldMeta&
     operator[](const std::string& field_name) const {
         auto offset_iter = offsets_.find(field_name);
-        if (offset_iter == offsets_.end()) {
-          throw std::runtime_error("Cannot found field_name: " + field_name);
-        }
+        AssertInfo(offset_iter != offsets_.end(), "Cannot found field_name: " + field_name);
         auto offset = offset_iter->second;
         return (*this)[offset];
     }
