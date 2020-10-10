@@ -54,7 +54,7 @@ pqCodeDistances(Tensor<float, 2, true> queries,
 
   // Each thread will load the pq centroid data for the code that it
   // is processing
-  if(!loadingThreads) {
+  if(!isLoadingThread) {
 #pragma unroll
       for (int i = 0; i < DimsPerSubQuantizer; ++i) {
         subQuantizerData[i] = pqCentroids[subQuantizer][i][code].ldg();
