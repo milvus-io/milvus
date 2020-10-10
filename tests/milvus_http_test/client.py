@@ -15,6 +15,10 @@ class Request(object):
         self._url = url
 
     def _check_status(self, result):
+        self._url = url
+
+    def _check_status(self, result):
+        # logging.getLogger().info(result.text)
         if result.status_code not in [200, 201, 204]:
             return False
         if not result.text or "code" not in json.loads(result.text):
@@ -28,27 +32,28 @@ class Request(object):
 
     def get(self, data=None):
         res_get = requests.get(self._url, params=data)
-        if self._check_status(res_get):
-            # TODO:
-            return json.loads(res_get.text)["data"]
+        return self._check_status(res_get), json.loads(res_get.text)["data"]
 
     def post(self, data):
         res_post = requests.post(self._url, data=json.dumps(data))
-        return self._check_status(res_post)
+        if res_post.text:
+            return self._check_status(res_post), json.loads(res_post.text)
+        else:
+            return self._check_status(res_post), res_post
 
     def delete(self, data=None):
         if data:
             res_delete = requests.delete(self._url, data=json.dumps(data))
         else:
             res_delete = requests.delete(self._url)
-        return self._check_status(res_delete)
+        return self._check_status(res_delete), res_delete
 
     def put(self, data=None):
         if data:
             res_put = requests.put(self._url, data=json.dumps(data))
         else:
             res_put = requests.put(self._url)
-        return self._check_status(res_put)
+        return self._check_status(res_put), res_put
 
 
 class MilvusClient(object):
@@ -61,7 +66,11 @@ class MilvusClient(object):
         r = Request(url)
         fields.update({"collection_name": collection_name})
         try:
-            return r.post(fields)
+            status, data = r.post(fields)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -70,8 +79,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'?'+'offset='+str(offset)+'&page_size='+str(page_size)
         r = Request(url)
         try:
-            collections = r.get()
-            return collections["collections"]
+            status, data = r.get()
+            if status:
+                return data["collections"]
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False 
@@ -80,7 +92,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name
         r = Request(url)
         try:
-            return r.get()
+            status, data = r.get()
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False 
@@ -89,7 +105,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+str(collection_name)
         r = Request(url)
         try:
-            res_drop = r.delete()
+            status, data = r.delete()
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -98,7 +118,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name
         r = Request(url)
         try:
-            return r.get()
+            status, data = r.get()
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -107,7 +131,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name
         r = Request(url)
         try:
-            return r.get(data={"info": "stat"})
+            status, data = r.get(data={"info": "stat"})
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -120,7 +148,11 @@ class MilvusClient(object):
         r = Request(url)
         create_params = {"partition_tag": tag}
         try:
-            return r.post(create_params)
+            status, data = r.post(create_params)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -129,8 +161,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name+'/partitions'
         r = Request(url)
         try:
-            ret = r.get()
-            return ret["partitions"]
+            status, data = r.get()
+            if status:
+                return data["partitions"]
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -139,7 +174,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name+'/partitions/'+tag;
         r = Request(url)
         try:
-            res_drop = r.delete()
+            status, data = r.delete()
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -150,7 +189,11 @@ class MilvusClient(object):
         flush_params = {
             "flush": {"collection_names": collection_names}}
         try:
-            return r.put(data=flush_params)
+            status, data = r.put(data=flush_params)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -162,7 +205,11 @@ class MilvusClient(object):
         if tag:
             insert_params.update({"partition_tag": tag})
         try:
-            return r.post(insert_params)
+            status, data = r.post(insert_params)
+            if status:
+                return data["ids"] 
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -172,8 +219,11 @@ class MilvusClient(object):
         r = Request(url)
         delete_params = {"ids": ids}
         try:
-            res_delete = r.delete(data=delete_params)
-            return res_delete
+            status, data = r.delete(data=delete_params)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -187,8 +237,11 @@ class MilvusClient(object):
         # url = self._url+url_collections+'/'+collection_name+'/entities'
         r = Request(url)
         try:
-            collections = r.get()
-            return collections["entities"]
+            status, data = r.get()
+            if status:
+                return data["entities"]
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -200,7 +253,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name+'/fields/'+field_name+'/indexes'
         r = Request(url)
         try:
-            return r.post(index_params)
+            status, data = r.post(index_params)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -209,7 +266,11 @@ class MilvusClient(object):
         url = self._url+url_collections+'/'+collection_name+'/fields/'+field_name+'/indexes'
         r = Request(url)
         try:
-            return r.delete()
+            status, data = r.delete()
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -228,7 +289,11 @@ class MilvusClient(object):
             "fields": fields
         }
         try:
-            return r.post(search_params)
+            status, data = r.post(search_params)
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
@@ -245,7 +310,11 @@ class MilvusClient(object):
         url = self._url+url_system+cmd
         r = Request(url)
         try:
-            return r.get()["reply"]
+            status, data = r.get()["reply"]
+            if status:
+                return data
+            else:
+                return False
         except Exception as e:
             logging.getLogger().error(str(e))
             return False
