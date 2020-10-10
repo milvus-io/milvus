@@ -80,7 +80,6 @@ void
 ClientTest::CreateCollection(const std::string& collection_name) {
     milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
     milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    milvus::FieldPtr field_ptr3 = std::make_shared<milvus::Field>();
     milvus::FieldPtr field_ptr4 = std::make_shared<milvus::Field>();
 
     field_ptr1->field_name = "field_1";
@@ -95,12 +94,6 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     index_param_2["name"] = "index_2";
     field_ptr2->index_params = index_param_2.dump();
 
-    field_ptr3->field_name = "field_3";
-    field_ptr3->field_type = milvus::DataType::INT32;
-    JSON index_param_3;
-    index_param_3["name"] = "index_3";
-    field_ptr3->index_params = index_param_3.dump();
-
     field_ptr4->field_name = "field_vec";
     field_ptr4->field_type = milvus::DataType::VECTOR_FLOAT;
     JSON index_param_4;
@@ -113,7 +106,7 @@ ClientTest::CreateCollection(const std::string& collection_name) {
     JSON extra_params;
     extra_params["segment_row_limit"] = 10000;
     extra_params["auto_id"] = false;
-    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr3, field_ptr4}};
+    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr4}};
 
     milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
     std::cout << "CreateCollection function call status: " << stat.message() << std::endl;

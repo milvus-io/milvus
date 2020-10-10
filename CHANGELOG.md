@@ -80,6 +80,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3449 Upgrade master version to v0.11.0
 -   \#3465 Optimize gc event executor
 -   \#3631 Add build option `-rdynamic` in CMakeList.txt
+-   \#3882 Params in Restful-api is different from the params in other SDKs
 
 ## Task
 
