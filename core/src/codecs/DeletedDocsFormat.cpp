@@ -29,6 +29,7 @@
 #include "db/Utils.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
@@ -45,7 +46,7 @@ Status
 DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                         segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-
+    milvus::TimeRecorderAuto recorder("DeletedDocsFormat::Read:" + full_file_path);
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
@@ -72,7 +73,7 @@ Status
 DeletedDocsFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                          const segment::DeletedDocsPtr& deleted_docs) {
     const std::string full_file_path = file_path + DELETED_DOCS_POSTFIX;
-
+    milvus::TimeRecorderAuto recorder("DeletedDocsFormat::Write:" + full_file_path);
     auto deleted_docs_list = deleted_docs->GetDeletedDocs();
     size_t num_bytes = sizeof(engine::offset_t) * deleted_docs->GetCount();
 
