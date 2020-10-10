@@ -82,7 +82,7 @@ StructuredIndexFormat::CreateStructuredIndex(const engine::DataType data_type) {
 Status
 StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             knowhere::IndexPtr& index) {
-    milvus::TimeRecorder recorder("StructuredIndexFormat::Read");
+    milvus::TimeRecorderAuto recorder("StructuredIndexFormat::Read:" + file_path);
     knowhere::BinarySet load_data_list;
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
@@ -132,10 +132,6 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
     }
     fs_ptr->reader_ptr_->Close();
 
-    double span = recorder.RecordSection("End");
-    double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::read(" << full_file_path << ") rate " << rate << "MB/s";
-
     auto attr_type = static_cast<engine::DataType>(data_type);
     index = CreateStructuredIndex(attr_type);
     index->Load(load_data_list);
@@ -146,7 +142,7 @@ StructuredIndexFormat::Read(const milvus::storage::FSHandlerPtr& fs_ptr, const s
 Status
 StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                              engine::DataType data_type, const knowhere::IndexPtr& index) {
-    milvus::TimeRecorder recorder("StructuredIndexFormat::Write");
+    milvus::TimeRecorderAuto recorder("StructuredIndexFormat::Write:" + file_path);
 
     std::string full_file_path = file_path + STRUCTURED_INDEX_POSTFIX;
 
@@ -184,10 +180,6 @@ StructuredIndexFormat::Write(const milvus::storage::FSHandlerPtr& fs_ptr, const 
         fs_ptr->writer_ptr_->Write(data.data(), data.size());
         WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
         fs_ptr->writer_ptr_->Close();
-
-        double span = recorder.RecordSection("End");
-        double rate = fs_ptr->writer_ptr_->Length() * 1000000.0 / span / 1024 / 1024;
-        LOG_ENGINE_DEBUG_ << "StructuredIndexFormat::write(" << full_file_path << ") rate " << rate << "MB/s";
     } catch (std::exception& ex) {
         std::string err_msg = "Failed to write structured index: " + std::string(ex.what());
         LOG_ENGINE_ERROR_ << err_msg;

@@ -41,7 +41,7 @@ VectorCompressFormat::FilePostfix() {
 Status
 VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                            knowhere::BinaryPtr& compress) {
-    milvus::TimeRecorder recorder("VectorCompressFormat::Read");
+    milvus::TimeRecorderAuto recorder("VectorCompressFormat::Read:" + file_path);
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
     if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
@@ -63,17 +63,13 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
     fs_ptr->reader_ptr_->Read(compress->data.get(), length);
     fs_ptr->reader_ptr_->Close();
 
-    double span = recorder.RecordSection("End");
-    double rate = length * 1000000.0 / span / 1024 / 1024;
-    LOG_ENGINE_DEBUG_ << "VectorCompressFormat::Read(" << full_file_path << ") rate " << rate << "MB/s";
-
     return Status::OK();
 }
 
 Status
 VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                             const knowhere::BinaryPtr& compress) {
-    milvus::TimeRecorder recorder("VectorCompressFormat::Write");
+    milvus::TimeRecorderAuto recorder("VectorCompressFormat::Write:" + file_path);
 
     const std::string full_file_path = file_path + VECTOR_COMPRESS_POSTFIX;
 
@@ -93,10 +89,6 @@ VectorCompressFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::stri
         WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(compress->data.get()), compress->size);
 
         fs_ptr->writer_ptr_->Close();
-
-        double span = recorder.RecordSection("End");
-        double rate = compress->size * 1000000.0 / span / 1024 / 1024;
-        LOG_ENGINE_DEBUG_ << "SVectorCompressFormat::Write(" << full_file_path << ") rate " << rate << "MB/s";
     } catch (std::exception& ex) {
         std::string err_msg = "Failed to write compress data: " + std::string(ex.what());
         LOG_ENGINE_ERROR_ << err_msg;
