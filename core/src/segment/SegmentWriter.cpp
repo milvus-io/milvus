@@ -91,8 +91,6 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
-    TimeRecorderAuto recorder("SegmentWriter::WriteField: " + file_path);
-
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw));
 
@@ -101,7 +99,7 @@ SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryData
 
 Status
 SegmentWriter::WriteFields() {
-    TimeRecorder recorder("SegmentWriter::WriteFields");
+    TimeRecorderAuto recorder("SegmentWriter::WriteFields");
 
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_visitors_map) {
@@ -176,8 +174,6 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
         return Status(DB_ERROR, "WriteBloomFilter: null pointer");
     }
 
-    TimeRecorderAuto recorder("SegmentWriter::WriteBloomFilter: " + file_path);
-
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr));
 
@@ -186,8 +182,6 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
 
 Status
 SegmentWriter::WriteDeletedDocs() {
-    TimeRecorder recorder("SegmentWriter::WriteDeletedDocs");
-
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
@@ -214,8 +208,6 @@ SegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsP
     if (deleted_docs == nullptr) {
         return Status::OK();
     }
-
-    TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs: " + file_path);
 
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs));
