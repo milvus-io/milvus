@@ -431,7 +431,7 @@ TEST_F(WalTest, WalProxyTest) {
     }
 }
 
-TEST_F(WalTest, WalManagerTest) {
+TEST_F(WalTest, WalManagerTest1) {
     // construct mock db
     DBOptions options;
     options.wal_path_ = "/tmp/milvus_wal";
@@ -459,6 +459,9 @@ TEST_F(WalTest, WalManagerTest) {
             auto status = WalManager::GetInstance().RecordOperation(op, db_1);
             ASSERT_TRUE(status.ok());
 
+            idx_t max_done_id = WalManager::GetInstance().GetMaxOperationID(COLLECTION_NAME);
+            ASSERT_EQ(max_done_id, op->ID());
+
             delete_count++;
         } else {
             DataChunkPtr chunk;
@@ -473,6 +476,9 @@ TEST_F(WalTest, WalManagerTest) {
             auto status = WalManager::GetInstance().RecordOperation(op, db_1);
             ASSERT_TRUE(status.ok());
 
+            idx_t max_done_id = WalManager::GetInstance().GetMaxOperationID(COLLECTION_NAME);
+            ASSERT_EQ(max_done_id, op->ID());
+
             insert_count++;
         }
     }
@@ -480,10 +486,11 @@ TEST_F(WalTest, WalManagerTest) {
     ASSERT_EQ(db_1->InsertCount(), insert_count);
     ASSERT_EQ(db_1->DeleteCount(), delete_count);
 
-
     // test recovery
+    // firstly write some operations to wal, not apply to DB
     insert_count = 0;
     delete_count = 0;
+    idx_t max_op_id = 0;
     for (int64_t i = 1; i <= 1000; i++) {
         if (i % 10 == 0) {
             IDNumbers ids = {1, 2, 3};
@@ -495,6 +502,7 @@ TEST_F(WalTest, WalManagerTest) {
             auto status = WalManager::GetInstance().RecordOperation(op, nullptr);
             ASSERT_TRUE(status.ok());
 
+            max_op_id = (op->ID() > max_op_id) ? op->ID() : max_op_id;
             delete_count++;
         } else {
             DataChunkPtr chunk;
@@ -509,13 +517,56 @@ TEST_F(WalTest, WalManagerTest) {
             auto status = WalManager::GetInstance().RecordOperation(op, nullptr);
             ASSERT_TRUE(status.ok());
 
+            max_op_id = (op->ID() > max_op_id) ? op->ID() : max_op_id;
             insert_count++;
         }
     }
 
+    // secondly call wal manager to recovery
     DummyDBPtr db_2 = std::make_shared<DummyDB>(options);
     milvus::engine::CollectionMaxOpIDMap max_op_ids;
     WalManager::GetInstance().Recovery(db_2, max_op_ids);
     ASSERT_EQ(db_2->InsertCount(), insert_count);
     ASSERT_EQ(db_2->DeleteCount(), delete_count);
+
+    idx_t max_done_id = WalManager::GetInstance().GetMaxOperationID(COLLECTION_NAME);
+    ASSERT_EQ(max_done_id, max_op_id);
+}
+
+TEST_F(WalTest, WalManagerTest2) {
+    // construct mock db
+    DBOptions options;
+    options.wal_path_ = "/tmp/milvus_wal";
+    options.wal_enable_ = true;
+
+    // prepare wal manager
+    WalManager::GetInstance().Stop();
+    WalManager::GetInstance().Start(options);
+
+    // do some delete operations without insert, write the operations into wal, not apply to DB
+    int64_t delete_count = 0;
+    idx_t max_op_id = 0;
+    for (int64_t i = 1; i <= 100; i++) {
+        IDNumbers ids = {i};
+
+        auto op = std::make_shared<DeleteEntityOperation>();
+        op->collection_name_ = COLLECTION_NAME;
+        op->entity_ids_ = ids;
+
+        auto status = WalManager::GetInstance().RecordOperation(op, nullptr);
+        ASSERT_TRUE(status.ok());
+
+        max_op_id = (op->ID() > max_op_id) ? op->ID() : max_op_id;
+
+        delete_count++;
+    }
+
+    // test recovery the delete operations
+    DummyDBPtr db = std::make_shared<DummyDB>(options);
+    milvus::engine::CollectionMaxOpIDMap max_op_ids;
+    WalManager::GetInstance().Recovery(db, max_op_ids);
+    ASSERT_EQ(db->DeleteCount(), delete_count);
+
+    idx_t max_done_id = WalManager::GetInstance().GetMaxOperationID(COLLECTION_NAME);
+    ASSERT_EQ(max_done_id, max_op_id);
 }
