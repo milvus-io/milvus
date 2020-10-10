@@ -138,22 +138,6 @@ CheckSum(const std::string& header, const char* data, const size_t data_size, co
 }
 
 bool
-CheckSum(const storage::FSHandlerPtr& fs_ptr) {
-    auto length = fs_ptr->reader_ptr_->Length();
-    fs_ptr->reader_ptr_->Seekg(length - SUM_SIZE);
-    uint32_t record;
-    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
-
-    uint32_t result = CalculateSum(fs_ptr, true);
-    if (record != result) {
-        LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result;
-        fs_ptr->reader_ptr_->Close();
-        return false;
-    }
-    return true;
-}
-
-bool
 WriteHeaderValues(const storage::FSHandlerPtr& fs_ptr, const std::string& kv) {
     fs_ptr->writer_ptr_->Write(kv.data(), HEADER_SIZE);
     return true;

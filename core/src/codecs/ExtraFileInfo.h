@@ -41,12 +41,6 @@ namespace codec {
         throw Exception(SERVER_FILE_MAGIC_BYTES_ERROR, "Wrong magic bytes"); \
     }
 
-#define CHECK_FILE_SUM_VALID(PTR)                                                               \
-    if (!CheckSum(PTR)) {                                                                       \
-        LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed";                          \
-        throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "Wrong sum bytes, file has been changed"); \
-    }
-
 #define CHECK_SUM_VALID(HEADER, DATA, DATA_SIZE, RECORD)                                        \
     if (!CheckSum(HEADER, DATA, DATA_SIZE, RECORD)) {                                           \
         LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed";                          \
@@ -81,9 +75,6 @@ WriteMagic(const storage::FSHandlerPtr& fs_ptr);
 
 bool
 CheckMagic(const storage::FSHandlerPtr& fs_ptr);
-
-bool
-CheckSum(const storage::FSHandlerPtr& fs_ptr);
 
 bool
 CheckSum(const std::string& header, const char* data, const size_t data_size, const uint32_t record);

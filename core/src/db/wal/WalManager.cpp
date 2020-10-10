@@ -155,14 +155,14 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
         return Status::OK();
     }
 
-    bool start_clecnup = false;
+    bool start_cleanup = false;
     {
         // record max operation id for each collection
         std::lock_guard<std::mutex> lock(max_op_mutex_);
         idx_t last_id = max_op_id_map_[collection_name];
         if (op_id > last_id) {
             max_op_id_map_[collection_name] = op_id;
-            start_clecnup = true;
+            start_cleanup = true;
 
             // write max op id to disk
             std::string path = ConstructFilePath(collection_name, WAL_MAX_OP_FILE_NAME);
@@ -174,7 +174,7 @@ WalManager::OperationDone(const std::string& collection_name, idx_t op_id) {
         }
     }
 
-    if (start_clecnup) {
+    if (start_cleanup) {
         AddCleanupTask(collection_name);
         StartCleanupThread();
     }
@@ -258,6 +258,17 @@ WalManager::Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids) {
     }
 }
 
+idx_t
+WalManager::GetMaxOperationID(const std::string& collection_name) {
+    std::lock_guard<std::mutex> lock(max_op_mutex_);
+    auto pair = max_op_id_map_.find(collection_name);
+    if (pair != max_op_id_map_.end()) {
+        return pair->second;
+    }
+
+    return 0;
+}
+
 Status
 WalManager::Init() {
     sync_mode_ = config.wal.sync_mode();
@@ -304,6 +315,7 @@ WalManager::Init() {
 Status
 WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, const DBPtr& db) {
     idx_t op_id = id_gen_.GetNextIDNumber();
+    operation->SetID(op_id);
 
     DataChunkPtr& chunk = operation->data_chunk_;
     int64_t chunk_size = utils::GetSizeOfChunk(chunk);
@@ -347,6 +359,7 @@ WalManager::RecordInsertOperation(const InsertEntityOperationPtr& operation, con
 Status
 WalManager::RecordDeleteOperation(const DeleteEntityOperationPtr& operation, const DBPtr& db) {
     idx_t op_id = id_gen_.GetNextIDNumber();
+    operation->SetID(op_id);
     int64_t append_size = operation->entity_ids_.size() * sizeof(idx_t);
 
     // open wal file

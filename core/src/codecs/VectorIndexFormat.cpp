@@ -60,7 +60,6 @@ VectorIndexFormat::ReadRaw(const storage::FSHandlerPtr& fs_ptr, const std::strin
     data->size = num_bytes;
     data->data = std::shared_ptr<uint8_t[]>(new uint8_t[num_bytes]);
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(data->data.get(), num_bytes);
     uint32_t record;
     fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
@@ -193,7 +192,7 @@ VectorIndexFormat::ConstructIndex(const std::string& index_name, knowhere::Binar
 Status
 VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                               const knowhere::VecIndexPtr& index) {
-    milvus::TimeRecorder recorder("SVectorIndexFormat::WriteIndex");
+    milvus::TimeRecorderAuto recorder("SVectorIndexFormat::WriteIndex:" + file_path);
 
     std::string full_file_path = file_path + VECTOR_INDEX_POSTFIX;
 
@@ -237,10 +236,6 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
         WRITE_SUM(fs_ptr, header, reinterpret_cast<char*>(data.data()), data.size());
 
         fs_ptr->writer_ptr_->Close();
-
-        double span = recorder.RecordSection("End");
-        double rate = fs_ptr->writer_ptr_->Length() * 1000000.0 / span / 1024 / 1024;
-        LOG_ENGINE_DEBUG_ << "VectorIndexFormat::WriteIndex(" << full_file_path << ") rate " << rate << "MB/s";
     } catch (std::exception& ex) {
         std::string err_msg = "Failed to write vector index data: " + std::string(ex.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -255,7 +250,7 @@ VectorIndexFormat::WriteIndex(const storage::FSHandlerPtr& fs_ptr, const std::st
 Status
 VectorIndexFormat::WriteCompress(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path,
                                  const knowhere::VecIndexPtr& index) {
-    milvus::TimeRecorder recorder("VectorIndexFormat::WriteCompress");
+    milvus::TimeRecorderAuto recorder("VectorIndexFormat::WriteCompress:" + file_path);
 
     auto binaryset = index->Serialize(knowhere::Config());
 
