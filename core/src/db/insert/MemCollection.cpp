@@ -92,6 +92,9 @@ MemCollection::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
         ids_to_delete_.insert(id);
     }
 
+    // record max delete operation id here, for the case that no insert but only delete action performed
+    max_delete_op_id_ = (op_id > max_delete_op_id_) ? op_id : max_delete_op_id_;
+
     // Add the id to mem segments so it can be applied during the next flush
     std::lock_guard<std::mutex> lock(mem_mutex_);
     for (auto& partition_segments : mem_segments_) {
@@ -337,12 +340,16 @@ MemCollection::CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::Comp
 Status
 MemCollection::SerializeSegments() {
     std::lock_guard<std::mutex> lock(mem_mutex_);
-    if (mem_segments_.empty()) {
-        return Status::OK();
-    }
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_id_));
+
+    if (mem_segments_.empty()) {
+        // for the case that no insert but only delete action performed
+        // notify wal manager the delete operations has been done
+        WalManager::GetInstance().OperationDone(ss->GetName(), max_delete_op_id_);
+        return Status::OK();
+    }
 
     snapshot::OperationContext context;
     auto operation = std::make_shared<snapshot::MultiSegmentsOperation>(context, ss);
