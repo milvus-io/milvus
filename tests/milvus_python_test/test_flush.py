@@ -54,7 +54,7 @@ class TestFlushBase:
         method: flush, with collection not existed
         expected: error raised
         '''
-        collection_new = gen_unique_str(collection_id)
+        collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
             connect.flush([collection_new])
 
