@@ -39,16 +39,23 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
-    HeaderMap map = ReadHeaderValues(fs_ptr);
+    HeaderMap map = TransformHeaderData(header);
     size_t num_bytes = stol(map.at("size"));
 
     raw = std::make_shared<engine::BinaryData>();
     raw->data_.resize(num_bytes);
     fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes);
+
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(raw->data_.data()), num_bytes, record);
 
     return Status::OK();
 }
@@ -56,7 +63,6 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 Status
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
                   engine::BinaryDataPtr& raw) {
-    milvus::TimeRecorderAuto recorder("BlockFormat::Read:" + file_path);
     if (offset < 0 || num_bytes <= 0) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid input to read: " + file_path);
     }
@@ -65,11 +71,11 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
-    // no need to check sum, check sum read whole file data, poor performance
-    // CHECK_SUM_VALID(fs_ptr);
-
-    HeaderMap map = ReadHeaderValues(fs_ptr);
+    HeaderMap map = TransformHeaderData(header);
     size_t total_num_bytes = stol(map.at("size"));
 
     if (offset + num_bytes > total_num_bytes) {
@@ -81,7 +87,12 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
     fs_ptr->reader_ptr_->Seekg(offset + MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes);
+
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(raw->data_.data()), num_bytes, record);
 
     return Status::OK();
 }
@@ -89,7 +100,6 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 Status
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
                   engine::BinaryDataPtr& raw) {
-    milvus::TimeRecorderAuto recorder("BlockFormat::Read:" + file_path);
     if (read_ranges.empty()) {
         return Status::OK();
     }
@@ -99,13 +109,23 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     }
     CHECK_MAGIC_VALID(fs_ptr);
 
-    // no need to check sum, check sum read whole file data, poor performance
-    // CHECK_SUM_VALID(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
-    HeaderMap map = ReadHeaderValues(fs_ptr);
+    HeaderMap map = TransformHeaderData(header);
     size_t total_num_bytes = stol(map.at("size"));
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
+    std::vector<char> data;
+    data.resize(total_num_bytes);
+
+    fs_ptr->reader_ptr_->Read(data.data(), total_num_bytes);
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
+    fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(data.data()), total_num_bytes, record);
+
     int64_t total_bytes = 0;
     for (auto& range : read_ranges) {
         if (range.offset_ > total_num_bytes) {
@@ -118,12 +138,10 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     raw->data_.resize(total_bytes);
     int64_t poz = 0;
     for (auto& range : read_ranges) {
-        int64_t offset = MAGIC_SIZE + HEADER_SIZE + range.offset_;
-        fs_ptr->reader_ptr_->Seekg(offset);
-        fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_);
+        int64_t offset = range.offset_;
+        memcpy(raw->data_.data() + poz, data.data() + offset, range.num_bytes_);
         poz += range.num_bytes_;
     }
-    fs_ptr->reader_ptr_->Close();
 
     return Status::OK();
 }
