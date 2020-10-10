@@ -62,7 +62,9 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
+
+    // no need to check sum, check sum read whole file data, poor performance
+    // CHECK_SUM_VALID(fs_ptr);
 
     HeaderMap map = ReadHeaderValues(fs_ptr);
     size_t total_num_bytes = stol(map.at("size"));
@@ -92,7 +94,9 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
+
+    // no need to check sum, check sum read whole file data, poor performance
+    // CHECK_SUM_VALID(fs_ptr);
 
     HeaderMap map = ReadHeaderValues(fs_ptr);
     size_t total_num_bytes = stol(map.at("size"));
