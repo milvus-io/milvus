@@ -51,18 +51,24 @@ DeletedDocsFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& 
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
-    HeaderMap map = ReadHeaderValues(fs_ptr);
+    HeaderMap map = TransformHeaderData(header);
     size_t num_bytes = stol(map.at("size"));
 
     auto deleted_docs_size = num_bytes / sizeof(engine::offset_t);
     std::vector<engine::offset_t> deleted_docs_list;
     deleted_docs_list.resize(deleted_docs_size);
 
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(deleted_docs_list.data(), num_bytes);
+
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(deleted_docs_list.data()), num_bytes, record);
 
     deleted_docs = std::make_shared<segment::DeletedDocs>(deleted_docs_list);
 
@@ -112,13 +118,27 @@ DeletedDocsFormat::ReadSize(const storage::FSHandlerPtr& fs_ptr, const std::stri
         return Status(SERVER_CANNOT_CREATE_FILE, "Fail to open deleted docs file: " + full_file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
 
-    HeaderMap map = ReadHeaderValues(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
+
+    HeaderMap map = TransformHeaderData(header);
     size_t num_bytes = stol(map.at("size"));
 
-    size = num_bytes / sizeof(engine::offset_t);
+    std::vector<char> data;
+
+    fs_ptr->reader_ptr_->Read(data.data(), num_bytes);
+
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(data.data()), num_bytes, record);
+
+    fs_ptr->reader_ptr_->Close();
+
+    size = num_bytes / sizeof(engine::offset_t);
 
     return Status::OK();
 }
