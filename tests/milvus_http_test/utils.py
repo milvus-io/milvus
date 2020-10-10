@@ -27,7 +27,7 @@ default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
-default_int_field_name = "int"
+default_int_field_name = "int64"
 default_float_field_name = "float"
 default_double_field_name = "double"
 
