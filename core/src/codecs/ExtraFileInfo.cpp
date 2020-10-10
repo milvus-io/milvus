@@ -51,13 +51,7 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr) {
 }
 
 std::unordered_map<std::string, std::string>
-ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
-
-    std::vector<char> data;
-    data.resize(HEADER_SIZE);
-    fs_ptr->reader_ptr_->Read(data.data(), HEADER_SIZE);
-
+TransformHeaderData(const std::vector<char>& data) {
     std::string header(data.begin(), data.end());
 
     auto result = std::unordered_map<std::string, std::string>();
@@ -75,6 +69,17 @@ ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
     }
 
     return result;
+}
+
+std::unordered_map<std::string, std::string>
+ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
+
+    std::vector<char> data;
+    data.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(data.data(), HEADER_SIZE);
+
+    return TransformHeaderData(data);
 }
 
 std::string
@@ -105,7 +110,7 @@ CalculateSum(char* data, size_t size) {
 }
 
 void
-WriteSum(const storage::FSHandlerPtr& fs_ptr, std::string header, char* data, size_t data_size) {
+WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& header, const char* data, const size_t data_size) {
     std::vector<char> total;
     total.resize(MAGIC_SIZE + HEADER_SIZE + data_size);
     memcpy(total.data(), MAGIC, MAGIC_SIZE);
@@ -114,6 +119,22 @@ WriteSum(const storage::FSHandlerPtr& fs_ptr, std::string header, char* data, si
     auto result_sum = CalculateSum(total.data(), MAGIC_SIZE + HEADER_SIZE + data_size);
 
     fs_ptr->writer_ptr_->Write(&result_sum, SUM_SIZE);
+}
+
+bool
+CheckSum(const std::string& header, const char* data, const size_t data_size, const uint32_t record) {
+    std::vector<char> total;
+    total.resize(MAGIC_SIZE + HEADER_SIZE + data_size);
+    memcpy(total.data(), MAGIC, MAGIC_SIZE);
+    memcpy(total.data() + MAGIC_SIZE, header.data(), HEADER_SIZE);
+    memcpy(total.data() + MAGIC_SIZE + HEADER_SIZE, data, data_size);
+    auto result_sum = CalculateSum(total.data(), MAGIC_SIZE + HEADER_SIZE + data_size);
+
+    if (record != result_sum) {
+        LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result_sum;
+        return false;
+    }
+    return true;
 }
 
 bool

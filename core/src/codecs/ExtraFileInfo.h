@@ -21,6 +21,7 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "storage/FSHandler.h"
 #include "utils/Error.h"
@@ -40,8 +41,14 @@ namespace codec {
         throw Exception(SERVER_FILE_MAGIC_BYTES_ERROR, "Wrong magic bytes"); \
     }
 
-#define CHECK_SUM_VALID(PTR)                                                                    \
+#define CHECK_FILE_SUM_VALID(PTR)                                                               \
     if (!CheckSum(PTR)) {                                                                       \
+        LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed";                          \
+        throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "Wrong sum bytes, file has been changed"); \
+    }
+
+#define CHECK_SUM_VALID(HEADER, DATA, DATA_SIZE, RECORD)                                        \
+    if (!CheckSum(HEADER, DATA, DATA_SIZE, RECORD)) {                                           \
         LOG_ENGINE_DEBUG_ << "Wrong sum bytes, file has been changed";                          \
         throw Exception(SERVER_FILE_SUM_BYTES_ERROR, "Wrong sum bytes, file has been changed"); \
     }
@@ -78,14 +85,20 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr);
 bool
 CheckSum(const storage::FSHandlerPtr& fs_ptr);
 
+bool
+CheckSum(const std::string& header, const char* data, const size_t data_size, const uint32_t record);
+
 void
-WriteSum(const storage::FSHandlerPtr& fs_ptr, std::string header, char* data, size_t data_size);
+WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& header, const char* data, const size_t data_size);
 
 std::uint32_t
 CalculateSum(const storage::FSHandlerPtr& fs_ptr, bool written = false);
 
 std::uint32_t
-CalculateSum(char* data, size_t size);
+CalculateSum(const char* data, const size_t size);
+
+std::unordered_map<std::string, std::string>
+TransformHeaderData(const std::vector<char>& data);
 
 std::string
 ReadHeaderValue(const storage::FSHandlerPtr& fs_ptr, const std::string& key);

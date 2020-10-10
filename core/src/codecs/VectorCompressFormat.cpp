@@ -17,7 +17,7 @@
 
 #include <boost/filesystem.hpp>
 #include <memory>
-#include <unordered_map>
+#include <vector>
 
 #include "codecs/ExtraFileInfo.h"
 #include "codecs/VectorCompressFormat.h"
@@ -48,7 +48,9 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open vector compress file: " + full_file_path);
     }
     CHECK_MAGIC_VALID(fs_ptr);
-    CHECK_SUM_VALID(fs_ptr);
+    std::vector<char> header;
+    header.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header.data(), HEADER_SIZE);
 
     int64_t length = fs_ptr->reader_ptr_->Length() - MAGIC_SIZE - HEADER_SIZE - SUM_SIZE;
     if (length <= 0) {
@@ -61,7 +63,11 @@ VectorCompressFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::strin
 
     fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(compress->data.get(), length);
+    uint32_t record;
+    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
+
+    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(compress->data.get()), length, record);
 
     double span = recorder.RecordSection("End");
     double rate = length * 1000000.0 / span / 1024 / 1024;
