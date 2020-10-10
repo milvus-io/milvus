@@ -27,12 +27,14 @@
 #include "db/Utils.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
 
 Status
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, engine::BinaryDataPtr& raw) {
+    milvus::TimeRecorderAuto recorder("BlockFormat::Read:" + file_path);
     if (!fs_ptr->reader_ptr_->Open(file_path)) {
         return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open file: " + file_path);
     }
@@ -54,6 +56,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 Status
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, int64_t offset, int64_t num_bytes,
                   engine::BinaryDataPtr& raw) {
+    milvus::TimeRecorderAuto recorder("BlockFormat::Read:" + file_path);
     if (offset < 0 || num_bytes <= 0) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid input to read: " + file_path);
     }
@@ -86,6 +89,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 Status
 BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_path, const ReadRanges& read_ranges,
                   engine::BinaryDataPtr& raw) {
+    milvus::TimeRecorderAuto recorder("BlockFormat::Read:" + file_path);
     if (read_ranges.empty()) {
         return Status::OK();
     }
@@ -130,6 +134,8 @@ BlockFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::string& file_
     if (raw == nullptr) {
         return Status::OK();
     }
+
+    milvus::TimeRecorderAuto recorder("BlockFormat::Write:" + file_path);
 
     if (!fs_ptr->writer_ptr_->Open(file_path)) {
         return Status(SERVER_CANNOT_CREATE_FILE, "Fail to open file: " + file_path);

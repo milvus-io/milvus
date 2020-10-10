@@ -108,7 +108,7 @@ SegmentReader::Load() {
 Status
 SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache) {
     try {
-        TimeRecorder recorder("SegmentReader::LoadField: " + field_name);
+        TimeRecorderAuto recorder("SegmentReader::LoadField: " + field_name);
 
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
@@ -138,8 +138,6 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         segment_ptr_->SetFixedFieldData(field_name, raw);
-
-        recorder.RecordSection("read " + file_path);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
