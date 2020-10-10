@@ -30,7 +30,7 @@ class Request(object):
         res_get = requests.get(self._url, params=data)
         if self._check_status(res_get):
             # TODO:
-            return json.loads(res_get.text)
+            return json.loads(res_get.text)["data"]
 
     def post(self, data):
         res_post = requests.post(self._url, data=json.dumps(data))
