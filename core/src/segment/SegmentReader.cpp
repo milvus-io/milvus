@@ -517,13 +517,13 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Read(fs_ptr_, file_path, id_bloom_filter_ptr));
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         } else {
             id_bloom_filter_ptr = std::static_pointer_cast<segment::IdBloomFilter>(data_obj);
         }
 
         if (id_bloom_filter_ptr) {
             segment_ptr_->SetBloomFilter(id_bloom_filter_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, id_bloom_filter_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());
@@ -556,13 +556,13 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
+            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
             deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);
         }
 
         if (deleted_docs_ptr) {
             segment_ptr_->SetDeletedDocs(deleted_docs_ptr);
-            cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load deleted docs: " + std::string(e.what());
