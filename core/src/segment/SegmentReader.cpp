@@ -26,6 +26,8 @@
 #include "db/Types.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -106,7 +108,7 @@ SegmentReader::Load() {
 Status
 SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& raw, bool to_cache) {
     try {
-        TimeRecorder recorder("SegmentReader::LoadField: " + field_name);
+        TimeRecorderAuto recorder("SegmentReader::LoadField: " + field_name);
 
         segment_ptr_->GetFixedFieldData(field_name, raw);
         if (raw != nullptr) {
@@ -136,8 +138,6 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         segment_ptr_->SetFixedFieldData(field_name, raw);
-
-        recorder.RecordSection("read " + file_path);
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
@@ -169,24 +169,84 @@ SegmentReader::LoadEntities(const std::string& field_name, const std::vector<int
     try {
         TimeRecorderAuto recorder("SegmentReader::LoadEntities: " + field_name);
 
-        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
-        if (field_visitor == nullptr) {
-            return Status(DB_ERROR, "Invalid field_name");
-        }
-        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
-        std::string file_path =
-            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
-
         int64_t field_width = 0;
         STATUS_CHECK(segment_ptr_->GetFixedFieldWidth(field_name, field_width));
         if (field_width <= 0) {
             return Status(DB_ERROR, "Invalid field width");
         }
 
+        auto field_visitor = segment_visitor_->GetFieldVisitor(field_name);
+        if (field_visitor == nullptr) {
+            return Status(DB_ERROR, "Invalid field name");
+        }
+
+        // copy from cache function
+        auto copy_data = [&](uint8_t* src_data, int64_t src_data_size, const std::vector<int64_t>& offsets,
+                             int64_t field_width, engine::BinaryDataPtr& raw) -> Status {
+            if (src_data == nullptr) {
+                return Status(DB_ERROR, "src_data is null pointer");
+            }
+            int64_t total_bytes = offsets.size() * field_width;
+            raw = std::make_shared<engine::BinaryData>();
+            raw->data_.resize(total_bytes);
+
+            // copy from cache
+            int64_t target_poz = 0;
+            for (auto offset : offsets) {
+                int64_t src_poz = offset * field_width;
+                if (offset < 0 || src_poz + field_width > src_data_size) {
+                    return Status(DB_ERROR, "Invalid entity offset");
+                }
+
+                memcpy(raw->data_.data() + target_poz, src_data + src_poz, field_width);
+                target_poz += field_width;
+            }
+
+            return Status::OK();
+        };
+
+        // if raw data is alrady in cache, copy from cache
+        const engine::snapshot::FieldPtr& field = field_visitor->GetField();
+        engine::BinaryDataPtr field_data;
+        segment_ptr_->GetFixedFieldData(field_name, field_data);
+        if (field_data != nullptr) {
+            return copy_data(field_data->data_.data(), field_data->data_.size(), offsets, field_width, raw);
+        }
+
+        // for vector field, the LoadVectorIndex() could create a IDMAP index in cache, copy from the index
+        if (engine::IsVectorField(field)) {
+            std::string temp_index_path;
+            GetTempIndexPath(field->GetName(), temp_index_path);
+
+            uint8_t* src_data = nullptr;
+            int64_t src_data_size = 0;
+            if (auto data_obj = cache::CpuCacheMgr::GetInstance().GetItem(temp_index_path)) {
+                auto index_ptr = std::static_pointer_cast<knowhere::VecIndex>(data_obj);
+                if (index_ptr->index_type() == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
+                    auto idmap_index = std::static_pointer_cast<knowhere::IDMAP>(index_ptr);
+                    src_data = (uint8_t*)idmap_index->GetRawVectors();
+                    src_data_size = idmap_index->Count() * field_width;
+                } else if (index_ptr->index_type() == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+                    auto idmap_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_ptr);
+                    src_data = (uint8_t*)idmap_index->GetRawVectors();
+                    src_data_size = idmap_index->Count() * field_width;
+                }
+            }
+
+            if (src_data) {
+                return copy_data(src_data, src_data_size, offsets, field_width, raw);
+            }
+        }
+
+        // read from storage
         codec::ReadRanges ranges;
         for (auto offset : offsets) {
             ranges.push_back(codec::ReadRange(offset * field_width, field_width));
         }
+
+        auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        std::string file_path =
+            engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
         auto& ss_codec = codec::Codec::instance();
         STATUS_CHECK(ss_codec.GetBlockFormat()->Read(fs_ptr_, file_path, ranges, raw));
     } catch (std::exception& e) {

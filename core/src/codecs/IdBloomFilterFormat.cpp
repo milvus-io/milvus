@@ -23,6 +23,7 @@
 
 #include "utils/Exception.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace codec {
@@ -40,6 +41,7 @@ IdBloomFilterFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string
                           segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
         const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
+        milvus::TimeRecorderAuto recorder("IdBloomFilterFormat::Read:" + full_file_path);
         if (!fs_ptr->reader_ptr_->Open(full_file_path)) {
             return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open bloom filter file: " + full_file_path);
         }
@@ -66,6 +68,7 @@ IdBloomFilterFormat::Write(const storage::FSHandlerPtr& fs_ptr, const std::strin
                            const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     try {
         const std::string full_file_path = file_path + BLOOM_FILTER_POSTFIX;
+        milvus::TimeRecorderAuto recorder("IdBloomFilterFormat::Write:" + full_file_path);
         if (!fs_ptr->writer_ptr_->Open(full_file_path)) {
             return Status(SERVER_CANNOT_OPEN_FILE, "Fail to open bloom filter file: " + full_file_path);
         }
