@@ -174,7 +174,8 @@ Resource::loader_function() {
             task_item->Loaded();
 
             auto& label = task_item->task->label();
-            if (label != nullptr && label->Type() != TaskLabelType::BROADCAST) {
+            if (label != nullptr &&
+                (label->Type() != TaskLabelType::BROADCAST || task_item->task->Type() == TaskType::DeleteTask)) {
                 if (task_item->from) {
                     task_item->from->Moved();
                     task_item->from->task = FinishedTask::Create(task_item->from->task);
