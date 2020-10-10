@@ -904,7 +904,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             }
             result_json["result"].push_back(raw_result_json);
         }
-        result_str = result_json.dump();
+        nlohmann::json data_json;
+        data_json["data"] = result_json;
+        result_str = data_json.dump();
     }
 
     return Status::OK();
