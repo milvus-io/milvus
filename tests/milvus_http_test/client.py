@@ -191,7 +191,7 @@ class MilvusClient(object):
             return collections["entities"]
         except Exception as e:
             logging.getLogger().error(str(e))
-            return False 
+            return False
 
     '''
     method: create index
