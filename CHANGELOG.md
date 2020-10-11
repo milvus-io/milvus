@@ -51,6 +51,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
 -   \#3741 Inconsistent parameter names
 -   \#3811 c++ sdk segmentation fault
+-   \#3946 The result format is wrong returned by 'get collections'
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
