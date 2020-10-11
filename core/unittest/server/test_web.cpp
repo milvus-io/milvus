@@ -824,8 +824,8 @@ TEST_F(WebControllerTest, SEARCH) {
     //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
     //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
     auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
-    ASSERT_TRUE(result_json.contains("num"));
-    ASSERT_EQ(1, result_json["num"].get<int64_t>());
+    ASSERT_TRUE(result_json.contains("data"));
+    ASSERT_EQ(1, result_json["data"]["num"].get<int64_t>());
 }
 
 TEST_F(WebControllerTest, INDEX) {
