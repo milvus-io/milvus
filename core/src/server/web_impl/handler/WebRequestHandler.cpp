@@ -290,8 +290,7 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
     int64_t count;
     STATUS_CHECK(req_handler_.CountEntities(context_ptr_, collection_name, count));
 
-    nlohmann::json result_json;
-    result_json["collection_name"] = schema.collection_name_;
+    json_out["collection_name"] = schema.collection_name_;
     for (const auto& field : schema.fields_) {
         if (field.first == engine::FIELD_UID) {
             continue;
@@ -301,16 +300,15 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["type"] = type2str.at(field.second.field_type_);
         field_json["index_params"] = field.second.index_params_;
         field_json["params"] = field.second.field_params_;
-        result_json["fields"].push_back(field_json);
+        json_out["fields"].push_back(field_json);
     }
     if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        result_json[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
     }
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
-        result_json[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
+        json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
     }
-    result_json["count"] = count;
-    json_out["data"] = result_json;
+    json_out["count"] = count;
     return Status::OK();
 }
 
@@ -902,7 +900,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             }
             result_json["result"].push_back(raw_result_json);
         }
-        result_str = result_json.dump();
+        nlohmann::json data_json;
+        data_json["data"] = result_json;
+        result_str = data_json.dump();
     }
 
     return Status::OK();
@@ -1366,7 +1366,9 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
     } else {
         nlohmann::json json;
         status = GetCollectionMetaInfo(collection_name->std_str(), json);
-        result = status.ok() ? json.dump().c_str() : "NULL";
+        nlohmann::json result_json;
+        result_json["data"] = json;
+        result = status.ok() ? result_json.dump().c_str() : "NULL";
     }
 
     ASSIGN_RETURN_STATUS_DTO(status);
