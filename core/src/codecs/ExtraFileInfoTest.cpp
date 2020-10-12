@@ -65,14 +65,22 @@ TEST_F(ExtraFileInfoTest, WriteFileTest) {
     }
 
     ASSERT_TRUE(CheckMagic(fs_ptr));
-    std::unordered_map<std::string, std::string> headers = ReadHeaderValues(fs_ptr);
+    std::vector<char> header_data;
+    header_data.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(header_data.data(), HEADER_SIZE);
+
+    std::unordered_map<std::string, std::string> headers = TransformHeaderData(header_data);
     ASSERT_EQ(headers.at("test"), "test");
     ASSERT_EQ(headers.at("github"), "github");
     ASSERT_EQ(stol(headers.at("size")), num_bytes);
 
     fs_ptr->reader_ptr_->Read(raw.data(), num_bytes);
 
-    ASSERT_TRUE(CheckSum(fs_ptr));
+    uint32_t record_sum;
+    fs_ptr->reader_ptr_->Read(&record_sum, SUM_SIZE);
+    fs_ptr->reader_ptr_->Close();
+
+    ASSERT_TRUE(CheckSum(header_data.data(), reinterpret_cast<const char*>(raw.data()), num_bytes, record_sum));
 }
 }  // namespace codec
 
