@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
 -   \#3742 If the GPU cache is too small, IVF_SQ8H using multiple GPUs will cause to crash
 -   \#3760 After IVF_SQ8H querying, an CUDA error will occur when Milvus exits
+-   \#3903 The search of SQ8H index is slower than the previous version
 
 ## Feature
 
