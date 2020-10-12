@@ -16,10 +16,6 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/czs007/suvlim/conf"
-	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
-	"github.com/czs007/suvlim/pkg/master/kv"
-	"github.com/czs007/suvlim/reader/message_client"
 	"github.com/stretchr/testify/assert"
 	"log"
 	"sort"
@@ -27,6 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
+	"github.com/czs007/suvlim/pkg/master/kv"
+	"github.com/czs007/suvlim/reader/message_client"
 	//"github.com/stretchr/testify/assert"
 )
 
@@ -69,21 +68,8 @@ type QueryInfo struct {
 
 type MsgCounter struct {
 	InsertCounter int64
-	InsertTime    time.Time
-
 	DeleteCounter int64
-	DeleteTime    time.Time
-
 	SearchCounter int64
-	SearchTime    time.Time
-}
-
-type InsertLog struct {
-	MsgLength              int
-	DurationInMilliseconds int64
-	InsertTime             time.Time
-	NumSince               int64
-	Speed                  float64
 }
 
 type QueryNode struct {
@@ -99,7 +85,6 @@ type QueryNode struct {
 	insertData           InsertData
 	kvBase               *kv.EtcdKVBase
 	msgCounter           *MsgCounter
-	InsertLogs           []InsertLog
 }
 
 func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
@@ -109,7 +94,7 @@ func NewQueryNode(queryNodeId uint64, timeSync uint64) *QueryNode {
 		ReadTimeSyncMin: timeSync,
 		ReadTimeSyncMax: timeSync,
 		WriteTimeSync:   timeSync,
-		ServiceTimeSync: timeSync,
+		ServiceTimeSync:  timeSync,
 		TSOTimeSync:     timeSync,
 	}
 
@@ -149,7 +134,7 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 		ReadTimeSyncMin: timeSync,
 		ReadTimeSyncMax: timeSync,
 		WriteTimeSync:   timeSync,
-		ServiceTimeSync: timeSync,
+		ServiceTimeSync:  timeSync,
 		TSOTimeSync:     timeSync,
 	}
 
@@ -164,11 +149,8 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 
 	msgCounter := MsgCounter{
 		InsertCounter: 0,
-		InsertTime:    time.Now(),
 		DeleteCounter: 0,
-		DeleteTime:    time.Now(),
 		SearchCounter: 0,
-		SearchTime:    time.Now(),
 	}
 
 	return &QueryNode{
@@ -179,7 +161,6 @@ func CreateQueryNode(queryNodeId uint64, timeSync uint64, mc *message_client.Mes
 		queryNodeTimeSync: queryNodeTimeSync,
 		buffer:            buffer,
 		msgCounter:        &msgCounter,
-		InsertLogs:        make([]InsertLog, 0),
 	}
 }
 
@@ -264,37 +245,13 @@ func (node *QueryNode) InitQueryNodeCollection() {
 
 func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 	const Debug = true
-	const CountInsertMsgBaseline = 1000 * 1000
-	var BaselineCounter int64 = 0
+	const CountMsgNum = 1000 * 1000
 
 	if Debug {
-		for {
-			var msgLen = node.PrepareBatchMsg()
-			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
-			assert.NotEqual(nil, 0, timeRange.timestampMin)
-			assert.NotEqual(nil, 0, timeRange.timestampMax)
+		var printFlag = true
+		var startTime = true
+		var start time.Time
 
-			if node.msgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
-				node.WriteQueryLog()
-				BaselineCounter = node.msgCounter.InsertCounter/CountInsertMsgBaseline
-			}
-
-			if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
-				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-				continue
-			}
-
-			node.QueryNodeDataInit()
-			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
-			//fmt.Println("MessagesPreprocess Done")
-			node.WriterDelete()
-			node.PreInsertAndDelete()
-			//fmt.Println("PreInsertAndDelete Done")
-			node.DoInsertAndDelete()
-			//fmt.Println("DoInsertAndDelete Done")
-			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
-		}
-	} else {
 		for {
 			var msgLen = node.PrepareBatchMsg()
 			var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
@@ -306,6 +263,12 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 				continue
 			}
 
+			if startTime {
+				fmt.Println("============> Start Test <============")
+				startTime = false
+				start = time.Now()
+			}
+
 			node.QueryNodeDataInit()
 			node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
 			//fmt.Println("MessagesPreprocess Done")
@@ -315,7 +278,36 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 			node.DoInsertAndDelete()
 			//fmt.Println("DoInsertAndDelete Done")
 			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+
+			// Test insert time
+			if printFlag && node.msgCounter.InsertCounter >= CountMsgNum {
+				printFlag = false
+				timeSince := time.Since(start)
+				fmt.Println("============> Do", node.msgCounter.InsertCounter, "Insert in", timeSince, "<============")
+			}
 		}
+	}
+
+	for {
+		var msgLen = node.PrepareBatchMsg()
+		var timeRange = TimeRange{node.messageClient.TimeSyncStart(), node.messageClient.TimeSyncEnd()}
+		assert.NotEqual(nil, 0, timeRange.timestampMin)
+		assert.NotEqual(nil, 0, timeRange.timestampMax)
+
+		if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
+			node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
+			continue
+		}
+
+		node.QueryNodeDataInit()
+		node.MessagesPreprocess(node.messageClient.InsertOrDeleteMsg, timeRange)
+		//fmt.Println("MessagesPreprocess Done")
+		node.WriterDelete()
+		node.PreInsertAndDelete()
+		//fmt.Println("PreInsertAndDelete Done")
+		node.DoInsertAndDelete()
+		//fmt.Println("DoInsertAndDelete Done")
+		node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 	}
 	wg.Done()
 }
@@ -340,16 +332,16 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 			node.messageClient.SearchMsg = node.messageClient.SearchMsg[:0]
 			node.messageClient.SearchMsg = append(node.messageClient.SearchMsg, msg)
 			fmt.Println("Do Search...")
-			//for  {
-			//if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
-			var status = node.Search(node.messageClient.SearchMsg)
-			if status.ErrorCode != 0 {
-				fmt.Println("Search Failed")
-				node.PublishFailedSearchResult()
+			for  {
+				if node.messageClient.SearchMsg[0].Timestamp < node.queryNodeTimeSync.ServiceTimeSync {
+					var status = node.Search(node.messageClient.SearchMsg)
+					if status.ErrorCode != 0 {
+						fmt.Println("Search Failed")
+						node.PublishFailedSearchResult()
+					}
+					break
+				}
 			}
-			//break
-			//}
-			//}
 		default:
 		}
 	}
@@ -492,9 +484,9 @@ func (node *QueryNode) PreInsertAndDelete() msgPb.Status {
 func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 	var wg sync.WaitGroup
 	// Do insert
-	for segmentID := range node.insertData.insertRecords {
+	for segmentID, records := range node.insertData.insertRecords {
 		wg.Add(1)
-		go node.DoInsert(segmentID, &wg)
+		go node.DoInsert(segmentID, &records, &wg)
 	}
 
 	// Do delete
@@ -512,7 +504,7 @@ func (node *QueryNode) DoInsertAndDelete() msgPb.Status {
 	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
 }
 
-func (node *QueryNode) DoInsert(segmentID int64, wg *sync.WaitGroup) msgPb.Status {
+func (node *QueryNode) DoInsert(segmentID int64, records *[][]byte, wg *sync.WaitGroup) msgPb.Status {
 	fmt.Println("Doing insert..., len = ", len(node.insertData.insertIDs[segmentID]))
 	var targetSegment, err = node.GetSegmentBySegmentID(segmentID)
 	if err != nil {
@@ -522,13 +514,10 @@ func (node *QueryNode) DoInsert(segmentID int64, wg *sync.WaitGroup) msgPb.Statu
 
 	ids := node.insertData.insertIDs[segmentID]
 	timestamps := node.insertData.insertTimestamps[segmentID]
-	records := node.insertData.insertRecords[segmentID]
 	offsets := node.insertData.insertOffset[segmentID]
 
-	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, &records)
-
-	node.QueryLog(len(ids))
-
+	node.msgCounter.InsertCounter += int64(len(ids))
+	err = targetSegment.SegmentInsert(offsets, &ids, &timestamps, records)
 	if err != nil {
 		fmt.Println(err.Error())
 		return msgPb.Status{ErrorCode: 1}
@@ -567,7 +556,7 @@ func (node *QueryNode) QueryJson2Info(queryJson *string) *QueryInfo {
 		return nil
 	}
 
-	//fmt.Println(query)
+	fmt.Println(query)
 	return &query
 }
 
@@ -594,8 +583,8 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// So the ServiceTimeSync is always less than searchTimestamp.
 		// Here, we manually make searchTimestamp's logic time minus `conf.Config.Timesync.Interval` milliseconds.
 		// Which means `searchTimestamp.logicTime = searchTimestamp.logicTime - conf.Config.Timesync.Interval`.
-		var logicTimestamp = searchTimestamp << 46 >> 46
-		searchTimestamp = (searchTimestamp>>18-uint64(conf.Config.Timesync.Interval+600))<<18 + logicTimestamp
+		// var logicTimestamp = searchTimestamp << 46 >> 46
+		// searchTimestamp = (searchTimestamp >> 18 - uint64(conf.Config.Timesync.Interval)) << 18 + logicTimestamp
 
 		var vector = msg.Records
 		// We now only the first Json is valid.
@@ -604,7 +593,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
 		if searchTimestamp > node.queryNodeTimeSync.ServiceTimeSync {
-			fmt.Println("Invalid query time, timestamp = ", searchTimestamp>>18, ", SearchTimeSync = ", node.queryNodeTimeSync.ServiceTimeSync>>18)
+			fmt.Println("Invalid query time, timestamp = ", searchTimestamp >> 18, ", SearchTimeSync = ", node.queryNodeTimeSync.ServiceTimeSync >> 18)
 			return msgPb.Status{ErrorCode: 1}
 		}
 
@@ -613,12 +602,6 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		// 3. Do search in all segments
 		for _, segment := range node.SegmentsMap {
-			if segment.GetRowCount() <= 0 {
-				// Skip empty segment
-				continue
-			}
-
-			//fmt.Println("Search in segment:", segment.SegmentId, ",segment rows:", segment.GetRowCount())
 			var res, err = segment.SegmentSearch(query, searchTimestamp, vector)
 			if err != nil {
 				fmt.Println(err.Error())
@@ -634,9 +617,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		sort.Slice(resultsTmp, func(i, j int) bool {
 			return resultsTmp[i].ResultDistance < resultsTmp[j].ResultDistance
 		})
-		if len(resultsTmp) > query.TopK {
-			resultsTmp = resultsTmp[:query.TopK]
-		}
+		resultsTmp = resultsTmp[:query.TopK]
 		var entities = msgPb.Entities{
 			Ids: make([]int64, 0),
 		}

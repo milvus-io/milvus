@@ -36,9 +36,9 @@ func GetSegmentObjId(key string) string {
 func isCollectionObj(key string) bool {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectonPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
-	// println("prefix is :$", prefix)
+	println("prefix is :$", prefix)
 	index := strings.Index(key, prefix)
-	// println("index is :", index)
+	println("index is :", index)
 	return index == 0
 }
 
@@ -54,15 +54,8 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *mock.Segment) bool {
 		log.Printf("Illegal segment channel range")
 		return false
 	}
-
-	var queryNodeChannelStart = conf.Config.Reader.TopicStart
-	var queryNodeChannelEnd = conf.Config.Reader.TopicEnd
-
-	if segment.ChannelStart >= queryNodeChannelStart && segment.ChannelEnd <= queryNodeChannelEnd {
-		return true
-	}
-
-	return false
+	// TODO: add query node channel range check
+	return true
 }
 
 func printCollectionStruct(obj *mock.Collection) {
@@ -95,7 +88,7 @@ func (node *QueryNode) processCollectionCreate(id string, value string) {
 		println("error of json 2 collection")
 		println(err.Error())
 	}
-	//printCollectionStruct(collection)
+	printCollectionStruct(collection)
 	newCollection := node.NewCollection(collection.ID, collection.Name, collection.GrpcMarshalString)
 	for _, partitionTag := range collection.PartitionTags {
 		newCollection.NewPartition(partitionTag)
@@ -109,11 +102,12 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 		println("error of json 2 segment")
 		println(err.Error())
 	}
-	//printSegmentStruct(segment)
+	printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
-		return
-	}
+	// TODO: fix this after channel range config finished
+	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	//	return
+	//}
 
 	collection := node.GetCollectionByID(segment.CollectionID)
 	if collection != nil {
@@ -131,7 +125,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 }
 
 func (node *QueryNode) processCreate(key string, msg string) {
-	println("process create", key)
+	println("process create", key, ":", msg)
 	if isCollectionObj(key) {
 		objID := GetCollectionObjId(key)
 		node.processCollectionCreate(objID, msg)
@@ -144,18 +138,19 @@ func (node *QueryNode) processCreate(key string, msg string) {
 }
 
 func (node *QueryNode) processSegmentModify(id string, value string) {
-	// println("Modify Segment: ", id)
+	println("Modify Segment: ", id)
 
 	segment, err := mock.JSON2Segment(value)
 	if err != nil {
 		println("error of json 2 segment")
 		println(err.Error())
 	}
-	// printSegmentStruct(segment)
+	printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
-		return
-	}
+	// TODO: fix this after channel range config finished
+	//if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	//	return
+	//}
 
 	seg, err := node.GetSegmentBySegmentID(int64(segment.SegmentID)) // todo change  to uint64
 	if seg != nil {
@@ -164,13 +159,13 @@ func (node *QueryNode) processSegmentModify(id string, value string) {
 }
 
 func (node *QueryNode) processCollectionModify(id string, value string) {
-	// println("Modify Collection: ", id)
+	println("Modify Collection: ", id)
 	collection, err := mock.JSON2Collection(value)
 	if err != nil {
 		println("error of json 2 collection")
 		println(err.Error())
 	}
-	// printCollectionStruct(collection)
+	printCollectionStruct(collection)
 
 	goCollection := node.GetCollectionByID(collection.ID)
 	if goCollection != nil {
@@ -180,7 +175,7 @@ func (node *QueryNode) processCollectionModify(id string, value string) {
 }
 
 func (node *QueryNode) processModify(key string, msg string) {
-	// println("process modify")
+	println("process modify")
 	if isCollectionObj(key) {
 		objID := GetCollectionObjId(key)
 		node.processCollectionModify(objID, msg)
@@ -219,7 +214,7 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 	if err != nil {
 		return err
 	}
-	// println("processResp!!!!!\n")
+	println("processResp!!!!!\n")
 
 	for _, ev := range resp.Events {
 		if ev.IsCreate() {

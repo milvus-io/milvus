@@ -6,13 +6,12 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/czs007/suvlim/conf"
-	//	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+//	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	. "github.com/czs007/suvlim/storage/pkg/types"
 	"io"
 )
 
-var bucketName = conf.Config.Writer.Bucket
+var bucketName = "zilliz-hz"
 
 type S3Store struct {
 	client *s3.S3

@@ -15,7 +15,6 @@
 
 #include <time.h>
 #include <string>
-#include <chrono>
 
 namespace milvus {
 
@@ -40,9 +39,6 @@ class CommonUtil {
     static bool
     TimeStrToTime(const std::string& time_str, time_t& time_integer, tm& time_struct,
                   const std::string& format = "%d-%d-%d %d:%d:%d");
-
-    static std::string
-    TimeToString(std::chrono::high_resolution_clock::time_point t);
 
     static void
     ConvertTime(time_t time_integer, tm& time_struct);
