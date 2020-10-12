@@ -221,7 +221,7 @@ class TestStatsBase:
         logging.getLogger().info(stats)
         assert stats["row_count"] == default_nb
         for file in stats["partitions"][0]["segments"][0]["files"]:
-            if file["field"] == default_float_vec_field_name and "index_type" in file:
+            if file["name"] == default_float_vec_field_name and "index_type" in file:
                 assert file["data_size"] > 0
                 assert file["index_type"] == get_simple_index["index_type"]
                 break
@@ -240,7 +240,7 @@ class TestStatsBase:
         stats = connect.get_collection_stats(collection)
         assert stats["row_count"] == default_nb
         for file in stats["partitions"][0]["segments"][0]["files"]:
-            if file["field"] == default_float_vec_field_name and "index_type" in file:
+            if file["name"] == default_float_vec_field_name and "index_type" in file:
                 assert file["data_size"] > 0
                 assert file["index_type"] == get_simple_index["index_type"]
                 break
@@ -257,7 +257,7 @@ class TestStatsBase:
         stats = connect.get_collection_stats(binary_collection)
         assert stats["row_count"] == default_nb
         for file in stats["partitions"][0]["segments"][0]["files"]:
-            if file["field"] == default_float_vec_field_name and "index_type" in file:
+            if file["name"] == default_float_vec_field_name and "index_type" in file:
                 assert file["data_size"] > 0
                 assert file["index_type"] == get_simple_index["index_type"]
                 break
@@ -276,7 +276,7 @@ class TestStatsBase:
             stats = connect.get_collection_stats(collection)
             assert stats["row_count"] == default_nb
             for file in stats["partitions"][0]["segments"][0]["files"]:
-                if file["field"] == default_float_vec_field_name and "index_type" in file:
+                if file["name"] == default_float_vec_field_name and "index_type" in file:
                     assert file["data_size"] > 0
                     assert file["index_type"] == index_type
                     break
@@ -327,12 +327,12 @@ class TestStatsBase:
             stats = connect.get_collection_stats(collection_list[i])
             if i % 2:
                 for file in stats["partitions"][0]["segments"][0]["files"]:
-                    if file["field"] == default_float_vec_field_name and "index_type" in file:
+                    if file["name"] == default_float_vec_field_name and "index_type" in file:
                         assert file["index_type"] == "IVF_SQ8"
                         break
             else:
                 for file in stats["partitions"][0]["segments"][0]["files"]:
-                    if file["field"] == default_float_vec_field_name and "index_type" in file:
+                    if file["name"] == default_float_vec_field_name and "index_type" in file:
                         assert file["index_type"] == "IVF_FLAT"
                         break
             connect.drop_collection(collection_list[i])
