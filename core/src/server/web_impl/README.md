@@ -1046,11 +1046,18 @@ Inserts entities to a collection.
 <tr><td>Body</td><td><pre><code>
 {
     "partition_tag": "part",
-    "entities": {
-        "__id": [123456789,234567]
-        "field_1": 1
-        "field_vec": [[], []]
-    }
+    "entities": [
+        {
+           "__id": 1,
+           "field_1": 1,
+           "field_vec": []
+        },
+        {
+            "__id": 2,
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
