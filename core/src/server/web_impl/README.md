@@ -821,7 +821,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]],\"params\":{\"nprobe\":16}}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "..."
 ```
 
 ##### Response
