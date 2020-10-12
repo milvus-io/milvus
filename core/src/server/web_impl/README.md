@@ -26,6 +26,7 @@
   - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
   - [`/system/{op}` (PUT)](#systemop-put)
+  - [`/status` (GET)](#status)
 - [Error Codes](#error-codes)
 
 <!-- /TOC -->
@@ -582,12 +583,17 @@ Creates a partition in a collection.
 
 #### Request
 
-| Request Component | Value                                       |
-| ----------------- | ------------------------------------------- |
-| Name              | `/collections/{collection_name}/partitions` |
-| Header            | `accept: application/json`                  |
-| Body              | N/A                                         |
-| Method            | POST                                        |
+<table>
+<tr><th>Request Component</th><th>Value</th></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/partitions</code></pre></td></tr>
+<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
+<tr><td>Body</td><td><pre><code>
+{
+    "partition_tag": "test"
+}
+</code></pre> </td></tr>
+<tr><td>Method</td><td>POST</td></tr>
+</table>
 
 #### Response
 
@@ -1274,6 +1280,40 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 
 ```json
 { "code": 0, "message": "success" }
+```
+
+### `/status` (GET)
+
+Gets status of the Milvus server.
+
+#### Request
+
+| Request Component | Value                      |
+| ----------------- | -------------------------- |
+| Name              | `/status`                  |
+| Header            | `accept: application/json` |
+| Body              | N/A                        |
+| Method            | GET                        |
+
+#### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 200         | The request is successful.                                        |
+| 400         | The request is incorrect. Refer to the error message for details. |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X GET "http://127.0.0.1:19121/status" -H "accept: application/json"
+```
+
+##### Response
+
+```json
+{"code":0,"message":"OK"}
 ```
 
 ## Index and search parameters
