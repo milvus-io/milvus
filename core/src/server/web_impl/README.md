@@ -168,7 +168,7 @@ Creates a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -407,7 +407,7 @@ Updates the index type and nlist of a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -762,7 +762,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -981,7 +981,7 @@ Delete entities
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1035,7 +1035,7 @@ Inserts entities to a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
