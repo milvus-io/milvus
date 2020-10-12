@@ -102,6 +102,17 @@ void runPass1SelectLists(thrust::device_vector<void*>& listIndices,
                          Tensor<int, 3, true>& heapIndices,
                          cudaStream_t stream);
 
+/// With min distance limit
+void runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
+                         Tensor<float, 1, true>& distance,
+                         int nprobe,
+                         int k,
+                         bool chooseLargest,
+                         Tensor<float, 3, true>& heapDistances,
+                         Tensor<int, 3, true>& heapIndices,
+                         Tensor<float, 2, true>& minDistances,
+                         cudaStream_t stream);
+
 /// Performs a final pass of k-selection on the results, producing the
 /// final indices
 void runPass2SelectLists(Tensor<float, 2, true>& heapDistances,
