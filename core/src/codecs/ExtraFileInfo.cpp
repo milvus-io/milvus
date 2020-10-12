@@ -111,24 +111,18 @@ CalculateSum(char* data, size_t size) {
 
 void
 WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& header, const char* data, const size_t data_size) {
-    std::vector<char> total;
-    total.resize(MAGIC_SIZE + HEADER_SIZE + data_size);
-    memcpy(total.data(), MAGIC, MAGIC_SIZE);
-    memcpy(total.data() + MAGIC_SIZE, header.data(), HEADER_SIZE);
-    memcpy(total.data() + MAGIC_SIZE + HEADER_SIZE, data, data_size);
-    auto result_sum = CalculateSum(total.data(), MAGIC_SIZE + HEADER_SIZE + data_size);
+    auto result_sum = crc32c_extend(0, reinterpret_cast<const uint8_t*>(MAGIC), MAGIC_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(header.data()), HEADER_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(data), data_size);
 
     fs_ptr->writer_ptr_->Write(&result_sum, SUM_SIZE);
 }
 
 bool
 CheckSum(const std::string& header, const char* data, const size_t data_size, const uint32_t record) {
-    std::vector<char> total;
-    total.resize(MAGIC_SIZE + HEADER_SIZE + data_size);
-    memcpy(total.data(), MAGIC, MAGIC_SIZE);
-    memcpy(total.data() + MAGIC_SIZE, header.data(), HEADER_SIZE);
-    memcpy(total.data() + MAGIC_SIZE + HEADER_SIZE, data, data_size);
-    auto result_sum = CalculateSum(total.data(), MAGIC_SIZE + HEADER_SIZE + data_size);
+    auto result_sum = crc32c_extend(0, reinterpret_cast<const uint8_t*>(MAGIC), MAGIC_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(header.data()), HEADER_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(data), data_size);
 
     if (record != result_sum) {
         LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result_sum;
