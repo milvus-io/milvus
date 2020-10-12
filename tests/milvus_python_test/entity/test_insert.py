@@ -498,7 +498,7 @@ class TestInsertBase:
         expected: error raised
         '''
         tmp_entity = copy.deepcopy(default_entity)
-        del tmp_entity[-1]["field"]
+        del tmp_entity[-1]["name"]
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 

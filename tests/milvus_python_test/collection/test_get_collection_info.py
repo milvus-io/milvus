@@ -93,7 +93,7 @@ class TestInfoBase:
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.get_collection_info(collection)
         for field in res["fields"]:
-            if field["field"] == default_float_vec_field_name:
+            if field["name"] == default_float_vec_field_name:
                 index = field["indexes"][0]
                 assert index["index_type"] == get_simple_index["index_type"]
                 assert index["metric_type"] == get_simple_index["metric_type"]
