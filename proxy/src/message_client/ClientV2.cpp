@@ -76,14 +76,21 @@ Aggregation(std::vector<std::shared_ptr<grpc::QueryResult>> results, milvus::grp
   }
 
   std::vector<float> all_scores;
-  std::vector<float> all_distance;
-  std::vector<int64_t> all_entities_ids;
+
+  // Proxy get numQueries from row_num.
+  auto numQueries = results[0]->row_num();
+  auto topK = results[0]->distances_size() / numQueries;
+
+  // 2d array for multiple queries
+  std::vector<std::vector<float>> all_distance(numQueries);
+  std::vector<std::vector<int64_t>> all_entities_ids(numQueries);
+
   std::vector<bool> all_valid_row;
   std::vector<grpc::RowData> all_row_data;
   std::vector<grpc::KeyValuePair> all_kv_pairs;
 
   grpc::Status status;
-  int row_num = 0;
+//  int row_num = 0;
 
   for (auto &result_per_node : results) {
     if (result_per_node->status().error_code() != grpc::ErrorCode::SUCCESS) {
@@ -91,46 +98,66 @@ Aggregation(std::vector<std::shared_ptr<grpc::QueryResult>> results, milvus::grp
 //        one_node_res->entities().status().error_code() != grpc::ErrorCode::SUCCESS) {
       return Status(DB_ERROR, "QueryNode return wrong status!");
     }
-    for (int j = 0; j < result_per_node->distances_size(); j++) {
-      all_scores.push_back(result_per_node->scores()[j]);
-      all_distance.push_back(result_per_node->distances()[j]);
-//          all_kv_pairs.push_back(result_per_node->extra_params()[j]);
+
+//    assert(result_per_node->row_num() == numQueries);
+
+    for (int i = 0; i < numQueries; i++) {
+      for (int j = i * topK; j < (i + 1) * topK && j < result_per_node->distances_size(); j++) {
+          all_scores.push_back(result_per_node->scores()[j]);
+          all_distance[i].push_back(result_per_node->distances()[j]);
+          all_entities_ids[i].push_back(result_per_node->entities().ids(j));
+      }
     }
-    for (int k = 0; k < result_per_node->entities().ids_size(); ++k) {
-      all_entities_ids.push_back(result_per_node->entities().ids(k));
-//          all_valid_row.push_back(result_per_node->entities().valid_row(k));
-//          all_row_data.push_back(result_per_node->entities().rows_data(k));
-    }
-    if (result_per_node->row_num() > row_num) {
-      row_num = result_per_node->row_num();
-    }
+
+//    for (int j = 0; j < result_per_node->distances_size(); j++) {
+//      all_scores.push_back(result_per_node->scores()[j]);
+//      all_distance.push_back(result_per_node->distances()[j]);
+////          all_kv_pairs.push_back(result_per_node->extra_params()[j]);
+//    }
+//    for (int k = 0; k < result_per_node->entities().ids_size(); ++k) {
+//      all_entities_ids.push_back(result_per_node->entities().ids(k));
+////          all_valid_row.push_back(result_per_node->entities().valid_row(k));
+////          all_row_data.push_back(result_per_node->entities().rows_data(k));
+//    }
+
+//    if (result_per_node->row_num() > row_num) {
+//      row_num = result_per_node->row_num();
+//    }
     status = result_per_node->status();
   }
 
-  std::vector<int> index(all_distance.size());
+  std::vector<std::vector<int>> index_array;
+  for (int i = 0; i < numQueries; i++) {
+      auto &distance = all_distance[i];
+      std::vector<int> index(distance.size());
 
-  iota(index.begin(), index.end(), 0);
+      iota(index.begin(), index.end(), 0);
 
-  std::stable_sort(index.begin(), index.end(),
-                   [&all_distance](size_t i1, size_t i2) { return all_distance[i1] > all_distance[i2]; });
+      std::stable_sort(index.begin(), index.end(),
+                       [&distance](size_t i1, size_t i2) { return distance[i1] < distance[i2]; });
+      index_array.emplace_back(index);
+  }
+
 
   grpc::Entities result_entities;
 
-  for (int m = 0; m < result->row_num(); ++m) {
-    result->add_scores(all_scores[index[m]]);
-    result->add_distances(all_distance[index[m]]);
+  for (int i = 0; i < numQueries; i++) {
+      for (int m = 0; m < topK; ++m) {
+          result->add_scores(all_scores[index_array[i][m]]);
+          result->add_distances(all_distance[i][index_array[i][m]]);
 //        result->add_extra_params();
 //        result->mutable_extra_params(m)->CopyFrom(all_kv_pairs[index[m]]);
 
-    result_entities.add_ids(all_entities_ids[index[m]]);
+          result_entities.add_ids(all_entities_ids[i][index_array[i][m]]);
 //        result_entities.add_valid_row(all_valid_row[index[m]]);
 //        result_entities.add_rows_data();
 //        result_entities.mutable_rows_data(m)->CopyFrom(all_row_data[index[m]]);
+      }
   }
 
   result_entities.mutable_status()->CopyFrom(status);
 
-  result->set_row_num(row_num);
+  result->set_row_num(numQueries);
   result->mutable_entities()->CopyFrom(result_entities);
   result->set_query_id(results[0]->query_id());
 //  result->set_client_id(results[0]->client_id());
