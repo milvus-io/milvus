@@ -216,7 +216,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, collection)
         connect.create_index(collection, field_name, get_simple_index)
@@ -260,7 +260,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         entities, ids = init_data(connect, collection)
@@ -290,7 +290,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         entities, ids = init_data(connect, collection, partition_tags=default_tag)
@@ -338,7 +338,7 @@ class TestSearchBase:
         nq = 2
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
@@ -372,7 +372,7 @@ class TestSearchBase:
         tag = "tag"
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
@@ -427,7 +427,7 @@ class TestSearchBase:
         nq = get_nq
 
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         entities, ids = init_data(connect, collection)
         get_simple_index["metric_type"] = "IP"
@@ -455,7 +455,7 @@ class TestSearchBase:
         nq = get_nq
         metric_type = "IP"
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         entities, ids = init_data(connect, collection)
@@ -488,7 +488,7 @@ class TestSearchBase:
         metric_type = "IP"
         new_tag = "new_tag"
         index_type = get_simple_index["index_type"]
-        if index_type in ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]:
+        if index_type in skip_pq():
             pytest.skip("Skip PQ")
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, new_tag)
