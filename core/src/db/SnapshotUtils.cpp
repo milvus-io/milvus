@@ -283,31 +283,31 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 }
 
 Status
-GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count) {
+GetSegmentRowLimit(const std::string& collection_name, int64_t& segment_row_limit) {
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
-    return GetSegmentRowCount(collection, segment_row_count);
+    return GetSegmentRowLimit(collection, segment_row_limit);
 }
 
 Status
-GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
+GetSegmentRowLimit(int64_t collection_id, int64_t& segment_row_limit) {
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
-    return GetSegmentRowCount(collection, segment_row_count);
+    return GetSegmentRowLimit(collection, segment_row_limit);
 }
 
 Status
-GetSegmentRowCount(const snapshot::CollectionPtr& collection, int64_t& segment_row_count) {
-    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+GetSegmentRowLimit(const snapshot::CollectionPtr& collection, int64_t& segment_row_limit) {
+    segment_row_limit = DEFAULT_SEGMENT_ROW_LIMIT;
     const json params = collection->GetParams();
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    if (params.find(PARAM_SEGMENT_ROW_LIMIT) != params.end()) {
+        segment_row_limit = params[PARAM_SEGMENT_ROW_LIMIT];
     }
 
     return Status::OK();
