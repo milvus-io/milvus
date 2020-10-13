@@ -149,6 +149,8 @@ SearchReq::OnExecute() {
         }
         fiu_do_on("SearchReq.OnExecute.empty_result_ids", result_->result_ids_.clear());
         if (result_->result_ids_.empty()) {
+            auto vector_query = query_ptr_->vectors.begin()->second;
+            result_->row_num_ = vector_query->query_vector.vector_count;
             return Status::OK();  // empty table
         }
 
