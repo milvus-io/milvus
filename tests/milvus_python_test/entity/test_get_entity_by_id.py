@@ -584,9 +584,9 @@ class TestGetBase:
                 # logging.getLogger().info(current_thread().getName() + " insert")
                 for group_vector in group_vectors:
                     group_entities = [
-                        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
-                        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
-                        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
+                        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(step)]},
+                        {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
+                        {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
                     ]
                     group_ids = connect.insert(collection, group_entities)
                     connect.flush([collection])

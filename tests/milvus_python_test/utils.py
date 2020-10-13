@@ -79,6 +79,10 @@ def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
 
 
+def skip_pq():
+    return ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]
+
+
 def binary_metrics():
     return ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
