@@ -83,7 +83,7 @@ class MemCollection {
     std::unordered_set<idx_t> ids_to_delete_;
     idx_t max_delete_op_id_ = 0;
 
-    int64_t segment_row_count_ = 0;
+    int64_t segment_row_limit_ = 0;
 };
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;

@@ -40,7 +40,7 @@ namespace engine {
 
 MemCollection::MemCollection(int64_t collection_id, const DBOptions& options)
     : collection_id_(collection_id), options_(options) {
-    GetSegmentRowCount(collection_id_, segment_row_count_);
+    GetSegmentRowLimit(collection_id_, segment_row_limit_);
 }
 
 Status
@@ -58,8 +58,8 @@ MemCollection::Add(int64_t partition_id, const DataChunkPtr& chunk, idx_t op_id)
     int64_t chunk_size = utils::GetSizeOfChunk(chunk);
 
     Status status;
-    if (current_mem_segment == nullptr || chunk->count_ >= segment_row_count_ ||
-        current_mem_segment->GetCurrentRowCount() >= segment_row_count_ ||
+    if (current_mem_segment == nullptr || chunk->count_ >= segment_row_limit_ ||
+        current_mem_segment->GetCurrentRowCount() >= segment_row_limit_ ||
         current_mem_segment->GetCurrentMem() + chunk_size > MAX_MEM_SEGMENT_SIZE) {
         MemSegmentPtr new_mem_segment = std::make_shared<MemSegment>(collection_id_, partition_id, options_);
         status = new_mem_segment->Add(chunk, op_id);

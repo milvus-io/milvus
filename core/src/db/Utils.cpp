@@ -191,22 +191,22 @@ GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
 }
 
 Status
-SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks) {
-    if (chunk == nullptr || segment_row_count <= 0) {
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_limit, std::vector<DataChunkPtr>& chunks) {
+    if (chunk == nullptr || segment_row_limit <= 0) {
         return Status::OK();
     }
 
-    // no need to split chunk if chunk row count less than segment_row_count
-    // if user specify a tiny segment_row_count(such as 1) , also no need to split,
-    // use build_index_threshold(default is 4096) to avoid tiny segment_row_count
-    if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold()) {
+    // no need to split chunk if chunk row count less than segment_row_limit
+    // if user specify a tiny segment_row_limit(such as 1) , also no need to split,
+    // use build_index_threshold(default is 4096) to avoid tiny segment_row_limit
+    if (chunk->count_ <= segment_row_limit || chunk->count_ <= config.engine.build_index_threshold()) {
         chunks.push_back(chunk);
         return Status::OK();
     }
 
     int64_t chunk_count = chunk->count_;
 
-    // split chunk accordding to segment row count
+    // split chunk accordding to segment_row_limit
     // firstly validate each field size
     FIELD_WIDTH_MAP fields_width;
     for (auto& pair : chunk->fixed_fields_) {
@@ -236,8 +236,8 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
     // secondly, copy new chunk
     int64_t copied_count = 0;
     while (copied_count < chunk_count) {
-        int64_t count_to_copy = segment_row_count;
-        if (chunk_count - copied_count < segment_row_count) {
+        int64_t count_to_copy = segment_row_limit;
+        if (chunk_count - copied_count < segment_row_limit) {
             count_to_copy = chunk_count - copied_count;
         }
         DataChunkPtr new_chunk = std::make_shared<DataChunk>();

@@ -430,7 +430,7 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
                 "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
 
     mapping_json = nlohmann::json::parse(mapping_str);
@@ -629,7 +629,7 @@ TEST_F(WebControllerTest, INSERT_BIN) {
                 "params": {}
             }
         ],
-        "segment_row_count": 100000,
+        "segment_row_limit": 100000,
         "auto_id": true
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
@@ -778,7 +778,7 @@ TEST_F(WebControllerTest, SEARCH) {
                 "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
     mapping_json["collection_name"] = collection_name;

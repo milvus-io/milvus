@@ -240,7 +240,7 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
         Status status;
         for (size_t jj = 0; jj < 20; jj ++) {
             std::string collection_name = collection_name_prefix + std::to_string(jj);
-            milvus::json cj{{"segment_row_count", 1024}};
+            milvus::json cj{{"segment_row_limit", 1024}};
             auto collection = std::make_shared<Collection>(collection_name, cj);
             auto c_ctx = ResourceContextBuilder<Collection>().SetResource(collection).SetOp(Op::oAdd).CreatePtr();
             status = meta_->Execute<Collection>(c_ctx, result_id);

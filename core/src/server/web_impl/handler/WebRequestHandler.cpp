@@ -302,8 +302,8 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
-    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_LIMIT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
         json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
@@ -1274,8 +1274,8 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     }
 
     milvus::json json_params;
-    if (json_str.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_params[engine::PARAM_SEGMENT_ROW_COUNT] = json_str[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (json_str.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_params[engine::PARAM_SEGMENT_ROW_LIMIT] = json_str[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (json_str.contains(engine::PARAM_UID_AUTOGEN)) {
         json_params[engine::PARAM_UID_AUTOGEN] = json_str[engine::PARAM_UID_AUTOGEN];
