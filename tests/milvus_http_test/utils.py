@@ -21,6 +21,7 @@ default_drop_interval = 3
 default_dim = 128
 default_nb = 1200
 default_top_k = 10
+default_nq = 1
 max_top_k = 16384
 max_partition_num = 256
 default_segment_row_limit = 1000
@@ -245,18 +246,20 @@ def gen_single_vector_fields():
 
 def gen_default_fields(auto_id=True, binary=False):
     fields = [
-        {"name": "int64", "type": "INT64"},
-        {"name": "float", "type": "FLOAT"}
+        {"name": default_int_field_name, "type": "INT64"},
+        {"name": default_float_field_name, "type": "FLOAT"}
     ]
     if binary is False:
-        field = {"name": default_float_vec_field_name, "type": "VECTOR_FLOAT", "params": {"dim": default_dim}}
+        field = {"name": default_float_vec_field_name, "type": "VECTOR_FLOAT",
+                 "params": {"dim": default_dim}}
     else:
-        field = {"name": default_binary_vec_field_name, "type": "BINARY_FLOAT", "params": {"dim": default_dim}}
+        field = {"name": default_binary_vec_field_name, "type": "BINARY_FLOAT",
+                 "params": {"dim": default_dim}}
     fields.append(field)
     default_fields = {
         "fields": fields,
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
@@ -276,11 +279,14 @@ def gen_entities(nb, is_normal=False):
 
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
-    entities = [
-        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
-        {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
-        {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
-    ]
+    entities = []
+    for i in range(nb):
+        entity = {
+            default_int_field_name: i,
+            default_float_field_name: float(i),
+            default_binary_vec_field_name: vectors
+        }
+        entities.append(entity)
     return raw_vectors, entities
 
 
@@ -307,13 +313,13 @@ def assert_equal_entity(a, b):
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
                       metric_type="L2", replace_vecs=None):
     if rand_vector is True:
-        dimension = len(entities[-1]["values"][0])
+        dimension = len(entities[0][default_float_vec_field_name][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
-        query_vectors = entities[-1]["values"][:nq]
+        query_vectors = list(map(lambda x: x[default_float_vec_field_name], entities[:nq]))
     if replace_vecs:
         query_vectors = replace_vecs
-    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    must_param = {"vector": {field_name: {"topk": top_k, "values": query_vectors, "params": search_params}}}
     must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
@@ -376,7 +382,7 @@ def gen_invalid_range():
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": default_nb//2},
+        {"GT": 0, "LT": default_nb // 2},
         {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
         {"LT": default_nb},

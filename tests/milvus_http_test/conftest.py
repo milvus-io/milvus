@@ -14,6 +14,7 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
+    # parser.addoption("--ip", action="store", default="192.168.1.113")
     parser.addoption("--service", action="store", default="")
     parser.addoption("--port", action="store", default=19121)
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")

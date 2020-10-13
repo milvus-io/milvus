@@ -77,3 +77,12 @@ class TestCreateCollection:
         # fields = gen_default_fields(auto_id=False)
         client.create_collection(collection_name, fields)
         assert client.has_collection(collection_name)
+
+    def _test_create_binary_collection(self, client):
+        collection_name = 'test_NRHgct0s'
+        fields = {'fields': [{'name': 'int64', 'type': 'INT64'},
+                             {'name': 'float', 'type': 'FLOAT'},
+                             {'name': 'binary_vector', 'type': 'BINARY_FLOAT', 'params': {'dim': 128}}],
+                  'segment_row_limit': 1000, 'auto_id': True}
+        client.create_collection(collection_name, fields)
+        assert client.has_collection(collection_name)

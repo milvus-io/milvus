@@ -2,6 +2,7 @@ import logging
 import pdb
 import json
 import requests
+import traceback
 import utils
 from milvus import Milvus
 from utils import *
@@ -12,9 +13,6 @@ url_system = "system/"
 class Request(object):
     def __init__(self, url):
         logging.getLogger().error(url)
-        self._url = url
-
-    def _check_status(self, result):
         self._url = url
 
     def _check_status(self, result):
@@ -32,6 +30,10 @@ class Request(object):
 
     def get(self, data=None):
         res_get = requests.get(self._url, params=data)
+        return self._check_status(res_get), json.loads(res_get.text)["data"]
+
+    def get_with_body(self, data=None):
+        res_get = requests.get(self._url, data=json.dumps(data))
         return self._check_status(res_get), json.loads(res_get.text)["data"]
 
     def post(self, data):
@@ -115,7 +117,7 @@ class MilvusClient(object):
             return False
 
     def info_collection(self, collection_name):
-        url = self._url+url_collections+'/'+collection_name
+        url = self._url+url_collections+'/'+str(collection_name)
         r = Request(url)
         try:
             status, data = r.get()
@@ -128,7 +130,7 @@ class MilvusClient(object):
             return False
 
     def stat_collection(self, collection_name):
-        url = self._url+url_collections+'/'+collection_name
+        url = self._url+url_collections+'/'+str(collection_name)
         r = Request(url)
         try:
             status, data = r.get(data={"info": "stat"})
@@ -207,7 +209,7 @@ class MilvusClient(object):
         try:
             status, data = r.post(insert_params)
             if status:
-                return data["ids"] 
+                return data["ids"]
             else:
                 return False
         except Exception as e:
@@ -282,14 +284,14 @@ class MilvusClient(object):
                 return field["index_params"]
 
     def search(self, collection_name, query_expr, fields=None):
-        url = self._url+url_collections+'/'+collection_name+'/entities'
+        url = self._url+url_collections+'/'+str(collection_name)+'/entities'
         r = Request(url)
         search_params = {
             "query": query_expr,
             "fields": fields
         }
         try:
-            status, data = r.post(search_params)
+            status, data = r.get_with_body(search_params)
             if status:
                 return data
             else:
@@ -303,8 +305,9 @@ class MilvusClient(object):
     '''
     def clear_db(self):
         collections = self.list_collections(page_size=10000)
-        for item in collections:
-            self.drop_collection(item["collection_name"])
+        if collections:
+            for item in collections:
+                self.drop_collection(item["collection_name"])
 
     def system_cmd(self, cmd):
         url = self._url+url_system+cmd
