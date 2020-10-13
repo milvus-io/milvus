@@ -48,11 +48,11 @@ SnapshotVisitor::SegmentsToIndex(const std::string& field_name, snapshot::IDS_TY
 
     // force_build means client invoke create_index,
     // all segments whose row_count greater than config.build_index_threshold will be counted in.
-    // else, only the segments whose row_count greater than segment_row_count will be counted in
+    // else, only the segments whose row_count greater than segment_row_limit will be counted in
     int64_t build_index_threshold = config.engine.build_index_threshold();
     if (!force_build) {
         auto collection = ss_->GetCollection();
-        GetSegmentRowCount(collection, build_index_threshold);
+        GetSegmentRowLimit(collection, build_index_threshold);
     }
 
     auto handler = std::make_shared<SegmentsToIndexCollector>(ss_, field_name, segment_ids, build_index_threshold);
@@ -65,12 +65,12 @@ Status
 SnapshotVisitor::SegmentsToMerge(snapshot::IDS_TYPE& segment_ids) {
     STATUS_CHECK(status_);
 
-    // segment whose row count is less than segment_row_count will be counted in
-    int64_t segment_row_count = 0;
+    // segment whose row count is less than segment_row_limit will be counted in
+    int64_t segment_row_limit = 0;
     auto collection = ss_->GetCollection();
-    GetSegmentRowCount(collection, segment_row_count);
+    GetSegmentRowLimit(collection, segment_row_limit);
 
-    auto handler = std::make_shared<SegmentsToMergeCollector>(ss_, segment_ids, segment_row_count);
+    auto handler = std::make_shared<SegmentsToMergeCollector>(ss_, segment_ids, segment_row_limit);
     handler->Iterate();
 
     return handler->GetStatus();

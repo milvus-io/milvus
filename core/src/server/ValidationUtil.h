@@ -45,7 +45,7 @@ extern Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
 
 extern Status
-ValidateSegmentRowCount(int64_t segment_row_count);
+ValidateSegmentRowLimit(int64_t segment_row_limit);
 
 extern Status
 ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type);
