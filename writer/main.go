@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"github.com/czs007/suvlim/conf"
 	storage "github.com/czs007/suvlim/storage/pkg"
@@ -9,11 +10,16 @@ import (
 	"github.com/czs007/suvlim/writer/write_node"
 	"log"
 	"strconv"
-	"sync"
-	"time"
 )
 
 func main() {
+    var yamlFile string
+	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
+	flag.Parse()
+    // flag.Usage()
+	fmt.Println("yaml file: ", yamlFile)
+	conf.LoadConfig(yamlFile)
+
 	pulsarAddr := "pulsar://"
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
@@ -24,7 +30,6 @@ func main() {
 	//TODO::close client / consumer/ producer
 
 	mc.ReceiveMessage()
-	wg := sync.WaitGroup{}
 	ctx := context.Background()
 	kv, err := storage.NewStore(ctx, conf.Config.Storage.Driver)
 	// TODO:: if err != nil, should retry link
@@ -45,34 +50,25 @@ func main() {
 	}
 
 	const Debug = true
-	const CountMsgNum = 1000 * 1000
 
 	if Debug {
-		var printFlag = true
-		var startTime = true
-		var start time.Time
+		const CountInsertMsgBaseline = 1000 * 1000
+		var BaselineCounter int64 = 0
 
 		for {
 			if ctx.Err() != nil {
 				break
 			}
 			msgLength := wn.MessageClient.PrepareBatchMsg()
-			if msgLength > 0 {
-				if startTime {
-					fmt.Println("============> Start Test <============")
-					startTime = false
-					start = time.Now()
-				}
 
-				wn.DoWriteNode(ctx, &wg)
-				fmt.Println("write node do a batch message, storage len: ", msgLength)
+			if wn.MsgCounter.InsertCounter/CountInsertMsgBaseline != BaselineCounter {
+				wn.WriteWriterLog()
+				BaselineCounter = wn.MsgCounter.InsertCounter/CountInsertMsgBaseline
 			}
 
-			// Test insert time
-			if printFlag && wn.MsgCounter.InsertCounter >= CountMsgNum {
-				printFlag = false
-				timeSince := time.Since(start)
-				fmt.Println("============> Do", wn.MsgCounter.InsertCounter, "Insert in", timeSince, "<============")
+			if msgLength > 0 {
+				wn.DoWriteNode(ctx)
+				fmt.Println("write node do a batch message, storage len: ", msgLength)
 			}
 		}
 	}
@@ -84,7 +80,7 @@ func main() {
 		}
 		msgLength := wn.MessageClient.PrepareBatchMsg()
 		if msgLength > 0 {
-			wn.DoWriteNode(ctx, &wg)
+			wn.DoWriteNode(ctx)
 			fmt.Println("write node do a batch message, storage len: ", msgLength)
 		}
 	}

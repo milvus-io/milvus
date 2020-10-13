@@ -72,7 +72,7 @@ Status MetaWrapper::Init() {
     auto f = [&](const etcdserverpb::WatchResponse &res) {
       UpdateMeta(res);
     };
-    watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, segment_path_, f, true);
+    watcher_ = std::make_shared<milvus::master::Watcher>(etcd_addr, etcd_root_path_, f, true);
     return SyncMeta();
   }
   catch (const std::exception &e) {

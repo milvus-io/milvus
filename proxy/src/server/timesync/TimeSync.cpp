@@ -25,9 +25,17 @@ TimeSync::TimeSync(int64_t id,
     timestamp_(timestamp), interval_(interval), pulsar_addr_(pulsar_addr), time_sync_topic_(time_sync_topic) {
   sync_msg_.set_peer_id(id);
   auto timer = [&]() {
-    std::shared_ptr<milvus::message_client::MsgClient>
-        client = std::make_shared<milvus::message_client::MsgClient>(this->pulsar_addr_);
-    milvus::message_client::MsgProducer producer(client, this->time_sync_topic_);
+    //create pulsar client
+    std::shared_ptr<milvus::message_client::MsgClient> pulsar_client;
+    if (config.pulsar.authentication) {
+        pulsar::ClientConfiguration clientConfig;
+        clientConfig.setAuth(pulsar::AuthToken::createWithToken(config.pulsar.token.value));
+        pulsar_client = std::make_shared<milvus::message_client::MsgClient>(this->pulsar_addr_, clientConfig);
+    } else {
+        pulsar_client = std::make_shared<milvus::message_client::MsgClient>(this->pulsar_addr_);
+    }
+
+    milvus::message_client::MsgProducer producer(pulsar_client, this->time_sync_topic_);
 
     for (;;) {
       if (this->stop_) break;
@@ -44,7 +52,7 @@ TimeSync::TimeSync(int64_t id,
     if (rst != pulsar::ResultOk) {
       //TODO, add log or throw exception
     }
-    rst = client->close();
+    rst = pulsar_client->close();
     if (rst != pulsar::ResultOk) {
       //TODO, add log or throw exception
     }

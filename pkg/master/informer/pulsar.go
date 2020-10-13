@@ -3,13 +3,11 @@ package informer
 import (
 	"context"
 	"fmt"
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/czs007/suvlim/conf"
+	"github.com/czs007/suvlim/pkg/master/mock"
 	"log"
 	"strconv"
-	"time"
-
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/pkg/master/mock"
 )
 
 func NewPulsarClient() PulsarClient {
@@ -17,11 +15,25 @@ func NewPulsarClient() PulsarClient {
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:               pulsarAddr,
-		OperationTimeout:  30 * time.Second,
-		ConnectionTimeout: 30 * time.Second,
-	})
+
+	var client pulsar.Client
+	var err error
+
+	if conf.Config.Pulsar.Authentication {
+		client, err = pulsar.NewClient(pulsar.ClientOptions{
+			URL:               pulsarAddr,
+			Authentication:    pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
+			//OperationTimeout:  30 * time.Second,
+			//ConnectionTimeout: 30 * time.Second,
+		})
+	} else {
+		client, err = pulsar.NewClient(pulsar.ClientOptions{
+			URL:               pulsarAddr,
+			//OperationTimeout:  30 * time.Second,
+			//ConnectionTimeout: 30 * time.Second,
+		})
+	}
+
 	if err != nil {
 		log.Fatalf("Could not instantiate Pulsar client: %v", err)
 	}
@@ -53,8 +65,10 @@ func (pc PulsarClient) Listener(ssChan chan mock.SegmentStats) error {
 		if err != nil {
 			log.Println("SegmentUnMarshal Failed")
 		}
-		fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
-			msg.ID(), m.SegementID)
+		//fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
+		//	msg.ID(), m.SegementID)
+		fmt.Println("Received SegmentStats -- segmentID:", m.SegementID,
+			",memSize:", m.MemorySize, ",memRate:", m.MemoryRate, ",numRows:", m.Rows, ",status:", m.Status)
 		ssChan <- m
 		consumer.Ack(msg)
 	}
