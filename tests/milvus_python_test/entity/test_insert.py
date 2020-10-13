@@ -122,7 +122,7 @@ class TestInsertBase:
         info = connect.get_collection_info(collection)
         fields = info["fields"]
         for field in fields:
-            if field["field"] == field_name:
+            if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -138,7 +138,7 @@ class TestInsertBase:
         info = connect.get_collection_info(collection)
         fields = info["fields"]
         for field in fields:
-            if field["field"] == field_name:
+            if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -498,7 +498,7 @@ class TestInsertBase:
         expected: error raised
         '''
         tmp_entity = copy.deepcopy(default_entity)
-        del tmp_entity[-1]["field"]
+        del tmp_entity[-1]["name"]
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
@@ -603,7 +603,7 @@ class TestInsertBinary:
         info = connect.get_collection_info(binary_collection)
         fields = info["fields"]
         for field in fields:
-            if field["field"] == binary_field_name:
+            if field["name"] == binary_field_name:
                 assert field["indexes"][0] == get_binary_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
@@ -620,7 +620,7 @@ class TestInsertBinary:
         info = connect.get_collection_info(binary_collection)
         fields = info["fields"]
         for field in fields:
-            if field["field"] == binary_field_name:
+            if field["name"] == binary_field_name:
                 assert field["indexes"][0] == get_binary_index
 
     def test_insert_binary_search(self, connect, binary_collection):
