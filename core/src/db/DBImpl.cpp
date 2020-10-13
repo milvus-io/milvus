@@ -1045,6 +1045,9 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
         }
+
+        // notify index request to return
+        index_req_swn_.Notify();
     }
 }
 
