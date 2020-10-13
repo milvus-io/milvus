@@ -104,7 +104,7 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
         STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
         // segment must meet two conditions for merging:
-        // 1. the segment's row count is less than segment_row_count
+        // 1. the segment's row count is less than segment_row_limit
         // 2. the segment has no index(for any field)
         snapshot::IDS_TYPE segment_ids;
         SnapshotVisitor ss_visitor(latest_ss);
@@ -144,7 +144,7 @@ MergeManagerImpl::MergeSegments(int64_t collection_id, MergeStrategyType type) {
         // get row count per segment
         auto collection = latest_ss->GetCollection();
         int64_t row_count_per_segment = 0;
-        GetSegmentRowCount(collection, row_count_per_segment);
+        GetSegmentRowLimit(collection, row_count_per_segment);
 
         // distribute segments to groups by some strategy
         SegmentGroups segment_groups;

@@ -93,8 +93,8 @@ Status
 WalProxy::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                  idx_t op_id) {
     // get segment row count of this collection
-    int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_COUNT;
-    GetSegmentRowCount(collection_name, row_count_per_segment);
+    int64_t row_count_per_segment = DEFAULT_SEGMENT_ROW_LIMIT;
+    GetSegmentRowLimit(collection_name, row_count_per_segment);
 
     // split chunk accordding to segment row count
     std::vector<DataChunkPtr> chunks;

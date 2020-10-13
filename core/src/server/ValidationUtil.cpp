@@ -383,11 +383,11 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
 }
 
 Status
-ValidateSegmentRowCount(int64_t segment_row_count) {
+ValidateSegmentRowLimit(int64_t segment_row_limit) {
     int64_t min = config.engine.build_index_threshold();
     int max = engine::MAX_SEGMENT_ROW_COUNT;
-    if (segment_row_count < min || segment_row_count > max) {
-        std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
+    if (segment_row_limit < min || segment_row_limit > max) {
+        std::string msg = "Invalid segment row limit: " + std::to_string(segment_row_limit) + ". " +
                           "Should be in range " + std::to_string(min) + " ~ " + std::to_string(max) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
