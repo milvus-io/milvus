@@ -24,10 +24,10 @@ namespace milvus {
 namespace engine {
 
 // 1. SIMPLE
-//    merge in old way, merge segment one by one, stop merge until segment row count exceed segment_row_count
+//    merge in old way, merge segment one by one, stop merge until segment row count exceed segment_row_limit
 // 2. LAYERED
-//    distribute segments to several groups according to segment_row_count
-//    assume segment_row_count = 100000
+//    distribute segments to several groups according to segment_row_limit
+//    assume segment_row_limit = 100000
 //    firstly, define layers by row count: 100000, 20000, 4000
 //    if segment row count between 0~4000, put it into layer "4000"
 //    if segment row count between 4000~20000, put it into layer "20000"
@@ -36,8 +36,8 @@ namespace engine {
 //    secondly, merge segments for each group
 //    third, if some segment's create time is 30 seconds ago, and it still un-merged, force merge with upper layer
 // 3. ADAPTIVE
-//    merge segments to fit the segment_row_count
-//    assume segment_row_count = 100000
+//    merge segments to fit the segment_row_limit
+//    assume segment_row_limit = 100000
 //    segment_1 row count = 80000
 //    segment_2 row count = 60000
 //    segment_3 row count = 30000

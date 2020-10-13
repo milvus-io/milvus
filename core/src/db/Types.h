@@ -42,7 +42,7 @@ extern const char* PARAM_DIMENSION;
 extern const char* PARAM_INDEX_TYPE;
 extern const char* PARAM_INDEX_METRIC_TYPE;
 extern const char* PARAM_INDEX_EXTRA_PARAMS;
-extern const char* PARAM_SEGMENT_ROW_COUNT;
+extern const char* PARAM_SEGMENT_ROW_LIMIT;
 
 extern const char* DEFAULT_STRUCTURED_INDEX;
 extern const char* DEFAULT_PARTITON_TAG;

@@ -556,14 +556,14 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // do insert
-    int64_t segment_row_count = 0;
-    GetSegmentRowCount(ss->GetCollection(), segment_row_count);
+    int64_t segment_row_limit = 0;
+    GetSegmentRowLimit(ss->GetCollection(), segment_row_limit);
 
     int64_t collection_id = ss->GetCollectionId();
     int64_t partition_id = partition->GetID();
 
     std::vector<DataChunkPtr> chunks;
-    STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_count, chunks));
+    STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_limit, chunks));
 
     LOG_ENGINE_DEBUG_ << "Insert entities into mem manager";
     for (auto& chunk : chunks) {
@@ -848,8 +848,8 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
         }
 
         // delete rate less than threshold, skip compact
-        auto deleted_count = deleted_docs->GetCount();
-        if (double(deleted_count) / (row_count + deleted_count) < threshold) {
+        auto deleted_count = (double)(deleted_docs->GetCount());
+        if (deleted_count / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
 

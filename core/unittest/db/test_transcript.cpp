@@ -55,7 +55,7 @@ CreateContext(CreateCollectionContext& context) {
 
     auto params = context.collection->GetParams();
     params[milvus::engine::PARAM_UID_AUTOGEN] = true;
-    params[milvus::engine::PARAM_SEGMENT_ROW_COUNT] = 1000;
+    params[milvus::engine::PARAM_SEGMENT_ROW_LIMIT] = 1000;
     context.collection->SetParams(params);
 }
 

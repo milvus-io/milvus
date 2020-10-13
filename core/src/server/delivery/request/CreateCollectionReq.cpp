@@ -50,11 +50,11 @@ CreateCollectionReq::OnExecute() {
             return status;
         }
 
-        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-            extra_params_[engine::PARAM_SEGMENT_ROW_COUNT] = engine::DEFAULT_SEGMENT_ROW_COUNT;
+        if (!extra_params_.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+            extra_params_[engine::PARAM_SEGMENT_ROW_LIMIT] = engine::DEFAULT_SEGMENT_ROW_LIMIT;
         } else {
-            auto segment_row = extra_params_[engine::PARAM_SEGMENT_ROW_COUNT].get<int64_t>();
-            STATUS_CHECK(ValidateSegmentRowCount(segment_row));
+            auto segment_row_limit = extra_params_[engine::PARAM_SEGMENT_ROW_LIMIT].get<int64_t>();
+            STATUS_CHECK(ValidateSegmentRowLimit(segment_row_limit));
         }
 
         rc.RecordSection("check validation");
