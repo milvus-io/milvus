@@ -128,6 +128,12 @@ class DBImpl : public DB, public ConfigObserver {
     IsBuildingIndex() override;
 
  private:
+    bool
+    ServiceAvailable();
+
+    void
+    SetAvailable(bool available);
+
     void
     InternalFlush(const std::string& collection_name = "", bool merge = true);
 
@@ -175,7 +181,7 @@ class DBImpl : public DB, public ConfigObserver {
 
  private:
     DBOptions options_;
-    std::atomic<bool> initialized_;
+    std::atomic<bool> available_;
 
     MemManagerPtr mem_mgr_;
     MergeManagerPtr merge_mgr_ptr_;
