@@ -20,7 +20,7 @@ TEST(CLIENT_CPP, PRODUCE_INSERT) {
   int64_t offset = 1;
   milvus::grpc::RowData data;
   milvus::grpc::InsertOrDeleteMsg msg;
-  while (offset <= 100000) {
+  while (offset <= 1000) {
     data.set_blob("a blob");
     msg.set_collection_name("zilliz");
     msg.set_partition_tag("milvus");
@@ -33,8 +33,8 @@ TEST(CLIENT_CPP, PRODUCE_INSERT) {
 
     std::string to_string = msg.SerializeAsString();
     producer.send(to_string);
-    if (offset % 20 == 0)
-      usleep(200000);
+//    if (offset % 20 == 0)
+//      usleep(200000);
     offset++;
   }
 //  producer.close();

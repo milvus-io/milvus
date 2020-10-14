@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-cpu-build-env
+  labels:
+    app: milvus
+    componet: cpu-build-env
+spec:
+  containers:
+  - name: milvus-cpu-build-env
+    image: registry.zilliz.com/milvus/milvus-cpu-build-env:v0.10.2-ubuntu18.04
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: OS_NAME
+      value: "ubuntu18.04"
+    - name: BUILD_ENV_IMAGE_ID
+      value: "4e30ebe398d1a10150c625e52f44d5426c71a557afbb3f16ee9cea20e52e1b9d"
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "14Gi"
+        cpu: "6.0"
+      requests:
+        memory: "8Gi"
+        cpu: "4.0"
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: milvus
+    effect: NoSchedule

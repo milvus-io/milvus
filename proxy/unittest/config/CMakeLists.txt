@@ -20,9 +20,8 @@ set( CONFIG_SRCS
                     )
 
 set(unittest_srcs
-	ServerConfigTest.cpp
 	ConfigTypeTest1.cpp
-	ConfigTypeTest2.cpp
+#	ConfigTypeTest2.cpp
         )
 
 

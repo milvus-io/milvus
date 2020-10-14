@@ -1,0 +1,17 @@
+version: '2.3'
+
+services:
+  cpu_centos7:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: cpu/centos7/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
+  cpu_ubuntu18.04:
+    image: ${TARGET_REPO}:${TARGET_TAG}
+    build:
+      context: ./
+      dockerfile: cpu/ubuntu18.04/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}:${SOURCE_TAG}
