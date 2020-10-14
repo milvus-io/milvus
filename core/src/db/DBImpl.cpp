@@ -26,7 +26,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
@@ -92,8 +91,6 @@ DBImpl::Start() {
     if (initialized_.load(std::memory_order_acquire)) {
         return Status::OK();
     }
-
-    knowhere::enable_faiss_logging();
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     initialized_.store(true, std::memory_order_release);
