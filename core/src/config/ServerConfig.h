@@ -119,6 +119,7 @@ struct ServerConfig {
         Integer use_blas_threshold{0};
         Integer omp_thread_num{0};
         Integer simd_type{0};
+        Bool stat_optimizer_enable{true};
     } engine;
 
     struct GPU {
