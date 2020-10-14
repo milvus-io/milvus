@@ -152,7 +152,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "acce
                     "params": {"dime": 128}
                     }
                 ],
-                "segment_size": 1024,
+                "segment_row_limit": 1024,
                 "auto_id": true
             }
         ],
@@ -428,7 +428,7 @@ Updates the index type and nlist of a collection.
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
-| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes.                                 | No        |
 | `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
@@ -804,7 +804,6 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 | Parameter  | Description                                                                                                                                                                                  | Required? |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `dsl`      | query dsl.                                                                                                                                                                            | Yes       |
-| `params`   | Extra params for search. Please refer to [Index and search parameters](#Index-and-search-parameters) to get more detail information.                                                                                        | Yes       |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
@@ -1022,7 +1021,7 @@ Delete entities
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{"ids": ["1578989029645098000"]}"
 ```
 
 ##### Response
@@ -1092,7 +1091,7 @@ Inserts entities to a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"entities\":[{"__id": 1, "field_vec": []}]}"
 ```
 
 ##### Response
