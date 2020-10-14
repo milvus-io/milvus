@@ -14,6 +14,9 @@ import (
 )
 
 type MessageClient struct {
+	// context
+	ctx context.Context
+
 	// timesync
 	timeSyncCfg *timesync.ReaderTimeSyncCfg
 
@@ -22,12 +25,12 @@ type MessageClient struct {
 	key2SegChan chan *msgpb.Key2SegMsg
 
 	// pulsar
-	client                   pulsar.Client
+	client pulsar.Client
 	//searchResultProducer     pulsar.Producer
 	searchResultProducers     map[int64]pulsar.Producer
 	segmentsStatisticProducer pulsar.Producer
-	searchConsumer           pulsar.Consumer
-	key2segConsumer          pulsar.Consumer
+	searchConsumer            pulsar.Consumer
+	key2segConsumer           pulsar.Consumer
 
 	// batch messages
 	InsertOrDeleteMsg   []*msgpb.InsertOrDeleteMsg
@@ -79,27 +82,45 @@ func (mc *MessageClient) GetSearchChan() <-chan *msgpb.SearchMsg {
 
 func (mc *MessageClient) receiveSearchMsg() {
 	for {
-		searchMsg := msgpb.SearchMsg{}
-		msg, err := mc.searchConsumer.Receive(context.Background())
-		err = proto.Unmarshal(msg.Payload(), &searchMsg)
-		if err != nil {
-			log.Fatal(err)
+		select {
+		case <-mc.ctx.Done():
+			return
+		default:
+			searchMsg := msgpb.SearchMsg{}
+			msg, err := mc.searchConsumer.Receive(mc.ctx)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			err = proto.Unmarshal(msg.Payload(), &searchMsg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			mc.searchChan <- &searchMsg
+			mc.searchConsumer.Ack(msg)
 		}
-		mc.searchChan <- &searchMsg
-		mc.searchConsumer.Ack(msg)
 	}
 }
 
 func (mc *MessageClient) receiveKey2SegMsg() {
 	for {
-		key2SegMsg := msgpb.Key2SegMsg{}
-		msg, err := mc.key2segConsumer.Receive(context.Background())
-		err = proto.Unmarshal(msg.Payload(), &key2SegMsg)
-		if err != nil {
-			log.Fatal(err)
+		select {
+		case <-mc.ctx.Done():
+			return
+		default:
+			key2SegMsg := msgpb.Key2SegMsg{}
+			msg, err := mc.key2segConsumer.Receive(mc.ctx)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			err = proto.Unmarshal(msg.Payload(), &key2SegMsg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			mc.key2SegChan <- &key2SegMsg
+			mc.key2segConsumer.Ack(msg)
 		}
-		mc.key2SegChan <- &key2SegMsg
-		mc.key2segConsumer.Ack(msg)
 	}
 }
 
@@ -141,7 +162,7 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 	if conf.Config.Pulsar.Authentication {
 		// create client with Authentication
 		client, err := pulsar.NewClient(pulsar.ClientOptions{
-			URL: url,
+			URL:            url,
 			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
 		})
 
@@ -162,7 +183,10 @@ func (mc *MessageClient) createClient(url string) pulsar.Client {
 	return client
 }
 
-func (mc *MessageClient) InitClient(url string) {
+func (mc *MessageClient) InitClient(ctx context.Context, url string) {
+	// init context
+	mc.ctx = ctx
+
 	//create client
 	mc.client = mc.createClient(url)
 	mc.MessageClientID = conf.Config.Reader.ClientId
@@ -185,7 +209,7 @@ func (mc *MessageClient) InitClient(url string) {
 		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
 	}
 
-	for _, key := range proxyIdList{
+	for _, key := range proxyIdList {
 		topic := searchResultTopicName
 		topic = topic + strconv.Itoa(int(key))
 		mc.searchResultProducers[key] = mc.creatProducer(topic)
@@ -217,7 +241,8 @@ func (mc *MessageClient) InitClient(url string) {
 
 	readSubName := "reader" + strconv.Itoa(mc.MessageClientID)
 	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
-	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
+	timeSync, err := timesync.NewReaderTimeSync(ctx,
+		timeSyncTopic,
 		timeSyncSubName,
 		readTopics,
 		readSubName,
@@ -236,14 +261,26 @@ func (mc *MessageClient) InitClient(url string) {
 }
 
 func (mc *MessageClient) Close() {
-	mc.client.Close()
-	for key, _ := range mc.searchResultProducers {
-		mc.searchResultProducers[key].Close()
+	if mc.client != nil {
+		mc.client.Close()
 	}
-	mc.segmentsStatisticProducer.Close()
-	mc.searchConsumer.Close()
-	mc.key2segConsumer.Close()
-	mc.timeSyncCfg.Close()
+	for key, _ := range mc.searchResultProducers {
+		if mc.searchResultProducers[key] != nil {
+			mc.searchResultProducers[key].Close()
+		}
+	}
+	if mc.segmentsStatisticProducer != nil {
+		mc.segmentsStatisticProducer.Close()
+	}
+	if mc.searchConsumer != nil {
+		mc.searchConsumer.Close()
+	}
+	if mc.key2segConsumer != nil {
+		mc.key2segConsumer.Close()
+	}
+	if mc.timeSyncCfg != nil {
+		mc.timeSyncCfg.Close()
+	}
 }
 
 type MessageType int

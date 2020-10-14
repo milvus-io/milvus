@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -12,7 +13,8 @@ import (
 
 func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	ctx := context.Background()
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -21,11 +23,14 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_SegmentInsert(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	ctx := context.Background()
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -66,11 +71,14 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_SegmentDelete(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -91,11 +99,14 @@ func TestSegment_SegmentDelete(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_SegmentSearch(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -152,11 +163,14 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_SegmentPreInsert(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -169,11 +183,14 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_SegmentPreDelete(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -186,13 +203,16 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 //  Segment util functions test
 ////////////////////////////////////////////////////////////////////////////
 func TestSegment_GetStatus(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -205,11 +225,14 @@ func TestSegment_GetStatus(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_Close(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -222,11 +245,14 @@ func TestSegment_Close(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_GetRowCount(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -271,11 +297,14 @@ func TestSegment_GetRowCount(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_GetDeletedCount(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -301,11 +330,14 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_GetMemSize(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -344,22 +376,28 @@ func TestSegment_GetMemSize(t *testing.T) {
 
 	// 6. Get memory usage in bytes
 	var memSize = segment.GetMemSize()
-	assert.Equal(t, memSize, uint64(1048714))
+	assert.Equal(t, memSize, uint64(2785280))
 
 	// 7. Destruct collection, partition and segment
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }
 
 func TestSegment_RealSchemaTest(t *testing.T) {
+	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
 	//var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  " +
 	//	"field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
 	//	"field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n" +
 	//	"\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
-	var schemaString = "id: 6875229265736357360\nname: \"collection0\"\nschema: \u003c\n  field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n  \u003e\n  field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n  \u003e\n\u003e\ncreate_time: 1600764055\nsegment_ids: 6875229265736357360\npartition_tags: \"default\"\n"
-	node := NewQueryNode(0, 0)
+	var schemaString = "id: 6875229265736357360\nname: \"collection0\"\nschema: \u003c\n  " +
+		"field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
+		"field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n    dim: 16\n  " +
+		"\u003e\n\u003e\ncreate_time: 1600764055\nsegment_ids: 6875229265736357360\npartition_tags: \"default\"\n"
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", schemaString)
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -400,4 +438,6 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+
+	node.Close()
 }

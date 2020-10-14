@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	msgPb "github.com/czs007/suvlim/pkg/master/grpc/message"
@@ -12,7 +13,8 @@ import (
 
 func TestIndex_BuildIndex(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(0, 0)
+	ctx := context.Background()
+	node := NewQueryNode(ctx, 0, 0)
 	var collection = node.NewCollection(0, "collection0", "")
 	var partition = collection.NewPartition("partition0")
 	var segment = partition.NewSegment(0)
@@ -74,4 +76,5 @@ func TestIndex_BuildIndex(t *testing.T) {
 	partition.DeleteSegment(segment)
 	collection.DeletePartition(partition)
 	node.DeleteCollection(collection)
+	node.Close()
 }

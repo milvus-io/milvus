@@ -1,7 +1,6 @@
 package reader
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"path"
@@ -274,12 +273,12 @@ func (node *QueryNode) InitFromMeta() error {
 	return nil
 }
 
-func (node *QueryNode) RunMetaService(ctx context.Context, wg *sync.WaitGroup) {
+func (node *QueryNode) RunMetaService(wg *sync.WaitGroup) {
 	//node.InitFromMeta()
 	metaChan := node.kvBase.WatchWithPrefix("")
 	for {
 		select {
-		case <-ctx.Done():
+		case <-node.ctx.Done():
 			wg.Done()
 			println("DONE!!!!!!")
 			return
