@@ -52,6 +52,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3811 c++ sdk segmentation fault
 -   \#3946 The result format is wrong returned by 'get collections'
 -   \#3962 The 'num' in return of search is incorrect when use http-api
+-   \#3976 Web_impl restful doc bugs
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
