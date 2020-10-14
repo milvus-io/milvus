@@ -1,4 +1,4 @@
-//package com;
+package com1;//package com;
 //
 //import io.milvus.client.*;
 //import org.apache.commons.lang3.RandomStringUtils;
