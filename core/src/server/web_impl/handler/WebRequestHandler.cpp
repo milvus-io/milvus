@@ -822,7 +822,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         nlohmann::json result_json;
-        result_json["num"] = result->row_num_;
+        result_json["nq"] = result->row_num_;
         if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
             result_str = result_json.dump();
