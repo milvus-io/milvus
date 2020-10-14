@@ -49,10 +49,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode);
 
     Status
-    CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
-                          knowhere::IndexPtr& index_ptr);
-
-    Status
     LoadForSearch(const query::QueryPtr& query_ptr);
 
     Status
