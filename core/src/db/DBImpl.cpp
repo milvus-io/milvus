@@ -164,7 +164,7 @@ DBImpl::Stop() {
 
 Status
 DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     auto ctx = context;
 
@@ -202,7 +202,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
 Status
 DBImpl::DropCollection(const std::string& collection_name) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
@@ -224,7 +224,7 @@ DBImpl::DropCollection(const std::string& collection_name) {
 
 Status
 DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -235,7 +235,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
 
 Status
 DBImpl::ListCollections(std::vector<std::string>& names) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     names.clear();
     return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
@@ -244,7 +244,7 @@ DBImpl::ListCollections(std::vector<std::string>& names) {
 Status
 DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
                           snapshot::FieldElementMappings& fields_schema) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -259,7 +259,7 @@ DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::Collecti
 
 Status
 DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     STATUS_CHECK(GetSnapshotInfo(collection_name, collection_stats));
     return Status::OK();
@@ -267,7 +267,7 @@ DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& col
 
 Status
 DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -278,7 +278,7 @@ DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
 
 Status
 DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -297,7 +297,7 @@ DBImpl::CreatePartition(const std::string& collection_name, const std::string& p
 
 Status
 DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -319,7 +319,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
 
 Status
 DBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(server::ValidatePartitionTags({partition_tag}));
@@ -339,7 +339,7 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
 
 Status
 DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -351,7 +351,7 @@ DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::stri
 Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
@@ -445,7 +445,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
 Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
@@ -464,7 +464,7 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
 Status
 DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Describe index for collection: " << collection_name << " field: " << field_name;
 
@@ -476,7 +476,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                idx_t op_id) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     if (data_chunk == nullptr) {
         return Status(DB_ERROR, "Null pointer");
@@ -605,7 +605,7 @@ Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                       const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                       DataChunkPtr& data_chunk) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -623,7 +623,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 
 Status
 DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -651,7 +651,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
 
 Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     TimeRecorder rc("DBImpl::Query");
 
@@ -720,7 +720,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
 Status
 DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -751,7 +751,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 Status
 DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                        const std::vector<std::string>& field_names, bool force) {
-    CHECK_AVAILABLE;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
