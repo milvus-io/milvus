@@ -23,7 +23,7 @@ class AdvancedConfigDto : public ODTO {
 
     DTO_FIELD(Int64, cpu_cache_capacity) = VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT;
     DTO_FIELD(Boolean, cache_insert_data) = VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT;
-    DTO_FIELD(Int64, use_blas_threshold) = 1100;
+    DTO_FIELD(Int64, use_blas_threshold) = 16385;
 
 #ifdef MILVUS_GPU_VERSION
     DTO_FIELD(Int64, gpu_search_threshold) = 1000;

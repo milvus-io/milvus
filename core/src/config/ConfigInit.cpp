@@ -170,11 +170,14 @@ InitConfig() {
                              &config.engine.search_combine_nq.value, 64)},
         {"engine.use_blas_threshold",
          CreateIntegerConfig("engine.use_blas_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.use_blas_threshold.value, 1100)},
+                             &config.engine.use_blas_threshold.value, 16385)},
         {"engine.omp_thread_num", CreateIntegerConfig("engine.omp_thread_num", 0, std::numeric_limits<int64_t>::max(),
                                                       &config.engine.omp_thread_num.value, 0)},
         {"engine.simd_type",
          CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
+
+        {"engine.stat_optimizer_enable",
+         CreateBoolConfig("engine.stat_optimizer_enable", &config.engine.stat_optimizer_enable.value, true)},
 
         {"system.lock.enable", CreateBoolConfig("system.lock.enable", &config.system.lock.enable.value, true)},
 
