@@ -1486,6 +1486,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     milvus::json result_json;
     result_json["data"] = data_json;
     AddStatusToJson(result_json, status.code(), status.message());
+    result_str = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1734,12 +1735,14 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             if (query_params.get("partition_tag")) {
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
+            nlohmann::json result_json;
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
-                json_out["data"]["entities"] = json::array();
+                result_json["data"]["entities"] = json::array();
             }
-            AddStatusToJson(json_out, status.code(), status.message());
-            response = json_out.dump().c_str();
+            result_json["data"] = json_out;
+            AddStatusToJson(result_json, status.code(), status.message());
+            response = result_json.dump().c_str();
             return status;
         }
 
