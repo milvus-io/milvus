@@ -24,9 +24,13 @@ enum OperatorType { LT = 0, LE = 1, GT = 3, GE = 4 };
 
 static std::map<std::string, OperatorType> s_map_operator_type = {
     {"LT", OperatorType::LT},
-    {"LE", OperatorType::LE},
+    {"LTE", OperatorType::LE},
     {"GT", OperatorType::GT},
-    {"GE", OperatorType::GE},
+    {"GTE", OperatorType::GE},
+    {"lt", OperatorType::LT},
+    {"lte", OperatorType::LE},
+    {"gt", OperatorType::GT},
+    {"gte", OperatorType::GE},
 };
 
 template <typename T>
