@@ -20,13 +20,13 @@
   - [`/collections/{collection_name}/partitions` (OPTIONS)](#collectionscollection_namepartitions-options)
   - [`/collections/{collection_name}/partitions` (DELETE)](#collectionscollection_namepartitions-delete)
   - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
-  - [`/collections/{collection_name}/entities` (PUT)](#collectionscollection_nameentities-put)
   - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
   - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
   - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities_id-get)
   - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
   - [`/system/{op}` (PUT)](#systemop-put)
+  - [`/status` (GET)](#status)
 - [Error Codes](#error-codes)
 
 <!-- /TOC -->
@@ -169,7 +169,7 @@ Creates a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -408,7 +408,7 @@ Updates the index type and nlist of a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -583,12 +583,17 @@ Creates a partition in a collection.
 
 #### Request
 
-| Request Component | Value                                       |
-| ----------------- | ------------------------------------------- |
-| Name              | `/collections/{collection_name}/partitions` |
-| Header            | `accept: application/json`                  |
-| Body              | N/A                                         |
-| Method            | POST                                        |
+<table>
+<tr><th>Request Component</th><th>Value</th></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/partitions</code></pre></td></tr>
+<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
+<tr><td>Body</td><td><pre><code>
+{
+    "partition_tag": "test"
+}
+</code></pre> </td></tr>
+<tr><td>Method</td><td>POST</td></tr>
+</table>
 
 #### Response
 
@@ -763,7 +768,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -822,7 +827,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]],\"params\":{\"nprobe\":16}}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "..."
 ```
 
 ##### Response
@@ -982,7 +987,7 @@ Delete entities
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1036,16 +1041,23 @@ Inserts entities to a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
     "partition_tag": "part",
-    "entities": {
-        "__id": [123456789,234567]
-        "field_1": 1
-        "field_vec": [[], []]
-    }
+    "entities": [
+        {
+           "__id": 1,
+           "field_1": 1,
+           "field_vec": []
+        },
+        {
+            "__id": 2,
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -1275,6 +1287,40 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 
 ```json
 { "code": 0, "message": "success" }
+```
+
+### `/status` (GET)
+
+Gets status of the Milvus server.
+
+#### Request
+
+| Request Component | Value                      |
+| ----------------- | -------------------------- |
+| Name              | `/status`                  |
+| Header            | `accept: application/json` |
+| Body              | N/A                        |
+| Method            | GET                        |
+
+#### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 200         | The request is successful.                                        |
+| 400         | The request is incorrect. Refer to the error message for details. |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X GET "http://127.0.0.1:19121/status" -H "accept: application/json"
+```
+
+##### Response
+
+```json
+{"code":0,"message":"OK"}
 ```
 
 ## Index and search parameters
