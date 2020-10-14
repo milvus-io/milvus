@@ -26,7 +26,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
@@ -98,8 +97,6 @@ DBImpl::Start() {
     if (ServiceAvailable()) {
         return Status::OK();
     }
-
-    knowhere::enable_faiss_logging();
 
     // LOG_ENGINE_TRACE_ << "DB service start";
     SetAvailable(true);
