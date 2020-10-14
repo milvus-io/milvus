@@ -47,20 +47,6 @@
 
 namespace milvus {
 namespace engine {
-namespace {
-template <typename T>
-knowhere::IndexPtr
-CreateSortedIndex(engine::BinaryDataPtr& raw_data) {
-    if (raw_data == nullptr) {
-        return nullptr;
-    }
-
-    auto count = raw_data->data_.size() / sizeof(T);
-    auto index_ptr =
-        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data->data_.data()));
-    return std::static_pointer_cast<knowhere::Index>(index_ptr);
-}
-}  // namespace
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -92,31 +78,6 @@ ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
 Status
 ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
     return Load(query_ptr->index_fields);
-}
-
-Status
-ExecutionEngineImpl::CreateStructuredIndex(const DataType field_type, engine::BinaryDataPtr& raw_data,
-                                           knowhere::IndexPtr& index_ptr) {
-    switch (field_type) {
-        case engine::DataType::INT32: {
-            index_ptr = CreateSortedIndex<int32_t>(raw_data);
-            break;
-        }
-        case engine::DataType::INT64: {
-            index_ptr = CreateSortedIndex<int64_t>(raw_data);
-            break;
-        }
-        case engine::DataType::FLOAT: {
-            index_ptr = CreateSortedIndex<float>(raw_data);
-            break;
-        }
-        case engine::DataType::DOUBLE: {
-            index_ptr = CreateSortedIndex<double>(raw_data);
-            break;
-        }
-        default: { return Status(DB_ERROR, "Field is not structured type"); }
-    }
-    return Status::OK();
 }
 
 Status
@@ -173,13 +134,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr));
             index_exist = (index_ptr != nullptr);
             if (!index_exist) {
-                // for structured field, create a simple sorted index for it
-                // we also can do this in BuildIndex step, but for now we do this in Load step
-                BinaryDataPtr raw_data;
-                segment_reader_->LoadField(name, raw_data);
-                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
-                segment_ptr->SetStructuredIndex(name, index_ptr);
-                index_exist = true;
+                LOG_ENGINE_ERROR_ << "Structure index doesn't exist";
             }
         }
 
