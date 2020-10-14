@@ -66,7 +66,7 @@ class SegmentReader {
     LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr);
 
     Status
-    LoadVectorIndice();
+    LoadIndice();
 
     Status
     LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
