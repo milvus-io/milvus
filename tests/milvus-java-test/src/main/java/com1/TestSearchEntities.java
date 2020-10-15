@@ -48,11 +48,13 @@ public class TestSearchEntities {
     }
 
     // # 3429
+    // TODO
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchCollection(MilvusClient client, String collectionName)  {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
+        System.out.println(client.getCollectionInfo(collectionName));
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(floatDsl);
         SearchResult res_search = client.search(searchParam);
         Assert.assertEquals(res_search.getResultIdsList().size(), Constants.nq);

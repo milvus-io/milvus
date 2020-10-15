@@ -19,23 +19,15 @@ public class TestCollectionCount {
     }
 
     // case-02
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCollectionCountCollectionNotExisted(MilvusClient client, String collectionName) {
-        try {
-            client.countEntities(collectionName+"_");
-        } catch (ServerSideMilvusException e) {
-            e.printStackTrace();
-        }
+        client.countEntities(collectionName+"_");
     }
 
     // case-03
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testCollectionCountWithoutConnect(MilvusClient client, String collectionName) {
-        try {
-            client.countEntities(collectionName);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.countEntities(collectionName);
     }
 
     // case-04

@@ -18,6 +18,7 @@ import java.util.Map;
 
 public class MainClass {
     private static String HOST = "127.0.0.1";
+//    private static String HOST = "192.168.1.238";
     private static int PORT = 19530;
     private int segmentRowCount = 5000;
     private static ConnectParam CONNECT_PARAM = new ConnectParam.Builder()

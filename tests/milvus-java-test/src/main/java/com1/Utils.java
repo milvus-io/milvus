@@ -140,7 +140,7 @@ public class Utils {
         tmpSearchParam.put("nprobe", nprobe);
         fieldParam.put("params", tmpSearchParam);
         JSONObject vectorParams = new JSONObject();
-        vectorParams.put(Constants.floatFieldName, fieldParam);
+        vectorParams.put(Constants.floatVectorFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
         return searchParam;
     }

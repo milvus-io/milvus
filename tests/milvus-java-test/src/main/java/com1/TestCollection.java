@@ -29,32 +29,24 @@ public class TestCollection {
     }
 
     // case-02
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testCreateCollectionDisconnect(MilvusClient client, String collectionName) {
         CollectionMapping cm = Utils.genCreateCollectionMapping(collectionName, true, false);
-        try {
-            client.createCollection(cm);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.createCollection(cm);
 
     }
 
     // case-03
-    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCreateCollectionRepeatably(MilvusClient client, String collectionName) {
         CollectionMapping cm = Utils.genCreateCollectionMapping(collectionName, true, false);
         client.createCollection(cm);
         Assert.assertEquals(client.hasCollection(collectionName), true);
-        try {
-            client.createCollection(cm);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.createCollection(cm);
     }
 
     // case-04
-    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCreateCollectionWrongParams(MilvusClient client, String collectionName) {
         Integer dim = 0;
         CollectionMapping cm = CollectionMapping.create(collectionName)
@@ -65,11 +57,7 @@ public class TestCollection {
                         .param("segment_row_limit", Constants.segmentRowLimit)
                         .param("auto_id", autoId)
                         .build());
-        try {
-            client.createCollection(cm);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.createCollection(cm);
     }
 
     // case-05
@@ -88,13 +76,9 @@ public class TestCollection {
     }
 
     // case-06
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testShowCollectionsWithoutConnect(MilvusClient client, String collectionName) {
-        try {
-            client.listCollections();
-        } catch (ClientSideMilvusException e) {
-            e.printStackTrace();
-        }
+        client.listCollections();
     }
 
     // case-07
@@ -108,25 +92,17 @@ public class TestCollection {
     }
 
     // case-08
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testDropCollectionNotExisted(MilvusClient client, String collectionName) {
-        try {
-            client.dropCollection(collectionName+"_");
-        } catch (ServerSideMilvusException e) {
-            e.printStackTrace();
-        }
+        client.dropCollection(collectionName+"_");
         List<String> collectionNames = client.listCollections();
         Assert.assertTrue(collectionNames.contains(collectionName));
     }
 
     // case-09
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testDropCollectionWithoutConnect(MilvusClient client, String collectionName) {
-        try {
-            client.dropCollection(collectionName);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.dropCollection(collectionName);
     }
 
     // case-10
@@ -150,13 +126,9 @@ public class TestCollection {
     }
 
     // case-11
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testDescribeCollectionWithoutConnect(MilvusClient client, String collectionName) {
-        try {
-            client.getCollectionInfo(collectionName);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.getCollectionInfo(collectionName);
     }
 
     // case-12
@@ -167,13 +139,9 @@ public class TestCollection {
     }
 
     // case-13
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testHasCollectionWithoutConnect(MilvusClient client, String collectionName) {
-        try {
-            client.hasCollection(collectionName);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.hasCollection(collectionName);
     }
 
     // case-14

@@ -57,14 +57,10 @@ public class TestCompact {
     }
 
     // case-03
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCompactNoCollection(MilvusClient client, String collectionName) {
         String name = "";
-        try {
-            client.compact(CompactParam.create(name));
-        } catch (ServerSideMilvusException e) {
-            e.printStackTrace();
-        }
+        client.compact(CompactParam.create(name));
     }
 
     // case-04
@@ -85,32 +81,30 @@ public class TestCompact {
         String statss = client.getCollectionStats(collectionName);
         JSONObject segments = (JSONObject)Utils.parseJsonArray(statss, "segments").get(0);
         System.out.println(segments);
-        client.deleteEntityByID(collectionName, ids);
-        Assert.assertEquals(client.countEntities(collectionName), 0);
+        client.deleteEntityByID(collectionName, ids.subList(0, nb / 4));
         client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), nb - (nb / 4));
+        // before compact
         String stats = client.getCollectionStats(collectionName);
+        System.out.println(stats);
         JSONObject segmentsBefore = (JSONObject)Utils.parseJsonArray(stats, "segments").get(0);
         client.compact(CompactParam.create(collectionName).setThreshold(0.5));
+        // after compact
         String statsAfter = client.getCollectionStats(collectionName);
+        System.out.println(statsAfter);
         JSONObject segmentsAfter = (JSONObject)Utils.parseJsonArray(statsAfter, "segments").get(0);
-        Assert.assertEquals(segmentsBefore.get("data_size"), segmentsAfter.get("data_size"));
+        Assert.assertEquals(segmentsAfter.get("data_size"), segmentsBefore.get("data_size"));
     }
-//
-//    // case-06
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void testCompactInvalidThreshold(MilvusClient client, String collectionName) {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-//        InsertResponse res = client.insert(insertParam);
-//        assert(res.getResponse().ok());
-//        client.flush(collectionName);
-//        Response deleteRes = client.deleteEntityByID(collectionName, res.getEntityIds());
-//        assert(deleteRes.ok());
-//        client.flush(collectionName);
-//        CompactParam compactParam = new CompactParam.Builder(collectionName).withThreshold(-1.0).build();
-//        Response resCompact = client.compact(compactParam);
-//        Assert.assertFalse(resCompact.ok());
-//    }
-//
+
+    // case-06
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    public void testCompactInvalidThreshold(MilvusClient client, String collectionName) {
+        List<Long> ids = initData(client, collectionName);
+        client.deleteEntityByID(collectionName, ids);
+        client.flush(collectionName);
+        client.compact(CompactParam.create(collectionName).setThreshold(-1.0));
+    }
+
 //    // case-07, test CompactAsync callback
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void testCompactAsyncAfterDelete(MilvusClient client, String collectionName) {

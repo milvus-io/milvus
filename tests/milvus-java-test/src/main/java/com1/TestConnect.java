@@ -1,5 +1,7 @@
 package com1;
 
+import io.milvus.client.exception.ClientSideMilvusException;
+import io.milvus.client.exception.ServerSideMilvusException;
 import org.testcontainers.containers.GenericContainer;
 import com1.MainClass;
 import io.milvus.client.*;
@@ -31,18 +33,14 @@ public class TestConnect {
     }
 
     // TODO timeout
-    @Test(dataProvider="InvalidConnectArgs")
+    @Test(dataProvider="InvalidConnectArgs", expectedExceptions = {ClientSideMilvusException.class, IllegalArgumentException.class})
     public void testConnectInvalidConnectArgs(String ip, int port) {
-        try {
-            ConnectParam connectParam = new ConnectParam.Builder()
-                    .withHost(ip)
-                    .withPort(port)
-                    .withKeepAliveTimeout(1, TimeUnit.MILLISECONDS)
-                    .build();
-            MilvusClient client = new MilvusGrpcClient(connectParam).withLogging();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        ConnectParam connectParam = new ConnectParam.Builder()
+                .withHost(ip)
+                .withPort(port)
+                .withKeepAliveTimeout(1, TimeUnit.MILLISECONDS)
+                .build();
+        MilvusClient client = new MilvusGrpcClient(connectParam).withLogging();
     }
 
     @DataProvider(name="InvalidConnectArgs")
@@ -59,17 +57,14 @@ public class TestConnect {
         };
     }
 
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
     public void testDisconnect(MilvusClient client, String collectionName){
         client.close();
     }
 
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    // TODO
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testDisconnectRepeatably(MilvusClient client, String collectionName){
-        try {
-            client.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        client.close();
     }
 }
