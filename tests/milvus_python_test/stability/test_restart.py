@@ -6,7 +6,6 @@ import logging
 import json
 from multiprocessing import Pool, Process
 import pytest
-from milvus import IndexType, MetricType
 from utils import *
 
 
