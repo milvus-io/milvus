@@ -37,8 +37,6 @@ HasCollectionReq::OnExecute() {
 
         STATUS_CHECK(ValidateCollectionName(collection_name_));
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist_));
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

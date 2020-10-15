@@ -21,6 +21,7 @@
 #include "scheduler/selector/Optimizer.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
+#include "utils/TimeRecorder.h"
 
 namespace milvus {
 namespace scheduler {
@@ -73,14 +74,18 @@ JobMgr::worker_function() {
         //            search_job->GetResultDistances().resize(search_job->nq(), std::numeric_limits<float>::max());
         //        }
 
+        TimeRecorder rc("JobMgr");
         auto tasks = build_task(job);
+        rc.RecordSection("build_tasks");
         for (auto& task : tasks) {
             OptimizerInst::GetInstance()->Run(task);
         }
+        rc.RecordSection("optimize");
 
         for (auto& task : tasks) {
             calculate_path(res_mgr_, task);
         }
+        rc.RecordSection("calculate path");
 
         // disk resources NEVER be empty.
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {

@@ -31,7 +31,7 @@ Status
 DropCollectionReq::OnExecute() {
     try {
         std::string hdr = "DropCollectionReq(collection=" + collection_name_ + ")";
-        TimeRecorder rc(hdr);
+        TimeRecorderAuto rc(hdr);
 
         STATUS_CHECK(ValidateCollectionName(collection_name_));
 
@@ -42,8 +42,6 @@ DropCollectionReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->DropCollection(collection_name_));
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
