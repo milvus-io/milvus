@@ -253,7 +253,7 @@ class TestCompactBase:
         # get collection info after compact
         info_after = connect.get_collection_stats(collection)
         logging.getLogger().info(info_after["partitions"])
-        assert info["partitions"][1]["segments"][0]["data_size"] > info_after["partitions"][1]["segments"][0]["data_size"]
+        assert info["partitions"][1]["segments"][0]["data_size"] >= info_after["partitions"][1]["segments"][0]["data_size"]
 
     @pytest.fixture(
         scope="function",

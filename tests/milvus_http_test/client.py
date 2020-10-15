@@ -12,7 +12,7 @@ url_system = "system/"
 
 class Request(object):
     def __init__(self, url):
-        logging.getLogger().error(url)
+        # logging.getLogger().error(url)
         self._url = url
 
     def _check_status(self, result):
