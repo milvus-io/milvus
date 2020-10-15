@@ -15,7 +15,6 @@ public class TestCollection {
     String intFieldName = Constants.intFieldName;
     String floatFieldName = Constants.floatFieldName;
     String floatVectorFieldName = Constants.floatVectorFieldName;
-    String binaryVectorFieldName = Constants.binaryVectorFieldName;
     Boolean autoId = true;
 
     // case-01
