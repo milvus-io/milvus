@@ -39,7 +39,7 @@ HasPartitionReq::Create(const ContextPtr& context, const std::string& collection
 Status
 HasPartitionReq::OnExecute() {
     try {
-        std::string hdr = "HasPartitionReq(collection=" + collection_name_ + " tag=" + partition_tag_ + ")";
+        std::string hdr = "HasPartitionReq(collection=" + collection_name_ + " partition=" + partition_tag_ + ")";
         TimeRecorderAuto rc(hdr);
 
         has_partition_ = false;
@@ -54,7 +54,6 @@ HasPartitionReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_partition_));
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
