@@ -1,0 +1,60 @@
+version: '3.5'
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:latest
+    command: etcd -listen-peer-urls=http://127.0.0.1:12380 -advertise-client-urls=http://127.0.0.1:12379 -listen-client-urls http://0.0.0.0:12379,http://0.0.0.0:14001 -initial-advertise-peer-urls=http://127.0.0.1:12380 --initial-cluster default=http://127.0.0.1:12380
+    ports:
+      - "12379:12379"
+      - "12380:12380"
+      - "14001:14001"
+
+  pulsar:
+    image: apachepulsar/pulsar:latest
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"
+      - "18080:8080"
+
+  pd0:
+    image: pingcap/pd:latest
+    network_mode: "host"
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - /tmp/config/pd.toml:/pd.toml:ro
+      - /tmp/data:/data
+      - /tmp/logs:/logs
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - --name=pd0
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://127.0.0.1:2379
+      - --advertise-peer-urls=http://127.0.0.1:2380
+      - --initial-cluster=pd0=http://127.0.0.1:2380
+      - --data-dir=/data/pd0
+      - --log-file=/logs/pd0.log
+    restart: on-failure
+
+  tikv0:
+    network_mode: "host"
+    image: pingcap/tikv:latest
+    ports:
+      - "20160:20160"
+    volumes:
+      - /tmp/config/tikv.toml:/tikv.toml:ro
+      - /tmp/data:/data
+      - /tmp/logs:/logs
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=127.0.0.1:20160
+      - --data-dir=/data/tikv0
+      - --pd=127.0.0.1:2379
+      - --log-file=/logs/tikv0.log
+    depends_on:
+      - "pd0"
+    restart: on-failure
+
