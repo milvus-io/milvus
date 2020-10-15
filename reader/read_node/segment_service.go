@@ -19,10 +19,11 @@ func (node *QueryNode) SegmentsManagement() {
 		for _, partition := range collection.Partitions {
 			for _, segment := range partition.Segments {
 				if segment.SegmentStatus != SegmentOpened {
+					log.Println("Segment have been closed")
 					continue
 				}
 
-				// fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
+				fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
 				if timeNow >= segment.SegmentCloseTime {
 					go segment.CloseSegment(collection)
 				}
@@ -35,13 +36,8 @@ func (node *QueryNode) SegmentManagementService() {
 	sleepMillisecondTime := 1000
 	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		select {
-		case <-node.ctx.Done():
-			return
-		default:
-			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-			node.SegmentsManagement()
-		}
+		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+		node.SegmentsManagement()
 	}
 }
 
@@ -96,12 +92,7 @@ func (node *QueryNode) SegmentStatisticService() {
 	sleepMillisecondTime := 1000
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
-		select {
-		case <-node.ctx.Done():
-			return
-		default:
-			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-			node.SegmentStatistic(sleepMillisecondTime)
-		}
+		time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+		node.SegmentStatistic(sleepMillisecondTime)
 	}
 }

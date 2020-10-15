@@ -1,11 +1,6 @@
 package main
 
-import (
-	"flag"
-        "fmt"
-        "github.com/czs007/suvlim/conf"
-	"github.com/czs007/suvlim/pkg/master"
-)
+import "github.com/czs007/suvlim/pkg/master"
 
 // func main() {
 //	ctx, cancel := context.WithCancel(context.Background())
@@ -25,13 +20,6 @@ func init() {
 	//	go mock.FakePulsarProducer()
 }
 func main() {
-        var yamlFile string
-        flag.StringVar(&yamlFile, "yaml", "", "yaml file")
-        flag.Parse()
-        // flag.Usage()
-        fmt.Println("yaml file: ", yamlFile)
-        conf.LoadConfig(yamlFile)
-
 	master.Run()
 	//master.SegmentStatsController()
 	//master.CollectionController()

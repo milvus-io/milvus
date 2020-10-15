@@ -2,14 +2,13 @@ package message_client
 
 import (
 	"context"
-	"log"
-	"strconv"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/czs007/suvlim/conf"
 	msgpb "github.com/czs007/suvlim/pkg/master/grpc/message"
 	timesync "github.com/czs007/suvlim/timesync"
 	"github.com/golang/protobuf/proto"
+	"log"
+	"strconv"
 )
 
 type MessageClient struct {
@@ -20,8 +19,8 @@ type MessageClient struct {
 	searchByIdChan chan *msgpb.EntityIdentity
 
 	// pulsar
-	client             pulsar.Client
-	key2segProducer    pulsar.Producer
+	client          pulsar.Client
+	key2segProducer pulsar.Producer
 	searchByIdConsumer pulsar.Consumer
 
 	// batch messages
@@ -65,6 +64,7 @@ func (mc *MessageClient) receiveSearchByIdMsg() {
 	}
 }
 
+
 func (mc *MessageClient) ReceiveMessage() {
 	err := mc.timeSyncCfg.Start()
 	if err != nil {
@@ -87,7 +87,7 @@ func (mc *MessageClient) creatProducer(topicName string) pulsar.Producer {
 func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 	consumer, err := mc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:            topicName,
-		SubscriptionName: "writer" + strconv.Itoa(mc.MessageClientID),
+		SubscriptionName: "writer",
 	})
 
 	if err != nil {
@@ -97,20 +97,7 @@ func (mc *MessageClient) createConsumer(topicName string) pulsar.Consumer {
 }
 
 func (mc *MessageClient) createClient(url string) pulsar.Client {
-	if conf.Config.Pulsar.Authentication {
-		// create client with Authentication
-		client, err := pulsar.NewClient(pulsar.ClientOptions{
-			URL:            url,
-			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
-		})
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		return client
-	}
-
-	// create client without Authentication
+	// create client
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL: url,
 	})
@@ -126,23 +113,11 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.client = mc.createClient(url)
 	mc.MessageClientID = conf.Config.Writer.ClientId
 
-	key2SegTopicName := "Key2Seg"
-	searchByIdTopicName := "SearchById"
-	timeSyncTopicName := "TimeSync"
-	insertOrDeleteTopicName := "InsertOrDelete-"
-
-	if conf.Config.Pulsar.Authentication {
-		key2SegTopicName = "Key2Seg-" + conf.Config.Pulsar.User
-		searchByIdTopicName = "Search-" + conf.Config.Pulsar.User
-		// timeSyncTopicName = "TimeSync-" + conf.Config.Pulsar.User
-		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
-	}
-
 	//create producer
-	mc.key2segProducer = mc.creatProducer(key2SegTopicName)
+	mc.key2segProducer = mc.creatProducer("Key2Seg")
 
 	//create consumer
-	mc.searchByIdConsumer = mc.createConsumer(searchByIdTopicName)
+	mc.searchByIdConsumer = mc.createConsumer("SearchById")
 
 	//init channel
 	mc.searchByIdChan = make(chan *msgpb.EntityIdentity, conf.Config.Writer.SearchByIdChanSize)
@@ -152,19 +127,18 @@ func (mc *MessageClient) InitClient(url string) {
 	mc.DeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 
 	//init timesync
-	timeSyncTopic := timeSyncTopicName
+	timeSyncTopic := "TimeSync"
 	timeSyncSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	readTopics := make([]string, 0)
 	for i := conf.Config.Writer.TopicStart; i < conf.Config.Writer.TopicEnd; i++ {
-		str := insertOrDeleteTopicName
+		str := "ManipulationReqMsg-"
 		str = str + strconv.Itoa(i)
 		readTopics = append(readTopics, str)
 	}
 	readSubName := "writer" + strconv.Itoa(mc.MessageClientID)
 	proxyIdList := conf.Config.Master.ProxyIdList
 	readerQueueSize := timesync.WithReaderQueueSize(conf.Config.Reader.ReaderQueueSize)
-	timeSync, err := timesync.NewReaderTimeSync(context.Background(),
-		timeSyncTopic,
+	timeSync, err := timesync.NewReaderTimeSync(timeSyncTopic,
 		timeSyncSubName,
 		readTopics,
 		readSubName,
@@ -175,7 +149,6 @@ func (mc *MessageClient) InitClient(url string) {
 		log.Fatal(err)
 	}
 	mc.timeSyncCfg = timeSync.(*timesync.ReaderTimeSyncCfg)
-	mc.timeSyncCfg.RoleType = timesync.Writer
 
 	mc.timestampBatchStart = 0
 	mc.timestampBatchEnd = 0

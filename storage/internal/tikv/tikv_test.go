@@ -7,7 +7,6 @@ import (
 	. "github.com/czs007/suvlim/storage/internal/tikv/codec"
 	. "github.com/czs007/suvlim/storage/pkg/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"math"
 	"os"
 	"sort"
@@ -33,7 +32,7 @@ func TestTikvEngine_Prefix(t *testing.T) {
 	// Put some key with same prefix
 	key := prefix
 	err := engine.Put(ctx, key, value)
-	require.Nil(t, err)
+	assert.Nil(t, err)
 	key = EncodeKey(prefix, 0, "")
 	err = engine.Put(ctx, key, value)
 	assert.Nil(t, err)
@@ -122,7 +121,7 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	size := 0
 	var testKeys []Key
 	var testValues []Value
-	var segments []string
+	var segment = "test"
 	var timestamps []Timestamp
 	for i := 0; size/store.engine.conf.Raw.MaxBatchPutSize < 1; i++ {
 		key := fmt.Sprint("key", i)
@@ -131,7 +130,6 @@ func TestTikvStore_BatchRow(t *testing.T) {
 		value := fmt.Sprint("value", i)
 		size += len(value)
 		testValues = append(testValues, []byte(value))
-		segments = append(segments, "test")
 		v, err := store.GetRow(ctx, Key(key), math.MaxUint64)
 		assert.Nil(t, v)
 		assert.Nil(t, err)
@@ -141,7 +139,7 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	for range testKeys {
 		timestamps = append(timestamps, 1)
 	}
-	err := store.PutRows(ctx, testKeys, testValues, segments, timestamps)
+	err := store.PutRows(ctx, testKeys, testValues, segment, timestamps)
 	assert.Nil(t, err)
 
 	// Batch get rows
@@ -157,10 +155,7 @@ func TestTikvStore_BatchRow(t *testing.T) {
 	}
 
 	// Delete all test rows
-	for i, _ := range timestamps {
-		timestamps[i] = math.MaxUint64
-	}
-	err = store.DeleteRows(ctx, testKeys, timestamps)
+	err = store.DeleteRows(ctx, testKeys, math.MaxUint64)
 	assert.Nil(t, err)
 	// Ensure all test row is deleted
 	for i, _ := range timestamps {

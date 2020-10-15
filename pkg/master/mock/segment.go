@@ -3,8 +3,10 @@ package mock
 import (
 	"bytes"
 	"encoding/gob"
-	masterpb "github.com/czs007/suvlim/pkg/master/grpc/master"
 	"github.com/golang/protobuf/proto"
+	"time"
+
+	masterpb "github.com/czs007/suvlim/pkg/master/grpc/master"
 )
 
 type SegmentStats struct {
@@ -57,7 +59,7 @@ type Segment struct {
 	Rows           int64                  `json:"rows"`
 }
 
-func NewSegment(id uint64, collectioID uint64, cName string, ptag string, chStart int, chEnd int, openTime uint64, closeTime uint64) Segment {
+func NewSegment(id uint64, collectioID uint64, cName string, ptag string, chStart int, chEnd int, openTime time.Time, closeTime time.Time) Segment {
 	return Segment{
 		SegmentID:      id,
 		CollectionID:   collectioID,
@@ -65,8 +67,8 @@ func NewSegment(id uint64, collectioID uint64, cName string, ptag string, chStar
 		PartitionTag:   ptag,
 		ChannelStart:   chStart,
 		ChannelEnd:     chEnd,
-		OpenTimeStamp:  openTime,
-		CloseTimeStamp: closeTime,
+		OpenTimeStamp:  uint64(openTime.Unix()),
+		CloseTimeStamp: uint64(closeTime.Unix()),
 	}
 }
 func Segment2JSON(s Segment) (string, error) {
