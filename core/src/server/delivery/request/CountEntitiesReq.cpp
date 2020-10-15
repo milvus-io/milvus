@@ -46,8 +46,6 @@ CountEntitiesReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->CountEntities(collection_name_, row_count_));
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

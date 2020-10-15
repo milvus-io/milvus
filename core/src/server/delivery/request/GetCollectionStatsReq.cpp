@@ -54,7 +54,6 @@ GetCollectionStatsReq::OnExecute() {
         milvus::json json_stats;
         STATUS_CHECK(DBWrapper::DB()->GetCollectionStats(collection_name_, json_stats));
         collection_stats_ = json_stats.dump();
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

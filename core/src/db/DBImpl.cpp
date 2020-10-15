@@ -349,7 +349,7 @@ Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_AVAILABLE
-
+    SetThreadName("create_index");
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
     // step 1: wait merge file thread finished to avoid duplicate data bug
@@ -586,7 +586,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
         std::set<int64_t> collection_ids;
         if (mem_mgr_->RequireFlush(collection_ids)) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
     }
@@ -625,7 +625,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     if (!status.ok()) {
-        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
+        LOG_ENGINE_DEBUG_ << "Failed to get snapshot: " << status.message();
         return status;
     }
 
@@ -637,8 +637,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     std::set<int64_t> collection_ids;
     if (mem_mgr_->RequireFlush(collection_ids)) {
         if (collection_ids.find(ss->GetCollectionId()) != collection_ids.end()) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "delete", 0)
-                              << "Delete count in buffer exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Delete count in buffer exceeds limit. Force flush";
             InternalFlush(collection_name);
         }
     }
@@ -649,8 +648,8 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
 Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
     CHECK_AVAILABLE
-
-    TimeRecorder rc("DBImpl::Query");
+    SetThreadName("query");
+    TimeRecorderAuto rc("DBImpl::Query");
 
     if (!query_ptr->root) {
         return Status{DB_ERROR, "BinaryQuery is null"};
@@ -662,7 +661,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     SnapshotVisitor ss_visitor(ss);
     snapshot::IDS_TYPE segment_ids;
     STATUS_CHECK(ss_visitor.SegmentsToSearch(query_ptr->partitions, segment_ids));
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_ids.size());
+    rc.RecordSection("segments to search: " + std::to_string(segment_ids.size()));
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
@@ -685,12 +684,14 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     if (job->query_result()) {
         result = job->query_result();
     }
+    rc.RecordSection("execute query");
 
     // step 4: get entities by result ids
     std::vector<bool> valid_row;
     if (!query_ptr->field_names.empty()) {
         STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
                                    result->data_chunk_));
+        rc.RecordSection("get entities");
     }
 
     // step 5: filter entities by field names
@@ -707,8 +708,6 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     //        }
     //        filter_attrs.emplace_back(attrs_data);
     //    }
-
-    rc.ElapseFromBegin("Engine query totally cost");
 
     // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
@@ -885,7 +884,7 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
         snapshot::ScopedSnapshotT ss;
         status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
         if (!status.ok()) {
-            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+            LOG_WAL_ERROR_ << "Failed to get snapshot: " << status.message();
             return;
         }
 

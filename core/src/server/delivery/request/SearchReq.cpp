@@ -50,8 +50,9 @@ Status
 SearchReq::OnExecute() {
     try {
         fiu_do_on("SearchReq.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
-        TimeRecorder rc(hdr);
+        std::string hdr = "SearchReq(collection=" + query_ptr_->collection_id + ")";
+        LOG_SERVER_DEBUG_ << hdr << " begin";
+        TimeRecorderAuto rc(hdr);
 
         STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
         STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
@@ -161,7 +162,6 @@ SearchReq::OnExecute() {
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
