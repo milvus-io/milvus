@@ -349,7 +349,7 @@ Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
     CHECK_AVAILABLE
-
+    SetThreadName("create_index");
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
     // step 1: wait merge file thread finished to avoid duplicate data bug
@@ -586,7 +586,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
         std::set<int64_t> collection_ids;
         if (mem_mgr_->RequireFlush(collection_ids)) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
     }
@@ -625,7 +625,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     if (!status.ok()) {
-        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
+        LOG_ENGINE_DEBUG_ << "Failed to get snapshot: " << status.message();
         return status;
     }
 
@@ -637,8 +637,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     std::set<int64_t> collection_ids;
     if (mem_mgr_->RequireFlush(collection_ids)) {
         if (collection_ids.find(ss->GetCollectionId()) != collection_ids.end()) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "delete", 0)
-                              << "Delete count in buffer exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Delete count in buffer exceeds limit. Force flush";
             InternalFlush(collection_name);
         }
     }
@@ -649,7 +648,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
 Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
     CHECK_AVAILABLE
-
+    SetThreadName("query");
     TimeRecorderAuto rc("DBImpl::Query");
 
     if (!query_ptr->root) {
@@ -885,7 +884,7 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
         snapshot::ScopedSnapshotT ss;
         status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
         if (!status.ok()) {
-            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+            LOG_WAL_ERROR_ << "Failed to get snapshot: " << status.message();
             return;
         }
 

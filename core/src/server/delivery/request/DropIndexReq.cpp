@@ -41,7 +41,7 @@ Status
 DropIndexReq::OnExecute() {
     try {
         fiu_do_on("DropIndexReq.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "DropIndexReq(collection=" + collection_name_ + ")";
+        std::string hdr = "DropIndexReq(collection=" + collection_name_ + " filed=" + field_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         bool exist = false;
@@ -56,7 +56,6 @@ DropIndexReq::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
