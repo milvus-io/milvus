@@ -40,7 +40,7 @@ CreatePartitionReq::Create(const ContextPtr& context, const std::string& collect
 Status
 CreatePartitionReq::OnExecute() {
     try {
-        std::string hdr = "CreatePartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+        std::string hdr = "CreatePartitionReq(collection=" + collection_name_ + ", partition=" + tag_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -77,7 +77,6 @@ CreatePartitionReq::OnExecute() {
         fiu_do_on("CreatePartitionReq.OnExecute.create_partition_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
-        rc.ElapseFromBegin("done");
         return status;
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
