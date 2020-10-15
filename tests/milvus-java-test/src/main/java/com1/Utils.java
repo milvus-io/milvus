@@ -3,6 +3,7 @@ package com1;
 import com.alibaba.fastjson.JSONArray;
 import io.milvus.client.*;
 import com.alibaba.fastjson.JSONObject;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 
 import java.nio.ByteBuffer;
@@ -12,11 +13,6 @@ import com1.Constants;
 import org.testng.Assert;
 
 public class Utils {
-
-    String intFieldName = Constants.intFieldName;
-    String floatFieldName = Constants.floatFieldName;
-    String floatVectorFieldName = Constants.floatVectorFieldName;
-    String binaryVectorFieldName = Constants.binaryVectorFieldName;
 
     public static List<Float> normalize(List<Float> w2v){
         float squareSum = w2v.stream().map(x -> x * x).reduce((float) 0, Float::sum);
@@ -39,7 +35,7 @@ public class Utils {
             for (int j = 0; j < dimension; ++j) {
                 vector.add(random.nextFloat());
             }
-            if (norm == true) {
+            if (norm) {
                 vector = normalize(vector);
             }
             vectors.add(vector);
@@ -49,7 +45,7 @@ public class Utils {
 
     static List<ByteBuffer> genBinaryVectors(int vectorCount, int dimension) {
         Random random = new Random();
-        List<ByteBuffer> vectors = new ArrayList(vectorCount);
+        List<ByteBuffer> vectors = new ArrayList<>(vectorCount);
         final int dimensionInByte = dimension / 8;
         for (int i = 0; i < vectorCount; ++i) {
             ByteBuffer byteBuffer = ByteBuffer.allocate(dimensionInByte);
@@ -151,9 +147,12 @@ public class Utils {
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
         fieldParam.put("metric_type", metricType);
-        List<String> vectorsToSearch = queryVectors
-                .stream().map(byteBuffer -> Arrays.toString(byteBuffer.array()))
-                .collect(Collectors.toList());
+        List<List<Byte>> vectorsToSearch = new ArrayList<>();
+        for (ByteBuffer byteBuffer : queryVectors) {
+            byte[] b = new byte[byteBuffer.remaining()];
+            byteBuffer.get(b);
+            vectorsToSearch.add(Arrays.asList(ArrayUtils.toObject(b)));
+        }
         fieldParam.put("query", vectorsToSearch);
         fieldParam.put("type", Constants.binaryVectorType);
         JSONObject tmpSearchParam = new JSONObject();
@@ -184,6 +183,7 @@ public class Utils {
         tmp.add(searchParam);
         mustParam.put("must", tmp);
         boolParam.put("bool", mustParam);
+        System.out.println(JSONObject.toJSONString(boolParam));
         return JSONObject.toJSONString(boolParam);
     }
 
@@ -249,12 +249,17 @@ public class Utils {
     }
 
     public static InsertParam genBinaryInsertParam(String collectionName) {
-        Map<String, List> binaryEntities = Constants.defaultBinaryEntities;
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
         InsertParam insertParam = InsertParam
                 .create(collectionName)
-                .addField(Constants.intFieldName, DataType.INT64, binaryEntities.get(Constants.intFieldName))
-                .addField(Constants.floatFieldName, DataType.FLOAT, binaryEntities.get(Constants.floatFieldName))
-                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, binaryEntities.get(Constants.binaryVectorFieldName));
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, Constants.vectorsBinary);
         return insertParam;
     }
 
