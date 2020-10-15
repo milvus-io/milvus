@@ -1,6 +1,7 @@
 package com1;
 
 import io.milvus.client.*;
+import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -18,37 +19,29 @@ public class TestGetEntityByID {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
-        Map<Long, Map<String, Object>> entities = client.getEntityByID(collectionName, ids.subList(0, get_length));
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
         for (int i = 0; i < get_length; i++) {
-            Map<String,Object> fieldsMap = entities.get(ids.get(i));
+            Map<String,Object> fieldsMap = resEntities.get(ids.get(i));
             assert (fieldsMap.get("float_vector").equals(Constants.vectors.get(i)));
         }
     }
 
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void testGetEntityByIdAfterDelete(MilvusClient client, String collectionName) {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-//        InsertResponse resInsert = client.insert(insertParam);
-//        List<Long> ids = resInsert.getEntityIds();
-//        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(1)));
-//        assert(res_delete.ok());
-//        client.flush(collectionName);
-//        List<Long> getIds = ids.subList(0,2);
-//        GetEntityByIDResponse res = client.getEntityByID(collectionName, getIds);
-//        assert (res.getResponse().ok());
-//        List<Map<String, Object>> fieldsMap = res.getFieldsMap();
-//        Assert.assertEquals(fieldsMap.size(), getIds.size());
-//        Assert.assertEquals(fieldsMap.get(0).get("float_vector"), Constants.vectors.get(0));
-//        Assert.assertEquals(res.getFieldsMap().get(1).size(), 0);
-//        Assert.assertEquals(res.getFieldsMap().get(1), new HashMap<>());
-//    }
-//
-//    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
-//    public void testGetEntityByIdCollectionNameNotExisted(MilvusClient client, String collectionName) {
-//        String newCollection = "not_existed";
-//        GetEntityByIDResponse res = client.getEntityByID(newCollection, get_ids);
-//        assert(!res.getResponse().ok());
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testGetEntityByIdAfterDelete(MilvusClient client, String collectionName) {
+        List<Long> ids = Utils.initData(client, collectionName);
+        client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(1)));
+        client.flush(collectionName);
+        List<Long> getIds = ids.subList(0,2);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, getIds);
+        Assert.assertEquals(resEntities.size(), getIds.size()-1);
+        Assert.assertEquals(resEntities.get(getIds.get(0)).get(Constants.floatVectorFieldName), Constants.vectors.get(0));
+    }
+
+    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    public void testGetEntityByIdCollectionNameNotExisted(MilvusClient client, String collectionName) {
+        String newCollection = "not_existed";
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(newCollection, get_ids);
+    }
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void testGetVectorIdNotExisted(MilvusClient client, String collectionName) {
@@ -59,7 +52,7 @@ public class TestGetEntityByID {
 //        Assert.assertEquals(res.getFieldsMap().size(), get_ids.size());
 //        Assert.assertEquals(res.getFieldsMap().get(0), new HashMap<>());
 //    }
-//
+
 //    // Binary tests
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
 //    public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {

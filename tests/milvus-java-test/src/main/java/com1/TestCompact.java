@@ -15,25 +15,10 @@ import com.google.common.util.concurrent.MoreExecutors;
 public class TestCompact {
     int nb = Constants.nb;
 
-    private List<Long> initData(MilvusClient client, String collectionName) {
-        InsertParam insertParam = Utils.genInsertParam(collectionName);
-        List<Long> ids = client.insert(insertParam);
-        System.out.println(ids.get(0));
-        client.flush(collectionName);
-        return ids;
-    }
-
-    private List<Long> initBinaryData(MilvusClient client, String collectionName) {
-        InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
-        List<Long> ids = client.insert(insertParam);
-        client.flush(collectionName);
-        return ids;
-    }
-
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCompactAfterDelete(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
+        List<Long> ids = Utils.initData(client, collectionName);
         client.deleteEntityByID(collectionName, ids);
         client.flush(collectionName);
         client.compact(CompactParam.create(collectionName));
@@ -46,7 +31,7 @@ public class TestCompact {
     // case-02
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testCompactAfterDeleteBinary(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
         client.deleteEntityByID(collectionName, ids);
         client.flush(collectionName);
         client.compact(CompactParam.create(collectionName));
@@ -77,21 +62,27 @@ public class TestCompact {
     // TODO delete not correct
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCompactThresholdLessThanDeleted(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
-        String statss = client.getCollectionStats(collectionName);
-        JSONObject segments = (JSONObject)Utils.parseJsonArray(statss, "segments").get(0);
-        System.out.println(segments);
-        client.deleteEntityByID(collectionName, ids.subList(0, nb / 4));
-        client.flush(collectionName);
-        Assert.assertEquals(client.countEntities(collectionName), nb - (nb / 4));
+        int segmentRowLimit = nb+1000;
+        String collectionNameNew = collectionName+"_";
+        CollectionMapping cm = CollectionMapping.create(collectionNameNew)
+                .addField(Constants.intFieldName, DataType.INT64)
+                .addField(Constants.floatFieldName, DataType.FLOAT)
+                .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, Constants.dimension)
+                .setParamsInJson(new JsonBuilder()
+                        .param("segment_row_limit", segmentRowLimit)
+                        .param("auto_id", true)
+                        .build());
+        client.createCollection(cm);
+        List<Long> ids = Utils.initData(client, collectionNameNew);
+        client.deleteEntityByID(collectionNameNew, ids.subList(0, nb / 4));
+        client.flush(collectionNameNew);
+        Assert.assertEquals(client.countEntities(collectionNameNew), nb - (nb / 4));
         // before compact
-        String stats = client.getCollectionStats(collectionName);
-        System.out.println(stats);
+        String stats = client.getCollectionStats(collectionNameNew);
         JSONObject segmentsBefore = (JSONObject)Utils.parseJsonArray(stats, "segments").get(0);
-        client.compact(CompactParam.create(collectionName).setThreshold(0.5));
+        client.compact(CompactParam.create(collectionNameNew).setThreshold(0.9));
         // after compact
-        String statsAfter = client.getCollectionStats(collectionName);
-        System.out.println(statsAfter);
+        String statsAfter = client.getCollectionStats(collectionNameNew);
         JSONObject segmentsAfter = (JSONObject)Utils.parseJsonArray(statsAfter, "segments").get(0);
         Assert.assertEquals(segmentsAfter.get("data_size"), segmentsBefore.get("data_size"));
     }
@@ -99,7 +90,7 @@ public class TestCompact {
     // case-06
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCompactInvalidThreshold(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
+        List<Long> ids = Utils.initData(client, collectionName);
         client.deleteEntityByID(collectionName, ids);
         client.flush(collectionName);
         client.compact(CompactParam.create(collectionName).setThreshold(-1.0));

@@ -9,6 +9,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 import com1.Constants;
+import org.testng.Assert;
 
 public class Utils {
 
@@ -150,7 +151,10 @@ public class Utils {
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
         fieldParam.put("metric_type", metricType);
-        fieldParam.put("query", queryVectors);
+        List<String> vectorsToSearch = queryVectors
+                .stream().map(byteBuffer -> Arrays.toString(byteBuffer.array()))
+                .collect(Collectors.toList());
+        fieldParam.put("query", vectorsToSearch);
         fieldParam.put("type", Constants.binaryVectorType);
         JSONObject tmpSearchParam = new JSONObject();
         tmpSearchParam.put("nprobe", nprobe);
@@ -268,6 +272,22 @@ public class Utils {
             cm.addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, Constants.dimension);
         }
         return cm;
+    }
+
+    public static List<Long> initData(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), Constants.nb);
+        return ids;
+    }
+
+    public static List<Long> initBinaryData(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), Constants.nb);
+        return ids;
     }
 
     ////////////////////////////////////////////////////////////////////////

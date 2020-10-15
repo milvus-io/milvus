@@ -77,25 +77,23 @@ public class TestFlush {
 //        }
 //    }
 //
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void testAddFlushMultipleTimes(MilvusClient client, String collectionName) {
-//        for (int i = 0; i < 10; i++) {
-//            InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-//            client.insert(insertParam);
-//            Response res = client.flush(collectionName);
-//            assert(res.ok());
-//            Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb * (i+1));
-//        }
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void testAddFlushMultipleTimesBinary(MilvusClient client, String collectionName) {
-//        for (int i = 0; i < 10; i++) {
-//            InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-//            client.insert(insertParam);
-//            Response res = client.flush(collectionName);
-//            assert(res.ok());
-//            Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb * (i+1));
-//        }
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testAddFlushMultipleTimes(MilvusClient client, String collectionName) {
+        for (int i = 0; i < 10; i++) {
+            InsertParam insertParam = Utils.genInsertParam(collectionName);
+            List<Long> ids = client.insert(insertParam);
+            client.flush(collectionName);
+            Assert.assertEquals(client.countEntities(collectionName), nb * (i+1));
+        }
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testAddFlushMultipleTimesBinary(MilvusClient client, String collectionName) {
+        for (int i = 0; i < 10; i++) {
+            InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
+            List<Long> ids = client.insert(insertParam);
+            client.flush(collectionName);
+            Assert.assertEquals(client.countEntities(collectionName), nb * (i+1));
+        }
+    }
 }
