@@ -7,7 +7,6 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import sklearn.preprocessing
-from milvus import IndexType, MetricType
 from utils import *
 
 dim = 128
@@ -21,7 +20,7 @@ top_k = 1
 nprobe = 1
 epsilon = 0.001
 nlist = 128
-index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
+# index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 
 class TestMixBase:
@@ -38,18 +37,18 @@ class TestMixBase:
         milvus_instance.create_collection({'collection_name': collection,
              'dimension': dim,
              'index_file_size': index_file_size,
-             'metric_type': MetricType.L2})
+             'metric_type': "L2"})
         for i in range(10):
             status, ids = milvus_instance.insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
                 id_0 = ids[0]; id_1 = ids[1]
-        def create_index(milvus_instance):
-            logging.getLogger().info("In create index")
-            status = milvus_instance.create_index(collection, index_params)
-            logging.getLogger().info(status)
-            status, result = milvus_instance.get_index_info(collection)
-            logging.getLogger().info(result)
+        # def create_index(milvus_instance):
+        #     logging.getLogger().info("In create index")
+        #     status = milvus_instance.create_index(collection, index_params)
+        #     logging.getLogger().info(status)
+        #     status, result = milvus_instance.get_index_info(collection)
+        #     logging.getLogger().info(result)
         def insert(milvus_instance):
             logging.getLogger().info("In add vectors")
             status, ids = milvus_instance.insert(collection, vectors)
