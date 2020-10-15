@@ -50,22 +50,20 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 #ifdef MILVUS_FPGA_VERSION
-   bool enable_fpga = false;
+    bool enable_fpga = false;
     server::Config& config = server::Config::GetInstance();
     config.GetFpgaResourceConfigEnable(enable_fpga);
-    if(enable_fpga)
-    {
+    if (enable_fpga) {
         std::vector<int64_t> fpga_ids;
         config.GetFpgaResourceConfigSearchResources(fpga_ids);
-         auto pcie = Connection("pcie", 12000);
-        
+        auto pcie = Connection("pcie", 12000);
+
         for (auto& fpga_id : fpga_ids) {
-            LOG_SERVER_DEBUG_ << LogOut("[%ld]",fpga_id);
+            LOG_SERVER_DEBUG_ << LogOut("[%ld]", fpga_id);
             ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(fpga_id), "FPGA", fpga_id));
             ResMgrInst::GetInstance()->Connect("cpu", std::to_string(fpga_id), pcie);
         }
     }
-   
 
 #endif
 // get resources

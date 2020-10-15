@@ -1343,14 +1343,12 @@ Status
 Config::CheckFpgaResourceConfigEnable(const std::string& value) {
     fiu_return_on("check_config_fpga_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-   /* if (!ValidateStringIsBool(value).ok()) {
-        std::string msg = "Invalid fpga resource config: " + value + ". Possible reason: fpga.enable is not a boolean.";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    }*/
+    /* if (!ValidateStringIsBool(value).ok()) {
+         std::string msg = "Invalid fpga resource config: " + value + ". Possible reason: fpga.enable is not a
+     boolean."; return Status(SERVER_INVALID_ARGUMENT, msg);
+     }*/
     return Status::OK();
 }
-
-
 
 #endif
 /* cache config */
@@ -2082,17 +2080,17 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
 #ifdef MILVUS_FPGA_VERSION
 Status
 Config::GetFpgaResourceConfigEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_ENABLE, CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT);
-    
+    std::string str =
+        GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_ENABLE, CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT);
+
     STATUS_CHECK(CheckFpgaResourceConfigEnable(str));
     STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
     return Status::OK();
 }
 Status
-Config::GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value){
+Config::GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value) {
     value.push_back(0);
     return Status::OK();
-
 }
 Status
 Config::GetFpgaResourceConfigCacheCapacity(int64_t& value) {
@@ -2129,18 +2127,18 @@ Status
 Config::CheckFpgaResourceConfigCacheThreshold(const std::string& value) {
     fiu_return_on("check_config_fpga_resource_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
 
-   /* if (!ValidateStringIsFloat(value).ok()) {
-        std::string msg = "Invalid fpga cache threshold: " + value +
-                          ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
-        return Status(SERVER_INVALID_ARGUMENT, msg);
-    } else {
-        float fpga_cache_threshold = std::stof(value);
-        if (fpga_cache_threshold <= 0.0 || fpga_cache_threshold >= 1.0) {
-            std::string msg = "Invalid fpga cache threshold: " + value +
-                              ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
-            return Status(SERVER_INVALID_ARGUMENT, msg);
-        }
-    }*/
+    /* if (!ValidateStringIsFloat(value).ok()) {
+         std::string msg = "Invalid fpga cache threshold: " + value +
+                           ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+         return Status(SERVER_INVALID_ARGUMENT, msg);
+     } else {
+         float fpga_cache_threshold = std::stof(value);
+         if (fpga_cache_threshold <= 0.0 || fpga_cache_threshold >= 1.0) {
+             std::string msg = "Invalid fpga cache threshold: " + value +
+                               ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+             return Status(SERVER_INVALID_ARGUMENT, msg);
+         }
+     }*/
     return Status::OK();
 }
 #endif

@@ -74,7 +74,7 @@ ResourceMgr::Add(ResourcePtr&& resource) {
             break;
         }
         case ResourceType::FPGA: {
-             LOG_ENGINE_DEBUG_ << "add fpga resource";
+            LOG_ENGINE_DEBUG_ << "add fpga resource";
             fpga_resources_.emplace_back(ResourceWPtr(resource));
             break;
         }
@@ -177,12 +177,9 @@ ResourceMgr::Dump() const {
         resources.push_back(res->Dump());
     }
     json ret{
-        {"number_of_resource", resources_.size()},
-        {"number_of_disk_resource", disk_resources_.size()},
-        {"number_of_cpu_resource", cpu_resources_.size()},
-        {"number_of_gpu_resource", gpu_resources_.size()},
-        {"number_of_fpga_resource", fpga_resources_.size()},
-        {"resources", resources},
+        {"number_of_resource", resources_.size()},           {"number_of_disk_resource", disk_resources_.size()},
+        {"number_of_cpu_resource", cpu_resources_.size()},   {"number_of_gpu_resource", gpu_resources_.size()},
+        {"number_of_fpga_resource", fpga_resources_.size()}, {"resources", resources},
     };
     return ret;
 }

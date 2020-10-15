@@ -62,7 +62,5 @@ class FaissIVFPass : public Pass {
 };
 using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
 
-
 }  // namespace scheduler
 }  // namespace milvus
-

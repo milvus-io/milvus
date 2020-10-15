@@ -16,8 +16,8 @@
 
 #include "resource/CpuResource.h"
 #include "resource/DiskResource.h"
+#include "resource/FpgaResource.h"
 #include "resource/GpuResource.h"
-#include"resource/FpgaResource.h"
 #include "resource/Resource.h"
 
 namespace milvus {

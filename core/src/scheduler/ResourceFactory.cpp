@@ -24,7 +24,7 @@ ResourceFactory::Create(const std::string& name, const std::string& type, uint64
         return std::make_shared<GpuResource>(name, device_id, enable_executor);
     } else if (type == "FPGA") {
         return std::make_shared<FpgaResource>(name, device_id, enable_executor);
-    }else {
+    } else {
         return nullptr;
     }
 }

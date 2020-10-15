@@ -20,9 +20,9 @@
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
+#include "cache/FpgaCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
-#include"cache/FpgaCacheMgr.h"
 #include "db/Utils.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
@@ -33,10 +33,10 @@
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #ifdef MILVUS_FPGA_VERSION
+#include <faiss/index_io.h>
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
-#include <faiss/index_io.h>
-#include"knowhere/index/vector_index/fpga/utils.h"
+#include "knowhere/index/vector_index/fpga/utils.h"
 #endif
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
@@ -178,18 +178,17 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 #ifdef MILVUS_FPGA_VERSION
     server::Config& config = server::Config::GetInstance();
     bool fpga_resource_enable = true;
-    
+
     config.GetFpgaResourceConfigEnable(fpga_resource_enable);
     fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.fpga_res_disabled", fpga_resource_enable = false);
-    if(fpga_resource_enable)
+    if (fpga_resource_enable) {
         LOG_ENGINE_DEBUG_ << "fpga enable indexmode::mode_fpga ";
-    else
-    {
+    } else {
         LOG_ENGINE_DEBUG_ << "fpga not enable indexmode::mode_fpga ";
     }
     if (fpga_resource_enable) {
         mode = knowhere::IndexMode::MODE_FPGA;
-    } 
+    }
 #endif
     fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
@@ -410,11 +409,12 @@ ExecutionEngineImpl::Serialize() {
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
 #ifdef MILVUS_FPGA_VERSION
-    auto  cache_index__ = std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    auto cache_index__ =
+        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_caches = (cache_index__ != nullptr);
     if (already_in_caches) {
-      LOG_ENGINE_DEBUG_ << "fpga cache no need to load again" ;
-      return Status::OK();
+        LOG_ENGINE_DEBUG_ << "fpga cache no need to load again";
+        return Status::OK();
     }
 #endif
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
@@ -705,56 +705,51 @@ ExecutionEngineImpl::CopyToCpu() {
 }
 
 Status
-    ExecutionEngineImpl::CopyToFpga() 
-{
+ExecutionEngineImpl::CopyToFpga() {
 #ifdef MILVUS_FPGA_VERSION
-    auto  cache_index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    auto cache_index_ =
+        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (cache_index_ != nullptr);
-    if (!already_in_cache) {  
-    int64_t indexsize=index_->IndexSize();
-    std::shared_ptr<knowhere::IVFPQ> ivfpq =  std::static_pointer_cast<knowhere::IVFPQ>(index_);
-    std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga= std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
-    indexFpga->SetIndexSize(indexsize);
-    indexFpga->CopyIndexToFpga(); 
-    
+    if (!already_in_cache) {
+        int64_t indexsize = index_->IndexSize();
+        std::shared_ptr<knowhere::IVFPQ> ivfpq = std::static_pointer_cast<knowhere::IVFPQ>(index_);
+        std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
+        indexFpga->SetIndexSize(indexsize);
+        indexFpga->CopyIndexToFpga();
 
-    std::string segment_dir;
-    utils::GetParentPath(location_, segment_dir);
-    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
-    segment::SegmentPtr segment_ptr;
-    segment_reader_ptr->GetSegment(segment_ptr);
-    segment::DeletedDocsPtr deleted_docs_ptr;
-    auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
-    if (!status.ok()) {
-        std::string msg = "Failed to load deleted docs from " + location_;
-        LOG_ENGINE_ERROR_ << msg;
-        return Status(DB_ERROR, msg);
-    }
-    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-
-    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr =
-        std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-    for (auto& offset : deleted_docs) {
-        if (!concurrent_bitset_ptr->test(offset)) {
-            concurrent_bitset_ptr->set(offset);
+        std::string segment_dir;
+        utils::GetParentPath(location_, segment_dir);
+        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+        segment::SegmentPtr segment_ptr;
+        segment_reader_ptr->GetSegment(segment_ptr);
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+        if (!status.ok()) {
+            std::string msg = "Failed to load deleted docs from " + location_;
+            LOG_ENGINE_ERROR_ << msg;
+            return Status(DB_ERROR, msg);
         }
-    }
-    index_=indexFpga;  
-    index_->SetBlacklist(concurrent_bitset_ptr);
+        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
 
-    std::vector<segment::doc_id_t> uids;
-    segment_reader_ptr->LoadUids(uids);
-    index_->SetUids(uids);
-    FpgaCache();
+        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+        for (auto& offset : deleted_docs) {
+            if (!concurrent_bitset_ptr->test(offset)) {
+                concurrent_bitset_ptr->set(offset);
+            }
+        }
+        index_ = indexFpga;
+        index_->SetBlacklist(concurrent_bitset_ptr);
+
+        std::vector<segment::doc_id_t> uids;
+        segment_reader_ptr->LoadUids(uids);
+        index_->SetUids(uids);
+        FpgaCache();
+    } else {
+        index_ = cache_index_;
     }
-    else
-    {
-        index_=cache_index_;
-    }
-    LOG_ENGINE_DEBUG_<<"copy to fpga time ";   
+    LOG_ENGINE_DEBUG_ << "copy to fpga time ";
 #endif
     return Status::OK();
-
 }
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {

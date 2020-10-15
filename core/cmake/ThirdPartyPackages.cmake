@@ -1175,7 +1175,7 @@ macro(build_armadillo)
     message(STATUS "Building armadillo 9.9.x from source")
     set(ARMADILLO_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/armadillo_ep-prefix/src/armadillo_ep")
     set(ARMADILLO_INCLUDE_DIR "${ARMADILLO_PREFIX}/include")
-    set(ARMADILLO_SHARED_LIB "${ARMADILLO_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}armadillo${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(ARMADILLO_SHARED_LIB "${ARMADILLO_PREFIX}/${CMAKE_SHARED_LIBRARY_PREFIX}armadillo${CMAKE_SHARED_LIBRARY_SUFFIX}")
 
     externalproject_add(armadillo_ep
             URL

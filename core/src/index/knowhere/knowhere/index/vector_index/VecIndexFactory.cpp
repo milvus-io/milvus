@@ -58,11 +58,11 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
 #ifdef MILVUS_GPU_VERSION
         if (mode == IndexMode::MODE_GPU) {
             return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
-      }
+        }
 #endif
 #ifdef MILVUS_FPGA_VERSION
-         if (mode == IndexMode::MODE_FPGA) {
-           // LOG_ENGINE_DEBUG_ << " fpga enable indexmode::mode_fpga ";
+        if (mode == IndexMode::MODE_FPGA) {
+            // LOG_ENGINE_DEBUG_ << " fpga enable indexmode::mode_fpga ";
             return std::make_shared<knowhere::FPGAIVFPQ>();
         }
 #endif

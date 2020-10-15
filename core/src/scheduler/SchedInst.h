@@ -100,8 +100,8 @@ class OptimizerInst {
                 server::Config& config = server::Config::GetInstance();
                 config.GetFpgaResourceConfigEnable(enable_fpga);
                 if (enable_fpga) {
-                     pass_list.push_back(std::make_shared<FaissIVFPass>());
-					 LOG_SERVER_DEBUG_ << LogOut("add fpga ");
+                    pass_list.push_back(std::make_shared<FaissIVFPass>());
+                    LOG_SERVER_DEBUG_ << LogOut("add fpga ");
                 }
 #endif
 #ifdef MILVUS_GPU_VERSION
