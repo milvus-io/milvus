@@ -78,10 +78,10 @@ InsertReq::Create(const ContextPtr& context, const std::string& collection_name,
 
 Status
 InsertReq::OnExecute() {
-    LOG_SERVER_INFO_ << LogOut("[%s][%ld] ", "insert", 0) << "Execute InsertReq.";
     try {
-        std::string hdr = "InsertReq(collection=" + collection_name_ + ", partition_name=" + partition_name_ + ")";
-        TimeRecorder rc(hdr);
+        std::string hdr = "InsertReq(collection=" + collection_name_ + ", partition=" + partition_name_ + ")";
+        LOG_SERVER_DEBUG_ << hdr << " begin";
+        TimeRecorderAuto rc(hdr);
 
         if (insert_param_.row_count_ == 0 || insert_param_.fields_data_.empty()) {
             return Status{SERVER_INVALID_ARGUMENT, "The field is empty, make sure you have entered entities"};
@@ -121,8 +121,6 @@ InsertReq::OnExecute() {
         int64_t num = iter->second->data_.size() / sizeof(int64_t);
         insert_param_.id_returned_.resize(num);
         memcpy(insert_param_.id_returned_.data(), iter->second->data_.data(), iter->second->data_.size());
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

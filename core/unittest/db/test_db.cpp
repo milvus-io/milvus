@@ -851,6 +851,10 @@ TEST_F(DBTest, GetEntityTest) {
     }
     std::cout << "Post GetEntityByID2" << std::endl;
 
+    // load collection data into cache, let the GetEntityByID() get entity from cache
+    std::vector<std::string> fields;
+    db_->LoadCollection(dummy_context_, collection_name, fields);
+
     {
         std::vector<std::string> field_names;
         fill_field_names(field_mappings, field_names);

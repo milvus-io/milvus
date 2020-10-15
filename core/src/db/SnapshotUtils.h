@@ -55,13 +55,13 @@ Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
 Status
-GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count);
+GetSegmentRowLimit(const std::string& collection_name, int64_t& segment_row_limit);
 
 Status
-GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count);
+GetSegmentRowLimit(int64_t collection_id, int64_t& segment_row_limit);
 
 Status
-GetSegmentRowCount(const snapshot::CollectionPtr& collection, int64_t& segment_row_count);
+GetSegmentRowLimit(const snapshot::CollectionPtr& collection, int64_t& segment_row_limit);
 
 Status
 ClearCollectionCache(snapshot::ScopedSnapshotT& ss, const std::string& dir_root);

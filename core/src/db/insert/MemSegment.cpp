@@ -298,7 +298,11 @@ MemSegment::PutChunksToWriter(const segment::SegmentWriterPtr& writer) {
 
         // copy data to writer
         writer->AddChunk(chunk);
+
+        // free memory immediately since the data has been added into writer
+        action.insert_data_ = nullptr;
     }
+    actions_.clear();
 
     return Status::OK();
 }

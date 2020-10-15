@@ -420,19 +420,17 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
         "collection_name": "test_collection",
         "fields": [
             {
-                "field_name": "field_vec",
-                "field_type": "VECTOR_FLOAT",
-                "index_params": {},
-                "extra_params": {"dim": 128}
+                "name": "field_vec",
+                "type": "VECTOR_FLOAT",
+                "params": {"dim": 128}
             },
             {
-                "field_name": "int64",
-                "field_type": "int64",
-                "index_params": {},
-                "extra_params": {}
+                "name": "int64",
+                "type": "int64",
+                "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
 
     mapping_json = nlohmann::json::parse(mapping_str);
@@ -510,16 +508,14 @@ TEST_F(WebControllerTest, CREATE_COLLECTION) {
         "collection_name": "test_collection",
         "fields": [
             {
-                "field_name": "field_vec",
-                "field_type": "VECTOR_FLOAT",
-                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-                "extra_params": {"dim": 128}
+                "name": "field_vec",
+                "type": "VECTOR_FLOAT",
+                "params": {"dim": 128}
             },
             {
-                "field_name": "int64",
-                "field_type": "int64",
-                "index_params": {},
-                "extra_params": {}
+                "name": "int64",
+                "type": "int64",
+                "params": {}
             }
         ]
     })";
@@ -539,8 +535,8 @@ TEST_F(WebControllerTest, GET_COLLECTION_INFO) {
     auto response = client_ptr->getCollection(collection_name.c_str(), connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto json_response = nlohmann::json::parse(response->readBodyToString()->c_str());
-    ASSERT_EQ(collection_name, json_response["collection_name"]);
-    ASSERT_EQ(2, json_response["fields"].size());
+    ASSERT_EQ(collection_name, json_response["data"]["collection_name"]);
+    ASSERT_EQ(2, json_response["data"]["fields"].size());
 
     // invalid collection name
     collection_name = "57474dgdfhdfhdh  dgd";
@@ -554,7 +550,7 @@ TEST_F(WebControllerTest, SHOW_COLLECTIONS) {
     auto response = client_ptr->showCollections("1", "1", connection_ptr);
     ASSERT_EQ(OStatus::CODE_200.code, response->getStatusCode());
     auto json_response = nlohmann::json::parse(response->readBodyToString()->std_str());
-    ASSERT_GE(json_response["count"].get<int64_t>(), 0);
+    ASSERT_GE(json_response["data"]["total"].get<int64_t>(), 0);
 
     // test query collection empty
     response = client_ptr->showCollections("0", "0", connection_ptr);
@@ -623,19 +619,17 @@ TEST_F(WebControllerTest, INSERT_BIN) {
         "collection_name": "test_collection",
         "fields": [
             {
-                "field_name": "field_vec",
-                "field_type": "VECTOR_BINARY",
-                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-                "extra_params": {"dim": 128}
+                "name": "field_vec",
+                "type": "VECTOR_BINARY",
+                "params": {"dim": 128}
             },
             {
-                "field_name": "int64",
-                "field_type": "int64",
-                "index_params": {},
-                "extra_params": {}
+                "name": "int64",
+                "type": "int64",
+                "params": {}
             }
         ],
-        "segment_row_count": 100000,
+        "segment_row_limit": 100000,
         "auto_id": true
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
@@ -774,19 +768,17 @@ TEST_F(WebControllerTest, SEARCH) {
         "collection_name": "test_collection",
         "fields": [
             {
-                "field_name": "field_vec",
-                "field_type": "VECTOR_FLOAT",
-                "index_params": {"name": "index_1", "index_type": "IVFFLAT", "nlist":  4096},
-                "extra_params": {"dim": 4}
+                "name": "field_vec",
+                "type": "VECTOR_FLOAT",
+                "params": {"dim": 4}
             },
             {
-                "field_name": "int64",
-                "field_type": "int64",
-                "index_params": {},
-                "extra_params": {}
+                "name": "int64",
+                "type": "int64",
+                "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
     mapping_json["collection_name"] = collection_name;
@@ -832,8 +824,8 @@ TEST_F(WebControllerTest, SEARCH) {
     //    auto error_dto = response->readBodyToDto<milvus::server::web::StatusDtoT>(object_mapper.get());
     //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
     auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
-    ASSERT_TRUE(result_json.contains("num"));
-    ASSERT_EQ(1, result_json["num"].get<int64_t>());
+    ASSERT_TRUE(result_json.contains("data"));
+    ASSERT_EQ(1, result_json["data"]["nq"].get<int64_t>());
 }
 
 TEST_F(WebControllerTest, INDEX) {
@@ -873,7 +865,7 @@ TEST_F(WebControllerTest, INDEX) {
     nlohmann::json collection_json = nlohmann::json::parse(response->readBodyToString()->std_str());
     std::cout << collection_json.dump() << std::endl;
     for (const auto& field_json : collection_json["fields"]) {
-        if (field_json["field_name"] == "field_vec") {
+        if (field_json["name"] == "field_vec") {
             nlohmann::json index_params = field_json["index_params"];
             ASSERT_EQ(index_params["index_type"].get<std::string>(), milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
             break;

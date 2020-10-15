@@ -45,7 +45,7 @@ CreateIndexReq::Create(const ContextPtr& context, const std::string& collection_
 Status
 CreateIndexReq::OnExecute() {
     try {
-        std::string hdr = "CreateIndexReq(collection=" + collection_name_ + ")";
+        std::string hdr = "CreateIndexReq(collection=" + collection_name_ + +" field=" + field_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
@@ -127,7 +127,6 @@ CreateIndexReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->CreateIndex(context_, collection_name_, field_name_, index));
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

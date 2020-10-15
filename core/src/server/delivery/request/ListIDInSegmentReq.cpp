@@ -57,7 +57,6 @@ ListIDInSegmentReq::OnExecute() {
         // step 2: get vector data, now only support get one id
         ids_.clear();
         STATUS_CHECK(DBWrapper::DB()->ListIDInSegment(collection_name_, segment_id_, ids_));
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

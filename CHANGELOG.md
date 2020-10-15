@@ -51,6 +51,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
 -   \#3741 Inconsistent parameter names
 -   \#3811 c++ sdk segmentation fault
+-   \#3946 The result format is wrong returned by 'get collections'
+-   \#3962 The 'num' in return of search is incorrect when use http-api
+-   \#3976 Web_impl restful doc bugs
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -80,6 +83,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3449 Upgrade master version to v0.11.0
 -   \#3465 Optimize gc event executor
 -   \#3631 Add build option `-rdynamic` in CMakeList.txt
+-   \#3882 Params in Restful-api is different from the params in other SDKs
 
 ## Task
 
