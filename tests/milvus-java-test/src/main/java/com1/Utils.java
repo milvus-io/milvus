@@ -62,10 +62,10 @@ public class Utils {
     private static List<Map<String, Object>> genBaseFieldsWithoutVector(){
         List<Map<String,Object>> fieldsList = new ArrayList<>();
         Map<String, Object> intFields = new HashMap<>();
-        intFields.put("field",Constants.intFieldName);
+        intFields.put(Constants.fieldNameKey,Constants.intFieldName);
         intFields.put("type",DataType.INT64);
         Map<String, Object> floatField = new HashMap<>();
-        floatField.put("field",Constants.floatFieldName);
+        floatField.put(Constants.fieldNameKey,Constants.floatFieldName);
         floatField.put("type",DataType.FLOAT);
         fieldsList.add(intFields);
         fieldsList.add(floatField);
@@ -77,10 +77,10 @@ public class Utils {
         List<Map<String, Object>> defaultFieldList = genBaseFieldsWithoutVector();
         Map<String, Object> vectorField = new HashMap<>();
         if (isBinary){
-            vectorField.put("field", Constants.binaryVectorFieldName);
+            vectorField.put(Constants.fieldNameKey, Constants.binaryVectorFieldName);
             vectorField.put("type",DataType.VECTOR_BINARY);
         }else {
-            vectorField.put("field", Constants.floatVectorFieldName);
+            vectorField.put(Constants.fieldNameKey, Constants.floatVectorFieldName);
             vectorField.put("type",DataType.VECTOR_FLOAT);
         }
         JSONObject jsonObject = new JSONObject();

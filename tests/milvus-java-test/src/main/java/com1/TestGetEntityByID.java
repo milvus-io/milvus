@@ -42,51 +42,38 @@ public class TestGetEntityByID {
         String newCollection = "not_existed";
         Map<Long, Map<String, Object>> resEntities = client.getEntityByID(newCollection, get_ids);
     }
-//
-//    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void testGetVectorIdNotExisted(MilvusClient client, String collectionName) {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-//        client.insert(insertParam);
-//        client.flush(collectionName);
-//        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-//        Assert.assertEquals(res.getFieldsMap().size(), get_ids.size());
-//        Assert.assertEquals(res.getFieldsMap().get(0), new HashMap<>());
-//    }
 
-//    // Binary tests
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {
-//        int get_length = 20;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-//        InsertResponse resInsert = client.insert(insertParam);
-//        List<Long> ids = resInsert.getEntityIds();
-//        client.flush(collectionName);
-//        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
-//        for (int i = 0; i < get_length; i++) {
-//            List<Map<String,Object>> fieldsMap = res.getFieldsMap();
-//            assert (fieldsMap.get(i).get("binary_vector").equals(Constants.vectorsBinary.get(i)));
-//        }
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void testGetEntityByIdAfterDeleteBinary(MilvusClient client, String collectionName) {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-//        InsertResponse resInsert = client.insert(insertParam);
-//        List<Long> ids = resInsert.getEntityIds();
-//        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
-//        assert(res_delete.ok());
-//        client.flush(collectionName);
-//        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-//        Assert.assertEquals(res.getFieldsMap().size(), 1);
-//    }
-//
-//    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void testGetEntityIdNotExistedBinary(MilvusClient client, String collectionName) {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-//        client.insert(insertParam);
-//        client.flush(collectionName);
-//        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-//        Assert.assertEquals(res.getFieldsMap().size(), get_ids.size());
-//        Assert.assertEquals(res.getFieldsMap().get(0), new HashMap<>());
-//    }
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void testGetVectorIdNotExisted(MilvusClient client, String collectionName) {
+        List<Long> ids = Utils.initData(client, collectionName);
+        Map<Long, Map<String, Object>> resEntities =  client.getEntityByID(collectionName, get_ids);
+        Assert.assertEquals(resEntities.size(), 0);
+    }
+
+    // Binary tests
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {
+        int get_length = 20;
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
+        for (int i = 0; i < get_length; i++) {
+            assert (resEntities.get(ids.get(i)).get(Constants.binaryVectorFieldName).equals(Constants.vectorsBinary.get(i)));
+        }
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testGetEntityByIdAfterDeleteBinary(MilvusClient client, String collectionName) {
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
+        client.flush(collectionName);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, 1));
+        Assert.assertEquals(resEntities.size(), 0);
+    }
+
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testGetEntityIdNotExistedBinary(MilvusClient client, String collectionName) {
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, get_ids);
+        Assert.assertEquals(resEntities.size(), 0);
+    }
 }

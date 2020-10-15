@@ -15,22 +15,6 @@ import java.util.stream.LongStream;
 
 public class TestDeleteEntities {
 
-    private List<Long> initData(MilvusClient client, String collectionName) {
-        InsertParam insertParam = Utils.genInsertParam(collectionName);
-        List<Long> ids = client.insert(insertParam);
-        System.out.println(ids.get(0));
-        client.flush(collectionName);
-        return ids;
-    }
-
-    private List<Long> initBinaryData(MilvusClient client, String collectionName) {
-        InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
-        List<Long> ids = client.insert(insertParam);
-        client.flush(collectionName);
-        Assert.assertEquals(client.countEntities(collectionName), Constants.nb);
-        return ids;
-    }
-
     // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testDeleteEntities(MilvusClient client, String collectionName) {
@@ -44,17 +28,16 @@ public class TestDeleteEntities {
     }
 
     // case-02
-    // TODO
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testDeleteSingleEntity(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
+        List<Long> ids = Utils.initData(client, collectionName);
         client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         client.flush(collectionName);
         // Assert collection row count
         Assert.assertEquals(client.countEntities(collectionName), Constants.nb - 1);
         // Assert getEntityByID
-        Map<Long, Map<String, Object>> res_get = client.getEntityByID(collectionName, Collections.singletonList(ids.get(0)));
-        Assert.assertEquals(res_get.size(), 1);
+        Map<Long, Map<String, Object>> resEntity = client.getEntityByID(collectionName, Collections.singletonList(ids.get(0)));
+        Assert.assertEquals(resEntity.size(), 0);
     }
 
     // case-03
@@ -75,7 +58,7 @@ public class TestDeleteEntities {
     // case-05
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testDeleteEntityIdNotExisted(MilvusClient client, String collectionName) {
-        List<Long> ids = initData(client, collectionName);
+        List<Long> ids = Utils.initData(client, collectionName);
         List<Long> delIds = new ArrayList<Long>();
         delIds.add(123456L);
         delIds.add(1234561L);
@@ -89,7 +72,7 @@ public class TestDeleteEntities {
     // Below tests binary vectors
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testDeleteEntitiesBinary(MilvusClient client, String collectionName) {
-        List<Long> ids = initBinaryData(client, collectionName);
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
         client.deleteEntityByID(collectionName, ids);
         client.flush(collectionName);
         // Assert collection row count

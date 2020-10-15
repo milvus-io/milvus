@@ -111,9 +111,10 @@ public class TestCollection {
     public void testDescribeCollection(MilvusClient client, String collectionName) {
         CollectionMapping info = client.getCollectionInfo(collectionName);
         List<Map<String,Object>> fields = info.getFields();
+        System.out.println(fields);
         int dim = 0;
         for(Map<String,Object> field: fields){
-            if (floatVectorFieldName.equals(field.get("field"))) {
+            if (floatVectorFieldName.equals(field.get(Constants.fieldNameKey))) {
                 JSONObject jsonObject = JSONObject.parseObject(field.get("params").toString());
                 dim = jsonObject.getIntValue("dim");
             }

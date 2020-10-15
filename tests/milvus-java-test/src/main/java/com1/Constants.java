@@ -1,7 +1,5 @@
 package com1;
 
-import com1.Utils;
-
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +23,8 @@ public final class Constants {
 
     public static final int segmentRowLimit = 5000;
 
+    public static final String fieldNameKey = "name";
+
     public static final String vectorType = "float";
 
     public static final String binaryVectorType = "binary";
@@ -47,20 +47,11 @@ public final class Constants {
 
     public static final String binaryVectorFieldName = "binary_vector";
 
-//    public static final String indexParam = Utils.setIndexParam(indexType, "L2", n_list);
-
-//    public static final String binaryIndexParam = Utils.setIndexParam(defaultBinaryIndexType, defaultBinaryMetricType, n_list);
-
     public static final List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
 
     public static final List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
-    public static final List<Map<String,Object>> defaultFields = Utils.genDefaultFields(dimension,false);
-
-    public static final List<Map<String,Object>> defaultBinaryFields = Utils.genDefaultFields(dimension,true);
-
-//    public static final List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension, nb, vectors);
-      public static final Map<String, List> defaultEntities = Utils.genDefaultEntities(nb, vectors);
+    public static final Map<String, List> defaultEntities = Utils.genDefaultEntities(nb, vectors);
 
     public static final Map<String, List> defaultBinaryEntities = Utils.genDefaultBinaryEntities(nb, vectorsBinary);
 
