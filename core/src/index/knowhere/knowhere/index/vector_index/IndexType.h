@@ -60,7 +60,7 @@ extern const char* INDEX_NGTPANNG;
 extern const char* INDEX_NGTONNG;
 }  // namespace IndexEnum
 
-enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1 };
+enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1, MODE_FPGA = 2 };
 
 extern std::string
 OldIndexTypeToStr(const int32_t type);

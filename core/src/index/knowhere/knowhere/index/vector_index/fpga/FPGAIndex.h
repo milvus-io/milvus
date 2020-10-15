@@ -7,27 +7,36 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
 
-#include <memory>
-#include <string>
-
-#include "resource/CpuResource.h"
-#include "resource/DiskResource.h"
-#include "resource/FpgaResource.h"
-#include "resource/GpuResource.h"
-#include "resource/Resource.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
-namespace scheduler {
+namespace knowhere {
 
-class ResourceFactory {
+class FPGAIndex {
  public:
-    static std::shared_ptr<Resource>
-    Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_executor = true);
+    explicit FPGAIndex(const int& device_id) : fpga_id_(device_id) {
+    }
+
+    virtual VecIndexPtr
+    CopyFpgaToCpu(const Config&) = 0;
+
+    void
+    SetFpgaDevice(const int& fpga_id) {
+        fpga_id_ = fpga_id;
+    }
+
+    const int64_t
+    GetFpgaDevice() {
+        return fpga_id_;
+    }
+
+ protected:
+    int64_t fpga_id_;
 };
 
-}  // namespace scheduler
+}  // namespace knowhere
 }  // namespace milvus
