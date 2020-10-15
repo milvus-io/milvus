@@ -158,6 +158,8 @@ logs:
   path: @MILVUS_DB_PATH@/logs
   max_log_file_size: 1024MB
   log_rotate_num: 0
+  log_to_stdout: false
+  log_to_file: true
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |

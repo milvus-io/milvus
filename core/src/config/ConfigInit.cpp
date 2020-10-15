@@ -147,6 +147,8 @@ InitConfig() {
                                                     &config.logs.max_log_file_size.value, 1024 * MB)},
         {"logs.log_rotate_num",
          CreateIntegerConfig("logs.log_rotate_num", 0, 1024, &config.logs.log_rotate_num.value, 0)},
+        {"logs.log_to_stdout", CreateBoolConfig("logs.log_to_stdout", &config.logs.log_to_stdout.value, false)},
+        {"logs.log_to_file", CreateBoolConfig("logs.log_to_file", &config.logs.log_to_file.value, true)},
 
         /* metric */
         {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},

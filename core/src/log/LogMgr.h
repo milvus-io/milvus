@@ -25,7 +25,7 @@ class LogMgr {
  public:
     static Status
     InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
-            int64_t delete_exceeds);
+            int64_t delete_exceeds, bool log_to_stdout, bool log_to_file);
 
     static void
     RolloutHandler(const char* filename, std::size_t size, el::Level level);
@@ -38,10 +38,10 @@ class LogMgr {
 
     /* Non-const for fiu to injecting error */
     LogMgr&
-    Level(std::unordered_map<std::string, bool>& enables);
+    Level(std::unordered_map<std::string, bool>& enables, bool log_to_file);
 
     LogMgr&
-    To();
+    To(bool log_to_stdout, bool log_to_file);
 
     LogMgr&
     Rotate(int64_t max_log_file_size, int64_t log_rotate_num);
@@ -57,7 +57,8 @@ class LogMgr {
     parse_level(const std::string& level);
 
     static void
-    set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path);
+    set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path,
+              bool log_to_file);
 
  private:
     el::Configurations el_config_;
