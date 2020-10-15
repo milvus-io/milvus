@@ -147,6 +147,8 @@ InitConfig() {
                                                     &config.logs.max_log_file_size.value, 1024 * MB)},
         {"logs.log_rotate_num",
          CreateIntegerConfig("logs.log_rotate_num", 0, 1024, &config.logs.log_rotate_num.value, 0)},
+        {"logs.log_to_stdout", CreateBoolConfig("logs.log_to_stdout", &config.logs.log_to_stdout.value, false)},
+        {"logs.log_to_file", CreateBoolConfig("logs.log_to_file", &config.logs.log_to_file.value, true)},
 
         /* metric */
         {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},
@@ -339,12 +341,18 @@ gpu:
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
 #                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_stdout        | Whether to write logs to standard output in Milvus.        | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_file          | Whether to write logs to files in Milvus                   | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   level: @logs.level@
   trace.enable: @logs.trace.enable@
   path: @logs.path@
   max_log_file_size: @logs.max_log_file_size@
   log_rotate_num: @logs.log_rotate_num@
+  log_to_stdout: @logs.log_to_stdout@
+  log_to_file: @logs.log_to_file@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
