@@ -162,6 +162,8 @@ struct ServerConfig {
         String path{"unknown"};
         Integer max_log_file_size{0};
         Integer log_rotate_num{0};
+        Bool log_to_stdout{false};
+        Bool log_to_file{true};
     } logs;
 
     struct System {
