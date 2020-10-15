@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import io.milvus.client.*;
 import io.milvus.client.exception.ServerSideMilvusException;
@@ -8,7 +8,6 @@ import org.testng.annotations.Test;
 import java.util.List;
 
 public class TestPartition {
-    int dimension = 128;
 
     // ----------------------------- create partition cases in ---------------------------------
 

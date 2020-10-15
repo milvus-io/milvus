@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
@@ -6,11 +6,6 @@ import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 import java.util.List;
-import com1.Utils;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.MoreExecutors;
 
 public class TestCompact {
     int nb = Constants.nb;

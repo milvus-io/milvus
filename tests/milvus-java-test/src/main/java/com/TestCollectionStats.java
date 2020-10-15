@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
@@ -31,7 +31,7 @@ public class TestCollectionStats {
         List<Long> idsBefore = client.insert(insertParam);
         client.flush(collectionName);
         Index index = Index
-                .create(collectionName, Constants.floatFieldName)
+                .create(collectionName, Constants.floatVectorFieldName)
                 .setIndexType(IndexType.IVF_SQ8)
                 .setMetricType(MetricType.L2)
                 .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());

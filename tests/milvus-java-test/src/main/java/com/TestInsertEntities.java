@@ -1,11 +1,7 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
 import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.ServerSideMilvusException;
@@ -150,11 +146,18 @@ public class TestInsertEntities {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertEntityPartitionABinary(MilvusClient client, String collectionName) {
         client.createPartition(collectionName, tag);
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
         InsertParam insertParam = InsertParam
                 .create(collectionName)
-                .addField(Constants.intFieldName, DataType.INT64, binaryEntities.get(Constants.intFieldName))
-                .addField(Constants.floatFieldName, DataType.FLOAT, binaryEntities.get(Constants.floatFieldName))
-                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, binaryEntities.get(Constants.binaryVectorFieldName))
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors)
                 .setPartitionTag(tag);
         client.insert(insertParam);
         client.flush(collectionName);
@@ -170,11 +173,18 @@ public class TestInsertEntities {
     // case-11
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testInsertEntityBinary(MilvusClient client, String collectionName)  {
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
         InsertParam insertParam = InsertParam
                 .create(collectionName)
-                .addField(Constants.intFieldName, DataType.INT64, binaryEntities.get(Constants.intFieldName))
-                .addField(Constants.floatFieldName, DataType.FLOAT, binaryEntities.get(Constants.floatFieldName))
-                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, binaryEntities.get(Constants.binaryVectorFieldName));
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         List<Long> vectorIds = client.insert(insertParam);
         client.flush(collectionName);
         // Assert collection row count
@@ -187,11 +197,18 @@ public class TestInsertEntities {
     public void testInsertBinaryEntityWithIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
         List<Long> entityIds = LongStream.range(0, nb).boxed().collect(Collectors.toList());
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
         InsertParam insertParam = InsertParam
                 .create(collectionName)
-                .addField(Constants.intFieldName, DataType.INT64, binaryEntities.get(Constants.intFieldName))
-                .addField(Constants.floatFieldName, DataType.FLOAT, binaryEntities.get(Constants.floatFieldName))
-                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, binaryEntities.get(Constants.binaryVectorFieldName))
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors)
                 .setEntityIds(entityIds);
         List<Long> vectorIds = client.insert(insertParam);
         client.flush(collectionName);

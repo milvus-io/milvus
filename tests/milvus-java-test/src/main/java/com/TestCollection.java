@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONObject;
 import io.milvus.client.*;
@@ -10,7 +10,6 @@ import org.testng.annotations.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import com1.Utils;
 
 public class TestCollection {
     String intFieldName = Constants.intFieldName;

@@ -1,7 +1,5 @@
-package com1;
+package com;
 
-import com.google.common.util.concurrent.ListenableFuture;
-import java.util.concurrent.ExecutionException;
 import io.milvus.client.*;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;

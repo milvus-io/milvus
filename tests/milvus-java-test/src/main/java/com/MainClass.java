@@ -1,11 +1,8 @@
-package com1;
+package com;
 
-import com1.Constants;
-import com1.Utils;
 import io.milvus.client.*;
 import org.apache.commons.cli.*;
 import org.apache.commons.lang3.RandomStringUtils;
-import org.testng.SkipException;
 import org.testng.TestNG;
 import org.testng.annotations.DataProvider;
 import org.testng.xml.XmlClass;
@@ -14,7 +11,6 @@ import org.testng.xml.XmlTest;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class MainClass {
     private static String HOST = "127.0.0.1";

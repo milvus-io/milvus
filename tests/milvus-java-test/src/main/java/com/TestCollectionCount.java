@@ -1,6 +1,5 @@
-package com1;
+package com;
 
-import io.grpc.StatusRuntimeException;
 import io.milvus.client.*;
 import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.ServerSideMilvusException;

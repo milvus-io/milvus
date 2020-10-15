@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONArray;
 import io.milvus.client.*;
@@ -9,7 +9,6 @@ import org.apache.commons.lang3.RandomStringUtils;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
-import com1.Constants;
 import org.testng.Assert;
 
 public class Utils {
@@ -183,7 +182,6 @@ public class Utils {
         tmp.add(searchParam);
         mustParam.put("must", tmp);
         boolParam.put("bool", mustParam);
-        System.out.println(JSONObject.toJSONString(boolParam));
         return JSONObject.toJSONString(boolParam);
     }
 
@@ -259,7 +257,7 @@ public class Utils {
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, intValues)
                 .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, Constants.vectorsBinary);
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, Utils.genBinaryVectors(Constants.nb, Constants.dimension));
         return insertParam;
     }
 

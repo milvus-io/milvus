@@ -1,14 +1,12 @@
-package com1;
+package com;
 
 import io.milvus.client.*;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.nio.ByteBuffer;
+import java.util.*;
 
 public class TestGetEntityByID {
     public List<Long> get_ids = Utils.toListIds(1111);
@@ -54,10 +52,23 @@ public class TestGetEntityByID {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {
         int get_length = 20;
-        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+        InsertParam insertParam = InsertParam
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
         Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
         for (int i = 0; i < get_length; i++) {
-            assert (resEntities.get(ids.get(i)).get(Constants.binaryVectorFieldName).equals(Constants.vectorsBinary.get(i)));
+            assert (resEntities.get(ids.get(i)).get(Constants.binaryVectorFieldName).equals(vectors.get(i)));
         }
     }
 

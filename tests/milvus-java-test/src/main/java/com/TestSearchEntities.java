@@ -1,4 +1,4 @@
-package com1;
+package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -7,7 +7,6 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import io.milvus.client.*;
-import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.InvalidDsl;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
@@ -16,7 +15,6 @@ import org.testng.annotations.Test;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 public class TestSearchEntities {
 

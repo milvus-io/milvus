@@ -1,11 +1,7 @@
-package com1;
+package com;
 
 import io.milvus.client.exception.ClientSideMilvusException;
-import io.milvus.client.exception.ServerSideMilvusException;
-import org.testcontainers.containers.GenericContainer;
-import com1.MainClass;
 import io.milvus.client.*;
-import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -62,9 +58,9 @@ public class TestConnect {
         client.close();
     }
 
-    // TODO
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
-    public void testDisconnectRepeatably(MilvusClient client, String collectionName){
-        client.close();
-    }
+//    // TODO
+//    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
+//    public void testDisconnectRepeatably(MilvusClient client, String collectionName){
+//        client.close();
+//    }
 }
