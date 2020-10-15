@@ -110,15 +110,14 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
                             valid_metric_type = true;
                         }
                     }
+                } else {
+                    if (context_.query_ptr_->metric_types.find(name) == context_.query_ptr_->metric_types.end()) {
+                        return Status{DB_ERROR,
+                                      "Please provide a metric_type in search params since index is not created"};
+                    } else {
+                        valid_metric_type = true;
+                    }
                 }
-                //                else {
-                //                    if (context_->query_ptr_->metric_types.find(name) ==
-                //                    context_->query_ptr_->metric_types.end()) {
-                //                        return Status{DB_ERROR,
-                //                                      "Please provide a metric_type in search params since index is
-                //                                      not created"};
-                //                    }
-                //                }
             }
 
             knowhere::VecIndexPtr index_ptr;
