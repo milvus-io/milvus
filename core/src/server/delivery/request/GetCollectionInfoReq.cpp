@@ -77,8 +77,6 @@ GetCollectionInfoReq::OnExecute() {
 
             collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));
         }
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

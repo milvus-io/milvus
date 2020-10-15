@@ -47,7 +47,6 @@ ListPartitionsReq::OnExecute() {
 
     /* get partitions */
     STATUS_CHECK(DBWrapper::DB()->ListPartitions(collection_name_, partition_list_));
-    rc.ElapseFromBegin("done");
 
     return Status::OK();
 }
