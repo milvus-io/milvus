@@ -160,17 +160,8 @@ LogMgr::Level(std::unordered_map<std::string, bool>& enables, bool log_to_file) 
 
 LogMgr&
 LogMgr::To(bool log_to_stdout, bool log_to_file) {
-    if (log_to_stdout) {
-        el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, "true");
-    } else {
-        el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
-    }
-
-    if (log_to_file) {
-        el_config_.setGlobally(el::ConfigurationType::ToFile, "true");
-    } else {
-        el_config_.setGlobally(el::ConfigurationType::ToFile, "false");
-    }
+    el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, (log_to_stdout ? "true" : "false"));
+    el_config_.setGlobally(el::ConfigurationType::ToFile, (log_to_file ? "true" : "false"));
 
     return *this;
 }
