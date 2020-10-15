@@ -63,8 +63,6 @@ LoadCollectionReq::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

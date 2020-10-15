@@ -38,7 +38,6 @@ ListCollectionsReq::OnExecute() {
     if (!status.ok()) {
         return status;
     }
-    rc.ElapseFromBegin("done");
     return Status::OK();
 }
 
