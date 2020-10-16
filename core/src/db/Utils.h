@@ -31,6 +31,15 @@ IsSameIndex(const CollectionIndex& index1, const CollectionIndex& index2);
 bool
 IsBinaryMetricType(const std::string& metric_type);
 
+bool
+IsFlatIndexType(const std::string& index_type);
+
+bool
+IsVectorType(engine::DataType type);
+
+bool
+IsBinaryVectorType(engine::DataType type);
+
 engine::date_t
 GetDate(const std::time_t& t, int day_delta = 0);
 engine::date_t
@@ -60,7 +69,7 @@ int64_t
 GetSizeOfChunk(const engine::DataChunkPtr& chunk);
 
 Status
-SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks);
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_limit, std::vector<DataChunkPtr>& chunks);
 
 bool
 RequireRawFile(const std::string& index_type);

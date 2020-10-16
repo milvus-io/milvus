@@ -15,6 +15,7 @@
 
 #include "codecs/ExtraFileInfo.h"
 #include "crc32c/crc32c.h"
+#include "utils/Log.h"
 
 const char* MAGIC = "Milvus";
 const int64_t MAGIC_SIZE = 6;
@@ -41,17 +42,16 @@ CheckMagic(const storage::FSHandlerPtr& fs_ptr) {
     magic.resize(MAGIC_SIZE);
     fs_ptr->reader_ptr_->Read(magic.data(), MAGIC_SIZE);
 
-    return !strncmp(magic.data(), MAGIC, MAGIC_SIZE);
+    if (strncmp(magic.data(), MAGIC, MAGIC_SIZE)) {
+        LOG_ENGINE_ERROR_ << "Check magic failed. Record is " << magic.data() << " while magic is Milvus";
+        fs_ptr->reader_ptr_->Close();
+        return false;
+    }
+    return true;
 }
 
 std::unordered_map<std::string, std::string>
-ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
-    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
-
-    std::vector<char> data;
-    data.resize(HEADER_SIZE);
-    fs_ptr->reader_ptr_->Read(data.data(), HEADER_SIZE);
-
+TransformHeaderData(const std::vector<char>& data) {
     std::string header(data.begin(), data.end());
 
     auto result = std::unordered_map<std::string, std::string>();
@@ -69,6 +69,17 @@ ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
     }
 
     return result;
+}
+
+std::unordered_map<std::string, std::string>
+ReadHeaderValues(const storage::FSHandlerPtr& fs_ptr) {
+    fs_ptr->reader_ptr_->Seekg(MAGIC_SIZE);
+
+    std::vector<char> data;
+    data.resize(HEADER_SIZE);
+    fs_ptr->reader_ptr_->Read(data.data(), HEADER_SIZE);
+
+    return TransformHeaderData(data);
 }
 
 std::string
@@ -99,27 +110,25 @@ CalculateSum(char* data, size_t size) {
 }
 
 void
-WriteSum(const storage::FSHandlerPtr& fs_ptr, std::string header, char* data, size_t data_size) {
-    std::vector<char> total;
-    total.resize(MAGIC_SIZE + HEADER_SIZE + data_size);
-    memcpy(total.data(), MAGIC, MAGIC_SIZE);
-    memcpy(total.data() + MAGIC_SIZE, header.data(), HEADER_SIZE);
-    memcpy(total.data() + MAGIC_SIZE + HEADER_SIZE, data, data_size);
-    auto result_sum = CalculateSum(total.data(), MAGIC_SIZE + HEADER_SIZE + data_size);
+WriteSum(const storage::FSHandlerPtr& fs_ptr, const std::string& header, const char* data, const size_t data_size) {
+    auto result_sum = crc32c_extend(0, reinterpret_cast<const uint8_t*>(MAGIC), MAGIC_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(header.data()), HEADER_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(data), data_size);
 
     fs_ptr->writer_ptr_->Write(&result_sum, SUM_SIZE);
 }
 
 bool
-CheckSum(const storage::FSHandlerPtr& fs_ptr) {
-    auto length = fs_ptr->reader_ptr_->Length();
-    fs_ptr->reader_ptr_->Seekg(length - SUM_SIZE);
-    uint32_t record;
-    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
+CheckSum(const std::string& header, const char* data, const size_t data_size, const uint32_t record) {
+    auto result_sum = crc32c_extend(0, reinterpret_cast<const uint8_t*>(MAGIC), MAGIC_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(header.data()), HEADER_SIZE);
+    result_sum = crc32c_extend(result_sum, reinterpret_cast<const uint8_t*>(data), data_size);
 
-    uint32_t result = CalculateSum(fs_ptr, true);
-
-    return record == result;
+    if (record != result_sum) {
+        LOG_ENGINE_ERROR_ << "CheckSum failed. Record is " << record << ". Calculate sum is " << result_sum;
+        return false;
+    }
+    return true;
 }
 
 bool

@@ -35,7 +35,7 @@ DropPartitionReq::Create(const ContextPtr& context, const std::string& collectio
 Status
 DropPartitionReq::OnExecute() {
     try {
-        std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition_tag=" + tag_ + ")";
+        std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition=" + tag_ + ")";
         TimeRecorderAuto rc(hdr);
 
         /* check partition tag */

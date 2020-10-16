@@ -27,8 +27,11 @@
 #include "db/Types.h"
 
 #ifdef MILVUS_GPU_VERSION
+
 #include "cache/GpuCacheMgr.h"
+
 #endif
+
 #include "config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -60,6 +63,22 @@ IsBinaryMetricType(const std::string& metric_type) {
     return (metric_type == knowhere::Metric::HAMMING) || (metric_type == knowhere::Metric::JACCARD) ||
            (metric_type == knowhere::Metric::SUBSTRUCTURE) || (metric_type == knowhere::Metric::SUPERSTRUCTURE) ||
            (metric_type == knowhere::Metric::TANIMOTO);
+}
+
+bool
+IsFlatIndexType(const std::string& index_type) {
+    return (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+            index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP);
+}
+
+bool
+IsVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+}
+
+bool
+IsBinaryVectorType(engine::DataType type) {
+    return type == engine::DataType::VECTOR_BINARY;
 }
 
 engine::date_t
@@ -172,22 +191,22 @@ GetSizeOfChunk(const engine::DataChunkPtr& chunk) {
 }
 
 Status
-SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<DataChunkPtr>& chunks) {
-    if (chunk == nullptr || segment_row_count <= 0) {
+SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_limit, std::vector<DataChunkPtr>& chunks) {
+    if (chunk == nullptr || segment_row_limit <= 0) {
         return Status::OK();
     }
 
-    // no need to split chunk if chunk row count less than segment_row_count
-    // if user specify a tiny segment_row_count(such as 1) , also no need to split,
-    // use build_index_threshold(default is 4096) to avoid tiny segment_row_count
-    if (chunk->count_ <= segment_row_count || chunk->count_ <= config.engine.build_index_threshold.value) {
+    // no need to split chunk if chunk row count less than segment_row_limit
+    // if user specify a tiny segment_row_limit(such as 1) , also no need to split,
+    // use build_index_threshold(default is 4096) to avoid tiny segment_row_limit
+    if (chunk->count_ <= segment_row_limit || chunk->count_ <= config.engine.build_index_threshold()) {
         chunks.push_back(chunk);
         return Status::OK();
     }
 
     int64_t chunk_count = chunk->count_;
 
-    // split chunk accordding to segment row count
+    // split chunk accordding to segment_row_limit
     // firstly validate each field size
     FIELD_WIDTH_MAP fields_width;
     for (auto& pair : chunk->fixed_fields_) {
@@ -212,11 +231,13 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         }
     }
 
+    LOG_SERVER_DEBUG_ << "Split chunk since the chunk row count greater than segment_row_limit";
+
     // secondly, copy new chunk
     int64_t copied_count = 0;
     while (copied_count < chunk_count) {
-        int64_t count_to_copy = segment_row_count;
-        if (chunk_count - copied_count < segment_row_count) {
+        int64_t count_to_copy = segment_row_limit;
+        if (chunk_count - copied_count < segment_row_limit) {
             count_to_copy = chunk_count - copied_count;
         }
         DataChunkPtr new_chunk = std::make_shared<DataChunk>();
@@ -245,6 +266,11 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_count, std::vector<Dat
         copied_count += count_to_copy;
         chunks.emplace_back(new_chunk);
     }
+
+    // data has been copied, do this to free memory
+    chunk->fixed_fields_.clear();
+    chunk->variable_fields_.clear();
+    chunk->count_ = 0;
 
     return Status::OK();
 }

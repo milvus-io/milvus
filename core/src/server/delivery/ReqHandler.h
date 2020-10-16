@@ -80,7 +80,7 @@ class ReqHandler {
 
     Status
     Insert(const ContextPtr& context, const std::string& collection_name, const std::string& partition_name,
-           const int64_t& row_count, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data);
+           InsertParam& insert_param);
 
     Status
     GetEntityByID(const ContextPtr& context, const std::string& collection_name, const engine::IDNumbers& ids,

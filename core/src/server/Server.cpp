@@ -160,7 +160,8 @@ Server::Start() {
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
-                                     config.logs.max_log_file_size(), config.logs.log_rotate_num()));
+                                     config.logs.max_log_file_size(), config.logs.log_rotate_num(),
+                                     config.logs.log_to_stdout(), config.logs.log_to_file()));
 
         auto wal_path = config.wal.enable() ? config.wal.path() : "";
         STATUS_CHECK(Directory::Initialize(config.storage.path(), wal_path, config.logs.path()));
@@ -177,7 +178,7 @@ Server::Start() {
             STATUS_CHECK(Directory::Access(config.storage.path(), wal_path, config.logs.path()));
 
             if (config.system.lock.enable()) {
-                STATUS_CHECK(Directory::Lock(config.storage.path(), wal_path));
+                STATUS_CHECK(Directory::Lock(config.storage.path(), wal_path, fd_list_));
             }
         }
 
@@ -213,6 +214,11 @@ Server::Start() {
 void
 Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
+
+    for (auto fd : fd_list_) {
+        LOG_SERVER_DEBUG_C << "close directory lock file descriptor: " << fd;
+        close(fd);
+    }
 
     /* Unlock and close lockfile */
     if (pid_fd_ != -1) {
@@ -278,10 +284,27 @@ FAIL:
 
 void
 Server::StopService() {
+    // Note: don't change the sequence of stop service if you dont have enough reason
+    // both the WebServer and GrpcServer have similar behavior:
+    //   if you want to stop them, they will wait all the remote requests return.
+    //   most of requests depend on DBImpl(which is wrappered by DBWrapper) interface.
+    //   so we must firstly stop DBWrapper to let the DBImpl know the server is going to shutdown.
+    //   the DBImpl then notify unfinished tasks and break working threads.
+    //   once the DBImpl finish its work, the remote requests can return.
+    //
+    // A typical case is:
+    //   insert millons of entities(assume there are lot of segments), then invoke create_index to build index
+    //   in the command line, execute stop_server.sh to stop the milvus_server
+    //   if we stop DBWrapper before GrpcServer, milvus_server will wait the current segment finish index, then exit
+    //   but if we stop GrpcServer before DBWrapper, milvus_server will wait all segments finish index, then exit
+    //
+    // Note: if any request comning before GrpcServer::Stop() but DBWrapper has been stopped, the request will
+    //   get error message "Milvus server is shutdown!"
+
     // storage::S3ClientWrapper::GetInstance().StopService();
+    DBWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
-    DBWrapper::GetInstance().StopService();
     scheduler::StopSchedulerService();
     engine::snapshot::Snapshots::GetInstance().StopService();
     engine::KnowhereResource::Finalize();

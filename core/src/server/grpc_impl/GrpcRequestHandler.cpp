@@ -19,11 +19,13 @@
 #include <utility>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "query/BinaryQuery.h"
 #include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
 #include "tracing/TracerUtil.h"
+#include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
 namespace milvus {
@@ -91,35 +93,33 @@ RequestMap(ReqType req_type) {
 }
 
 namespace {
+template <typename T>
 void
-CopyVectorData(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
-               std::vector<uint8_t>& vectors_data) {
-    // calculate buffer size
+RecordDataAddr(const std::string& field_name, int32_t num, const T* data, InsertParam& insert_param) {
+    int64_t bytes = num * sizeof(T);
+    const char* data_addr = reinterpret_cast<const char*>(data);
+    auto data_segment = std::make_pair(data_addr, bytes);
+    insert_param.fields_data_[field_name].emplace_back(data_segment);
+}
+
+void
+RecordVectorDataAddr(const std::string& field_name,
+                     const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
+                     InsertParam& insert_param) {
+    // calculate data size
     int64_t float_data_size = 0, binary_data_size = 0;
     for (auto& record : grpc_records) {
         float_data_size += record.float_data_size();
         binary_data_size += record.binary_data().size();
     }
 
-    int64_t data_size = binary_data_size;
-    if (float_data_size > 0) {
-        data_size = float_data_size * sizeof(float);
-    }
-
-    // copy vector data
-    vectors_data.resize(data_size);
-    int64_t offset = 0;
     if (float_data_size > 0) {
         for (auto& record : grpc_records) {
-            int64_t single_size = record.float_data_size() * sizeof(float);
-            memcpy(&vectors_data[offset], record.float_data().data(), single_size);
-            offset += single_size;
+            RecordDataAddr<float>(field_name, record.float_data_size(), record.float_data().data(), insert_param);
         }
     } else if (binary_data_size > 0) {
         for (auto& record : grpc_records) {
-            int64_t single_size = record.binary_data().size();
-            memcpy(&vectors_data[offset], record.binary_data().data(), single_size);
-            offset += single_size;
+            RecordDataAddr<char>(field_name, record.binary_data().size(), record.binary_data().data(), insert_param);
         }
     }
 }
@@ -591,7 +591,10 @@ get_request_id(::grpc::ServerContext* context) {
 }  // namespace
 
 GrpcRequestHandler::GrpcRequestHandler(const std::shared_ptr<opentracing::Tracer>& tracer)
-    : tracer_(tracer), random_num_generator_() {
+    : tracer_(tracer),
+      random_num_generator_(),
+      max_concurrent_insert_request_size_(config.cache.max_concurrent_insert_request_size()),
+      max_concurrent_insert_request_size(max_concurrent_insert_request_size_) {
     std::random_device random_device;
     random_num_generator_.seed(random_device());
 }
@@ -1296,8 +1299,15 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     //    engine::VectorsData vectors;
     //    CopyRowRecords(request->entity().vector_data(0).value(), request->entity_id_array(), vectors);
 
+    auto request_id = GetContext(context)->ReqID();
     CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", request_id.c_str(), __func__);
+
+    // By limiting the number of requests processed at the same time,
+    // avoid excessive memory consumption (causing oom in extreme cases).
+    // acquire resources
+    int64_t request_size = request->ByteSizeLong();
+    WaitToInsert(request_id, request_size);
 
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
@@ -1308,10 +1318,6 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
             return ::grpc::Status::OK;
         }
     }
-
-    auto field_size = request->fields_size();
-
-    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
 
     auto valid_row_count = [&](int32_t& base, int32_t test) -> bool {
         if (base < 0) {
@@ -1329,8 +1335,10 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         return true;
     };
 
-    // copy field data
+    // construct insert parameter
+    InsertParam insert_param;
     int32_t row_num = -1;
+    auto field_size = request->fields_size();
     for (int i = 0; i < field_size; i++) {
         auto grpc_int32_size = request->fields(i).attr_record().int32_value_size();
         auto grpc_int64_size = request->fields(i).attr_record().int64_value_size();
@@ -1339,66 +1347,64 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
         const auto& field = request->fields(i);
         auto& field_name = field.field_name();
 
-        std::vector<uint8_t> temp_data;
         if (grpc_int32_size > 0) {
             if (!valid_row_count(row_num, grpc_int32_size)) {
                 return ::grpc::Status::OK;
             }
-            temp_data.resize(grpc_int32_size * sizeof(int32_t));
-            memcpy(temp_data.data(), field.attr_record().int32_value().data(), grpc_int32_size * sizeof(int32_t));
+            RecordDataAddr<int32_t>(field_name, grpc_int32_size, field.attr_record().int32_value().data(),
+                                    insert_param);
         } else if (grpc_int64_size > 0) {
             if (!valid_row_count(row_num, grpc_int64_size)) {
                 return ::grpc::Status::OK;
             }
-            temp_data.resize(grpc_int64_size * sizeof(int64_t));
-            memcpy(temp_data.data(), field.attr_record().int64_value().data(), grpc_int64_size * sizeof(int64_t));
+            RecordDataAddr<int64_t>(field_name, grpc_int64_size, field.attr_record().int64_value().data(),
+                                    insert_param);
         } else if (grpc_float_size > 0) {
             if (!valid_row_count(row_num, grpc_float_size)) {
                 return ::grpc::Status::OK;
             }
-            temp_data.resize(grpc_float_size * sizeof(float));
-            memcpy(temp_data.data(), field.attr_record().float_value().data(), grpc_float_size * sizeof(float));
+            RecordDataAddr<float>(field_name, grpc_float_size, field.attr_record().float_value().data(), insert_param);
         } else if (grpc_double_size > 0) {
             if (!valid_row_count(row_num, grpc_double_size)) {
                 return ::grpc::Status::OK;
             }
-            temp_data.resize(grpc_double_size * sizeof(double));
-            memcpy(temp_data.data(), field.attr_record().double_value().data(), grpc_double_size * sizeof(double));
+            RecordDataAddr<double>(field_name, grpc_double_size, field.attr_record().double_value().data(),
+                                   insert_param);
         } else {
             if (!valid_row_count(row_num, field.vector_record().records_size())) {
                 return ::grpc::Status::OK;
             }
-            CopyVectorData(field.vector_record().records(), temp_data);
+            RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param);
         }
-
-        chunk_data.insert(std::make_pair(field_name, temp_data));
     }
+    insert_param.row_count_ = row_num;
 
     // copy id array
     if (request->entity_id_array_size() > 0) {
-        int64_t size = request->entity_id_array_size() * sizeof(int64_t);
-        std::vector<uint8_t> temp_data(size, 0);
-        memcpy(temp_data.data(), request->entity_id_array().data(), size);
-        chunk_data.insert(std::make_pair(engine::FIELD_UID, temp_data));
+        RecordDataAddr<int64_t>(engine::FIELD_UID, request->entity_id_array_size(), request->entity_id_array().data(),
+                                insert_param);
     }
 
     std::string collection_name = request->collection_name();
     std::string partition_name = request->partition_tag();
-    Status status = req_handler_.Insert(GetContext(context), collection_name, partition_name, row_num, chunk_data);
+    Status status = req_handler_.Insert(GetContext(context), collection_name, partition_name, insert_param);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
 
     // return generated ids
-    auto pair = chunk_data.find(engine::FIELD_UID);
-    if (pair != chunk_data.end()) {
-        response->mutable_entity_id_array()->Resize(static_cast<int>(pair->second.size() / sizeof(int64_t)), 0);
-        memcpy(response->mutable_entity_id_array()->mutable_data(), pair->second.data(), pair->second.size());
+    if (!insert_param.id_returned_.empty()) {
+        response->mutable_entity_id_array()->Resize(static_cast<int>(insert_param.id_returned_.size()), 0);
+        memcpy(response->mutable_entity_id_array()->mutable_data(), insert_param.id_returned_.data(),
+               insert_param.id_returned_.size() * sizeof(int64_t));
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
+
+    // release resources
+    FinishInsert(request_id, request_size);
 
     return ::grpc::Status::OK;
 }
@@ -1831,7 +1837,14 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();
-    grpc_entity->mutable_valid_row()->Resize(id_size, true);
+    for (int64_t i = 0; i < result->result_ids_.size(); i++) {
+        if (result->result_ids_[i] == -1) {
+            id_size--;
+            grpc_entity->add_valid_row(false);
+        } else {
+            grpc_entity->add_valid_row(true);
+        }
+    }
 
     CopyDataChunkToEntity(result->data_chunk_, field_mappings, id_size, grpc_entity);
 
@@ -1847,6 +1860,35 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     SET_RESPONSE(response->mutable_status(), status, context);
 
     return ::grpc::Status::OK;
+}
+
+void
+GrpcRequestHandler::WaitToInsert(const std::string& request_id, int64_t request_size) {
+    std::unique_lock<std::mutex> lock(max_concurrent_insert_request_mutex);
+    insert_event_cv_.wait(lock, [&] { return max_concurrent_insert_request_size - request_size > 0; });
+    max_concurrent_insert_request_size -= request_size;
+    LOG_SERVER_DEBUG_ << LogOut(
+        "Start to process insert request [%s], "
+        "gRPC buffer size(request/remain/total): %s, %s, %s",
+        request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+        CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
+    lock.unlock();
+}
+
+void
+GrpcRequestHandler::FinishInsert(const std::string& request_id, int64_t request_size) {
+    {
+        std::lock_guard<std::mutex> lock(max_concurrent_insert_request_mutex);
+        max_concurrent_insert_request_size += request_size;
+        LOG_SERVER_DEBUG_ << LogOut(
+            "Finish to process insert request [%s], "
+            "gRPC buffer size(request/remain/total): %s, %s, %s",
+            request_id.c_str(), CommonUtil::ConvertSize(request_size).c_str(),
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size).c_str(),
+            CommonUtil::ConvertSize(max_concurrent_insert_request_size_).c_str());
+    }
+    insert_event_cv_.notify_all();
 }
 
 }  // namespace grpc

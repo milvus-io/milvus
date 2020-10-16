@@ -43,6 +43,12 @@ GetCollectionInfoReq::OnExecute() {
 
         STATUS_CHECK(ValidateCollectionName(collection_name_));
 
+        bool exist = false;
+        STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
+        if (!exist) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, "Collection not exist: " + collection_name_);
+        }
+
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::FieldElementMappings field_mappings;
         STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, field_mappings));
@@ -71,8 +77,6 @@ GetCollectionInfoReq::OnExecute() {
 
             collection_schema_.fields_.insert(std::make_pair(field_name, field_schema));
         }
-
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

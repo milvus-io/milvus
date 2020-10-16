@@ -80,7 +80,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     // untrained index
     {
         ASSERT_ANY_THROW(index_->Serialize(search_conf));
-        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf, nullptr));
         ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
@@ -101,7 +101,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     index_->Load(bs);
 
-    auto result = index_->Query(query_dataset, search_conf);
+    auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
 
     /* test NSG GPU train */
@@ -122,7 +122,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     new_index_1->Load(bs);
 
-    auto new_result_1 = new_index_1->Query(query_dataset, search_conf);
+    auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
     AssertAnns(new_result_1, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
@@ -163,7 +163,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
 
     index_->Load(bs);
 
-    auto result = index_->Query(query_dataset, search_conf);
+    auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
@@ -175,9 +175,6 @@ TEST_F(NSGInterfaceTest, delete_test) {
     }
 
     auto I_before = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-
-    // search xq with delete
-    index_->SetBlacklist(bitset);
 
     // Serialize and Load before Query
     bs = index_->Serialize(search_conf);
@@ -191,7 +188,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     bs.Append(RAW_DATA, bptr);
 
     index_->Load(bs);
-    auto result_after = index_->Query(query_dataset, search_conf);
+    auto result_after = index_->Query(query_dataset, search_conf, bitset);
     AssertAnns(result_after, nq, k, CheckMode::CHECK_NOT_EQUAL);
     auto I_after = result_after->Get<int64_t*>(milvus::knowhere::meta::IDS);
 

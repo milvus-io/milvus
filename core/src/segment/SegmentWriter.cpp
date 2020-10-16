@@ -56,7 +56,7 @@ SegmentWriter::Initialize() {
 
     segment_ptr_ = std::make_shared<engine::Segment>();
 
-    const engine::SegmentVisitor::IdMapT& field_map = segment_visitor_->GetFieldVisitors();
+    auto& field_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_map) {
         const engine::snapshot::FieldPtr& field = iter.second->GetField();
         STATUS_CHECK(segment_ptr_->AddField(field));
@@ -91,8 +91,6 @@ SegmentWriter::Serialize() {
 
 Status
 SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryDataPtr& raw) {
-    TimeRecorderAuto recorder("SegmentWriter::WriteField: " + file_path);
-
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetBlockFormat()->Write(fs_ptr_, file_path, raw));
 
@@ -101,7 +99,7 @@ SegmentWriter::WriteField(const std::string& file_path, const engine::BinaryData
 
 Status
 SegmentWriter::WriteFields() {
-    TimeRecorder recorder("SegmentWriter::WriteFields");
+    TimeRecorderAuto recorder("SegmentWriter::WriteFields");
 
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     for (auto& iter : field_visitors_map) {
@@ -176,8 +174,6 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
         return Status(DB_ERROR, "WriteBloomFilter: null pointer");
     }
 
-    TimeRecorderAuto recorder("SegmentWriter::WriteBloomFilter: " + file_path);
-
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetIdBloomFilterFormat()->Write(fs_ptr_, file_path, id_bloom_filter_ptr));
 
@@ -186,8 +182,6 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
 
 Status
 SegmentWriter::WriteDeletedDocs() {
-    TimeRecorder recorder("SegmentWriter::WriteDeletedDocs");
-
     auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
@@ -215,8 +209,6 @@ SegmentWriter::WriteDeletedDocs(const std::string& file_path, const DeletedDocsP
         return Status::OK();
     }
 
-    TimeRecorderAuto recorder("SegmentWriter::WriteDeletedDocs: " + file_path);
-
     auto& ss_codec = codec::Codec::instance();
     STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Write(fs_ptr_, file_path, deleted_docs));
 
@@ -230,7 +222,7 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // check conflict
-    int64_t src_id = 0, target_id = 0;
+    int64_t src_id = -1, target_id = -2;
     auto status = GetSegmentID(target_id);
     if (!status.ok()) {
         return status;
@@ -255,11 +247,9 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
     }
 
     // merge deleted docs (Note: this step must before merge raw data)
+    // Note: deleted docs file could not exist, that means the segment has no deleted entities
     segment::DeletedDocsPtr src_deleted_docs;
-    status = segment_reader->LoadDeletedDocs(src_deleted_docs);
-    if (!status.ok()) {
-        return status;
-    }
+    segment_reader->LoadDeletedDocs(src_deleted_docs);
 
     engine::SegmentPtr src_segment;
     status = segment_reader->GetSegment(src_segment);
@@ -302,32 +292,6 @@ SegmentWriter::Merge(const SegmentReaderPtr& segment_reader) {
 size_t
 SegmentWriter::RowCount() {
     return segment_ptr_->GetRowCount();
-}
-
-Status
-SegmentWriter::LoadUids(std::vector<engine::idx_t>& uids) {
-    engine::BinaryDataPtr raw;
-    auto status = segment_ptr_->GetFixedFieldData(engine::FIELD_UID, raw);
-    if (!status.ok()) {
-        LOG_ENGINE_ERROR_ << status.message();
-        return status;
-    }
-
-    if (raw == nullptr) {
-        return Status(DB_ERROR, "Invalid id field");
-    }
-
-    if (raw->data_.size() % sizeof(engine::idx_t) != 0) {
-        std::string err_msg = "Failed to load uids: illegal file size";
-        LOG_ENGINE_ERROR_ << err_msg;
-        return Status(DB_ERROR, err_msg);
-    }
-
-    uids.clear();
-    uids.resize(raw->data_.size() / sizeof(engine::idx_t));
-    memcpy(uids.data(), raw->data_.data(), raw->data_.size());
-
-    return Status::OK();
 }
 
 Status

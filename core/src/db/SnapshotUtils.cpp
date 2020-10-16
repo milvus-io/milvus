@@ -31,9 +31,10 @@ namespace engine {
 const char* JSON_ROW_COUNT = "row_count";
 const char* JSON_ID = "id";
 const char* JSON_PARTITIONS = "partitions";
+const char* JSON_PARTITION_COUNT = "partition_count";
 const char* JSON_SEGMENTS = "segments";
+const char* JSON_SEGMENT_COUNT = "segment_count";
 const char* JSON_FIELD = "field";
-const char* JSON_FIELD_ELEMENT = "field_element";
 const char* JSON_PARTITION_TAG = "tag";
 const char* JSON_FILES = "files";
 const char* JSON_NAME = "name";
@@ -120,29 +121,31 @@ GetSnapshotIndex(const std::string& collection_name, const std::string& field_na
 
 Status
 DeleteSnapshotIndex(const std::string& collection_name, const std::string& field_name) {
+    snapshot::ScopedSnapshotT ss;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
     // drop for all fields or drop for one field?
     std::vector<std::string> field_names;
     if (field_name.empty()) {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
         field_names = ss->GetFieldNames();
     } else {
         field_names.push_back(field_name);
     }
 
+    snapshot::OperationContext context;
     for (auto& name : field_names) {
-        snapshot::ScopedSnapshotT ss;
-        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
         std::vector<snapshot::FieldElementPtr> elements = ss->GetFieldElementsByField(name);
         for (auto& element : elements) {
             if (element->GetFEtype() == engine::FieldElementType::FET_INDEX ||
                 element->GetFEtype() == engine::FieldElementType::FET_COMPRESS) {
-                snapshot::OperationContext context;
                 context.stale_field_elements.push_back(element);
-                auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
-                STATUS_CHECK(op->Push());
             }
         }
+    }
+
+    if (!context.stale_field_elements.empty()) {
+        auto op = std::make_shared<snapshot::DropAllIndexOperation>(context, ss);
+        STATUS_CHECK(op->Push());
     }
 
     return Status::OK();
@@ -155,12 +158,17 @@ IsVectorField(const engine::snapshot::FieldPtr& field) {
     }
 
     auto ftype = static_cast<engine::DataType>(field->GetFtype());
-    return IsVectorField(ftype);
+    return utils::IsVectorType(ftype);
 }
 
 bool
-IsVectorField(engine::DataType type) {
-    return type == engine::DataType::VECTOR_FLOAT || type == engine::DataType::VECTOR_BINARY;
+IsBinaryVectorField(const engine::snapshot::FieldPtr& field) {
+    if (field == nullptr) {
+        return false;
+    }
+
+    auto ftype = static_cast<engine::DataType>(field->GetFtype());
+    return utils::IsBinaryVectorType(ftype);
 }
 
 Status
@@ -171,7 +179,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
     size_t total_row_count = 0;
     size_t total_data_size = 0;
 
-    // get partition information
+    // partition statistic
     std::unordered_map<snapshot::ID_TYPE, milvus::json> partitions;
     auto partition_names = ss->GetPartitionNames();
     for (auto& name : partition_names) {
@@ -192,7 +200,8 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 
     // just ensure segments listed in id order
     snapshot::IDS_TYPE segment_ids;
-    auto handler = std::make_shared<SegmentsToSearchCollector>(ss, segment_ids);
+    std::vector<std::string> partition_tags;
+    auto handler = std::make_shared<SegmentsToSearchCollector>(ss, partition_tags, segment_ids);
     handler->Iterate();
     std::sort(segment_ids.begin(), segment_ids.end());
 
@@ -204,6 +213,7 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             continue;
         }
 
+        // element files statistic
         milvus::json json_files;
         auto seg_visitor = engine::SegmentVisitor::Build(ss, id);
         auto& field_visitors = seg_visitor->GetFieldVisitors();
@@ -216,27 +226,32 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
                     continue;
                 }
 
-                if (pair.second->GetFile()) {
-                    milvus::json json_file;
-                    json_file[JSON_DATA_SIZE] = pair.second->GetFile()->GetSize();
-                    json_file[JSON_PATH] =
-                        engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", pair.second->GetFile());
-                    json_file[JSON_FIELD] = field->GetName();
-
-                    // if the element is index, print index name/type
-                    // else print element name
-                    auto element = pair.second->GetElement();
-                    if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
-                        json_file[JSON_NAME] = element->GetName();
-                        json_file[JSON_INDEX_TYPE] = element->GetTypeName();
-                    } else {
-                        json_file[JSON_NAME] = element->GetName();
-                    }
-                    json_files.push_back(json_file);
+                // if the file doesn't exist, ignore it
+                auto file_ptr = pair.second->GetFile();
+                if (file_ptr == nullptr || file_ptr->GetSize() == 0) {
+                    continue;
                 }
+
+                // file statistic
+                milvus::json json_file;
+                json_file[JSON_DATA_SIZE] = file_ptr->GetSize();
+                json_file[JSON_PATH] = engine::snapshot::GetResPath<engine::snapshot::SegmentFile>("", file_ptr);
+                json_file[JSON_FIELD] = field->GetName();
+
+                // if the element is index, print index name/type
+                // else print element name
+                auto element = pair.second->GetElement();
+                if (element->GetFEtype() == engine::FieldElementType::FET_INDEX) {
+                    json_file[JSON_NAME] = element->GetName();
+                    json_file[JSON_INDEX_TYPE] = element->GetTypeName();
+                } else {
+                    json_file[JSON_NAME] = element->GetName();
+                }
+                json_files.push_back(json_file);
             }
         }
 
+        // segment statistic
         milvus::json json_segment;
         json_segment[JSON_ID] = id;
         json_segment[JSON_ROW_COUNT] = segment_commit->GetRowCount();
@@ -254,42 +269,45 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
             json_segments.push_back(json);
         }
         pair.second[JSON_SEGMENTS] = json_segments;
+        pair.second[JSON_SEGMENT_COUNT] = json_segments.size();
         json_partitions.push_back(pair.second);
     }
 
+    // general statistic
     json_info[JSON_ROW_COUNT] = total_row_count;
     json_info[JSON_DATA_SIZE] = total_data_size;
     json_info[JSON_PARTITIONS] = json_partitions;
+    json_info[JSON_PARTITION_COUNT] = json_partitions.size();
 
     return Status::OK();
 }
 
 Status
-GetSegmentRowCount(const std::string& collection_name, int64_t& segment_row_count) {
+GetSegmentRowLimit(const std::string& collection_name, int64_t& segment_row_limit) {
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
-    return GetSegmentRowCount(collection, segment_row_count);
+    return GetSegmentRowLimit(collection, segment_row_limit);
 }
 
 Status
-GetSegmentRowCount(int64_t collection_id, int64_t& segment_row_count) {
+GetSegmentRowLimit(int64_t collection_id, int64_t& segment_row_limit) {
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_id));
 
     // get row count per segment
     auto collection = latest_ss->GetCollection();
-    return GetSegmentRowCount(collection, segment_row_count);
+    return GetSegmentRowLimit(collection, segment_row_limit);
 }
 
 Status
-GetSegmentRowCount(const snapshot::CollectionPtr& collection, int64_t& segment_row_count) {
-    segment_row_count = DEFAULT_SEGMENT_ROW_COUNT;
+GetSegmentRowLimit(const snapshot::CollectionPtr& collection, int64_t& segment_row_limit) {
+    segment_row_limit = DEFAULT_SEGMENT_ROW_LIMIT;
     const json params = collection->GetParams();
-    if (params.find(PARAM_SEGMENT_ROW_COUNT) != params.end()) {
-        segment_row_count = params[PARAM_SEGMENT_ROW_COUNT];
+    if (params.find(PARAM_SEGMENT_ROW_LIMIT) != params.end()) {
+        segment_row_limit = params[PARAM_SEGMENT_ROW_LIMIT];
     }
 
     return Status::OK();
@@ -353,6 +371,23 @@ DropSegment(snapshot::ScopedSnapshotT& ss, snapshot::ID_TYPE segment_id) {
     drop_seg_context.prev_segment = segment;
     auto drop_op = std::make_shared<snapshot::DropSegmentOperation>(drop_seg_context, ss);
     return drop_op->Push();
+}
+
+bool
+FieldRequireBuildIndex(const engine::SegmentFieldVisitorPtr& field_visitor) {
+    auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+    if (element_visitor == nullptr) {
+        return false;  // index undefined
+    }
+    if (element_visitor->GetFile() != nullptr) {
+        return false;  // index already build
+    }
+    auto element = element_visitor->GetElement();
+    if (utils::IsFlatIndexType(element->GetTypeName())) {
+        return false;  // no need to build IDMAP
+    }
+
+    return true;
 }
 
 }  // namespace engine

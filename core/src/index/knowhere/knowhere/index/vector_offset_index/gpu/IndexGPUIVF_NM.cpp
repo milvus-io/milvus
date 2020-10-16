@@ -118,7 +118,8 @@ GPUIVF_NM::SerializeImpl(const IndexType& type) {
 }
 
 void
-GPUIVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                     const faiss::ConcurrentBitsetPtr& bitset) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
@@ -132,7 +133,7 @@ GPUIVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, 
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+            device_index->search(search_size, data + i * dim, k, distances + i * k, labels + i * k, bitset);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

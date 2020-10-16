@@ -16,6 +16,7 @@
 
 #include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
@@ -96,6 +97,10 @@ KnowhereResource::Initialize() {
                                                                 gpu_resource.second.resource_num);
     }
 #endif
+
+    if (config.engine.stat_optimizer_enable()) {
+        knowhere::enable_faiss_logging();
+    }
 
     return Status::OK();
 }

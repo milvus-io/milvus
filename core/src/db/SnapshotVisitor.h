@@ -17,6 +17,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace engine {
@@ -28,10 +29,13 @@ class SnapshotVisitor {
     explicit SnapshotVisitor(snapshot::ID_TYPE collection_id);
 
     Status
-    SegmentsToSearch(snapshot::IDS_TYPE& segment_ids);
+    SegmentsToSearch(const std::vector<std::string>& partitions, snapshot::IDS_TYPE& segment_ids);
 
     Status
     SegmentsToIndex(const std::string& field_name, snapshot::IDS_TYPE& segment_ids, bool force_build);
+
+    Status
+    SegmentsToMerge(snapshot::IDS_TYPE& segment_ids);
 
  protected:
     snapshot::ScopedSnapshotT ss_;

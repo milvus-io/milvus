@@ -83,55 +83,70 @@ WebErrorMap(ErrorCode code) {
     }
 }
 
-template <typename T>
-void
-CopyStructuredData(const nlohmann::json& json, std::vector<uint8_t>& raw) {
-    std::vector<T> values;
-    auto size = json.size();
-    values.resize(size);
-    raw.resize(size * sizeof(T));
-    size_t offset = 0;
-    for (const auto& data : json) {
-        values[offset] = data.get<T>();
-        ++offset;
-    }
-    memcpy(raw.data(), values.data(), size * sizeof(T));
-}
+using ChunkDataMap = std::unordered_map<std::string, std::vector<uint8_t>>;
 
 void
-CopyRowVectorFromJson(const nlohmann::json& json, std::vector<uint8_t>& vectors_data, bool bin) {
-    //    if (!json.is_array()) {
-    //        return Status(ILLEGAL_BODY, "field \"vectors\" must be a array");
-    //    }
+CopyRowVectorFromJson(const nlohmann::json& json, const std::string& field_name, int64_t offset, int64_t row_num,
+                      bool is_binary, ChunkDataMap& chunk_data) {
+    std::vector<uint8_t> binary_data;
     std::vector<float> float_vector;
-    if (!bin) {
+    uint64_t bytes = 0;
+    if (is_binary) {
+        for (auto& data : json) {
+            binary_data.emplace_back(data.get<uint8_t>());
+        }
+        bytes = binary_data.size() * sizeof(uint8_t);
+    } else {
         for (auto& data : json) {
             float_vector.emplace_back(data.get<float>());
         }
-        auto size = float_vector.size() * sizeof(float);
-        vectors_data.resize(size);
-        memcpy(vectors_data.data(), float_vector.data(), size);
+        bytes = float_vector.size() * sizeof(float);
+    }
+
+    if (chunk_data.find(field_name) == chunk_data.end()) {
+        std::vector<uint8_t> data(row_num * bytes, 0);
+        chunk_data.insert({field_name, data});
+    }
+
+    int64_t vector_offset = offset * bytes;
+    std::vector<uint8_t>& target_data = chunk_data.at(field_name);
+    if (is_binary) {
+        memcpy(target_data.data() + vector_offset, binary_data.data(), bytes);
     } else {
-        for (auto& data : json) {
-            vectors_data.emplace_back(data.get<uint8_t>());
-        }
+        memcpy(target_data.data() + vector_offset, float_vector.data(), bytes);
     }
 }
 
 template <typename T>
 void
-CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, const int64_t offset,
-                      const int64_t row_num, std::unordered_map<std::string, std::vector<uint8_t>>& chunk_data) {
+CopyRowStructuredData(const nlohmann::json& entity_json, const std::string& field_name, int64_t offset, int64_t row_num,
+                      ChunkDataMap& chunk_data) {
     T value = entity_json.get<T>();
-    std::vector<uint8_t> temp_data(sizeof(T), 0);
-    memcpy(temp_data.data(), &value, sizeof(T));
     if (chunk_data.find(field_name) == chunk_data.end()) {
         std::vector<uint8_t> T_data(row_num * sizeof(T), 0);
-        memcpy(T_data.data(), temp_data.data(), sizeof(T));
+        memcpy(T_data.data(), &value, sizeof(T));
         chunk_data.insert({field_name, T_data});
     } else {
         int64_t T_offset = offset * sizeof(T);
-        memcpy(chunk_data.at(field_name).data() + T_offset, temp_data.data(), sizeof(T));
+        memcpy(chunk_data.at(field_name).data() + T_offset, &value, sizeof(T));
+    }
+}
+
+template <typename T>
+void
+RecordDataAddr(const std::string& field_name, int32_t num, const T* data, InsertParam& insert_param) {
+    int64_t bytes = num * sizeof(T);
+    const char* data_addr = reinterpret_cast<const char*>(data);
+    auto data_segment = std::make_pair(data_addr, bytes);
+    insert_param.fields_data_[field_name].emplace_back(data_segment);
+}
+
+void
+ConvertToParam(const ChunkDataMap& data_chunk, int64_t row_num, InsertParam& insert_param) {
+    insert_param.row_count_ = row_num;
+    for (auto& pair : data_chunk) {
+        auto& bin = pair.second;
+        RecordDataAddr<uint8_t>(pair.first, bin.size(), bin.data(), insert_param);
     }
 }
 
@@ -281,14 +296,14 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
             continue;
         }
         nlohmann::json field_json;
-        field_json["field_name"] = field.first;
-        field_json["field_type"] = type2str.at(field.second.field_type_);
+        field_json["name"] = field.first;
+        field_json["type"] = type2str.at(field.second.field_type_);
         field_json["index_params"] = field.second.index_params_;
-        field_json["extra_params"] = field.second.field_params_;
+        field_json["params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
-    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_LIMIT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
         json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
@@ -304,7 +319,7 @@ WebRequestHandler::GetCollectionStat(const std::string& collection_name, nlohman
 
     if (status.ok()) {
         try {
-            json_out = nlohmann::json::parse(collection_stats);
+            json_out["data"] = nlohmann::json::parse(collection_stats);
         } catch (std::exception& e) {
             return Status(SERVER_UNEXPECTED_ERROR,
                           "Error occurred when parsing collection stat information: " + std::string(e.what()));
@@ -349,7 +364,7 @@ WebRequestHandler::GetPageEntities(const std::string& collection_name, const std
             }
         }
     }
-    json_out["count"] = row_count;
+    json_out["total"] = row_count;
     int64_t real_offset = entity_num;
     int64_t real_page_size = page_size;
 
@@ -396,7 +411,7 @@ WebRequestHandler::GetSegmentVectors(const std::string& collection_name, int64_t
     } else {
         json_out["vectors"] = vectors_json;
     }
-    json_out["count"] = vector_ids.size();
+    json_out["total"] = vector_ids.size();
 
     //    AddStatusToJson(json_out, status.code(), status.message());
 
@@ -419,7 +434,7 @@ WebRequestHandler::GetSegmentIds(const std::string& collection_name, int64_t seg
                 json_out["ids"].push_back(std::to_string(ids.at(i)));
             }
         }
-        json_out["count"] = ids.size();
+        json_out["total"] = ids.size();
     }
 
     return status;
@@ -501,7 +516,8 @@ WebRequestHandler::Compact(const nlohmann::json& json, std::string& result_str) 
 
     auto name = collection_name.get<std::string>();
 
-    double compact_threshold = 0.1;  // compact trigger threshold: delete_counts/segment_counts
+    // compact trigger threshold: delete_counts/segment_counts
+    auto compact_threshold = json["threshold"].get<double>();
     auto status = req_handler_.Compact(context_ptr_, name, compact_threshold);
 
     if (status.ok()) {
@@ -810,7 +826,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         nlohmann::json result_json;
-        result_json["num"] = result->row_num_;
+        result_json["nq"] = result->row_num_;
         if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
             result_str = result_json.dump();
@@ -888,7 +904,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             }
             result_json["result"].push_back(raw_result_json);
         }
-        result_str = result_json.dump();
+        nlohmann::json data_json;
+        data_json["data"] = result_json;
+        result_str = data_json.dump();
     }
 
     return Status::OK();
@@ -1238,16 +1256,16 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     std::unordered_map<std::string, FieldSchema> fields;
     for (auto& field : json_str["fields"]) {
         FieldSchema field_schema;
-        std::string field_name = field["field_name"];
+        std::string field_name = field["name"];
 
         if (fields.find(field_name) != fields.end()) {
             auto status = Status(SERVER_INVALID_FIELD_NAME, "Collection mapping has duplicate field names");
             ASSIGN_RETURN_STATUS_DTO(status)
         }
 
-        field_schema.field_params_ = field["extra_params"];
+        field_schema.field_params_ = field["params"];
 
-        std::string field_type = field["field_type"];
+        std::string field_type = field["type"];
         std::transform(field_type.begin(), field_type.end(), field_type.begin(), ::tolower);
 
         if (str2type.find(field_type) == str2type.end()) {
@@ -1260,8 +1278,8 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     }
 
     milvus::json json_params;
-    if (json_str.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_params[engine::PARAM_SEGMENT_ROW_COUNT] = json_str[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (json_str.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_params[engine::PARAM_SEGMENT_ROW_LIMIT] = json_str[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (json_str.contains(engine::PARAM_UID_AUTOGEN)) {
         json_params[engine::PARAM_UID_AUTOGEN] = json_str[engine::PARAM_UID_AUTOGEN];
@@ -1321,11 +1339,11 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
     }
 
     nlohmann::json result_json;
-    result_json["count"] = collections.size();
+    result_json["data"]["total"] = collections.size();
     if (collections_json.empty()) {
-        result_json["collections"] = std::vector<int64_t>();
+        result_json["data"]["collections"] = std::vector<int64_t>();
     } else {
-        result_json["collections"] = collections_json;
+        result_json["data"]["collections"] = collections_json;
     }
 
     AddStatusToJson(result_json, status.code(), status.message());
@@ -1352,7 +1370,9 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
     } else {
         nlohmann::json json;
         status = GetCollectionMetaInfo(collection_name->std_str(), json);
-        result = status.ok() ? json.dump().c_str() : "NULL";
+        nlohmann::json result_json;
+        result_json["data"] = json;
+        result = status.ok() ? result_json.dump().c_str() : "NULL";
     }
 
     ASSIGN_RETURN_STATUS_DTO(status);
@@ -1410,7 +1430,7 @@ WebRequestHandler::CreatePartition(const OString& collection_name, const Partiti
 
 StatusDtoT
 WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
-                                  PartitionListDtoT& partition_list_dto) {
+                                  OString& result_str) {
     int64_t offset = 0;
     auto status = ParseQueryInteger(query_params, "offset", offset);
     if (!status.ok()) {
@@ -1452,16 +1472,21 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
         page_size = std::min(partition_names.size() - offset, static_cast<size_t>(page_size));
     }
 
-    partition_list_dto->count = partition_names.size();
-    partition_list_dto->partitions = partition_list_dto->partitions.createShared();
+    milvus::json data_json;
+    data_json["total"] = partition_names.size();
 
     if (offset < static_cast<int64_t>(partition_names.size())) {
         for (int64_t i = offset; i < page_size + offset; i++) {
-            auto partition_dto = PartitionFieldsDto::createShared();
-            partition_dto->partition_tag = partition_names.at(i).c_str();
-            partition_list_dto->partitions->push_back(partition_dto);
+            milvus::json partition_json;
+            partition_json["partition_tag"] = partition_names.at(i).c_str();
+            data_json["partitions"].push_back(partition_json);
         }
     }
+
+    milvus::json result_json;
+    result_json["data"] = data_json;
+    AddStatusToJson(result_json, status.code(), status.message());
+    result_str = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1553,7 +1578,7 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
     } else {
         result_json["segments"] = segments_json;
     }
-    result_json["count"] = segments_json.size();
+    result_json["total"] = segments_json.size();
     AddStatusToJson(result_json, status.code(), status.message());
     response = result_json.dump().c_str();
 
@@ -1626,29 +1651,24 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         field_types.insert({field.first, field.second.field_type_});
     }
 
-    std::unordered_map<std::string, std::vector<uint8_t>> chunk_data;
-    int64_t row_num;
-
     auto entities_json = body_json["entities"];
     if (!entities_json.is_array()) {
         RETURN_STATUS_DTO(ILLEGAL_ARGUMENT, "Entities is not an array");
     }
-    row_num = entities_json.size();
+
+    // construct chunk data by json object
+    ChunkDataMap chunk_data;
+    int64_t row_num = entities_json.size();
     int64_t offset = 0;
-    std::vector<uint8_t> ids;
     for (auto& one_entity : entities_json) {
         for (auto& entity : one_entity.items()) {
             std::string field_name = entity.key();
             if (field_name == NAME_ID) {
-                if (ids.empty()) {
-                    ids.resize(row_num * sizeof(int64_t));
-                }
-                auto id = entity.value().get<int64_t>();
-                int64_t id_offset = offset * sizeof(int64_t);
-                memcpy(ids.data() + id_offset, &id, sizeof(int64_t));
+                // special handle id field
+                CopyRowStructuredData<int64_t>(entity.value(), engine::FIELD_UID, offset, row_num, chunk_data);
                 continue;
             }
-            std::vector<uint8_t> temp_data;
+
             switch (field_types.at(field_name)) {
                 case engine::DataType::INT32: {
                     CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
@@ -1669,16 +1689,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
                 case engine::DataType::VECTOR_FLOAT:
                 case engine::DataType::VECTOR_BINARY: {
                     bool is_bin = !(field_types.at(field_name) == engine::DataType::VECTOR_FLOAT);
-                    CopyRowVectorFromJson(entity.value(), temp_data, is_bin);
-                    auto size = temp_data.size();
-                    if (chunk_data.find(field_name) == chunk_data.end()) {
-                        std::vector<uint8_t> vector_data(row_num * size, 0);
-                        memcpy(vector_data.data(), temp_data.data(), size);
-                        chunk_data.insert({field_name, vector_data});
-                    } else {
-                        int64_t vector_offset = offset * size;
-                        memcpy(chunk_data.at(field_name).data() + vector_offset, temp_data.data(), size);
-                    }
+                    CopyRowVectorFromJson(entity.value(), field_name, offset, row_num, is_bin, chunk_data);
                     break;
                 }
                 default: {}
@@ -1687,71 +1698,21 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         offset++;
     }
 
-    if (!ids.empty()) {
-        chunk_data.insert({engine::FIELD_UID, ids});
-    }
+    // conver to InsertParam, no memory copy, just record the data address and pass to InsertReq
+    InsertParam insert_param;
+    ConvertToParam(chunk_data, row_num, insert_param);
 
-#if 0
-    for (auto& entity : body_json["entities"].items()) {
-        std::string field_name = entity.key();
-        auto field_value = entity.value();
-        if (!field_value.is_array()) {
-            RETURN_STATUS_DTO(ILLEGAL_ROWRECORD, "Field value is not an array");
-        }
-        if (field_name == NAME_ID) {
-            std::vector<uint8_t> temp_data(field_value.size() * sizeof(int64_t), 0);
-            CopyStructuredData<int64_t>(field_value, temp_data);
-            chunk_data.insert({engine::FIELD_UID, temp_data});
-            continue;
-        }
-        row_num = field_value.size();
-
-        std::vector<uint8_t> temp_data;
-        switch (field_types.at(field_name)) {
-            case engine::DataType::INT32: {
-                CopyStructuredData<int32_t>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::INT64: {
-                CopyStructuredData<int64_t>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::FLOAT: {
-                CopyStructuredData<float>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::DOUBLE: {
-                CopyStructuredData<double>(field_value, temp_data);
-                break;
-            }
-            case engine::DataType::VECTOR_FLOAT: {
-                CopyRecordsFromJson(field_value, temp_data, false);
-                break;
-            }
-            case engine::DataType::VECTOR_BINARY: {
-                CopyRecordsFromJson(field_value, temp_data, true);
-                break;
-            }
-            default: {}
-        }
-
-        chunk_data.insert(std::make_pair(field_name, temp_data));
-    }
-#endif
-
-    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, row_num, chunk_data);
+    // do insert
+    status = req_handler_.Insert(context_ptr_, collection_name->c_str(), partition_name, insert_param);
     if (!status.ok()) {
         RETURN_STATUS_DTO(UNEXPECTED_ERROR, "Failed to insert data");
     }
 
     // return generated ids
-    auto pair = chunk_data.find(engine::FIELD_UID);
-    if (pair != chunk_data.end()) {
-        int64_t count = pair->second.size() / 8;
-        auto pdata = reinterpret_cast<int64_t*>(pair->second.data());
+    if (!insert_param.id_returned_.empty()) {
         ids_dto->ids = ids_dto->ids.createShared();
-        for (int64_t i = 0; i < count; ++i) {
-            ids_dto->ids->push_back(std::to_string(pdata[i]).c_str());
+        for (auto id : insert_param.id_returned_) {
+            ids_dto->ids->push_back(std::to_string(id).c_str());
         }
     }
     ids_dto->code = status.code();
@@ -1774,12 +1735,14 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             if (query_params.get("partition_tag")) {
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
+            nlohmann::json result_json;
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
-                json_out["entities"] = json::array();
+                result_json["data"]["entities"] = json::array();
             }
-            AddStatusToJson(json_out, status.code(), status.message());
-            response = json_out.dump().c_str();
+            result_json["data"] = json_out;
+            AddStatusToJson(result_json, status.code(), status.message());
+            response = result_json.dump().c_str();
             return status;
         }
 
@@ -1804,21 +1767,23 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
         }
 
         std::vector<bool> valid_row;
-        nlohmann::json entity_result_json;
+        milvus::json entity_result_json;
         status = GetEntityByIDs(collection_name->std_str(), entity_ids, field_names, entity_result_json);
         if (!status.ok()) {
             response = "NULL";
             return status;
         }
 
-        nlohmann::json json;
-        AddStatusToJson(json, status.code(), status.message());
+        milvus::json data_json;
+        milvus::json json;
+        AddStatusToJson(data_json, status.code(), status.message());
         if (entity_result_json.empty()) {
             json = std::vector<int64_t>();
         } else {
             json = entity_result_json;
         }
-        response = json.dump().c_str();
+        data_json["data"] = json;
+        response = data_json.dump().c_str();
     } catch (std::exception& e) {
         return Status(SERVER_UNEXPECTED_ERROR, e.what());
     }

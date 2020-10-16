@@ -103,6 +103,7 @@ struct ServerConfig {
         Integer insert_buffer_size{0};
         Bool cache_insert_data{false};
         String preload_collection{"unknown"};
+        Integer max_concurrent_insert_request_size{0};
     } cache;
 
     struct Metric {
@@ -112,11 +113,13 @@ struct ServerConfig {
     } metric;
 
     struct Engine {
+        Integer max_partition_num{4096};
         Integer build_index_threshold{4096};
         Integer search_combine_nq{0};
         Integer use_blas_threshold{0};
         Integer omp_thread_num{0};
         Integer simd_type{0};
+        Bool stat_optimizer_enable{true};
     } engine;
 
     struct GPU {
@@ -134,6 +137,7 @@ struct ServerConfig {
 
     struct WAL {
         Bool enable{false};
+        Bool sync_mode{false};
         Bool recovery_error_ignore{false};
         Integer buffer_size{0};
         String path{"unknown"};
@@ -147,6 +151,8 @@ struct ServerConfig {
         String path{"unknown"};
         Integer max_log_file_size{0};
         Integer log_rotate_num{0};
+        Bool log_to_stdout{false};
+        Bool log_to_file{true};
     } logs;
 
     struct System {

@@ -62,6 +62,7 @@ bitmap_t *new_bitmap(size_t bytes)
     }
 
     if ((bitmap->array = (char*)malloc(bytes)) == NULL) {
+        free(bitmap);
         return NULL;
     }
 
@@ -125,16 +126,6 @@ int bitmap_check(bitmap_t *bitmap, unsigned int index, long offset)
         return bitmap->array[access] & 0x0f;
     } else {
         return bitmap->array[access] & 0xf0;
-    }
-}
-
-int bitmap_flush(bitmap_t *bitmap)
-{
-    if ((msync(bitmap->array, bitmap->bytes, MS_ASYNC) < 0)) {
-        perror("Error, flushing bitmap to disk");
-        return -1;
-    } else {
-        return 0;
     }
 }
 
@@ -369,15 +360,6 @@ int scaling_bloom_check(scaling_bloom_t *bloom, const char *s, size_t len)
         }
     }
     return 0;
-}
-
-int scaling_bloom_flush(scaling_bloom_t *bloom)
-{
-    if (bitmap_flush(bloom->bitmap) != 0) {
-        return -1;
-    }
-
-    return bitmap_flush(bloom->bitmap);
 }
 
 scaling_bloom_t *scaling_bloom_init(unsigned int capacity, double error_rate)

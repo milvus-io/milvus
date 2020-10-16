@@ -59,6 +59,9 @@ class WalManager {
     Status
     Recovery(const DBPtr& db, const CollectionMaxOpIDMap& max_op_ids);
 
+    idx_t
+    GetMaxOperationID(const std::string& collection_name);
+
  private:
     WalManager();
 
@@ -96,6 +99,7 @@ class WalManager {
     SafeIDGenerator id_gen_;
 
     bool enable_ = false;
+    bool sync_mode_ = false;
     std::string wal_path_;
     int64_t insert_buffer_size_ = 0;
 

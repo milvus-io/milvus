@@ -60,12 +60,15 @@ class MemCollection {
     size_t
     GetCurrentMem();
 
+    Status
+    SerializeSegments();
+
  private:
     Status
     ApplyDeleteToFile();
 
     Status
-    CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& segments_op,
+    CreateDeletedDocsBloomFilter(const std::shared_ptr<snapshot::CompoundSegmentsOperation>& operation,
                                  const snapshot::ScopedSnapshotT& ss, engine::SegmentVisitorPtr& seg_visitor,
                                  const std::unordered_set<engine::offset_t>& del_offsets, uint64_t new_deleted,
                                  segment::IdBloomFilterPtr& bloom_filter);
@@ -78,8 +81,9 @@ class MemCollection {
     std::mutex mem_mutex_;
 
     std::unordered_set<idx_t> ids_to_delete_;
+    idx_t max_delete_op_id_ = 0;
 
-    int64_t segment_row_count_ = 0;
+    int64_t segment_row_limit_ = 0;
 };
 
 using MemCollectionPtr = std::shared_ptr<MemCollection>;

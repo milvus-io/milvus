@@ -103,6 +103,7 @@ InitConfig() {
 
         /* wal */
         {"wal.enable", CreateBoolConfig("wal.enable", &config.wal.enable.value, true)},
+        {"wal.sync_mode", CreateBoolConfig("wal.sync_mode", &config.wal.sync_mode.value, false)},
         {"wal.recovery_error_ignore",
          CreateBoolConfig("wal.recovery_error_ignore", &config.wal.recovery_error_ignore.value, false)},
         {"wal.buffer_size",
@@ -121,6 +122,9 @@ InitConfig() {
          CreateBoolConfig("cache.cache_insert_data", &config.cache.cache_insert_data.value, false)},
         {"cache.preload_collection",
          CreateStringConfig("cache.preload_collection", &config.cache.preload_collection.value, "")},
+        {"cache.max_concurrent_insert_request_size",
+         CreateSizeConfig("cache.max_concurrent_insert_request_size", 256 * MB, std::numeric_limits<int64_t>::max(),
+                          &config.cache.max_concurrent_insert_request_size.value, 2 * GB)},
 
         /* gpu */
         {"gpu.enable", CreateBoolConfig("gpu.enable", &config.gpu.enable.value, false)},
@@ -143,6 +147,8 @@ InitConfig() {
                                                     &config.logs.max_log_file_size.value, 1024 * MB)},
         {"logs.log_rotate_num",
          CreateIntegerConfig("logs.log_rotate_num", 0, 1024, &config.logs.log_rotate_num.value, 0)},
+        {"logs.log_to_stdout", CreateBoolConfig("logs.log_to_stdout", &config.logs.log_to_stdout.value, false)},
+        {"logs.log_to_file", CreateBoolConfig("logs.log_to_file", &config.logs.log_to_file.value, true)},
 
         /* metric */
         {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},
@@ -155,6 +161,9 @@ InitConfig() {
 
         /* invisible */
         /* engine */
+        {"engine.max_partition_num",
+         CreateIntegerConfig("engine.build_index_threshold", 1, std::numeric_limits<int64_t>::max(),
+                             &config.engine.max_partition_num.value, 4096)},
         {"engine.build_index_threshold",
          CreateIntegerConfig("engine.build_index_threshold", 0, std::numeric_limits<int64_t>::max(),
                              &config.engine.build_index_threshold.value, 4096)},
@@ -163,11 +172,14 @@ InitConfig() {
                              &config.engine.search_combine_nq.value, 64)},
         {"engine.use_blas_threshold",
          CreateIntegerConfig("engine.use_blas_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.use_blas_threshold.value, 1100)},
+                             &config.engine.use_blas_threshold.value, 16385)},
         {"engine.omp_thread_num", CreateIntegerConfig("engine.omp_thread_num", 0, std::numeric_limits<int64_t>::max(),
                                                       &config.engine.omp_thread_num.value, 0)},
         {"engine.simd_type",
          CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
+
+        {"engine.stat_optimizer_enable",
+         CreateBoolConfig("engine.stat_optimizer_enable", &config.engine.stat_optimizer_enable.value, true)},
 
         {"system.lock.enable", CreateBoolConfig("system.lock.enable", &config.system.lock.enable.value, true)},
 
@@ -277,10 +289,17 @@ wal:
 #                      | '*' means preload all existing tables (single-quote or     |            |                 |
 #                      | double-quote required).                                    |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# max_concurrent_insert_request_size |                                              |            |                 |
+#                      | A size limit on the concurrent insert requests to process. | String     | 2GB             |
+#                      | Milvus can process insert requests from multiple clients   |            |                 |
+#                      | concurrently. This setting puts a cap on the memory        |            |                 |
+#                      | consumption during this process.                           |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 cache:
   cache_size: @cache.cache_size@
   insert_buffer_size: @cache.insert_buffer_size@
   preload_collection: @cache.preload_collection@
+  max_concurrent_insert_request_size: @cache.max_concurrent_insert_request_size@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # GPU Config           | Description                                                | Type       | Default         |
@@ -326,12 +345,18 @@ gpu:
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
 #                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_stdout        | Whether logging to standard output.                        | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_file          | Whether logging to log files.                              | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   level: @logs.level@
   trace.enable: @logs.trace.enable@
   path: @logs.path@
   max_log_file_size: @logs.max_log_file_size@
   log_rotate_num: @logs.log_rotate_num@
+  log_to_stdout: @logs.log_to_stdout@
+  log_to_file: @logs.log_to_file@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |

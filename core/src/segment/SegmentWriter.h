@@ -58,9 +58,6 @@ class SegmentWriter {
     RowCount();
 
     Status
-    LoadUids(std::vector<engine::idx_t>& uids);
-
-    Status
     SetVectorIndex(const std::string& field_name, const knowhere::VecIndexPtr& index);
 
     Status

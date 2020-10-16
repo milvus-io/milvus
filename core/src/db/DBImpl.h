@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "db/DB.h"
+#include "db/SegmentTaskTracker.h"
 
 #include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
@@ -127,6 +128,12 @@ class DBImpl : public DB, public ConfigObserver {
     IsBuildingIndex() override;
 
  private:
+    bool
+    ServiceAvailable();
+
+    void
+    SetAvailable(bool available);
+
     void
     InternalFlush(const std::string& collection_name = "", bool merge = true);
 
@@ -152,7 +159,7 @@ class DBImpl : public DB, public ConfigObserver {
     WaitBuildIndexFinish();
 
     void
-    StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all = false);
+    StartMergeTask(const std::set<int64_t>& collection_ids, bool force_merge_all);
 
     void
     BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all);
@@ -172,18 +179,9 @@ class DBImpl : public DB, public ConfigObserver {
     void
     DecreaseLiveBuildTaskNum();
 
-    void
-    MarkIndexFailedSegments(const std::string& collection_name, const snapshot::IDS_TYPE& failed_ids);
-
-    void
-    IgnoreIndexFailedSegments(const std::string& collection_name, snapshot::IDS_TYPE& segment_ids);
-
-    void
-    ClearIndexFailedRecord(const std::string& collection_name);
-
  private:
     DBOptions options_;
-    std::atomic<bool> initialized_;
+    std::atomic<bool> available_;
 
     MemManagerPtr mem_mgr_;
     MergeManagerPtr merge_mgr_ptr_;
@@ -207,10 +205,7 @@ class DBImpl : public DB, public ConfigObserver {
     std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
 
-    using SegmentIndexRetryMap = std::unordered_map<snapshot::ID_TYPE, int64_t>;
-    using CollectionIndexRetryMap = std::unordered_map<std::string, SegmentIndexRetryMap>;
-    CollectionIndexRetryMap index_retry_map_;
-    std::mutex index_retry_mutex_;
+    SegmentTaskTracker index_task_tracker_;
 
     std::mutex build_index_mutex_;
 

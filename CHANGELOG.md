@@ -43,11 +43,18 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3533 Scheduler/Selector needs to judge the index type
 -   \#3621 Fix crash where getting octets information
 -   \#3626 Server crashed during search with index pq on dataset: sift-50m
+-   \#3642 Fix the bug of file not close when check sum failed.
 -   \#3652 Proto of C++ sdk is different from milvus server
 -   \#3668 Docker exit without any logs
 -   \#3672 0.11.0 docker image is 200M larger due to the un-expected installation of openblas
 -   \#3689 Client get stuck if drop collection during creating index
 -   \#3734 GET_PAGE_ENTITY sometimes failed in test_web
+-   \#3741 Inconsistent parameter names
+-   \#3811 c++ sdk segmentation fault
+-   \#3946 The result format is wrong returned by 'get collections'
+-   \#3962 The 'num' in return of search is incorrect when use http-api
+-   \#3976 Web_impl restful doc bugs
+-   \#3990 Server crashed when search using java-sdk
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -59,6 +66,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3132 Refine the implementation of hnsw in faiss and add support for hnsw-flat, hnsw-pq and hnsw-sq8
 -   \#3463 Restrict the content of partition_tag
 -   \#3502 Normalize http method in web sever
+-   \#3732 Add new operation supporting multi-segments
+-   \#3828 Limit the number of insert requests processing concurrently.
+-   \#3977 Support logging to stdout.
 
 ## Improvement
 -   \#2543 Remove secondary_path related code
@@ -75,6 +85,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3449 Upgrade master version to v0.11.0
 -   \#3465 Optimize gc event executor
 -   \#3631 Add build option `-rdynamic` in CMakeList.txt
+-   \#3882 Params in Restful-api is different from the params in other SDKs
 
 ## Task
 

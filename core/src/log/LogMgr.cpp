@@ -37,12 +37,16 @@ bool LogMgr::enable_log_delete = false;
 
 Status
 LogMgr::InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
-                int64_t log_rotate_num) {
+                int64_t log_rotate_num, bool log_to_stdout, bool log_to_file) {
     try {
         auto enables = parse_level(level);
         enables["trace"] = trace_enable;
         LogMgr log_mgr(logs_path);
-        log_mgr.Default().Level(enables).To().Rotate(max_log_file_size, log_rotate_num).Setup();
+        log_mgr.Default()
+            .Level(enables, log_to_file)
+            .To(log_to_stdout, log_to_file)
+            .Rotate(max_log_file_size, log_rotate_num)
+            .Setup();
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -121,42 +125,43 @@ LogMgr::Default() {
 }
 
 LogMgr&
-LogMgr::Level(std::unordered_map<std::string, bool>& enables) {
+LogMgr::Level(std::unordered_map<std::string, bool>& enables, bool log_to_file) {
     std::string logs_reg_path = logs_path_.rfind('/') == logs_path_.length() - 1 ? logs_path_ : logs_path_ + "/";
+
+    /* If want to output all logs to one file, uncomment this line below and comment other set_level lines */
+    // set_level(el_config_, el::Level::Global, true, logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log");
 
     fiu_do_on("LogMgr.Level.trace_enable_to_false", enables["trace"] = false);
     set_level(el_config_, el::Level::Trace, enables["trace"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log");
-
-    set_level(el_config_, el::Level::Global, true, logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-global.log");
+              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-trace.log", log_to_file);
 
     fiu_do_on("LogMgr.Level.info_enable_to_false", enables["info"] = false);
-    set_level(el_config_, el::Level::Info, enables["info"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log");
+    set_level(el_config_, el::Level::Info, enables["info"], logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-info.log",
+              log_to_file);
 
     fiu_do_on("LogMgr.Level.debug_enable_to_false", enables["debug"] = false);
     set_level(el_config_, el::Level::Debug, enables["debug"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log");
+              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-debug.log", log_to_file);
 
     fiu_do_on("LogMgr.Level.warning_enable_to_false", enables["warning"] = false);
     set_level(el_config_, el::Level::Warning, enables["warning"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log");
+              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-warning.log", log_to_file);
 
     fiu_do_on("LogMgr.Level.error_enable_to_false", enables["error"] = false);
     set_level(el_config_, el::Level::Error, enables["error"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log");
+              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-error.log", log_to_file);
 
     fiu_do_on("LogMgr.Level.fatal_enable_to_false", enables["fatal"] = false);
     set_level(el_config_, el::Level::Fatal, enables["fatal"],
-              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log");
+              logs_reg_path + "milvus-%datetime{%y-%M-%d-%H:%m}-fatal.log", log_to_file);
 
     return *this;
 }
 
 LogMgr&
-LogMgr::To() {
-    el_config_.setGlobally(el::ConfigurationType::ToFile, "true");
-    el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
+LogMgr::To(bool log_to_stdout, bool log_to_file) {
+    el_config_.setGlobally(el::ConfigurationType::ToStandardOutput, (log_to_stdout ? "true" : "false"));
+    el_config_.setGlobally(el::ConfigurationType::ToFile, (log_to_file ? "true" : "false"));
 
     return *this;
 }
@@ -239,8 +244,12 @@ LogMgr::parse_level(const std::string& level) {
 }
 
 void
-LogMgr::set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path) {
-    default_conf.set(level, el::ConfigurationType::Filename, log_path.c_str());
+LogMgr::set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path,
+                  bool log_to_file) {
+    if (log_to_file) {
+        default_conf.set(level, el::ConfigurationType::Filename, log_path.c_str());
+    }
+
     if (enable) {
         default_conf.set(level, el::ConfigurationType::Enabled, "true");
     } else {

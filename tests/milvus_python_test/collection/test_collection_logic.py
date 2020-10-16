@@ -6,16 +6,10 @@ from time import sleep
 from multiprocessing import Process
 from utils import *
 
-default_segment_row_count = 100000
-drop_collection_interval_time = 3
-segment_row_count = 5000
-collection_id = "logic"
-vectors = gen_vectors(100, dim)
-default_fields = gen_default_fields() 
-
+uid = "collection_logic"
 
 def create_collection(connect, **params):
-    connect.create_collection(params["collection_name"], default_fields)
+    connect.create_collection(params["collection_name"], const.default_fields)
 
 def search_collection(connect, **params):
     status, result = connect.search(
@@ -128,7 +122,7 @@ class TestCollectionLogic(object):
             connect.drop_collection(name)
 
     def gen_params(self):
-        collection_name = gen_unique_str("collection_id")
+        collection_name = gen_unique_str(uid)
         top_k = 1
         vectors = gen_vectors(2, dim)
         param = {'collection_name': collection_name,

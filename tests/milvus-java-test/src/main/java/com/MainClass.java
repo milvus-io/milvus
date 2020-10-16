@@ -3,7 +3,6 @@ package com;
 import io.milvus.client.*;
 import org.apache.commons.cli.*;
 import org.apache.commons.lang3.RandomStringUtils;
-import org.testng.SkipException;
 import org.testng.TestNG;
 import org.testng.annotations.DataProvider;
 import org.testng.xml.XmlClass;
@@ -12,16 +11,17 @@ import org.testng.xml.XmlTest;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class MainClass {
     private static String HOST = "127.0.0.1";
+//    private static String HOST = "192.168.1.238";
     private static int PORT = 19530;
     private int segmentRowCount = 5000;
     private static ConnectParam CONNECT_PARAM = new ConnectParam.Builder()
             .withHost(HOST)
             .withPort(PORT)
             .build();
+    private static MilvusClient client;
 
     public static void setHost(String host) {
         MainClass.HOST = host;
@@ -45,77 +45,67 @@ public class MainClass {
     }
 
     @DataProvider(name="ConnectInstance")
-    public Object[][] connectInstance() throws ConnectFailedException {
-        MilvusClient client = new MilvusGrpcClient();
+    public Object[][] connectInstance() throws Exception {
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(HOST)
                 .withPort(PORT)
                 .build();
-        client.connect(connectParam);
+        client = new MilvusGrpcClient(connectParam).withLogging();
         String collectionName = RandomStringUtils.randomAlphabetic(10);
         return new Object[][]{{client, collectionName}};
     }
 
     @DataProvider(name="DisConnectInstance")
-    public Object[][] disConnectInstance() throws ConnectFailedException {
+    public Object[][] disConnectInstance(){
         // Generate connection instance
-        MilvusClient client = new MilvusGrpcClient();
-        client.connect(CONNECT_PARAM);
-        try {
-            client.disconnect();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        client = new MilvusGrpcClient(CONNECT_PARAM).withLogging();
+        client.close();
         String collectionName = RandomStringUtils.randomAlphabetic(10);
         return new Object[][]{{client, collectionName}};
     }
 
-    private Object[][] genCollection(boolean isBinary, boolean autoId) throws ConnectFailedException {
+    private Object[][] genCollection(boolean isBinary, boolean autoId) throws Exception {
         Object[][] collection;
         String collectionName = Utils.genUniqueStr("collection");
-        List<Map<String, Object>> defaultFields = Utils.genDefaultFields(Constants.dimension,isBinary);
-        String jsonParams = String.format("{\"segment_row_count\": %s, \"auto_id\": %s}",segmentRowCount, autoId);
         // Generate connection instance
-        MilvusClient client = new MilvusGrpcClient();
-        client.connect(CONNECT_PARAM);
-        CollectionMapping cm = new CollectionMapping.Builder(collectionName)
-                .withFields(defaultFields)
-                .withParamsInJson(jsonParams)
-                .build();
-        Response res = client.createCollection(cm);
-        if (!res.ok()) {
-            System.out.println(res.getMessage());
-            throw new SkipException("Collection created failed");
+        client = new MilvusGrpcClient(CONNECT_PARAM).withLogging();
+        CollectionMapping cm = CollectionMapping
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64)
+                .addField(Constants.floatFieldName, DataType.FLOAT)
+                .setParamsInJson(new JsonBuilder()
+                    .param("segment_row_limit", segmentRowCount)
+                    .param("auto_id", autoId)
+                    .build());
+        if (isBinary) {
+            cm.addVectorField("binary_vector", DataType.VECTOR_BINARY, Constants.dimension);
+        } else {
+            cm.addVectorField("float_vector", DataType.VECTOR_FLOAT, Constants.dimension);
         }
+        client.createCollection(cm);
         collection = new Object[][]{{client, collectionName}};
         return collection;
     }
 
     @DataProvider(name="Collection")
-    public Object[][] provideCollection() throws ConnectFailedException, InterruptedException {
+    public Object[][] provideCollection() throws Exception, InterruptedException {
         Object[][] collection = genCollection(false,true);
         return collection;
-//            List<String> tableNames = client.listCollections().getCollectionNames();
-//            for (int j = 0; j < tableNames.size(); ++j
-//                 ) {
-//                client.dropCollection(tableNames.get(j));
-//            }
-//            Thread.currentThread().sleep(2000);
     }
     @DataProvider(name="IdCollection")
-    public Object[][] provideIdCollection() throws ConnectFailedException, InterruptedException {
+    public Object[][] provideIdCollection() throws Exception, InterruptedException {
         Object[][] idCollection = genCollection(false,false);
         return idCollection;
     }
 
     @DataProvider(name="BinaryCollection")
-    public Object[][] provideBinaryCollection() throws ConnectFailedException, InterruptedException {
+    public Object[][] provideBinaryCollection() throws Exception, InterruptedException {
         Object[][] binaryCollection = genCollection(true,true);
         return binaryCollection;
     }
 
     @DataProvider(name="BinaryIdCollection")
-    public Object[][] provideBinaryIdCollection() throws ConnectFailedException, InterruptedException {
+    public Object[][] provideBinaryIdCollection() throws Exception, InterruptedException {
         Object[][] binaryIdCollection = genCollection(true,false);
         return binaryIdCollection;
     }

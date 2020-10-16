@@ -30,14 +30,17 @@ namespace engine {
 struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
-    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids);
+    SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, const std::vector<std::string>& partitions,
+                              snapshot::IDS_TYPE& segment_ids);
 
     Status
     Handle(const typename ResourceT::Ptr&) override;
 
+    std::vector<std::string> partitions_;
     snapshot::IDS_TYPE& segment_ids_;
 };
 
+///////////////////////////////////////////////////////////////////////////////
 struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
     using ResourceT = snapshot::SegmentCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
@@ -50,6 +53,20 @@ struct SegmentsToIndexCollector : public snapshot::SegmentCommitIterator {
     std::string field_name_;
     snapshot::IDS_TYPE& segment_ids_;
     int64_t build_index_threshold_;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+struct SegmentsToMergeCollector : public snapshot::SegmentCommitIterator {
+    using ResourceT = snapshot::SegmentCommit;
+    using BaseT = snapshot::IterateHandler<ResourceT>;
+    SegmentsToMergeCollector(snapshot::ScopedSnapshotT ss, snapshot::IDS_TYPE& segment_ids,
+                             int64_t row_count_threshold);
+
+    Status
+    Handle(const typename ResourceT::Ptr&) override;
+
+    snapshot::IDS_TYPE& segment_ids_;
+    int64_t row_count_threshold_;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

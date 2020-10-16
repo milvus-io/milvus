@@ -195,8 +195,7 @@ class WebRequestHandler {
     CreatePartition(const OString& collection_name, const PartitionRequestDtoT& param);
 
     StatusDtoT
-    ShowPartitions(const OString& collection_name, const OQueryParams& query_params,
-                   PartitionListDtoT& partition_list_dto);
+    ShowPartitions(const OString& collection_name, const OQueryParams& query_params, OString& response);
 
     StatusDtoT
     DropPartition(const OString& collection_name, const OString& body);

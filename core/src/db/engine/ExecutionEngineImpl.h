@@ -38,19 +38,15 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Search(ExecutionEngineContext& context) override;
 
     Status
-    BuildIndex() override;
+    BuildIndex(uint64_t device_id) override;
 
  private:
     Status
     VecSearch(ExecutionEngineContext& context, const query::VectorQueryPtr& vector_param,
-              knowhere::VecIndexPtr& vec_index, bool hybrid = false);
+              knowhere::VecIndexPtr& vec_index, const faiss::ConcurrentBitsetPtr& bitset, bool hybrid = false);
 
     knowhere::VecIndexPtr
-    CreateVecIndex(const std::string& index_name);
-
-    Status
-    CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
-                          knowhere::IndexPtr& index_ptr);
+    CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode);
 
     Status
     LoadForSearch(const query::QueryPtr& query_ptr);
