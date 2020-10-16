@@ -1,15 +1,15 @@
 package com;
 
-import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import io.milvus.client.*;
 import com.alibaba.fastjson.JSONObject;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import org.testng.Assert;
 
 public class Utils {
 
@@ -27,14 +27,14 @@ public class Utils {
     }
 
     public static List<List<Float>> genVectors(int vectorCount, int dimension, boolean norm) {
-        List<List<Float>> vectors = new ArrayList<>();
         Random random = new Random();
+        List<List<Float>> vectors = new ArrayList<>();
         for (int i = 0; i < vectorCount; ++i) {
             List<Float> vector = new ArrayList<>();
             for (int j = 0; j < dimension; ++j) {
                 vector.add(random.nextFloat());
             }
-            if (norm == true) {
+            if (norm) {
                 vector = normalize(vector);
             }
             vectors.add(vector);
@@ -42,12 +42,12 @@ public class Utils {
         return vectors;
     }
 
-    static List<ByteBuffer> genBinaryVectors(long vectorCount, long dimension) {
+    static List<ByteBuffer> genBinaryVectors(int vectorCount, int dimension) {
         Random random = new Random();
-        List<ByteBuffer> vectors = new ArrayList<>();
-        final long dimensionInByte = dimension / 8;
-        for (long i = 0; i < vectorCount; ++i) {
-            ByteBuffer byteBuffer = ByteBuffer.allocate((int) dimensionInByte);
+        List<ByteBuffer> vectors = new ArrayList<>(vectorCount);
+        final int dimensionInByte = dimension / 8;
+        for (int i = 0; i < vectorCount; ++i) {
+            ByteBuffer byteBuffer = ByteBuffer.allocate(dimensionInByte);
             random.nextBytes(byteBuffer.array());
             vectors.add(byteBuffer);
         }
@@ -57,10 +57,10 @@ public class Utils {
     private static List<Map<String, Object>> genBaseFieldsWithoutVector(){
         List<Map<String,Object>> fieldsList = new ArrayList<>();
         Map<String, Object> intFields = new HashMap<>();
-        intFields.put("field","int64");
+        intFields.put(Constants.fieldNameKey,Constants.intFieldName);
         intFields.put("type",DataType.INT64);
         Map<String, Object> floatField = new HashMap<>();
-        floatField.put("field","float");
+        floatField.put(Constants.fieldNameKey,Constants.floatFieldName);
         floatField.put("type",DataType.FLOAT);
         fieldsList.add(intFields);
         fieldsList.add(floatField);
@@ -72,10 +72,10 @@ public class Utils {
         List<Map<String, Object>> defaultFieldList = genBaseFieldsWithoutVector();
         Map<String, Object> vectorField = new HashMap<>();
         if (isBinary){
-            vectorField.put("field","binary_vector");
+            vectorField.put(Constants.fieldNameKey, Constants.binaryVectorFieldName);
             vectorField.put("type",DataType.VECTOR_BINARY);
         }else {
-            vectorField.put("field","float_vector");
+            vectorField.put(Constants.fieldNameKey, Constants.floatVectorFieldName);
             vectorField.put("type",DataType.VECTOR_FLOAT);
         }
         JSONObject jsonObject = new JSONObject();
@@ -86,55 +86,33 @@ public class Utils {
         return defaultFieldList;
     }
 
-    public static List<Map<String,Object>> genDefaultEntities(int dimension, int vectorCount, List<List<Float>> vectors){
-        List<Map<String,Object>> fieldsMap = genDefaultFields(dimension, false);
+    public static Map<String, List> genDefaultEntities(int vectorCount, List<List<Float>> vectors){
+//        Map<String,Object> fieldsMap = genDefaultFields(dimension, false);
+        Map<String, List> fieldsMap =new HashMap<>();
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
         for (int i = 0; i < vectorCount; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
         }
-        for(Map<String,Object> field: fieldsMap){
-            String fieldType = field.get("field").toString();
-            switch (fieldType){
-                case "int64":
-                    field.put("values",intValues);
-                    break;
-                case "float":
-                    field.put("values",floatValues);
-                    break;
-                case "float_vector":
-                    field.put("values",vectors);
-                    break;
-            }
-        }
+        fieldsMap.put(Constants.intFieldName,intValues);
+        fieldsMap.put(Constants.floatFieldName,floatValues);
+        fieldsMap.put(Constants.floatVectorFieldName,vectors);
         return fieldsMap;
     }
 
-    public static List<Map<String,Object>> genDefaultBinaryEntities(int dimension, int vectorCount, List<ByteBuffer> vectorsBinary){
-        List<Map<String,Object>> binaryFieldsMap = genDefaultFields(dimension, true);
+    public static Map<String, List> genDefaultBinaryEntities(int vectorCount, List<ByteBuffer> vectorsBinary){
+//        List<Map<String,Object>> binaryFieldsMap = genDefaultFields(dimension, true);
+        Map<String, List> binaryFieldsMap =new HashMap<>();
         List<Long> intValues = new ArrayList<>(vectorCount);
         List<Float> floatValues = new ArrayList<>(vectorCount);
-//        List<List<Float>> vectors = genVectors(vectorCount,dimension,false);
-//        List<ByteBuffer> binaryVectors = genBinaryVectors(vectorCount,dimension);
         for (int i = 0; i < vectorCount; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
         }
-        for(Map<String,Object> field: binaryFieldsMap){
-            String fieldType = field.get("field").toString();
-            switch (fieldType){
-                case "int64":
-                    field.put("values",intValues);
-                    break;
-                case "float":
-                    field.put("values",floatValues);
-                    break;
-                case "binary_vector":
-                    field.put("values",vectorsBinary);
-                    break;
-            }
-        }
+        binaryFieldsMap.put(Constants.intFieldName,intValues);
+        binaryFieldsMap.put(Constants.floatFieldName,floatValues);
+        binaryFieldsMap.put(Constants.binaryVectorFieldName,vectorsBinary);
         return binaryFieldsMap;
     }
 
@@ -147,7 +125,7 @@ public class Utils {
         return indexParams;
     }
 
-    public static String setSearchParam(String metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
+    static JSONObject genVectorParam(MetricType metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
@@ -158,34 +136,53 @@ public class Utils {
         tmpSearchParam.put("nprobe", nprobe);
         fieldParam.put("params", tmpSearchParam);
         JSONObject vectorParams = new JSONObject();
-        vectorParams.put(Constants.floatFieldName, fieldParam);
+        vectorParams.put(Constants.floatVectorFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
-        JSONObject param = new JSONObject();
-        JSONObject mustParam = new JSONObject();
-        JSONArray tmp = new JSONArray();
-        tmp.add(searchParam);
-        mustParam.put("must", tmp);
-        param.put("bool", mustParam);
-        return JSONObject.toJSONString(param);
+        return searchParam;
     }
 
-    public static String setBinarySearchParam(String metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
+    static JSONObject genBinaryVectorParam(MetricType metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
         JSONObject searchParam = new JSONObject();
         JSONObject fieldParam = new JSONObject();
         fieldParam.put("topk", topk);
-        fieldParam.put("metricType", metricType);
-        fieldParam.put("queryVectors", queryVectors);
+        fieldParam.put("metric_type", metricType);
+        List<List<Byte>> vectorsToSearch = new ArrayList<>();
+        for (ByteBuffer byteBuffer : queryVectors) {
+            byte[] b = new byte[byteBuffer.remaining()];
+            byteBuffer.get(b);
+            vectorsToSearch.add(Arrays.asList(ArrayUtils.toObject(b)));
+        }
+        fieldParam.put("query", vectorsToSearch);
+        fieldParam.put("type", Constants.binaryVectorType);
         JSONObject tmpSearchParam = new JSONObject();
         tmpSearchParam.put("nprobe", nprobe);
         fieldParam.put("params", tmpSearchParam);
         JSONObject vectorParams = new JSONObject();
-        vectorParams.put(Constants.floatFieldName, fieldParam);
+        vectorParams.put(Constants.binaryVectorFieldName, fieldParam);
         searchParam.put("vector", vectorParams);
+        return searchParam;
+    }
+
+    public static String setSearchParam(MetricType metricType, List<List<Float>> queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = genVectorParam(metricType, queryVectors, topk, nprobe);
         JSONObject boolParam = new JSONObject();
         JSONObject mustParam = new JSONObject();
-        mustParam.put("must", new JSONArray().add(searchParam));
+        JSONArray tmp = new JSONArray();
+        tmp.add(searchParam);
+        mustParam.put("must", tmp);
         boolParam.put("bool", mustParam);
-        return JSONObject.toJSONString(searchParam);
+        return JSONObject.toJSONString(boolParam);
+    }
+
+    public static String setBinarySearchParam(MetricType metricType, List<ByteBuffer> queryVectors, int topk, int nprobe) {
+        JSONObject searchParam = genBinaryVectorParam(metricType, queryVectors, topk, nprobe);
+        JSONObject boolParam = new JSONObject();
+        JSONObject mustParam = new JSONObject();
+        JSONArray tmp = new JSONArray();
+        tmp.add(searchParam);
+        mustParam.put("must", tmp);
+        boolParam.put("bool", mustParam);
+        return JSONObject.toJSONString(boolParam);
     }
 
     public static int getIndexParamValue(String indexParam, String key) {
@@ -218,7 +215,7 @@ public class Utils {
     public static List<Float> getVector(List<Map<String,Object>> entities, int i){
        List<Float> vector = new ArrayList<>();
         entities.forEach(entity -> {
-            if("float_vector".equals(entity.get("field")) && Objects.nonNull(entity.get("values"))){
+            if(Constants.floatVectorFieldName.equals(entity.get("field")) && Objects.nonNull(entity.get("values"))){
                 vector.add(((List<Float>)entity.get("values")).get(i));
             }
         });
@@ -239,4 +236,237 @@ public class Utils {
         throw  new RuntimeException("unsupported type");
     }
 
+    public static InsertParam genInsertParam(String collectionName) {
+        Map<String, List> entities = Constants.defaultEntities;
+        InsertParam insertParam = InsertParam
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
+                .addField(Constants.floatFieldName, DataType.FLOAT, entities.get(Constants.floatFieldName))
+                .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, entities.get(Constants.floatVectorFieldName));
+        return insertParam;
+    }
+
+    public static InsertParam genBinaryInsertParam(String collectionName) {
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+        InsertParam insertParam = InsertParam
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, Utils.genBinaryVectors(Constants.nb, Constants.dimension));
+        return insertParam;
+    }
+
+    public static CollectionMapping genCreateCollectionMapping(String collectionName, Boolean autoId, Boolean isBinary) {
+        CollectionMapping cm = CollectionMapping.create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64)
+                .addField(Constants.floatFieldName, DataType.FLOAT)
+                .setParamsInJson(new JsonBuilder()
+                        .param("segment_row_limit", Constants.segmentRowLimit)
+                        .param("auto_id", autoId)
+                        .build());
+        if (isBinary) {
+            cm.addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, Constants.dimension);
+        } else {
+            cm.addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, Constants.dimension);
+        }
+        return cm;
+    }
+
+    public static List<Long> initData(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), Constants.nb);
+        return ids;
+    }
+
+    public static List<Long> initBinaryData(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), Constants.nb);
+        return ids;
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+
+//    public static CollectionMapping genDefaultCollectionMapping(String collectionName, int dimension,
+//                                                                int segmentRowCount, boolean isBinary) {
+//        Map<String, Object> vectorFieldMap;
+//        if (isBinary) {
+//            vectorFieldMap = new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+//                                .param("dim", dimension)
+//                                .build();
+//        } else {
+//            vectorFieldMap = new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+//                                .param("dim", dimension)
+//                                .build();
+//        }
+//
+//        return new CollectionMapping.Builder(collectionName)
+//            .field(new FieldBuilder("int64", DataType.INT64).build())
+//            .field(new FieldBuilder("float", DataType.FLOAT).build())
+//            .field(vectorFieldMap)
+//            .withParamsInJson(new JsonBuilder()
+//                    .param("segment_row_count", segmentRowCount)
+//                    .build())
+//            .build();
+//    }
+//
+//    public static InsertParam genDefaultInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                    List<List<Float>> vectors) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+//                        .values(vectors)
+//                        .param("dim", dimension)
+//                        .build())
+//                .build();
+//    }
+//
+//    public static InsertParam genDefaultInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                    List<List<Float>> vectors, List<Long> entityIds) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+//                        .values(vectors)
+//                        .param("dim", dimension)
+//                        .build())
+//                .withEntityIds(entityIds)
+//                .build();
+//    }
+//
+//    public static InsertParam genDefaultInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                    List<List<Float>> vectors, String tag) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("float_vector", DataType.VECTOR_FLOAT)
+//                        .values(vectors)
+//                        .param("dim", dimension)
+//                        .build())
+//                .withPartitionTag(tag)
+//                .build();
+//    }
+//
+//    public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                          List<List<Byte>> vectorsBinary) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+//                        .values(vectorsBinary)
+//                        .param("dim", dimension)
+//                        .build())
+//                .build();
+//    }
+//
+//    public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                          List<List<Byte>> vectorsBinary, List<Long> entityIds) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+//                        .values(vectorsBinary)
+//                        .param("dim", dimension)
+//                        .build())
+//                .withEntityIds(entityIds)
+//                .build();
+//    }
+//
+//    public static InsertParam genDefaultBinaryInsertParam(String collectionName, int dimension, int vectorCount,
+//                                                          List<List<Byte>> vectorsBinary, String tag) {
+//        List<Long> intValues = new ArrayList<>(vectorCount);
+//        List<Float> floatValues = new ArrayList<>(vectorCount);
+//        for (int i = 0; i < vectorCount; ++i) {
+//            intValues.add((long) i);
+//            floatValues.add((float) i);
+//        }
+//
+//        return new InsertParam.Builder(collectionName)
+//                .field(new FieldBuilder("int64", DataType.INT64)
+//                        .values(intValues)
+//                        .build())
+//                .field(new FieldBuilder("float", DataType.FLOAT)
+//                        .values(floatValues)
+//                        .build())
+//                .field(new FieldBuilder("binary_vector", DataType.VECTOR_BINARY)
+//                        .values(vectorsBinary)
+//                        .param("dim", dimension)
+//                        .build())
+//                .withPartitionTag(tag)
+//                .build();
+//    }
+//
+//    public static Index genDefaultIndex(String collectionName, String fieldName, String indexType, String metricType, int nlist) {
+//        return new Index.Builder(collectionName, fieldName)
+//                .withParamsInJson(new JsonBuilder()
+//                        .param("index_type", indexType)
+//                        .param("metric_type", metricType)
+//                        .indexParam("nlist", nlist)
+//                        .build())
+//                .build();
+//    }
 }
