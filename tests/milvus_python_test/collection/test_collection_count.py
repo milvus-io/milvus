@@ -9,20 +9,10 @@ import sklearn.preprocessing
 
 import pytest
 from utils import *
+from constants import *
 
-nb = 6000
-dim = 128
-tag = "tag"
-collection_id = "count_collection"
-add_interval_time = 3
-segment_row_count = 5000
-default_fields = gen_default_fields()
-default_binary_fields = gen_binary_default_fields()
-entities = gen_entities(nb)
-raw_vectors, binary_entities = gen_binary_entities(nb)
-field_name = "fload_vector"
-index_name = "index_name"
-
+uid = "collection_count"
+tag = "collection_count_tag"
 
 class TestCollectionCount:
     """
@@ -32,8 +22,8 @@ class TestCollectionCount:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -155,7 +145,7 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         res = connect.insert(collection, entities)
         connect.flush([collection])
-        connect.create_index(collection, field_name, get_simple_index)
+        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.count_entities(collection)
         assert res == insert_count
 
@@ -187,8 +177,8 @@ class TestCollectionCountIP:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -230,8 +220,8 @@ class TestCollectionCountBinary:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -423,8 +413,8 @@ class TestCollectionMultiCollections:
         scope="function",
         params=[
             1,
-            4000,
-            6001
+            1000,
+            2001
         ],
     )
     def insert_count(self, request):
@@ -485,7 +475,7 @@ class TestCollectionMultiCollections:
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             res = connect.insert(collection_name, entities)
@@ -507,7 +497,7 @@ class TestCollectionMultiCollections:
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
             res = connect.insert(collection_name, entities)
@@ -527,16 +517,16 @@ class TestCollectionMultiCollections:
         collection_list = []
         collection_num = 20
         for i in range(0, int(collection_num / 2)):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, entities)
+            res = connect.insert(collection_name, default_entities)
         for i in range(int(collection_num / 2), collection_num):
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
-            res = connect.insert(collection_name, binary_entities)
+            res = connect.insert(collection_name, default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
-            assert res == nb
+            assert res == default_nb
