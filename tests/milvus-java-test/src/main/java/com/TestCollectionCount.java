@@ -1,87 +1,72 @@
 package com;
 
 import io.milvus.client.*;
+import io.milvus.client.exception.ClientSideMilvusException;
+import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
+
 import java.util.List;
 
 public class TestCollectionCount {
-    int segmentRowCount = 5000;
-    int dimension = Constants.dimension;
     int nb = Constants.nb;
 
+    // case-01
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCollectionCountNoVectors(MilvusClient client, String collectionName) {
-        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), 0);
+        Assert.assertEquals(client.countEntities(collectionName), 0);
     }
 
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    // case-02
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCollectionCountCollectionNotExisted(MilvusClient client, String collectionName) {
-        CountEntitiesResponse res = client.countEntities(collectionName+"_");
-        assert(!res.getResponse().ok());
+        client.countEntities(collectionName+"_");
     }
 
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
+    // case-03
+    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
     public void testCollectionCountWithoutConnect(MilvusClient client, String collectionName) {
-        CountEntitiesResponse res = client.countEntities(collectionName+"_");
-        assert(!res.getResponse().ok());
+        client.countEntities(collectionName);
     }
 
+    // case-04
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testCollectionCount(MilvusClient client, String collectionName) throws InterruptedException {
-
-        InsertParam insertParam =
-                new InsertParam.Builder(collectionName)
-                        .withFields(Constants.defaultEntities)
-                        .build();
-        InsertResponse insertResponse = client.insert(insertParam);
-        // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
-        List<Long> vectorIds = insertResponse.getEntityIds();
-        // Add vectors
-        Response flushResponse = client.flush(collectionName);
-        Assert.assertTrue(flushResponse.ok());
-        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
-    }
-
-    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void testCollectionCountBinary(MilvusClient client, String collectionName) throws InterruptedException {
-        // Add vectors
-        InsertParam insertParam = new InsertParam.Builder(collectionName)
-                .withFields(Constants.defaultBinaryEntities)
-                .build();
-        client.insert(insertParam);
+    public void testCollectionCount(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
-        Assert.assertEquals(client.countEntities(collectionName).getCollectionEntityCount(), nb);
+        // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
+        Assert.assertEquals(client.countEntities(collectionName), nb);
     }
 
+    // case-05
+    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
+    public void testCollectionCountBinary(MilvusClient client, String collectionName) {
+        // Add vectors
+        InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
+        client.flush(collectionName);
+        Assert.assertEquals(client.countEntities(collectionName), nb);
+    }
+
+    // case-06
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testCollectionCountMultiCollections(MilvusClient client, String collectionName) throws InterruptedException {
+    public void testCollectionCountMultiCollections(MilvusClient client, String collectionName) {
         Integer collectionNum = 10;
-        CountEntitiesResponse res;
         for (int i = 0; i < collectionNum; ++i) {
             String collectionNameNew = collectionName + "_" + i;
-            CollectionMapping collectionSchema = new CollectionMapping.Builder(collectionNameNew)
-                    .withFields(Utils.genDefaultFields(dimension,false))
-                    .withParamsInJson(String.format("{\"segment_row_count\": %s}",segmentRowCount))
-                    .build();
-            Response cteateRes = client.createCollection(collectionSchema);
-            Assert.assertEquals(cteateRes.ok(), true);
+            CollectionMapping cm = Utils.genCreateCollectionMapping(collectionNameNew, true, false);
+            client.createCollection(cm);
             // Add vectors
-            InsertParam insertParam = new InsertParam.Builder(collectionNameNew)
-                    .withFields(Constants.defaultEntities)
-                    .build();
-            InsertResponse insertRes = client.insert(insertParam);
-            Assert.assertEquals(insertRes.ok(), true);
-            Response flushRes = client.flush(collectionNameNew);
-            Assert.assertEquals(flushRes.ok(), true);
+            InsertParam insertParam = Utils.genInsertParam(collectionNameNew);
+            List<Long> ids = client.insert(insertParam);
+            client.flush(collectionNameNew);
         }
         for (int i = 0; i < collectionNum; ++i) {
             String collectionNameNew = collectionName + "_" + i;
-            res = client.countEntities(collectionNameNew);
-            Assert.assertEquals(res.getCollectionEntityCount(), nb);
+            Assert.assertEquals(client.countEntities(collectionNameNew), nb);
         }
     }
-
 }
 
 

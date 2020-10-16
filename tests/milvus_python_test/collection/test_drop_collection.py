@@ -3,15 +3,14 @@ import pytest
 import logging
 import itertools
 from time import sleep
+import threading
 from multiprocessing import Process
 from utils import *
+from constants import *
 
 uniq_id = "drop_collection"
-default_fields = gen_default_fields() 
-
 
 class TestDropCollection:
-
     """
     ******************************************************************
       The following cases are used to test `drop_collection` function
@@ -48,6 +47,33 @@ class TestDropCollection:
         with pytest.raises(Exception) as e:
             connect.drop_collection(collection_name)
 
+    @pytest.mark.level(2)
+    def test_create_drop_collection_multithread(self, connect):
+        '''
+        target: test create and drop collection with multithread
+        method: create and drop collection using multithread, 
+        expected: collections are created, and dropped
+        '''
+        threads_num = 8 
+        threads = []
+        collection_names = []
+
+        def create():
+            collection_name = gen_unique_str(collection_id)
+            collection_names.append(collection_name)
+            connect.create_collection(collection_name, default_fields)
+            connect.drop_collection(collection_name)
+        for i in range(threads_num):
+            t = threading.Thread(target=create, args=())
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+        
+        for item in collection_names:
+            assert not connect.has_collection(item)
+
 
 class TestDropCollectionInvalid(object):
     """
@@ -60,6 +86,7 @@ class TestDropCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
+    @pytest.mark.level(2)
     def test_drop_collection_with_invalid_collectionname(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:

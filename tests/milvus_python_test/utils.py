@@ -13,16 +13,25 @@ from milvus import Milvus, DataType
 
 port = 19530
 epsilon = 0.000001
+namespace = "milvus"
+
 default_flush_interval = 1
 big_flush_interval = 1000
-dimension = 128
-nb = 6000
-top_k = 10
-segment_row_count = 5000
+default_drop_interval = 3
+default_dim = 128
+default_nb = 1200
+default_top_k = 10
+max_top_k = 16384
+max_partition_num = 256
+default_segment_row_limit = 1000
+default_server_segment_row_limit = 1024 * 512
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
+default_partition_name = "_default"
+default_tag = "1970_01_01"
 
 # TODO:
+# TODO: disable RHNSW_SQ/PQ in 0.11.0
 all_index_types = [
     "FLAT",
     "IVF_FLAT",
@@ -32,6 +41,8 @@ all_index_types = [
     "HNSW",
     # "NSG",
     "ANNOY",
+    "RHNSW_PQ",
+    "RHNSW_SQ",
     "BIN_FLAT",
     "BIN_IVF_FLAT"
 ]
@@ -45,6 +56,8 @@ default_index_params = [
     {"M": 48, "efConstruction": 500},
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
+    {"M": 48, "efConstruction": 500, "PQM": 64},
+    {"M": 48, "efConstruction": 500},
     {"nlist": 128},
     {"nlist": 128}
 ]
@@ -64,6 +77,10 @@ def delete_support():
 
 def ivf():
     return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8_HYBRID", "IVF_PQ"]
+
+
+def skip_pq():
+    return ["IVF_PQ", "RHNSW_PQ", "RHNSW_SQ"]
 
 
 def binary_metrics():
@@ -121,6 +138,10 @@ def get_milvus(host, port, uri=None, handler=None, **kwargs):
     else:
         milvus = Milvus(host=host, port=port, handler=handler, try_connect=try_connect)
     return milvus
+
+
+def reset_build_index_threshold(connect):
+    connect.set_config("engine", "build_index_threshold", 1024)
 
 
 def disable_flush(connect):
@@ -204,14 +225,14 @@ def gen_single_filter_fields():
     fields = []
     for data_type in DataType:
         if data_type in [DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
-            fields.append({"field": data_type.name, "type": data_type})
+            fields.append({"name": data_type.name, "type": data_type})
     return fields
 
 
 def gen_single_vector_fields():
     fields = []
     for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-        field = {"field": data_type.name, "type": data_type, "params": {"dim": dimension}}
+        field = {"name": data_type.name, "type": data_type, "params": {"dim": default_dim}}
         fields.append(field)
     return fields
 
@@ -219,11 +240,11 @@ def gen_single_vector_fields():
 def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"field": "int64", "type": DataType.INT64},
-            {"field": "float", "type": DataType.FLOAT},
-            {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": dimension}},
+            {"name": "int64", "type": DataType.INT64},
+            {"name": "float", "type": DataType.FLOAT},
+            {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
         ],
-        "segment_row_limit": segment_row_count,
+        "segment_row_limit": default_segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
@@ -232,37 +253,37 @@ def gen_default_fields(auto_id=True):
 def gen_binary_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"field": "int64", "type": DataType.INT64},
-            {"field": "float", "type": DataType.FLOAT},
-            {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": dimension}}
+            {"name": "int64", "type": DataType.INT64},
+            {"name": "float", "type": DataType.FLOAT},
+            {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
         ],
-        "segment_row_limit": segment_row_count,
+        "segment_row_limit": default_segment_row_limit,
         "auto_id" : auto_id 
     }
     return default_fields
 
 
 def gen_entities(nb, is_normal=False):
-    vectors = gen_vectors(nb, dimension, is_normal)
+    vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
-        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
+        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
+        {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
     return entities
 
 
 def gen_binary_entities(nb):
-    raw_vectors, vectors = gen_binary_vectors(nb, dimension)
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
-        {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
+        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
+        {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
     return raw_vectors, entities
 
 
-def gen_entities_by_fields(fields, nb, dimension):
+def gen_entities_by_fields(fields, nb, dim):
     entities = []
     for field in fields:
         if field["type"] in [DataType.INT32, DataType.INT64]:
@@ -270,9 +291,9 @@ def gen_entities_by_fields(fields, nb, dimension):
         elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
             field_value = [3.0 for i in range(nb)]
         elif field["type"] == DataType.BINARY_VECTOR:
-            field_value = gen_binary_vectors(nb, dimension)[1]
+            field_value = gen_binary_vectors(nb, dim)[1]
         elif field["type"] == DataType.FLOAT_VECTOR:
-            field_value = gen_vectors(nb, dimension)
+            field_value = gen_vectors(nb, dim)
         field.update({"values": field_value})
         entities.append(field)
     return entities
@@ -316,7 +337,7 @@ def gen_default_vector_expr(default_query):
 
 def gen_default_term_expr(keyword="term", field="int64", values=None):
     if values is None:
-        values = [i for i in range(nb // 2)]
+        values = [i for i in range(default_nb // 2)]
     expr = {keyword: {field: {"values": values}}}
     return expr
 
@@ -330,7 +351,7 @@ def update_term_expr(src_term, terms):
 
 def gen_default_range_expr(keyword="range", field="int64", ranges=None):
     if ranges is None:
-        ranges = {"GT": 1, "LT": nb // 2}
+        ranges = {"GT": 1, "LT": default_nb // 2}
     expr = {keyword: {field: ranges}}
     return expr
 
@@ -347,18 +368,18 @@ def gen_invalid_range():
         {"range": 1},
         {"range": {}},
         {"range": []},
-        {"range": {"range": {"int64": {"GT": 0, "LT": nb // 2}}}}
+        {"range": {"range": {"int64": {"GT": 0, "LT": default_nb // 2}}}}
     ]
     return range
 
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": nb//2},
-        {"GT": nb // 2, "LT": nb*2},
+        {"GT": 0, "LT": default_nb//2},
+        {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
-        {"LT": nb},
-        {"GT": -1, "LT": top_k},
+        {"LT": default_nb},
+        {"GT": -1, "LT": default_top_k},
     ]
     return ranges
 
@@ -368,7 +389,7 @@ def gen_invalid_term():
         {"term": 1},
         {"term": []},
         {"term": {}},
-        {"term": {"term": {"int64": {"values": [i for i in range(nb // 2)]}}}}
+        {"term": {"term": {"int64": {"values": [i for i in range(default_nb // 2)]}}}}
     ]
     return terms
 
@@ -378,7 +399,7 @@ def add_field_default(default_fields, type=DataType.INT64, field_name=None):
     if field_name is None:
         field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": type
     }
     tmp_fields["fields"].append(field)
@@ -391,7 +412,7 @@ def add_field(entities, field_name=None):
     if field_name is None:
         field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": DataType.INT64,
         "values": [i for i in range(nb)]
     }
@@ -401,9 +422,9 @@ def add_field(entities, field_name=None):
 
 def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
-    vectors = gen_vectors(nb, dimension, is_normal)
+    vectors = gen_vectors(nb, default_dim, is_normal)
     field = {
-        "field": gen_unique_str(),
+        "name": gen_unique_str(),
         "type": DataType.FLOAT_VECTOR,
         "values": vectors
     }
@@ -434,15 +455,15 @@ def remove_vector_field(entities):
 def update_field_name(entities, old_name, new_name):
     tmp_entities = copy.deepcopy(entities)
     for item in tmp_entities:
-        if item["field"] == old_name:
-            item["field"] = new_name
+        if item["name"] == old_name:
+            item["name"] = new_name
     return tmp_entities
 
 
 def update_field_type(entities, old_name, new_name):
     tmp_entities = copy.deepcopy(entities)
     for item in tmp_entities:
-        if item["field"] == old_name:
+        if item["name"] == old_name:
             item["type"] = new_name
     return tmp_entities
 
@@ -456,21 +477,20 @@ def update_field_value(entities, old_type, new_value):
     return tmp_entities
 
 
-def add_vector_field(nb, dimension=dimension):
+def add_vector_field(nb, dimension=default_dim):
     field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": DataType.FLOAT_VECTOR,
         "values": gen_vectors(nb, dimension)
     }
     return field_name
 
 
-def gen_segment_row_counts():
+def gen_segment_row_limits():
     sizes = [
-        4096,
-        8192,
-        1000000,
+        1024,
+        4096
     ]
     return sizes
 
@@ -534,12 +554,8 @@ def gen_invalid_strs():
         # "",
         # None,
         "12 s",
-        "BB。A",
-        "c|c",
         " siede ",
         "(mn)",
-        "pip+",
-        "=c",
         "中文",
         "a".join("a" for i in range(256))
     ]
@@ -616,12 +632,7 @@ def gen_invalid_vectors():
         " ",
         "",
         "String",
-        "12-s",
-        "BB。A",
         " siede ",
-        "(mn)",
-        "pip+",
-        "=c",
         "中文",
         "a".join("a" for i in range(256))
     ]
@@ -639,7 +650,7 @@ def gen_invaild_search_params():
             for nprobe in gen_invalid_params():
                 ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
                 search_params.append(ivf_search_params)
-        elif index_type == "HNSW":
+        elif index_type in ["HNSW", "RHNSW_PQ", "RHNSW_SQ"]:
             for ef in gen_invalid_params():
                 hnsw_search_param = {"index_type": index_type, "search_params": {"ef": ef}}
                 search_params.append(hnsw_search_param)
@@ -667,9 +678,13 @@ def gen_invalid_index():
         index_params.append(index_param)
     for M in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
+        index_param = {"index_type": "RHNSW_PQ", "params": {"M": M, "efConstruction": 100}}
+        index_param = {"index_type": "RHNSW_SQ", "params": {"M": M, "efConstruction": 100}}
         index_params.append(index_param)
     for efConstruction in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": 16, "efConstruction": efConstruction}}
+        index_param = {"index_type": "RHNSW_PQ", "params": {"M": 16, "efConstruction": efConstruction}}
+        index_param = {"index_type": "RHNSW_SQ", "params": {"M": 16, "efConstruction": efConstruction}}
         index_params.append(index_param)
     for search_length in gen_invalid_params():
         index_param = {"index_type": "NSG",
@@ -688,6 +703,8 @@ def gen_invalid_index():
         index_params.append(index_param)
     index_params.append({"index_type": "IVF_FLAT", "params": {"invalid_key": 1024}})
     index_params.append({"index_type": "HNSW", "params": {"invalid_key": 16, "efConstruction": 100}})
+    index_params.append({"index_type": "RHNSW_PQ", "params": {"invalid_key": 16, "efConstruction": 100}})
+    index_params.append({"index_type": "RHNSW_SQ", "params": {"invalid_key": 16, "efConstruction": 100}})
     index_params.append({"index_type": "NSG",
                          "params": {"invalid_key": 100, "out_degree": 40, "candidate_pool_size": 300,
                                     "knng": 100}})
@@ -720,7 +737,7 @@ def gen_index():
                             for nlist in nlists \
                             for m in pq_ms]
             index_params.extend(IVFPQ_params)
-        elif index_type == "HNSW":
+        elif index_type in ["HNSW", "RHNSW_SQ", "RHNSW_PQ"]:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
                            for M in Ms \
                            for efConstruction in efConstructions]
@@ -763,7 +780,7 @@ def get_search_param(index_type, metric_type="L2"):
     search_params = {"metric_type": metric_type}
     if index_type in ivf() or index_type in binary_support():
         search_params.update({"nprobe": 64})
-    elif index_type == "HNSW":
+    elif index_type in ["HNSW", "RHNSW_SQ", "RHNSW_PQ"]:
         search_params.update({"ef": 64})
     elif index_type == "NSG":
         search_params.update({"search_length": 100})
@@ -788,7 +805,6 @@ def restart_server(helm_release_name):
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
 
-    namespace = "milvus"
     # service_name = "%s.%s.svc.cluster.local" % (helm_release_name, namespace)
     config.load_kube_config()
     v1 = client.CoreV1Api()
@@ -802,7 +818,7 @@ def restart_server(helm_release_name):
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
     # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
-    # print(status_res)
+    logging.getLogger().debug("Pod name: %s" % pod_name)
     if pod_name is not None:
         try:
             v1.delete_namespaced_pod(pod_name, namespace)
@@ -811,24 +827,61 @@ def restart_server(helm_release_name):
             logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
             res = False
             return res
-        time.sleep(5)
+        logging.error("Sleep 10s after pod deleted")
+        time.sleep(10)
         # check if restart successfully
         pods = v1.list_namespaced_pod(namespace)
         for i in pods.items:
             pod_name_tmp = i.metadata.name
-            if pod_name_tmp.find(helm_release_name) != -1:
-                logging.debug(pod_name_tmp)
+            logging.error(pod_name_tmp)
+            if pod_name_tmp == pod_name:
+                continue
+            elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
+                continue
+            else:
+                status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
+                logging.error(status_res.status.phase)
                 start_time = time.time()
-                while time.time() - start_time > timeout:
+                ready_break = False
+                while time.time() - start_time <= timeout:
+                    logging.error(time.time())
                     status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
                     if status_res.status.phase == "Running":
+                        logging.error("Already running")
+                        ready_break = True
+                        time.sleep(10)
                         break
-                    time.sleep(1)
+                    else:
+                        time.sleep(1)
                 if time.time() - start_time > timeout:
                     logging.error("Restart pod: %s timeout" % pod_name_tmp)
                     res = False
                     return res
+                if ready_break:
+                    break
     else:
-        logging.error("Pod: %s not found" % helm_release_name)
-        res = False
+        raise Exception("Pod: %s not found" % pod_name)
+    follow = True
+    pretty = True
+    previous = True  # bool | Return previous terminated container logs. Defaults to false. (optional)
+    since_seconds = 56  # int | A relative time in seconds before the current time from which to show logs. If this value precedes the time a pod was started, only logs since the pod start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified. (optional)
+    timestamps = True  # bool | If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output. Defaults to false. (optional)
+    container = "milvus"
+    # start_time = time.time()
+    # while time.time() - start_time <= timeout:
+    #     try:
+    #         api_response = v1.read_namespaced_pod_log(pod_name_tmp, namespace, container=container, follow=follow,
+    #                                                 pretty=pretty, previous=previous, since_seconds=since_seconds,
+    #                                                 timestamps=timestamps)
+    #         logging.error(api_response)
+    #         return res
+    #     except Exception as e:
+    #         logging.error("Exception when calling CoreV1Api->read_namespaced_pod_log: %s\n" % e)
+    #         # waiting for server start
+    #         time.sleep(5)
+    #         # res = False
+    #         # return res
+    # if time.time() - start_time > timeout:
+    #     logging.error("Restart pod: %s timeout" % pod_name_tmp)
+    #     res = False
     return res
