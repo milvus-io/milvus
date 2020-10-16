@@ -14,8 +14,9 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost")
+    # parser.addoption("--ip", action="store", default="192.168.1.113")
     parser.addoption("--service", action="store", default="")
-    parser.addoption("--port", action="store", default=19530)
+    parser.addoption("--port", action="store", default=19121)
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption('--dry-run', action='store_true', default=False)
 
@@ -87,9 +88,7 @@ def collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -105,9 +104,7 @@ def id_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -121,9 +118,7 @@ def binary_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
@@ -139,9 +134,7 @@ def binary_id_collection(request, client):
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
-        collections = client.list_collections()
-        for item in collections:
-            client.drop_collection(item["collection_name"])
+        client.clear_db()
     request.addfinalizer(teardown)
     assert client.has_collection(collection_name)
     return collection_name
