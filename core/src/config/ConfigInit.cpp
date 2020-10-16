@@ -345,9 +345,9 @@ gpu:
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
 #                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# log_to_stdout        | Whether to write logs to standard output in Milvus.        | Boolean    | false           |
+# log_to_stdout        | Whether logging to standard output.                        | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# log_to_file          | Whether to write logs to files in Milvus                   | Boolean    | true            |
+# log_to_file          | Whether logging to log files.                              | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   level: @logs.level@
