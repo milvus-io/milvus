@@ -44,7 +44,6 @@ IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     // index_ = std::shared_ptr<faiss::Index>(
     //    faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
 
-
     LOG_KNOWHERE_DEBUG_ << "start sq8 train";
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
