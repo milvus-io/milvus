@@ -4,13 +4,15 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.10.4 (TBD)
 ## Bug
--   \#3903 The search of SQ8H index is slower than the previous version.
+-   \#3626 Fix server crash when searching with IVF_PQ on GPU.
+-   \#3903 The performance of IVF_SQ8H in 0.10.3 is degraded.
 -   \#3906 Change DeleteTask state when it is loaded to avoid server crash.
+-   \#4012 Milvus hangs when continually creating and dropping partitions.
 
 ## Feature
 
 ## Improvement
--   \#3775 Improve search performance in the case that no item deleted
+-   \#3775 Improve search performance in the case that no item deleted.
 
 ## Task
 
