@@ -54,7 +54,7 @@ class TestFlushBase:
         method: flush, with collection not existed
         expected: error raised
         '''
-        collection_new = gen_unique_str("test_flush_1")
+        collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
             connect.flush([collection_new])
 
@@ -67,6 +67,7 @@ class TestFlushBase:
         assert len(ids) == default_nb
         status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
+        connect.flush([collection])
         res = connect.count_entities(collection)
         assert 0 == res
         # with pytest.raises(Exception) as e:

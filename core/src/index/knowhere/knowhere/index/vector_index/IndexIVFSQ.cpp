@@ -20,6 +20,7 @@
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
+#include <src/index/knowhere/knowhere/common/Log.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
@@ -43,12 +44,17 @@ IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     // index_ = std::shared_ptr<faiss::Index>(
     //    faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>())));
 
+
+    LOG_KNOWHERE_DEBUG_ << "start sq8 train";
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
+    LOG_KNOWHERE_DEBUG_ << "create sq8 train";
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFScalarQuantizer(
         coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit, metric_type));
 
+    LOG_KNOWHERE_DEBUG_ << "sq8 train begin";
     index_->train(rows, reinterpret_cast<const float*>(p_data));
+    LOG_KNOWHERE_DEBUG_ << "sq8 train end";
 }
 
 VecIndexPtr

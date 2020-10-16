@@ -65,13 +65,18 @@ IVF::Load(const BinarySet& binary_set) {
 
 void
 IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    LOG_KNOWHERE_DEBUG_ << "ivf train begin";
     GET_TENSOR_DATA_DIM(dataset_ptr)
 
+    LOG_KNOWHERE_DEBUG_ << "get tensor data dim";
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
     auto nlist = config[IndexParams::nlist].get<int64_t>();
+    LOG_KNOWHERE_DEBUG_ << "faiss index ivfflat";
     index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFFlat(coarse_quantizer, dim, nlist, metric_type));
+    LOG_KNOWHERE_DEBUG_ << "begin ivfflat train";
     index_->train(rows, reinterpret_cast<const float*>(p_data));
+    LOG_KNOWHERE_DEBUG_ << "end train";
 }
 
 void
@@ -80,7 +85,9 @@ IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
+    LOG_KNOWHERE_DEBUG_ << "get add mutex";
     std::lock_guard<std::mutex> lk(mutex_);
+    LOG_KNOWHERE_DEBUG_ << "get add mutex end";
     GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids(rows, reinterpret_cast<const float*>(p_data), p_ids);
 }

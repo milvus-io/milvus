@@ -473,7 +473,7 @@ class TestCollectionMultiCollections:
         '''
         entities = gen_entities(insert_count)
         collection_list = []
-        collection_num = 20
+        collection_num = 10
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)

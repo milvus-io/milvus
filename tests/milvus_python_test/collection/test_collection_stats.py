@@ -136,7 +136,7 @@ class TestStatsBase:
         delete_length = 1000
         ids = connect.insert(collection, default_entities)
         status = connect.flush([collection])
-        delete_ids = ids[:delete_length]
+        delete_ids = ids[segment_row_limit-1:segment_row_limit+1]
         connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
