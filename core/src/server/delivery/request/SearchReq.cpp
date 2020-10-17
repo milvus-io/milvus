@@ -50,8 +50,9 @@ Status
 SearchReq::OnExecute() {
     try {
         fiu_do_on("SearchReq.OnExecute.throw_std_exception", throw std::exception());
-        std::string hdr = "SearchReq(table=" + query_ptr_->collection_id;
-        TimeRecorder rc(hdr);
+        std::string hdr = "SearchReq(collection=" + query_ptr_->collection_id + ")";
+        LOG_SERVER_DEBUG_ << hdr << " begin";
+        TimeRecorderAuto rc(hdr);
 
         STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
         STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
@@ -80,6 +81,11 @@ SearchReq::OnExecute() {
                 // check dim
                 int64_t dimension = field->GetParams()[engine::PARAM_DIMENSION];
                 auto vector_query = query_ptr_->vectors.begin()->second;
+                if (vector_query->field_name != field->GetName()) {
+                    return Status(SERVER_INVALID_ARGUMENT,
+                                  "DSL vector query field name: " + vector_query->field_name + " is wrong");
+                }
+
                 if (!vector_query->query_vector.binary_data.empty()) {
                     if (vector_query->query_vector.binary_data.size() !=
                         vector_query->query_vector.vector_count * dimension / 8) {
@@ -161,7 +167,6 @@ SearchReq::OnExecute() {
 
         // step 8: print time cost percent
         rc.RecordSection("construct result and send");
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

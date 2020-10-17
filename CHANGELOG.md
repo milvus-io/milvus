@@ -51,6 +51,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3741 Inconsistent parameter names
 -   \#3811 c++ sdk segmentation fault
 -   \#3946 The result format is wrong returned by 'get collections'
+-   \#3962 The 'num' in return of search is incorrect when use http-api
+-   \#3976 Web_impl restful doc bugs
+-   \#3990 Server crashed when search using java-sdk
 
 ## Feature
 -   \#2319 Redo metadata to support MVCC
@@ -64,6 +67,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3502 Normalize http method in web sever
 -   \#3732 Add new operation supporting multi-segments
 -   \#3828 Limit the number of insert requests processing concurrently.
+-   \#3977 Support logging to stdout.
 
 ## Improvement
 -   \#2543 Remove secondary_path related code

@@ -3,6 +3,7 @@ package com;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
+import io.milvus.client.*;
 
 public final class Constants {
 
@@ -20,37 +21,39 @@ public final class Constants {
 
     public static final double epsilon = 0.001;
 
+    public static final int segmentRowLimit = 5000;
+
+    public static final String fieldNameKey = "name";
+
     public static final String vectorType = "float";
 
-    public static final String defaultMetricType = "L2";
+    public static final String binaryVectorType = "binary";
 
-    public static final String indexType = "IVF_SQ8";
+    public static final MetricType defaultMetricType = MetricType.L2;
 
-    public static final String defaultIndexType = "FLAT";
+    public static final IndexType indexType = IndexType.IVF_SQ8;
 
-    public static final String defaultBinaryIndexType = "BIN_FLAT";
+    public static final IndexType defaultIndexType = IndexType.FLAT;
 
-    public static final String defaultBinaryMetricType = "JACCARD";
+    public static final IndexType defaultBinaryIndexType = IndexType.BIN_IVF_FLAT;
 
-    public static final String floatFieldName = "float_vector";
+    public static final MetricType defaultBinaryMetricType = MetricType.JACCARD;
 
-    public static final String binaryFieldName = "binary_vector";
+    public static final String intFieldName = "int64";
 
-    public static final String indexParam = Utils.setIndexParam(indexType, "L2", n_list);
+    public static final String floatFieldName = "float";
 
-    public static final String binaryIndexParam = Utils.setIndexParam(defaultBinaryIndexType, defaultBinaryMetricType, n_list);
+    public static final String floatVectorFieldName = "float_vector";
+
+    public static final String binaryVectorFieldName = "binary_vector";
 
     public static final List<List<Float>> vectors = Utils.genVectors(nb, dimension, true);
 
     public static final List<ByteBuffer> vectorsBinary = Utils.genBinaryVectors(nb, dimension);
 
-    public static final List<Map<String,Object>> defaultFields = Utils.genDefaultFields(dimension,false);
+    public static final Map<String, List> defaultEntities = Utils.genDefaultEntities(nb, vectors);
 
-    public static final List<Map<String,Object>> defaultBinaryFields = Utils.genDefaultFields(dimension,true);
-
-    public static final List<Map<String,Object>> defaultEntities = Utils.genDefaultEntities(dimension, nb, vectors);
-
-    public static final List<Map<String,Object>> defaultBinaryEntities = Utils.genDefaultBinaryEntities(dimension, nb, vectorsBinary);
+    public static final Map<String, List> defaultBinaryEntities = Utils.genDefaultBinaryEntities(nb, vectorsBinary);
 
     public static final String searchParam = Utils.setSearchParam(defaultMetricType, vectors.subList(0, nq), topk, n_probe);
 

@@ -44,7 +44,7 @@ DeleteEntityByIDReq::Create(const ContextPtr& context, const std::string& collec
 Status
 DeleteEntityByIDReq::OnExecute() {
     try {
-        TimeRecorderAuto rc("DeleteEntityByIDReq");
+        TimeRecorderAuto rc("DeleteEntityByIDReq(collection=" + collection_name_ + ")");
 
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
@@ -53,7 +53,6 @@ DeleteEntityByIDReq::OnExecute() {
         }
 
         STATUS_CHECK(DBWrapper::DB()->DeleteEntityByID(collection_name_, entity_ids_));
-        rc.ElapseFromBegin("done");
     } catch (std::exception& ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }

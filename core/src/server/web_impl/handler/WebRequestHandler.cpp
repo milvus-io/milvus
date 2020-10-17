@@ -302,8 +302,8 @@ WebRequestHandler::GetCollectionMetaInfo(const std::string& collection_name, nlo
         field_json["params"] = field.second.field_params_;
         json_out["fields"].push_back(field_json);
     }
-    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_out[engine::PARAM_SEGMENT_ROW_COUNT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (schema.extra_params_.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_out[engine::PARAM_SEGMENT_ROW_LIMIT] = schema.extra_params_[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (schema.extra_params_.contains(engine::PARAM_UID_AUTOGEN)) {
         json_out[engine::PARAM_UID_AUTOGEN] = schema.extra_params_[engine::PARAM_UID_AUTOGEN];
@@ -822,7 +822,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         }
 
         nlohmann::json result_json;
-        result_json["num"] = result->row_num_;
+        result_json["nq"] = result->row_num_;
         if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
             result_str = result_json.dump();
@@ -1274,8 +1274,8 @@ WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
     }
 
     milvus::json json_params;
-    if (json_str.contains(engine::PARAM_SEGMENT_ROW_COUNT)) {
-        json_params[engine::PARAM_SEGMENT_ROW_COUNT] = json_str[engine::PARAM_SEGMENT_ROW_COUNT];
+    if (json_str.contains(engine::PARAM_SEGMENT_ROW_LIMIT)) {
+        json_params[engine::PARAM_SEGMENT_ROW_LIMIT] = json_str[engine::PARAM_SEGMENT_ROW_LIMIT];
     }
     if (json_str.contains(engine::PARAM_UID_AUTOGEN)) {
         json_params[engine::PARAM_UID_AUTOGEN] = json_str[engine::PARAM_UID_AUTOGEN];
@@ -1482,6 +1482,7 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
     milvus::json result_json;
     result_json["data"] = data_json;
     AddStatusToJson(result_json, status.code(), status.message());
+    result_str = result_json.dump().c_str();
 
     ASSIGN_RETURN_STATUS_DTO(status)
 }
@@ -1730,12 +1731,14 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
             if (query_params.get("partition_tag")) {
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
+            nlohmann::json result_json;
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
-                json_out["data"]["entities"] = json::array();
+                result_json["data"]["entities"] = json::array();
             }
-            AddStatusToJson(json_out, status.code(), status.message());
-            response = json_out.dump().c_str();
+            result_json["data"] = json_out;
+            AddStatusToJson(result_json, status.code(), status.message());
+            response = result_json.dump().c_str();
             return status;
         }
 

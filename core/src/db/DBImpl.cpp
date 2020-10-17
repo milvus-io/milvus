@@ -26,7 +26,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "metrics/Metrics.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
@@ -58,17 +57,13 @@ constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
 }  // namespace
 
-#define CHECK_INITIALIZED                                \
-    if (!initialized_.load(std::memory_order_acquire)) { \
-        return SHUTDOWN_ERROR;                           \
+#define CHECK_AVAILABLE        \
+    if (!ServiceAvailable()) { \
+        return SHUTDOWN_ERROR; \
     }
 
 DBImpl::DBImpl(const DBOptions& options)
-    : options_(options),
-      initialized_(false),
-      merge_thread_pool_(1, 1),
-      index_thread_pool_(1, 1),
-      index_task_tracker_(3) {
+    : options_(options), available_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1), index_task_tracker_(3) {
     mem_mgr_ = MemManagerFactory::Build(options_);
     merge_mgr_ptr_ = MergeManagerFactory::SSBuild(options_);
 
@@ -84,19 +79,27 @@ DBImpl::~DBImpl() {
     DBImpl::Stop();
 }
 
+bool
+DBImpl::ServiceAvailable() {
+    return available_.load(std::memory_order_acquire);
+}
+
+void
+DBImpl::SetAvailable(bool available) {
+    available_.store(available, std::memory_order_release);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // External APIs
 ////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::Start() {
-    if (initialized_.load(std::memory_order_acquire)) {
+    if (ServiceAvailable()) {
         return Status::OK();
     }
 
-    knowhere::enable_faiss_logging();
-
     // LOG_ENGINE_TRACE_ << "DB service start";
-    initialized_.store(true, std::memory_order_release);
+    SetAvailable(true);
 
     // TODO: merge files
 
@@ -123,11 +126,11 @@ DBImpl::Start() {
 
 Status
 DBImpl::Stop() {
-    if (!initialized_.load(std::memory_order_acquire)) {
+    if (!ServiceAvailable()) {
         return Status::OK();
     }
 
-    initialized_.store(false, std::memory_order_release);
+    SetAvailable(false);
 
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         // flush all without merge
@@ -136,11 +139,14 @@ DBImpl::Stop() {
         // wait flush thread finish
         swn_flush_.Notify();
         bg_flush_thread_.join();
+        LOG_ENGINE_DEBUG_ << "DBImpl::Stop bg_flush_thread_.join()";
 
         WaitMergeFileFinish();
-
+        LOG_ENGINE_DEBUG_ << "DBImpl::Stop WaitMergeFileFinish";
         swn_index_.Notify();
+        index_req_swn_.Notify();
         bg_index_thread_.join();
+        LOG_ENGINE_DEBUG_ << "DBImpl::Stop bg_index_thread_.join()";
     }
 
     // wait metric thread exit
@@ -155,7 +161,7 @@ DBImpl::Stop() {
 
 Status
 DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     auto ctx = context;
 
@@ -193,7 +199,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
 Status
 DBImpl::DropCollection(const std::string& collection_name) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
 
@@ -215,7 +221,7 @@ DBImpl::DropCollection(const std::string& collection_name) {
 
 Status
 DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
@@ -226,7 +232,7 @@ DBImpl::HasCollection(const std::string& collection_name, bool& has_or_not) {
 
 Status
 DBImpl::ListCollections(std::vector<std::string>& names) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     names.clear();
     return snapshot::Snapshots::GetInstance().GetCollectionNames(names);
@@ -235,7 +241,7 @@ DBImpl::ListCollections(std::vector<std::string>& names) {
 Status
 DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::CollectionPtr& collection,
                           snapshot::FieldElementMappings& fields_schema) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -250,7 +256,7 @@ DBImpl::GetCollectionInfo(const std::string& collection_name, snapshot::Collecti
 
 Status
 DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& collection_stats) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     STATUS_CHECK(GetSnapshotInfo(collection_name, collection_stats));
     return Status::OK();
@@ -258,7 +264,7 @@ DBImpl::GetCollectionStats(const std::string& collection_name, milvus::json& col
 
 Status
 DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -269,7 +275,7 @@ DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
 
 Status
 DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -288,7 +294,7 @@ DBImpl::CreatePartition(const std::string& collection_name, const std::string& p
 
 Status
 DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -310,7 +316,7 @@ DBImpl::DropPartition(const std::string& collection_name, const std::string& par
 
 Status
 DBImpl::HasPartition(const std::string& collection_name, const std::string& partition_tag, bool& exist) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(server::ValidatePartitionTags({partition_tag}));
@@ -330,7 +336,7 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
 
 Status
 DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::string>& partition_names) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -342,8 +348,8 @@ DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::stri
 Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
-    CHECK_INITIALIZED;
-
+    CHECK_AVAILABLE
+    SetThreadName("create_index");
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
 
     // step 1: wait merge file thread finished to avoid duplicate data bug
@@ -385,6 +391,12 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
     // step 4: iterate segments need to be build index, wait until all segments are built
     while (true) {
+        // server is going to shutdown, quit this thread
+        if (!ServiceAvailable()) {
+            LOG_ENGINE_DEBUG_ << "Build index stopped since DB service going to exit";
+            break;
+        }
+
         // start background build index thread
         std::vector<std::string> collection_names = {collection_name};
         StartBuildIndexTask(collection_names, true);
@@ -430,7 +442,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
 Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
 
@@ -449,7 +461,7 @@ DBImpl::DropIndex(const std::string& collection_name, const std::string& field_n
 
 Status
 DBImpl::DescribeIndex(const std::string& collection_name, const std::string& field_name, CollectionIndex& index) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Describe index for collection: " << collection_name << " field: " << field_name;
 
@@ -461,7 +473,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                idx_t op_id) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     if (data_chunk == nullptr) {
         return Status(DB_ERROR, "Null pointer");
@@ -556,14 +568,14 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
     }
 
     // do insert
-    int64_t segment_row_count = 0;
-    GetSegmentRowCount(ss->GetCollection(), segment_row_count);
+    int64_t segment_row_limit = 0;
+    GetSegmentRowLimit(ss->GetCollection(), segment_row_limit);
 
     int64_t collection_id = ss->GetCollectionId();
     int64_t partition_id = partition->GetID();
 
     std::vector<DataChunkPtr> chunks;
-    STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_count, chunks));
+    STATUS_CHECK(utils::SplitChunk(consume_chunk, segment_row_limit, chunks));
 
     LOG_ENGINE_DEBUG_ << "Insert entities into mem manager";
     for (auto& chunk : chunks) {
@@ -574,7 +586,7 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
 
         std::set<int64_t> collection_ids;
         if (mem_mgr_->RequireFlush(collection_ids)) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "insert", 0) << "Insert buffer size exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Insert buffer size exceeds limit. Force flush";
             InternalFlush();
         }
     }
@@ -590,7 +602,7 @@ Status
 DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_array,
                       const std::vector<std::string>& field_names, std::vector<bool>& valid_row,
                       DataChunkPtr& data_chunk) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -608,12 +620,12 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 
 Status
 DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     auto status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
     if (!status.ok()) {
-        LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get snapshot fail: " << status.message();
+        LOG_ENGINE_DEBUG_ << "Failed to get snapshot: " << status.message();
         return status;
     }
 
@@ -625,8 +637,7 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
     std::set<int64_t> collection_ids;
     if (mem_mgr_->RequireFlush(collection_ids)) {
         if (collection_ids.find(ss->GetCollectionId()) != collection_ids.end()) {
-            LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] ", "delete", 0)
-                              << "Delete count in buffer exceeds limit. Force flush";
+            LOG_ENGINE_DEBUG_ << "Delete count in buffer exceeds limit. Force flush";
             InternalFlush(collection_name);
         }
     }
@@ -636,9 +647,9 @@ DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNum
 
 Status
 DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_ptr, engine::QueryResultPtr& result) {
-    CHECK_INITIALIZED;
-
-    TimeRecorder rc("DBImpl::Query");
+    CHECK_AVAILABLE
+    SetThreadName("query");
+    TimeRecorderAuto rc("DBImpl::Query");
 
     if (!query_ptr->root) {
         return Status{DB_ERROR, "BinaryQuery is null"};
@@ -650,7 +661,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     SnapshotVisitor ss_visitor(ss);
     snapshot::IDS_TYPE segment_ids;
     STATUS_CHECK(ss_visitor.SegmentsToSearch(query_ptr->partitions, segment_ids));
-    LOG_ENGINE_DEBUG_ << LogOut("Engine query begin, segment count: %ld", segment_ids.size());
+    rc.RecordSection("segments to search: " + std::to_string(segment_ids.size()));
 
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(nullptr, ss, options_, query_ptr, segment_ids);
 
@@ -673,12 +684,14 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     if (job->query_result()) {
         result = job->query_result();
     }
+    rc.RecordSection("execute query");
 
     // step 4: get entities by result ids
     std::vector<bool> valid_row;
     if (!query_ptr->field_names.empty()) {
         STATUS_CHECK(GetEntityByID(query_ptr->collection_id, result->result_ids_, query_ptr->field_names, valid_row,
                                    result->data_chunk_));
+        rc.RecordSection("get entities");
     }
 
     // step 5: filter entities by field names
@@ -696,8 +709,6 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     //        filter_attrs.emplace_back(attrs_data);
     //    }
 
-    rc.ElapseFromBegin("Engine query totally cost");
-
     // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
@@ -705,7 +716,7 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
 Status
 DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, IDNumbers& entity_ids) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -736,7 +747,7 @@ DBImpl::ListIDInSegment(const std::string& collection_name, int64_t segment_id, 
 Status
 DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& collection_name,
                        const std::vector<std::string>& field_names, bool force) {
-    CHECK_INITIALIZED;
+    CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
@@ -750,9 +761,7 @@ DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& col
 
 Status
 DBImpl::Flush(const std::string& collection_name) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_AVAILABLE
 
     Status status;
     bool has_collection = false;
@@ -774,9 +783,7 @@ DBImpl::Flush(const std::string& collection_name) {
 
 Status
 DBImpl::Flush() {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Begin flush all collections";
     InternalFlush();
@@ -787,9 +794,7 @@ DBImpl::Flush() {
 
 Status
 DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name, double threshold) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
+    CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";
     const std::lock_guard<std::mutex> index_lock(build_index_mutex_);
@@ -848,8 +853,8 @@ DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::stri
         }
 
         // delete rate less than threshold, skip compact
-        auto deleted_count = deleted_docs->GetCount();
-        if (double(deleted_count) / (row_count + deleted_count) < threshold) {
+        auto deleted_count = (double)(deleted_docs->GetCount());
+        if (deleted_count / (row_count + deleted_count) < threshold) {
             continue;  // no need to compact
         }
 
@@ -879,7 +884,7 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
         snapshot::ScopedSnapshotT ss;
         status = snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name);
         if (!status.ok()) {
-            LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "flush", 0) << "Get snapshot fail: " << status.message();
+            LOG_WAL_ERROR_ << "Failed to get snapshot: " << status.message();
             return;
         }
 
@@ -913,7 +918,7 @@ DBImpl::TimingFlushThread() {
     SetThreadName("timing_flush");
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!initialized_.load(std::memory_order_acquire)) {
+        if (!ServiceAvailable()) {
             LOG_ENGINE_DEBUG_ << "DB background flush thread exit";
             break;
         }
@@ -963,7 +968,7 @@ DBImpl::TimingMetricThread() {
     SetThreadName("timing_metric");
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!initialized_.load(std::memory_order_acquire)) {
+        if (!ServiceAvailable()) {
             LOG_ENGINE_DEBUG_ << "DB background metric thread exit";
             break;
         }
@@ -1027,9 +1032,14 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         }
 
         // start build index job
-        LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for " << segment_ids.size() << " segments of " << collection_name;
+        // build one segment for each time, for two reasons:
+        // 1. we don't need to wait all segments index finish when milvus server stop
+        // 2. avoid build index for deleted segments
+        snapshot::IDS_TYPE segment_to_build = {segment_ids[0]};
+        LOG_ENGINE_DEBUG_ << "Create BuildIndexJob for segment " << segment_to_build[0] << " of " << collection_name;
         cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before build index
-        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_ids);
+        scheduler::BuildIndexJobPtr job =
+            std::make_shared<scheduler::BuildIndexJob>(latest_ss, options_, segment_to_build);
 
         IncreaseLiveBuildTaskNum();
         scheduler::JobMgrInst::GetInstance()->Put(job);
@@ -1045,6 +1055,15 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
         if (!job->status().ok()) {
             LOG_ENGINE_ERROR_ << job->status().message();
         }
+
+        // notify index request to return (if all segments index has been done)
+        index_req_swn_.Notify();
+
+        // quit this thread if the milvus server is going to shutdown
+        if (!ServiceAvailable()) {
+            LOG_ENGINE_DEBUG_ << "DB background build index thread exit";
+            break;
+        }
     }
 }
 
@@ -1053,11 +1072,11 @@ DBImpl::TimingIndexThread() {
     SetThreadName("timing_index");
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!initialized_.load(std::memory_order_acquire)) {
+        if (!ServiceAvailable()) {
             WaitMergeFileFinish();
             WaitBuildIndexFinish();
 
-            LOG_ENGINE_DEBUG_ << "DB background thread exit";
+            LOG_ENGINE_DEBUG_ << "DB background timing index thread exit";
             break;
         }
 
@@ -1122,7 +1141,7 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
                               << " reason:" << status.message();
         }
 
-        if (!initialized_.load(std::memory_order_acquire)) {
+        if (!ServiceAvailable()) {
             LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection id: " << collection_id;
             break;
         }

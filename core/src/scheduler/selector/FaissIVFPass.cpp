@@ -58,7 +58,7 @@ FaissIVFPass::Run(const TaskPtr& task) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: gpu disable, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < threshold_) {
-        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: nq < gpu_search_threshold, specify cpu to search! ");
+        LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: nq < gpu_search_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->topk() > server::GPU_QUERY_MAX_TOPK) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFPass: topk > gpu_max_topk_threshold, specify cpu to search!");

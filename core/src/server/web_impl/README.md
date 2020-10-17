@@ -20,13 +20,13 @@
   - [`/collections/{collection_name}/partitions` (OPTIONS)](#collectionscollection_namepartitions-options)
   - [`/collections/{collection_name}/partitions` (DELETE)](#collectionscollection_namepartitions-delete)
   - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
-  - [`/collections/{collection_name}/entities` (PUT)](#collectionscollection_nameentities-put)
   - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
   - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
   - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities_id-get)
   - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
   - [`/system/{op}` (PUT)](#systemop-put)
+  - [`/status` (GET)](#status)
 - [Error Codes](#error-codes)
 
 <!-- /TOC -->
@@ -152,7 +152,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections?offset=0&page_size=1" -H "acce
                     "params": {"dime": 128}
                     }
                 ],
-                "segment_size": 1024,
+                "segment_row_limit": 1024,
                 "auto_id": true
             }
         ],
@@ -169,7 +169,7 @@ Creates a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -408,7 +408,7 @@ Updates the index type and nlist of a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -428,7 +428,7 @@ Updates the index type and nlist of a collection.
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
-| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes.                                 | No        |
 | `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
@@ -583,12 +583,17 @@ Creates a partition in a collection.
 
 #### Request
 
-| Request Component | Value                                       |
-| ----------------- | ------------------------------------------- |
-| Name              | `/collections/{collection_name}/partitions` |
-| Header            | `accept: application/json`                  |
-| Body              | N/A                                         |
-| Method            | POST                                        |
+<table>
+<tr><th>Request Component</th><th>Value</th></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/partitions</code></pre></td></tr>
+<tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
+<tr><td>Body</td><td><pre><code>
+{
+    "partition_tag": "test"
+}
+</code></pre> </td></tr>
+<tr><td>Method</td><td>POST</td></tr>
+</table>
 
 #### Response
 
@@ -763,7 +768,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -799,7 +804,6 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 | Parameter  | Description                                                                                                                                                                                  | Required? |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `dsl`      | query dsl.                                                                                                                                                                            | Yes       |
-| `params`   | Extra params for search. Please refer to [Index and search parameters](#Index-and-search-parameters) to get more detail information.                                                                                        | Yes       |
 
 > Note: Type of items of vectors depends on the metric used by the collection. If the collection uses `L2` or `IP`, you must use `float`. If the collection uses `HAMMING`, `JACCARD`, or `TANIMOTO`, you must use `uint8`.
 
@@ -822,7 +826,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"search\":{\"topk\":2,\"vectors\":[[0.1]],\"params\":{\"nprobe\":16}}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "..."
 ```
 
 ##### Response
@@ -982,7 +986,7 @@ Delete entities
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
@@ -1017,7 +1021,7 @@ Delete entities
 ##### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{"delete": {"ids": ["1578989029645098000"]}}"
+$ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{"ids": ["1578989029645098000"]}"
 ```
 
 ##### Response
@@ -1036,16 +1040,23 @@ Inserts entities to a collection.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/tables/{table_name}/entities</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/entities</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
 <tr><td>Body</td><td><pre><code>
 {
     "partition_tag": "part",
-    "entities": {
-        "__id": [123456789,234567]
-        "field_1": 1
-        "field_vec": [[], []]
-    }
+    "entities": [
+        {
+           "__id": 1,
+           "field_1": 1,
+           "field_vec": []
+        },
+        {
+            "__id": 2,
+            "field_1": 2,
+            "field_vec": []
+        }
+    ]
 }
 </code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
@@ -1080,7 +1091,7 @@ Inserts entities to a collection.
 ##### Request
 
 ```shell
-$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"vectors\":[[0.1],[0.2],[0.3],[0.4]]}"
+$ curl -X POST "http://127.0.0.1:19121/collections/test_collection/entities" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"entities\":[{"__id": 1, "field_vec": []}]}"
 ```
 
 ##### Response
@@ -1275,6 +1286,40 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 
 ```json
 { "code": 0, "message": "success" }
+```
+
+### `/status` (GET)
+
+Gets status of the Milvus server.
+
+#### Request
+
+| Request Component | Value                      |
+| ----------------- | -------------------------- |
+| Name              | `/status`                  |
+| Header            | `accept: application/json` |
+| Body              | N/A                        |
+| Method            | GET                        |
+
+#### Response
+
+| Status code | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| 200         | The request is successful.                                        |
+| 400         | The request is incorrect. Refer to the error message for details. |
+
+#### Example
+
+##### Request
+
+```shell
+$ curl -X GET "http://127.0.0.1:19121/status" -H "accept: application/json"
+```
+
+##### Response
+
+```json
+{"code":0,"message":"OK"}
 ```
 
 ## Index and search parameters

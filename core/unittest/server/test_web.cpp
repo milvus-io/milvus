@@ -151,7 +151,7 @@ namespace {
 static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
-    "version: 0.5\n"
+    "version: 0.6\n"
     "\n"
     "cluster:\n"
     "  enable: false\n"
@@ -430,7 +430,7 @@ CreateCollection(const TestClientP& client_ptr, const TestConnP& connection_ptr,
                 "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
 
     mapping_json = nlohmann::json::parse(mapping_str);
@@ -629,7 +629,7 @@ TEST_F(WebControllerTest, INSERT_BIN) {
                 "params": {}
             }
         ],
-        "segment_row_count": 100000,
+        "segment_row_limit": 100000,
         "auto_id": true
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
@@ -778,7 +778,7 @@ TEST_F(WebControllerTest, SEARCH) {
                 "params": {}
             }
         ],
-        "segment_row_count": 100000
+        "segment_row_limit": 100000
     })";
     nlohmann::json mapping_json = nlohmann::json::parse(mapping_str);
     mapping_json["collection_name"] = collection_name;
@@ -825,7 +825,7 @@ TEST_F(WebControllerTest, SEARCH) {
     //    ASSERT_EQ(milvus::server::web::StatusCode::SUCCESS, error_dto->code);
     auto result_json = nlohmann::json::parse(response->readBodyToString()->std_str());
     ASSERT_TRUE(result_json.contains("data"));
-    ASSERT_EQ(1, result_json["data"]["num"].get<int64_t>());
+    ASSERT_EQ(1, result_json["data"]["nq"].get<int64_t>());
 }
 
 TEST_F(WebControllerTest, INDEX) {

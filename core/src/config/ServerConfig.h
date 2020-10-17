@@ -130,6 +130,7 @@ struct ServerConfig {
         Integer omp_thread_num{0};
         Integer clustering_type{0};
         Integer simd_type{0};
+        Bool stat_optimizer_enable{true};
     } engine;
 
     struct GPU {
@@ -161,6 +162,8 @@ struct ServerConfig {
         String path{"unknown"};
         Integer max_log_file_size{0};
         Integer log_rotate_num{0};
+        Bool log_to_stdout{false};
+        Bool log_to_file{true};
     } logs;
 
     struct System {

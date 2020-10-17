@@ -7,25 +7,20 @@ import logging
 from time import sleep
 from multiprocessing import Process
 import sklearn.preprocessing
-from milvus import IndexType, MetricType
 from utils import *
 
-dim = 128
 index_file_size = 10
-collection_id = "test_mix"
-add_interval_time = 5
-vectors = gen_vectors(10000, dim)
+vectors = gen_vectors(10000, default_dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
 top_k = 1
 nprobe = 1
 epsilon = 0.001
 nlist = 128
-index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
+# index_params = {'index_type': IndexType.IVFLAT, 'nlist': 16384}
 
 
 class TestMixBase:
-
     # disable
     def _test_search_during_createIndex(self, args):
         loops = 10000
@@ -36,20 +31,20 @@ class TestMixBase:
         milvus_instance = get_milvus(args["handler"])
         # milvus_instance.connect(uri=uri)
         milvus_instance.create_collection({'collection_name': collection,
-             'dimension': dim,
+             'dimension': default_dim,
              'index_file_size': index_file_size,
-             'metric_type': MetricType.L2})
+             'metric_type': "L2"})
         for i in range(10):
             status, ids = milvus_instance.insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
                 id_0 = ids[0]; id_1 = ids[1]
-        def create_index(milvus_instance):
-            logging.getLogger().info("In create index")
-            status = milvus_instance.create_index(collection, index_params)
-            logging.getLogger().info(status)
-            status, result = milvus_instance.get_index_info(collection)
-            logging.getLogger().info(result)
+        # def create_index(milvus_instance):
+        #     logging.getLogger().info("In create index")
+        #     status = milvus_instance.create_index(collection, index_params)
+        #     logging.getLogger().info(status)
+        #     status, result = milvus_instance.get_index_info(collection)
+        #     logging.getLogger().info(result)
         def insert(milvus_instance):
             logging.getLogger().info("In add vectors")
             status, ids = milvus_instance.insert(collection, vectors)
@@ -89,7 +84,7 @@ class TestMixBase:
             collection_name = gen_unique_str('test_mix_multi_collections')
             collection_list.append(collection_name)
             param = {'collection_name': collection_name,
-                     'dimension': dim,
+                     'dimension': default_dim,
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_collection(param)
@@ -102,7 +97,7 @@ class TestMixBase:
             collection_name = gen_unique_str('test_mix_multi_collections')
             collection_list.append(collection_name)
             param = {'collection_name': collection_name,
-                     'dimension': dim,
+                     'dimension': default_dim,
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_collection(param)

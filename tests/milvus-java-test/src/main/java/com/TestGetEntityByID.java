@@ -1,11 +1,12 @@
 package com;
 
 import io.milvus.client.*;
+import io.milvus.client.exception.ServerSideMilvusException;
+import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.nio.ByteBuffer;
+import java.util.*;
 
 public class TestGetEntityByID {
     public List<Long> get_ids = Utils.toListIds(1111);
@@ -13,77 +14,77 @@ public class TestGetEntityByID {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetEntitiesByIdValid(MilvusClient client, String collectionName) {
         int get_length = 100;
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-        InsertResponse resInsert = client.insert(insertParam);
-        List<Long> ids = resInsert.getEntityIds();
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, get_length));
-        assert (res.getResponse().ok());
-//        assert (res.getValidIds(), ids.subList(0, get_length));
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
         for (int i = 0; i < get_length; i++) {
-            List<Map<String,Object>> fieldsMap = res.getFieldsMap();
-            assert (fieldsMap.get(i).get("float_vector").equals(Constants.vectors.get(i)));
+            Map<String,Object> fieldsMap = resEntities.get(ids.get(i));
+            assert (fieldsMap.get("float_vector").equals(Constants.vectors.get(i)));
         }
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetEntityByIdAfterDelete(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-        InsertResponse resInsert = client.insert(insertParam);
-        List<Long> ids = resInsert.getEntityIds();
-        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
-        assert(res_delete.ok());
+        List<Long> ids = Utils.initData(client, collectionName);
+        client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(1)));
         client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-        assert (res.getResponse().ok());
-        assert (res.getFieldsMap().size() == 0);
+        List<Long> getIds = ids.subList(0,2);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, getIds);
+        Assert.assertEquals(resEntities.size(), getIds.size()-1);
+        Assert.assertEquals(resEntities.get(getIds.get(0)).get(Constants.floatVectorFieldName), Constants.vectors.get(0));
     }
 
-    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
+    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testGetEntityByIdCollectionNameNotExisted(MilvusClient client, String collectionName) {
         String newCollection = "not_existed";
-        GetEntityByIDResponse res = client.getEntityByID(newCollection, get_ids);
-        assert(!res.getResponse().ok());
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(newCollection, get_ids);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetVectorIdNotExisted(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultEntities).build();
-        client.insert(insertParam);
-        client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-        assert (res.getFieldsMap().size() == 0);
+        List<Long> ids = Utils.initData(client, collectionName);
+        Map<Long, Map<String, Object>> resEntities =  client.getEntityByID(collectionName, get_ids);
+        Assert.assertEquals(resEntities.size(), 0);
     }
 
     // Binary tests
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityByIdValidBinary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-        InsertResponse resInsert = client.insert(insertParam);
-        List<Long> ids = resInsert.getEntityIds();
+        int get_length = 20;
+        List<Long> intValues = new ArrayList<>(Constants.nb);
+        List<Float> floatValues = new ArrayList<>(Constants.nb);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
+        for (int i = 0; i < Constants.nb; ++i) {
+            intValues.add((long) i);
+            floatValues.add((float) i);
+        }
+        InsertParam insertParam = InsertParam
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+        List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-        assert res.getFieldsMap().get(0).get(Constants.binaryFieldName).equals(Constants.vectorsBinary.get(0).rewind());
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
+        for (int i = 0; i < get_length; i++) {
+            assert (resEntities.get(ids.get(i)).get(Constants.binaryVectorFieldName).equals(vectors.get(i)));
+        }
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityByIdAfterDeleteBinary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-        InsertResponse resInsert = client.insert(insertParam);
-        List<Long> ids = resInsert.getEntityIds();
-        Response res_delete = client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
-        assert(res_delete.ok());
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
         client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, ids.subList(0, 1));
-        assert (res.getFieldsMap().size() == 0);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, 1));
+        Assert.assertEquals(resEntities.size(), 0);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
     public void testGetEntityIdNotExistedBinary(MilvusClient client, String collectionName) {
-        InsertParam insertParam = new InsertParam.Builder(collectionName).withFields(Constants.defaultBinaryEntities).build();
-        client.insert(insertParam);
-        client.flush(collectionName);
-        GetEntityByIDResponse res = client.getEntityByID(collectionName, get_ids);
-        assert (res.getFieldsMap().size() == 0);
+        List<Long> ids = Utils.initBinaryData(client, collectionName);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, get_ids);
+        Assert.assertEquals(resEntities.size(), 0);
     }
 }
