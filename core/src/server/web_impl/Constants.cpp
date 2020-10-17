@@ -23,8 +23,6 @@ const char* NAME_ENGINE_TYPE_RNSG = "RNSG";
 const char* NAME_ENGINE_TYPE_IVFPQ = "IVFPQ";
 const char* NAME_ENGINE_TYPE_HNSW = "HNSW";
 const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
-const char* NAME_ENGINE_TYPE_NGTPANNG = "NGTPANNG";
-const char* NAME_ENGINE_TYPE_NGTONNG = "NGTONNG";
 
 const char* NAME_METRIC_TYPE_L2 = "L2";
 const char* NAME_METRIC_TYPE_IP = "IP";
