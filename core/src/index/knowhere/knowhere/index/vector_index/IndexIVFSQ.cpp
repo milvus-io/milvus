@@ -58,6 +58,7 @@ IVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 VecIndexPtr
 IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
+    LOG_KNOWHERE_DEBUG_ << "start copy to gpu";
 #ifdef MILVUS_GPU_VERSION
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
@@ -73,6 +74,7 @@ IVFSQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #else
     KNOWHERE_THROW_MSG("Calling IVFSQ::CopyCpuToGpu when we are using CPU version");
 #endif
+    LOG_KNOWHERE_DEBUG_ << "copy to gpu end";
 }
 
 void

@@ -785,13 +785,16 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         blacklist = bin_from_index->GetBlacklist();
     }
 
+	LOG_ENGINE_DEBUG_ << "start build all";
     try {
         new_index->BuildAll(dataset, conf);
     } catch (std::exception& ex) {
         std::string msg = "Knowhere failed to build index: " + std::string(ex.what());
         return Status(DB_ERROR, msg);
     }
+	LOG_ENGINE_DEBUG_ << "build all end";
 
+	LOG_ENGINE_DEBUG_ << "start copy gpu to cpu";
 #ifdef MILVUS_GPU_VERSION
     /* for GPU index, need copy back to CPU */
     if (new_index->index_mode() == knowhere::IndexMode::MODE_GPU) {
@@ -799,6 +802,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
         new_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
+	LOG_ENGINE_DEBUG_ << "copy gpu to cpu end";
 
     new_index->SetUids(uids);
     new_index->SetBlacklist(blacklist);
