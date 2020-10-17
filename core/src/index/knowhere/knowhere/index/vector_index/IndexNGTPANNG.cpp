@@ -103,5 +103,14 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
+void
+IndexNGTPANNG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    // todo: to be decided
+    index_size_ = 1000000;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

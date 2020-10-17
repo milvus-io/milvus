@@ -35,9 +35,14 @@ enum class OldIndexType {
     SPTAG_BKT_RNT_CPU,
     HNSW,
     ANNOY,
+<<<<<<< HEAD:core/src/index/knowhere/knowhere/index/IndexType.h
     RHNSW_FLAT,
     RHNSW_PQ,
     RHNSW_SQ,
+=======
+    NGTPANNG,
+    NGTONNG,
+>>>>>>> 748ab1f3a... make IndexNGT* works by c++ sdk:core/src/index/knowhere/knowhere/index/vector_index/IndexType.h
     FAISS_BIN_IDMAP = 100,
     FAISS_BIN_IVFLAT_CPU = 101,
 };

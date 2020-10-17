@@ -51,8 +51,6 @@ const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT = false;
 
 const char* NAME_ID = "__id";
 
-/////////////////////////////////////////////////////
-
 }  // namespace web
 }  // namespace server
 }  // namespace milvus

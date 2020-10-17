@@ -24,6 +24,10 @@ class IndexNGTPANNG : public IndexNGT {
 
     void
     BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
+
+    void
+    UpdateIndexSize() override;
+
 };
 
 }  // namespace knowhere

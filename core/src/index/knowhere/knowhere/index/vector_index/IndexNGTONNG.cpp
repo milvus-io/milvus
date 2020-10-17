@@ -67,5 +67,14 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     graphOptimizer.execute(*index_);
 }
 
+void
+IndexNGTONNG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    // todo: to be decided
+    index_size_ = 1000000;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

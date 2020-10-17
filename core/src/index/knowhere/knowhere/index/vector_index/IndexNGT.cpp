@@ -197,5 +197,11 @@ IndexNGT::Dim() {
     return index_->getDimension();
 }
 
+void
+IndexNGT::UpdateIndexSize() {
+    KNOWHERE_THROW_MSG(
+        "IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
+}
+
 }  // namespace knowhere
 }  // namespace milvus
