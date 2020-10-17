@@ -195,7 +195,8 @@ class PrimitiveComparator {
             diff0 = (COMPARE_TYPE)(*a++ - *b++);
             d += diff0 * diff0;
         }
-        return sqrt((double)d);
+//        return sqrt((double)d);
+        return d;
     }
 
     inline static double

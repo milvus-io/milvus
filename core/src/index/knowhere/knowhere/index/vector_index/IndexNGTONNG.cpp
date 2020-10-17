@@ -38,7 +38,9 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    } else if (metric_type == Metric::HAMMING) {
+    else if (metric_type == Metric::IP)
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeIP;
+    else if (metric_type == Metric::HAMMING)
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
     } else if (metric_type == Metric::JACCARD) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
