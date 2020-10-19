@@ -35,6 +35,7 @@ message( STATUS "LAST_COMMIT_ID = ${LAST_COMMIT_ID}" )
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
                 ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h @ONLY )
 
+set ( ENABLE_CPU_PROFILING ON )
 # unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
 set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
@@ -236,6 +237,9 @@ if ( MILVUS_GPU_VERSION )
 else ()
     set( GPU_ENABLE "false" )
 endif ()
+
+
+
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.template
                 ${CMAKE_CURRENT_SOURCE_DIR}/conf/milvus.yaml @ONLY)
 
