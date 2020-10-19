@@ -1837,7 +1837,14 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();
-    grpc_entity->mutable_valid_row()->Resize(id_size, true);
+    for (int64_t i = 0; i < result->result_ids_.size(); i++) {
+        if (result->result_ids_[i] == -1) {
+            id_size--;
+            grpc_entity->add_valid_row(false);
+        } else {
+            grpc_entity->add_valid_row(true);
+        }
+    }
 
     CopyDataChunkToEntity(result->data_chunk_, field_mappings, id_size, grpc_entity);
 

@@ -147,6 +147,8 @@ InitConfig() {
                                                     &config.logs.max_log_file_size.value, 1024 * MB)},
         {"logs.log_rotate_num",
          CreateIntegerConfig("logs.log_rotate_num", 0, 1024, &config.logs.log_rotate_num.value, 0)},
+        {"logs.log_to_stdout", CreateBoolConfig("logs.log_to_stdout", &config.logs.log_to_stdout.value, false)},
+        {"logs.log_to_file", CreateBoolConfig("logs.log_to_file", &config.logs.log_to_file.value, true)},
 
         /* metric */
         {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},
@@ -271,24 +273,28 @@ wal:
   enable: @wal.enable@
   path: @wal.path@
 
-#------------------------------------+-------------------------------------------------------------------+-----------------+
-# Cache Config                       | Description                                                | Type       | Default   |
-#------------------------------------+------------------------------------------------------------+------------+-----------+
-# cache_size                         | The size of CPU memory used for caching data for faster    | String     | 4GB       |
-#                                    | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |           |
-#                                    | must be less than system memory size.                      |            |           |
-#------------------------------------+------------------------------------------------------------+------------+-----------+
-# insert_buffer_size                 | Buffer size used for data insertion.                       | String     | 1GB       |
-#                                    | The sum of 'insert_buffer_size' and 'cache_size'           |            |           |
-#                                    | must be less than system memory size.                      |            |           |
-#------------------------------------+------------------------------------------------------------+------------+-----------+
-# preload_collection                 | A comma-separated list of collection names that need to    | StringList |           |
-#                                    | be pre-loaded when Milvus server starts up.                |            |           |
-#                                    | '*' means preload all existing tables (single-quote or     |            |           |
-#                                    | double-quote required).                                    |            |           |
-#------------------------------------+------------------------------------------------------------+------------+-----------+
-# max_concurrent_insert_request_size | A limitation of processing insert request size concurrent. | String     | 2GB       |
-#------------------------------------+------------------------------------------------------------+------------+-----------+
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Cache Config         | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# cache_size           | The size of CPU memory used for caching data for faster    | String     | 4GB             |
+#                      | query. The sum of 'cache_size' and 'insert_buffer_size'    |            |                 |
+#                      | must be less than system memory size.                      |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# insert_buffer_size   | Buffer size used for data insertion.                       | String     | 1GB             |
+#                      | The sum of 'insert_buffer_size' and 'cache_size'           |            |                 |
+#                      | must be less than system memory size.                      |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# preload_collection   | A comma-separated list of collection names that need to    | StringList |                 |
+#                      | be pre-loaded when Milvus server starts up.                |            |                 |
+#                      | '*' means preload all existing tables (single-quote or     |            |                 |
+#                      | double-quote required).                                    |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# max_concurrent_insert_request_size |                                              |            |                 |
+#                      | A size limit on the concurrent insert requests to process. | String     | 2GB             |
+#                      | Milvus can process insert requests from multiple clients   |            |                 |
+#                      | concurrently. This setting puts a cap on the memory        |            |                 |
+#                      | consumption during this process.                           |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 cache:
   cache_size: @cache.cache_size@
   insert_buffer_size: @cache.insert_buffer_size@
@@ -339,12 +345,18 @@ gpu:
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
 #                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_stdout        | Whether logging to standard output.                        | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_file          | Whether logging to log files.                              | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   level: @logs.level@
   trace.enable: @logs.trace.enable@
   path: @logs.path@
   max_log_file_size: @logs.max_log_file_size@
   log_rotate_num: @logs.log_rotate_num@
+  log_to_stdout: @logs.log_to_stdout@
+  log_to_file: @logs.log_to_file@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |

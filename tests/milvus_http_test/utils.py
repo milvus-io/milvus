@@ -21,13 +21,14 @@ default_drop_interval = 3
 default_dim = 128
 default_nb = 1200
 default_top_k = 10
+default_nq = 1
 max_top_k = 16384
 max_partition_num = 256
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
-default_int_field_name = "int"
+default_int_field_name = "int64"
 default_float_field_name = "float"
 default_double_field_name = "double"
 
@@ -231,53 +232,61 @@ def gen_single_filter_fields():
     fields = []
     for data_type in DataType:
         if data_type in [DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
-            fields.append({"field": data_type.name, "type": data_type})
+            fields.append({"name": data_type.name, "type": data_type})
     return fields
 
 
 def gen_single_vector_fields():
     fields = []
     for data_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]:
-        field = {"field": data_type.name, "type": data_type, "params": {"dim": default_dim}}
+        field = {"name": data_type.name, "type": data_type, "params": {"dim": default_dim}}
         fields.append(field)
     return fields
 
 
 def gen_default_fields(auto_id=True, binary=False):
     fields = [
-        {"field_name": "int64", "field_type": "INT64"},
-        {"field_name": "float", "field_type": "FLOAT"}
+        {"name": default_int_field_name, "type": "INT64"},
+        {"name": default_float_field_name, "type": "FLOAT"}
     ]
     if binary is False:
-        field = {"field_name": default_float_vec_field_name, "field_type": "VECTOR_FLOAT", "extra_params": {"dim": default_dim}}
+        field = {"name": default_float_vec_field_name, "type": "VECTOR_FLOAT",
+                 "params": {"dim": default_dim}}
     else:
-        field = {"field_name": default_binary_vec_field_name, "field_type": "BINARY_FLOAT", "extra_params": {"dim": default_dim}}
+        field = {"name": default_binary_vec_field_name, "type": "BINARY_FLOAT",
+                 "params": {"dim": default_dim}}
     fields.append(field)
     default_fields = {
         "fields": fields,
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
 
 def gen_entities(nb, is_normal=False):
+    entities = []
     vectors = gen_vectors(nb, default_dim, is_normal)
-    entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
-        {"field": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
-    ]
+    for i in range(nb):
+        entity = {
+            "int64": i,
+            "float": float(i),
+            default_float_vec_field_name: vectors[i]
+        }
+        entities.append(entity)
     return entities
 
 
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
-    entities = [
-        {"field": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
-        {"field": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
-        {"field": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
-    ]
+    entities = []
+    for i in range(nb):
+        entity = {
+            default_int_field_name: i,
+            default_float_field_name: float(i),
+            default_binary_vec_field_name: vectors
+        }
+        entities.append(entity)
     return raw_vectors, entities
 
 
@@ -304,13 +313,13 @@ def assert_equal_entity(a, b):
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
                       metric_type="L2", replace_vecs=None):
     if rand_vector is True:
-        dimension = len(entities[-1]["values"][0])
+        dimension = len(entities[0][default_float_vec_field_name][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
-        query_vectors = entities[-1]["values"][:nq]
+        query_vectors = list(map(lambda x: x[default_float_vec_field_name], entities[:nq]))
     if replace_vecs:
         query_vectors = replace_vecs
-    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
+    must_param = {"vector": {field_name: {"topk": top_k, "values": query_vectors, "params": search_params}}}
     must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
@@ -373,7 +382,7 @@ def gen_invalid_range():
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": default_nb//2},
+        {"GT": 0, "LT": default_nb // 2},
         {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
         {"LT": default_nb},
@@ -397,7 +406,7 @@ def add_field_default(default_fields, type=DataType.INT64, field_name=None):
     if field_name is None:
         field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": type
     }
     tmp_fields["fields"].append(field)
@@ -410,7 +419,7 @@ def add_field(entities, field_name=None):
     if field_name is None:
         field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": DataType.INT64,
         "values": [i for i in range(nb)]
     }
@@ -422,7 +431,7 @@ def add_vector_field(entities, is_normal=False):
     nb = len(entities[0]["values"])
     vectors = gen_vectors(nb, default_dim, is_normal)
     field = {
-        "field": gen_unique_str(),
+        "name": gen_unique_str(),
         "type": DataType.FLOAT_VECTOR,
         "values": vectors
     }
@@ -453,15 +462,15 @@ def remove_vector_field(entities):
 def update_field_name(entities, old_name, new_name):
     tmp_entities = copy.deepcopy(entities)
     for item in tmp_entities:
-        if item["field"] == old_name:
-            item["field"] = new_name
+        if item["name"] == old_name:
+            item["name"] = new_name
     return tmp_entities
 
 
 def update_field_type(entities, old_name, new_name):
     tmp_entities = copy.deepcopy(entities)
     for item in tmp_entities:
-        if item["field"] == old_name:
+        if item["name"] == old_name:
             item["type"] = new_name
     return tmp_entities
 
@@ -478,7 +487,7 @@ def update_field_value(entities, old_type, new_value):
 def add_vector_field(nb, dimension=default_dim):
     field_name = gen_unique_str()
     field = {
-        "field": field_name,
+        "name": field_name,
         "type": DataType.FLOAT_VECTOR,
         "values": gen_vectors(nb, dimension)
     }

@@ -151,7 +151,7 @@ namespace {
 static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "# Default values are used when you make no changes to the following parameters.\n"
     "\n"
-    "version: 0.5\n"
+    "version: 0.6\n"
     "\n"
     "cluster:\n"
     "  enable: false\n"
