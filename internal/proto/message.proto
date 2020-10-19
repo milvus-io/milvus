@@ -4,6 +4,7 @@ package milvus.grpc;
 
 option go_package="github.com/czs007/suvlim/internal/proto/message";
 
+
 enum ErrorCode {
     SUCCESS = 0;
     UNEXPECTED_ERROR = 1;

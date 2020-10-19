@@ -1,8 +1,10 @@
 syntax = "proto3";
 
+package masterpb;
+
 option go_package="github.com/czs007/suvlim/internal/proto/master";
 
-import "internal/proto/message/message.proto";
+import "message.proto";
 
 message Collection {
   uint64 id=1;

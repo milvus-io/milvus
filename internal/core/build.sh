@@ -5,7 +5,7 @@ if [[ ! ${jobs+1} ]]; then
     jobs=$(nproc)
 fi
 
-BUILD_OUTPUT_DIR="cmake-build-release"
+BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
