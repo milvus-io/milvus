@@ -30,14 +30,14 @@ timeout(time: 150, unit: 'MINUTES') {
     dir ("tests/milvus_python_test") {
         // sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
         sh 'python3 -m pip install -r requirements.txt'
-        if (isTimeTriggeredBuild) {
+        if (isTimeTriggeredBuild || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
             sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=2 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
         } else {
             sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 -n 4 --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local --service ${env.HELM_RELEASE_NAME} >> ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
         }
     }
 
-    if (isTimeTriggeredBuild) {
+    if (isTimeTriggeredBuild || "${params.IS_MANUAL_TRIGGER_TYPE}" == "True") {
         // sqlite database backend test
         MPLModule('Cleanup Single Node DevTest')
 
