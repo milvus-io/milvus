@@ -95,15 +95,6 @@ class OptimizerInst {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
                 std::vector<PassPtr> pass_list;
-#ifdef MILVUS_FPGA_VERSION
-                bool enable_fpga = false;
-                server::Config& config = server::Config::GetInstance();
-                config.GetFpgaResourceConfigEnable(enable_fpga);
-                if (enable_fpga) {
-                    pass_list.push_back(std::make_shared<FaissIVFPass>());
-                    LOG_SERVER_DEBUG_ << LogOut("add fpga ");
-                }
-#endif
 #ifdef MILVUS_GPU_VERSION
                 bool enable_gpu = false;
                 server::Config& config = server::Config::GetInstance();
@@ -132,6 +123,14 @@ class OptimizerInst {
                     pass_list.push_back(std::make_shared<FaissFlatPass>());
                     pass_list.push_back(std::make_shared<FaissIVFPass>());
                     pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+                }
+#elif defined MILVUS_FPGA_VERSION
+                bool enable_fpga = false;
+                server::Config& config = server::Config::GetInstance();
+                config.GetFpgaResourceConfigEnable(enable_fpga);
+                if (enable_fpga) {
+                    pass_list.push_back(std::make_shared<FaissIVFPass>());
+                    LOG_SERVER_DEBUG_ << LogOut("add fpga ");
                 }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());

@@ -1204,9 +1204,12 @@ macro(build_armadillo)
     add_dependencies(armadillo armadillo_ep)
 endmacro()
 
-resolve_dependency(armadillo)
+if(MILVUS_FPGA_VERSION)
+    resolve_dependency(armadillo)
 
-get_target_property(ARMADILLO_INCLUDE_DIR armadillo INTERFACE_INCLUDE_DIRECTORIES)
-include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
+    get_target_property(ARMADILLO_INCLUDE_DIR armadillo INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
+endif()
+
 # ----------------------------------------------------------------------
 # armadillo

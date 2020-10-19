@@ -27,26 +27,13 @@
 
 namespace milvus {
 namespace scheduler {
+
+class FaissIVFPass : public Pass
 #ifdef MILVUS_GPU_VERSION
-class FaissIVFPass : public Pass, public server::GpuResourceConfigHandler {
- public:
-    FaissIVFPass() = default;
-
- public:
-    void
-    Init() override;
-
- public:
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    int64_t idx_ = 0;
-};
-using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
+    ,
+                     public server::GpuResourceConfigHandler
 #endif
-
-class FaissIVFPass : public Pass {
+{
  public:
     FaissIVFPass() = default;
 
@@ -54,12 +41,14 @@ class FaissIVFPass : public Pass {
     void
     Init() override;
 
+ public:
     bool
     Run(const TaskPtr& task) override;
 
  private:
     int64_t idx_ = 0;
 };
+
 using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
 
 }  // namespace scheduler
