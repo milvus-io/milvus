@@ -4,8 +4,8 @@ import (
 	"context"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
-	"github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
+	"github.com/czs007/suvlim/internal/storage/internal/minio/codec"
+	. "github.com/czs007/suvlim/internal/storage/type"
 )
 
 type S3Driver struct {

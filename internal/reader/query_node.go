@@ -23,10 +23,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	"github.com/czs007/suvlim/internal/conf"
+	msgPb "github.com/czs007/suvlim/internal/proto/message"
+	"github.com/czs007/suvlim/internal/master/kv"
+	"github.com/czs007/suvlim/internal/msgclient"
 	"github.com/stretchr/testify/assert"
 	//"github.com/stretchr/testify/assert"
 )

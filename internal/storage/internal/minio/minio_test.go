@@ -2,7 +2,7 @@ package minio_driver_test
 
 import (
 	"context"
-	minio_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio"
+	minio_driver "github.com/czs007/suvlim/internal/storage/internal/minio"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

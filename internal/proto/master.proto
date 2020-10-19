@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package masterpb;
 
-option go_package="github.com/zilliztech/milvus-distributed/internal/proto/master";
+option go_package="github.com/czs007/suvlim/internal/proto/master";
 
 import "message.proto";
 

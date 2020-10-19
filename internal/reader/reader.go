@@ -2,7 +2,7 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	"github.com/czs007/suvlim/internal/msgclient"
 	"log"
 	"sync"
 )

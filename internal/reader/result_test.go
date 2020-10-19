@@ -2,14 +2,14 @@ package reader
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
+	"github.com/czs007/suvlim/internal/conf"
+	"github.com/czs007/suvlim/internal/msgclient"
 	"strconv"
 	"testing"
 	"time"
 
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	masterPb "github.com/czs007/suvlim/internal/proto/master"
+	msgPb "github.com/czs007/suvlim/internal/proto/message"
 )
 
 // NOTE: start pulsar before test
