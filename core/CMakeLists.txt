@@ -37,7 +37,7 @@ configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
 
 set ( ENABLE_CPU_PROFILING ON )
 # unset(CMAKE_EXPORT_COMPILE_COMMANDS CACHE)
-set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+# set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
