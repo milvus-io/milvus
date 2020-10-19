@@ -1,4 +1,4 @@
-module github.com/czs007/suvlim
+module github.com/zilliztech/milvus-distributed
 
 go 1.15
 

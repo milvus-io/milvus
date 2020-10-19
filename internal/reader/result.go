@@ -2,8 +2,8 @@ package reader
 
 import (
 	"context"
-	masterPb "github.com/czs007/suvlim/internal/proto/master"
-	msgPb "github.com/czs007/suvlim/internal/proto/message"
+	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 type ResultEntityIds []int64

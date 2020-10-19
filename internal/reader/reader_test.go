@@ -2,7 +2,7 @@ package reader
 
 import (
 	"context"
-	"github.com/czs007/suvlim/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"strconv"
 	"testing"
 	"time"

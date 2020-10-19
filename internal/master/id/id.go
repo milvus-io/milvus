@@ -5,7 +5,7 @@ import (
 
 	"github.com/rs/xid"
 
-	"github.com/czs007/suvlim/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 type ID struct {

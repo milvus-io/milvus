@@ -5,7 +5,7 @@ import (
 	"path"
 	"runtime"
 
-	storagetype "github.com/czs007/suvlim/internal/storage/type"
+	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -120,14 +120,15 @@ var Config ServerConfig
 // 	load_config()
 // }
 
-func getCurrentFileDir() string {
+func getConfigsDir() string {
 	_, fpath, _, _ := runtime.Caller(0)
-	return path.Dir(fpath)
+	configPath := path.Dir(fpath) + "/../../configs/"
+	configPath = path.Dir(configPath)
+	return configPath
 }
 
-func load_config() {
-	filePath := path.Join(getCurrentFileDir(), "config.yaml")
-	source, err := ioutil.ReadFile(filePath)
+func LoadConfigWithPath(yamlFilePath string) {
+	source, err := ioutil.ReadFile(yamlFilePath)
 	if err != nil {
 		panic(err)
 	}
@@ -139,14 +140,6 @@ func load_config() {
 }
 
 func LoadConfig(yamlFile string) {
-	filePath := path.Join(getCurrentFileDir(), yamlFile)
-	source, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		panic(err)
-	}
-	err = yaml.Unmarshal(source, &Config)
-	if err != nil {
-		panic(err)
-	}
-	//fmt.Printf("Result: %v\n", Config)
+	filePath := path.Join(getConfigsDir(), yamlFile)
+	LoadConfigWithPath(filePath)
 }

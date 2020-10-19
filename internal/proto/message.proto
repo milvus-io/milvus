@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package milvus.grpc;
 
-option go_package="github.com/czs007/suvlim/internal/proto/message";
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/message";
 
 
 enum ErrorCode {

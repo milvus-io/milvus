@@ -39,4 +39,4 @@ done
 # ignore Minio,S3 unittes
 MILVUS_DIR="${SCRIPTS_DIR}/../../internal/"
 echo $MILVUS_DIR
-go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/master/..." -failfast
+echo go test "${MILVUS_DIR}/storage/internal/tikv/..." "${MILVUS_DIR}/reader/..." "${MILVUS_DIR}/writer/..." "${MILVUS_DIR}/master/..." -failfast

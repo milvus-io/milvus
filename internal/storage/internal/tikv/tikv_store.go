@@ -3,9 +3,9 @@ package tikv_driver
 import (
 	"context"
 	"errors"
-	"github.com/czs007/suvlim/internal/conf"
-	. "github.com/czs007/suvlim/internal/storage/internal/tikv/codec"
-	. "github.com/czs007/suvlim/internal/storage/type"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv/codec"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
 	"github.com/tikv/client-go/config"
 	"github.com/tikv/client-go/rawkv"
 	"strconv"
