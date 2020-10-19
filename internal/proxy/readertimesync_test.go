@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/czs007/suvlim/internal/proto/message"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"log"

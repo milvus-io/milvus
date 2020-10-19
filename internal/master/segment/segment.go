@@ -3,7 +3,7 @@ package segment
 import (
 	"time"
 
-	masterpb "github.com/czs007/suvlim/internal/proto/master"
+	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
 	jsoniter "github.com/json-iterator/go"
 )
 

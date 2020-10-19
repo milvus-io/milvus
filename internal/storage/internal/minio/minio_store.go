@@ -2,9 +2,9 @@ package minio_driver
 
 import (
 	"context"
-	"github.com/czs007/suvlim/internal/storage/internal/minio/codec"
-	. "github.com/czs007/suvlim/internal/storage/internal/minio/codec"
-	. "github.com/czs007/suvlim/internal/storage/type"
+	"github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )

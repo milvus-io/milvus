@@ -13,7 +13,7 @@ package reader
 */
 import "C"
 import (
-	msgPb "github.com/czs007/suvlim/internal/proto/message"
+	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 type IndexConfig struct{}

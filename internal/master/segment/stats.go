@@ -8,9 +8,9 @@ import (
 	"log"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/czs007/suvlim/internal/conf"
-	masterpb "github.com/czs007/suvlim/internal/proto/master"
-	"github.com/czs007/suvlim/internal/master/informer"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	"github.com/zilliztech/milvus-distributed/internal/master/informer"
 )
 
 type SegmentStats struct {

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/czs007/suvlim/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 )

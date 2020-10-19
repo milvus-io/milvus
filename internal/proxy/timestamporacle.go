@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
-	pb "github.com/czs007/suvlim/internal/proto/message"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	etcd "go.etcd.io/etcd/clientv3"
 	"log"
 	"strconv"
