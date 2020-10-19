@@ -1,7 +1,6 @@
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
-include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 
 set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
 file(GLOB HDR_FILES
@@ -53,8 +52,6 @@ set(index_srcs
         knowhere/index/vector_index/IndexType.cpp
         knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
-
-        
         )
 
 set(depend_libs
@@ -63,7 +60,6 @@ set(depend_libs
         gomp
         gfortran
         pthread
-        ngt
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
