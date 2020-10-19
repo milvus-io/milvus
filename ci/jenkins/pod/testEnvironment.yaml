@@ -13,11 +13,11 @@ spec:
     tty: true
     resources:
       limits:
+        memory: "14Gi"
+        cpu: "6.0"
+      requests:
         memory: "8Gi"
         cpu: "4.0"
-      requests:
-        memory: "4Gi"
-        cpu: "2.0"
     volumeMounts:
     - name: kubeconf
       mountPath: /root/.kube/

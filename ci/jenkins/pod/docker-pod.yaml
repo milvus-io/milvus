@@ -17,10 +17,10 @@ spec:
     resources:
       limits:
         memory: "8Gi"
-        cpu: "2"
+        cpu: "4"
       requests:
-        memory: "2Gi"
-        cpu: "1"
+        memory: "4Gi"
+        cpu: "2"
     volumeMounts:
     - name: docker-sock
       mountPath: /var/run/docker.sock
