@@ -23,11 +23,11 @@ spec:
     tty: true
     resources:
       limits:
-        memory: "14Gi"
-        cpu: "6.0"
+        memory: "28Gi"
+        cpu: "12.0"
       requests:
-        memory: "8Gi"
-        cpu: "4.0"
+        memory: "16Gi"
+        cpu: "8.0"
   tolerations:
   - key: dedicated
     operator: Equal
