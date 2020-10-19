@@ -27,7 +27,7 @@ timeout(time: 150, unit: 'MINUTES') {
                                    -f ci/filebeat/values.yaml \
                                    -f test.yaml \
                                    --namespace milvus ${env.HELM_RELEASE_NAME} ."
-                    helmCMD.execute()
+                    sh script: helmCMD, returnStatus: true
                 }
             } catch (exc) {
                 def helmStatusCMD = "helm get manifest --namespace milvus ${env.HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
@@ -53,7 +53,7 @@ timeout(time: 150, unit: 'MINUTES') {
                          --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                          --service ${env.HELM_RELEASE_NAME} >> \
                          ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
-        pytestCMD.execute()
+        sh script: pytestCMD, returnStatus: true
     }
 
     if (isTimeTriggeredBuild) {
@@ -77,7 +77,7 @@ timeout(time: 150, unit: 'MINUTES') {
                                    -f ci/filebeat/values.yaml \
                                    -f test.yaml \
                                    --namespace milvus ${env.HELM_RELEASE_NAME} ."
-                    helmCMD.execute()
+                    sh script: helmCMD, returnStatus: true
                 }
             } catch (exc) {
                 def helmStatusCMD = "helm get manifest --namespace milvus ${env.HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
@@ -94,7 +94,7 @@ timeout(time: 150, unit: 'MINUTES') {
                              --alluredir=\"test_out/dev/single/sqlite\" \
                              --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local >> \
                              ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_sqlite_dev_test.log"
-            pytestCMD.execute()
+            sh script: pytestCMD, returnStatus: true
         }
     }
 }
