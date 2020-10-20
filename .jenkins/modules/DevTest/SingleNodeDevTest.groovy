@@ -52,6 +52,7 @@ timeout(time: 150, unit: 'MINUTES') {
         }
         def pytestCMD_mysql = "pytest . \
                                --level=${TESTCASE_LEVEL} \
+                               -n 4 \
                                --alluredir=\"test_out/dev/single/mysql\" \
                                --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                                --service ${env.HELM_RELEASE_NAME} >> \
@@ -79,6 +80,7 @@ timeout(time: 150, unit: 'MINUTES') {
         dir ("tests/milvus_python_test") {
             def pytestCMD_sqlite = "pytest . \
                                     --level=2 \
+                                    -n 4 \
                                     --alluredir=\"test_out/dev/single/sqlite\" \
                                     --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                                     --service ${env.HELM_RELEASE_NAME} >> \
