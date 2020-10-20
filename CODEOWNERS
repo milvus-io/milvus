@@ -1,10 +1,23 @@
 # Each line is a component followed by one or more owners. 
 
 *                        @JinHai-CN
-/sdk                     @scsven
-/shards                  @XuPeng-SH
+/.jenkins/               @jeffoverflow @cydrain
 /ci/                     @jeffoverflow @cydrain
 /core/                   @scsven
-/core/src/db/meta        @yhmo
+/core/build-support      @jeffoverflow
+/core/conf/              @cydrain
+/core/src/codecs         @yhmo
+/core/src/cache          @yhmo
+/core/src/config         @scsven
+/core/src/db             @yhmo
+/core/src/db/snapshot    @XuPeng-SH
+/core/src/db/meta        @XuPeng-SH
+/core/src/grpc           @yhmo
 /core/src/index/         @shengjun1985
-/tests/                  @cydrain
+/core/src/segment/       @yhmo
+/core/src/server/        @yhmo
+/docker/                 @cydrain @jeffoverflow
+/sdk                     @scsven
+/shards                  @XuPeng-SH
+/tests/                  @cydrain @del-zhenwu
+
