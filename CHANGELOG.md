@@ -5,7 +5,7 @@ Please mark all changes in change log and use the issue from GitHub
 # Milvus 0.11.1 (TBD)
 
 ## Bug
--   \#4030 The configurations build_index_threshold is not effective after update config file and restart docker
+-   \#4030 The configurations name is not effective after update config file and restart docker
 
 ## Feature
 
