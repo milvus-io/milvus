@@ -1,6 +1,7 @@
 # Each line is a component followed by one or more owners. 
 
 *                        @JinHai-CN
+CHANGELOG.md             @milvus-io/reviewer
 /sdk                     @scsven
 /shards                  @XuPeng-SH
 /ci/                     @jeffoverflow @cydrain
