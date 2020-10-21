@@ -1,6 +1,6 @@
 # Changelog
 
-Please mark all changes in change log and use the issue from GitHub
+Please mark all changes in change log and use the issue from GitHub.
 
 # Milvus 0.11.1 (TBD)
 
