@@ -49,9 +49,13 @@ load_simple_config() {
     auto io = Connection("io", 500);
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
+
+#if defined(MILVUS_GPU_VERSION) || defined(MILVUS_FPGA_VERSION)
+    server::Config& config = server::Config::GetInstance();
+#endif
+
 #ifdef MILVUS_FPGA_VERSION
     bool enable_fpga = false;
-    server::Config& config = server::Config::GetInstance();
     config.GetFpgaResourceConfigEnable(enable_fpga);
     if (enable_fpga) {
         std::vector<int64_t> fpga_ids;
@@ -69,7 +73,6 @@ load_simple_config() {
 // get resources
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;
-    server::Config& config = server::Config::GetInstance();
     config.GetGpuResourceConfigEnable(enable_gpu);
     if (enable_gpu) {
         std::vector<int64_t> gpu_ids;

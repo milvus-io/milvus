@@ -175,21 +175,6 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         mode = knowhere::IndexMode::MODE_GPU;
     }
 #endif
-#ifdef MILVUS_FPGA_VERSION
-    server::Config& config = server::Config::GetInstance();
-    bool fpga_resource_enable = true;
-
-    config.GetFpgaResourceConfigEnable(fpga_resource_enable);
-    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.fpga_res_disabled", fpga_resource_enable = false);
-    if (fpga_resource_enable) {
-        LOG_ENGINE_DEBUG_ << "fpga enable indexmode::mode_fpga ";
-    } else {
-        LOG_ENGINE_DEBUG_ << "fpga not enable indexmode::mode_fpga ";
-    }
-    if (fpga_resource_enable) {
-        mode = knowhere::IndexMode::MODE_FPGA;
-    }
-#endif
     fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
@@ -530,13 +515,11 @@ ExecutionEngineImpl::Load(bool to_cache) {
                             }
                         }
                     }
-#ifndef MILVUS_FPGA_VERSION
                     index_->SetBlacklist(concurrent_bitset_ptr);
 
                     std::vector<segment::doc_id_t> uids;
                     segment_reader_ptr->LoadUids(uids);
                     index_->SetUids(uids);
-#endif
                     LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
 
                     LOG_ENGINE_DEBUG_ << "Finished loading index file from segment " << segment_dir;
@@ -716,33 +699,13 @@ ExecutionEngineImpl::CopyToFpga() {
         std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
         indexFpga->SetIndexSize(indexsize);
         indexFpga->CopyIndexToFpga();
+        indexFpga->SetBlacklist(index_->GetBlacklist());
 
-        std::string segment_dir;
-        utils::GetParentPath(location_, segment_dir);
-        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
-        segment::SegmentPtr segment_ptr;
-        segment_reader_ptr->GetSegment(segment_ptr);
-        segment::DeletedDocsPtr deleted_docs_ptr;
-        auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
-        if (!status.ok()) {
-            std::string msg = "Failed to load deleted docs from " + location_;
-            LOG_ENGINE_ERROR_ << msg;
-            return Status(DB_ERROR, msg);
-        }
-        auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+        // do real copy now, may optimizer later
+        auto uids = index_->GetUids();
+        indexFpga->SetUids(uids);
 
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-        for (auto& offset : deleted_docs) {
-            if (!concurrent_bitset_ptr->test(offset)) {
-                concurrent_bitset_ptr->set(offset);
-            }
-        }
         index_ = indexFpga;
-        index_->SetBlacklist(concurrent_bitset_ptr);
-
-        std::vector<segment::doc_id_t> uids;
-        segment_reader_ptr->LoadUids(uids);
-        index_->SetUids(uids);
         FpgaCache();
     } else {
         index_ = cache_index_;
@@ -802,14 +765,12 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         to_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
-#ifndef MILVUS_FPGA_VERSION
     to_index->SetUids(uids);
     LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids().size() << "uids for " << location;
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
     }
-#endif
     LOG_ENGINE_DEBUG_ << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }

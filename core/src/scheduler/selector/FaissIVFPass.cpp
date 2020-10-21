@@ -63,9 +63,16 @@ FaissIVFPass::Run(const TaskPtr& task) {
     auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
     ResourcePtr res_ptr;
 #ifdef MILVUS_FPGA_VERSION
-    server::Config& config = server::Config::GetInstance();
-    bool fpga_enable_ = false;
-    config.GetFpgaResourceConfigEnable(fpga_enable_);
+    auto is_fpga_support = [&]() {
+        // now, only IVF_PQ is supported
+        return static_cast<engine::EngineType>(search_task->file_->engine_type_) == engine::EngineType::FAISS_PQ;
+    };
+
+    bool fpga_enable_ = is_fpga_support();
+    if (fpga_enable_) {
+        server::Config& config = server::Config::GetInstance();
+        config.GetFpgaResourceConfigEnable(fpga_enable_);
+    }
     if (fpga_enable_) {
         LOG_SERVER_DEBUG_ << LogOut("[%s][%d] FaissIVFPass: fpga enable, specify fpga to search!", "search", 0);
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::FPGA, 0);
