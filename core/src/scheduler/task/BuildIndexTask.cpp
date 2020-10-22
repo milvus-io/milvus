@@ -14,6 +14,7 @@
 #include <fiu/fiu-local.h>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
