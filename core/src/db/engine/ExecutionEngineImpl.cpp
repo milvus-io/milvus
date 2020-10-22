@@ -424,9 +424,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
             auto& vectors_uids = vectors->GetMutableUids();
             std::shared_ptr<std::vector<int64_t>> vector_uids_ptr = std::make_shared<std::vector<int64_t>>();
             vector_uids_ptr->swap(vectors_uids);
-            auto count = vectors_uids.size();
             index_->SetUids(vector_uids_ptr);
-            LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
+            LOG_ENGINE_DEBUG_ << "set uids " << vector_uids_ptr->size() << " for index " << location_;
 
             auto& vectors_data = vectors->GetData();
 
@@ -438,6 +437,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 attr_size_.insert(std::pair(attrs_it->first, attrs_it->second->GetNbytes()));
             }
 
+            auto count = vector_uids_ptr->size();
             vector_count_ = count;
 
             faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
