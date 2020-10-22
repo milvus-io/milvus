@@ -55,7 +55,7 @@ SearchReq::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         STATUS_CHECK(ValidateCollectionName(query_ptr_->collection_id));
-        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions));
+        STATUS_CHECK(ValidatePartitionTags(query_ptr_->partitions, false));
 
         // step 2: check table existence
         // only process root table, ignore partition table
