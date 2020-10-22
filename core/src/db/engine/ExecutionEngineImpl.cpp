@@ -177,7 +177,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& uids, int64_t nq, int64_t k,
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<idx_t>> uids, int64_t nq, int64_t k,
                  float* distances, int64_t* labels) {
     auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
@@ -189,7 +189,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& 
     /* map offsets to ids */
     for (int64_t i = 0; i < num; ++i) {
         int64_t offset = res_ids[i];
-        labels[i] = (offset == -1) ? -1 : uids[offset];
+        labels[i] = (offset == -1) ? -1 : (*uids)[offset];
     }
 
     free(res_ids);
@@ -766,7 +766,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
-    std::vector<idx_t> uids;
+    std::shared_ptr<std::vector<idx_t>> uids;
     ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {
