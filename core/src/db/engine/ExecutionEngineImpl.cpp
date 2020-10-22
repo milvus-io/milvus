@@ -393,15 +393,6 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-#ifdef MILVUS_FPGA_VERSION
-    auto cache_index__ =
-        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
-    bool already_in_caches = (cache_index__ != nullptr);
-    if (already_in_caches) {
-        LOG_ENGINE_DEBUG_ << "fpga cache no need to load again";
-        return Status::OK();
-    }
-#endif
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
