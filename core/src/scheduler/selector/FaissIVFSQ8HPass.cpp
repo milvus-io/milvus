@@ -21,6 +21,8 @@
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 
+#include <utility>
+
 namespace milvus {
 namespace scheduler {
 
