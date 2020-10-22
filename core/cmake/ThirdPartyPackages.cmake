@@ -1175,31 +1175,28 @@ macro(build_armadillo)
     message(STATUS "Building armadillo 9.9.x from source")
     set(ARMADILLO_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/armadillo_ep-prefix/src/armadillo_ep")
     set(ARMADILLO_INCLUDE_DIR "${ARMADILLO_PREFIX}/include")
-    set(ARMADILLO_SHARED_LIB "${ARMADILLO_PREFIX}/${CMAKE_SHARED_LIBRARY_PREFIX}armadillo${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(ARMADILLO_CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${ARMADILLO_PREFIX}")
 
     externalproject_add(armadillo_ep
-            URL
-            ${ARMADILLO_SOURCE_URL}
+            URL ${ARMADILLO_SOURCE_URL}
             ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            ${ARMADILLO_PREFIX}/configure
-            BUILD_IN_SOURCE
-            1
-            BUILD_COMMAND
-            ""
-            INSTALL_COMMAND
-            ${MAKE}
-            "PREFIX=${ARMADILLO_PREFIX}"
-            install
+            PREFIX ${ARMADILLO_PREFIX}
+            INSTALL_DIR ${ARMADILLO_PREFIX}
+            CMAKE_ARGS  ${ARMADILLO_CMAKE_ARGS}
+            BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND ${MAKE} install
             BUILD_BYPRODUCTS
             ${ARMADILLO_SHARED_LIB}
             )
 
         file(MAKE_DIRECTORY "${ARMADILLO_INCLUDE_DIR}")
         add_library(armadillo SHARED IMPORTED)
+        ExTernalProject_Get_Property(armadillo_ep INSTALL_DIR)
     set_target_properties(armadillo
-        PROPERTIES IMPORTED_LOCATION "${ARMADILLO_SHARED_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${ARMADILLO_INCLUDE_DIR}")
+        PROPERTIES
+            IMPORTED_GLOBAL    TRUE
+            IMPORTED_LOCATION "${INSTALL_DIR}/lib/libarmadillo.so"
+            INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include")
 
     add_dependencies(armadillo armadillo_ep)
 endmacro()
@@ -1209,7 +1206,9 @@ if(MILVUS_FPGA_VERSION)
 
     get_target_property(ARMADILLO_INCLUDE_DIR armadillo INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
+    install(FILES
+            ${INSTALL_DIR}/lib/libarmadillo.so
+            ${INSTALL_DIR}/lib/libarmadillo.so.9
+            ${INSTALL_DIR}/lib/libarmadillo.so.9.900.4
+            DESTINATION lib)
 endif()
-
-# ----------------------------------------------------------------------
-# armadillo
