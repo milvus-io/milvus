@@ -859,23 +859,24 @@ class TestSearchBase:
                 assert res[i]._distances[0] < epsilon
                 assert res[i]._distances[1] > epsilon
 
-    def _test_query_entities_with_field_less_than_top_k(self, connect, collection):
+    def test_query_entities_with_field_less_than_top_k(self, connect, id_collection):
         """
         target: test search with field, and let return entities less than topk
         method: insert entities and build ivf_ index, and search with field, n_probe=1
         expected:
         """
-        entities, ids = init_data(connect, collection)
-        simple_index = {"index_type": "IVF_SQ8", "params": {"nlist": 200}, "metric_type": "L2"}
-        connect.create_index(collection, field_name, simple_index)
-        default_query, default_query_vecs = gen_query_vectors(field_name, entities, default_top_k, nq, search_params={"nprobe": 1})
+        entities, ids = init_data(connect, id_collection, auto_id=False)
+        simple_index = {"index_type": "IVF_FLAT", "params": {"nlist": 200}, "metric_type": "L2"}
+        connect.create_index(id_collection, field_name, simple_index)
+        # logging.getLogger().info(connect.get_collection_info(id_collection))
+        top_k = 300
+        default_query, default_query_vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 1})
         expr = {"must": [gen_default_vector_expr(default_query)]}
         query = update_query_expr(default_query, expr=expr)
-        res = connect.search(collection, query, fields=["int64"])
-        for r in res[0]:
-            logging.getLogger().info(getattr(r.entity, "int64"))
+        res = connect.search(id_collection, query, fields=["int64"])
         assert len(res) == nq
-        assert len(res[0]) == default_top_k
+        for r in res[0]:
+            assert getattr(r.entity, "int64") == getattr(r.entity, "id")
 
 
 class TestSearchDSL(object):
@@ -1012,6 +1013,11 @@ class TestSearchDSL(object):
         res = connect.search(collection, query)
         assert len(res) == nq
         assert len(res[0]) == default_top_k
+        limit = default_nb // 2
+        for i in range(nq):
+            for result in res[i]:
+                logging.getLogger().info(result.id)
+                assert result.id in ids[:limit]
         # TODO:
 
     def test_query_term_values_parts_in(self, connect, collection):
