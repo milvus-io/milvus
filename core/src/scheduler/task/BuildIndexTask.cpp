@@ -15,6 +15,7 @@
 #include <memory>
 #include <utility>
 
+#include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
 #include "utils/Log.h"
@@ -39,6 +40,38 @@ BuildIndexTask::CreateExecEngine() {
     if (execution_engine_ == nullptr) {
         execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
+}
+
+json
+BuildIndexTask::Dump() const {
+    json ret{
+        {"type", type_},
+        {"segment_id", segment_id_},
+    };
+
+    json fields_dump;
+    auto seg_visitor = engine::SegmentVisitor::Build(snapshot_, segment_id_);
+    auto& field_visitors = seg_visitor->GetFieldVisitors();
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        if (!FieldRequireBuildIndex(field_visitor)) {
+            continue;
+        }
+
+        auto& field = field_visitor->GetField();
+        auto field_element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (field_element_visitor) {
+            json field_dump;
+            field_dump["field_name"] = field->GetName();
+            auto field_element = field_element_visitor->GetElement();
+            field_dump["index_type"] = field_element->GetTypeName();
+            field_dump["index_params"] = field_element->GetParams();
+            fields_dump.push_back(field_dump);
+        }
+    }
+    ret["require_index_fields"] = fields_dump;
+
+    return ret;
 }
 
 Status

@@ -49,6 +49,16 @@ SearchTask::CreateExecEngine() {
     }
 }
 
+json
+SearchTask::Dump() const {
+    json ret{
+        {"type", type_},
+        {"segment_id", segment_id_},
+    };
+
+    return ret;
+}
+
 Status
 SearchTask::OnLoad(LoadType type, uint8_t device_id) {
     TimeRecorder rc("SearchTask::OnLoad " + std::to_string(segment_id_));

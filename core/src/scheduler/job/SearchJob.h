@@ -22,9 +22,8 @@
 #include <utility>
 #include <vector>
 
-#include "Job.h"
-#include "db/SnapshotVisitor.h"
 #include "db/Types.h"
+#include "scheduler/job/Job.h"
 
 #include "server/context/Context.h"
 

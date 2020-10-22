@@ -30,14 +30,8 @@ class SearchTask : public Task {
                         const engine::DBOptions& options, const query::QueryPtr& query_ptr,
                         engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
 
-    inline json
-    Dump() const override {
-        json ret{
-            {"type", type_},
-            {"segment_id", segment_id_},
-        };
-        return ret;
-    }
+    json
+    Dump() const override;
 
     Status
     OnLoad(LoadType type, uint8_t device_id) override;
