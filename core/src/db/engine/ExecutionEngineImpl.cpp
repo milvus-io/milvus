@@ -727,8 +727,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<milvus::segment::doc_id_t>> uids, int64_t nq,
-                 int64_t k, float* distances, int64_t* labels) {
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<milvus::segment::doc_id_t>> uids,
+                 int64_t nq, int64_t k, float* distances, int64_t* labels) {
     int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
 
