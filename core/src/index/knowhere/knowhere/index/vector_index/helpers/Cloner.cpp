@@ -27,9 +27,7 @@ namespace cloner {
 
 void
 CopyIndexData(const VecIndexPtr& dst_index, const VecIndexPtr& src_index) {
-    /* do real copy */
-    auto uids = src_index->GetUids();
-    dst_index->SetUids(uids);
+    dst_index->SetUids(src_index->GetUids());
     dst_index->SetBlacklist(src_index->GetBlacklist());
     dst_index->SetIndexSize(src_index->IndexSize());
 }

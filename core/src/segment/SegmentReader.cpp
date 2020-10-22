@@ -430,8 +430,8 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 STATUS_CHECK(LoadField(field_name, raw, false));
 
                 // load uids
-                std::vector<int64_t> uids;
-                STATUS_CHECK(LoadUids(uids));
+                std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
+                STATUS_CHECK(LoadUids(*uids_ptr));
 
                 auto dataset = knowhere::GenDataset(row_count, dimension, raw->data_.data());
 
@@ -447,7 +447,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 milvus::json conf{{knowhere::meta::DIM, dimension}};
                 index_ptr->Train(knowhere::DatasetPtr(), conf);
                 index_ptr->AddWithoutIds(dataset, conf);
-                index_ptr->SetUids(uids);
+                index_ptr->SetUids(uids_ptr);
                 index_ptr->SetBlacklist(concurrent_bitset_ptr);
                 segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
@@ -504,10 +504,10 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                                                                      index_ptr));
 
         // load uids
-        std::vector<int64_t> uids;
-        STATUS_CHECK(LoadUids(uids));
+        std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
+        STATUS_CHECK(LoadUids(*uids_ptr));
 
-        index_ptr->SetUids(uids);
+        index_ptr->SetUids(uids_ptr);
         index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
