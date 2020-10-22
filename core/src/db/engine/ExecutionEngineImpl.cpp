@@ -422,9 +422,11 @@ ExecutionEngineImpl::Load(bool to_cache) {
             auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
             auto& vectors_uids = vectors->GetMutableUids();
+            std::shared_ptr<std::vector<int64_t>> vector_uids_ptr = std::make_shared<std::vector<int64_t>>();
+            vector_uids_ptr->swap(vectors_uids);
             auto count = vectors_uids.size();
-            index_->SetUids(vectors_uids);
-            LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
+            index_->SetUids(vector_uids_ptr);
+            LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
 
             auto& vectors_data = vectors->GetData();
 
@@ -492,11 +494,10 @@ ExecutionEngineImpl::Load(bool to_cache) {
                     }
 
                     index_->SetBlacklist(concurrent_bitset_ptr);
-
-                    std::vector<segment::doc_id_t> uids;
-                    segment_reader_ptr->LoadUids(uids);
-                    index_->SetUids(uids);
-                    LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids().size() << " for index " << location_;
+                    std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
+                    segment_reader_ptr->LoadUids(*uids_ptr);
+                    index_->SetUids(uids_ptr);
+                    LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
 
                     LOG_ENGINE_DEBUG_ << "Finished loading index file from segment " << segment_dir;
                 }
@@ -690,8 +691,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
-
-    std::vector<segment::doc_id_t> uids;
+    std::shared_ptr<std::vector<segment::doc_id_t>> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
         auto dataset =
@@ -716,7 +716,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 #endif
 
     to_index->SetUids(uids);
-    LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids().size() << "uids for " << location;
+    LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids()->size() << "uids for " << location;
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
@@ -727,7 +727,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::segment::doc_id_t>& uids, int64_t nq,
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<milvus::segment::doc_id_t>> uids, int64_t nq,
                  int64_t k, float* distances, int64_t* labels) {
     int64_t* res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     float* res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
@@ -739,7 +739,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<milvus::
     for (int64_t i = 0; i < num; ++i) {
         int64_t offset = res_ids[i];
         if (offset != -1) {
-            labels[i] = uids[offset];
+            labels[i] = (*uids)[offset];
         } else {
             labels[i] = -1;
         }
@@ -1134,7 +1134,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
     auto result = index_->Query(dataset, conf);
     rc.RecordSection("query done");
 
-    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
+    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),
                                 location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
@@ -1175,7 +1175,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     auto result = index_->Query(dataset, conf);
     rc.RecordSection("query done");
 
-    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids().size(),
+    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),
                                 location_.c_str());
     MapAndCopyResult(result, index_->GetUids(), n, k, distances, labels);
     rc.RecordSection("map uids " + std::to_string(n * k));
