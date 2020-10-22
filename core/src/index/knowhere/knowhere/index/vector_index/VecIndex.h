@@ -94,15 +94,14 @@ class VecIndex : public Index {
         bitset_ = std::move(bitset_ptr);
     }
 
-    const std::vector<IDType>&
+    std::shared_ptr<std::vector<IDType>>
     GetUids() const {
         return uids_;
     }
 
     void
-    SetUids(std::vector<IDType>& uids) {
-        uids_.clear();
-        uids_.swap(uids);
+    SetUids(std::shared_ptr<std::vector<IDType>> uids) {
+        uids_ = uids;
     }
 
     size_t
@@ -116,7 +115,7 @@ class VecIndex : public Index {
 
     size_t
     UidsSize() {
-        return uids_.size() * sizeof(IDType);
+        return uids_->size() * sizeof(IDType);
     }
 
     virtual int64_t
@@ -144,7 +143,7 @@ class VecIndex : public Index {
  protected:
     IndexType index_type_ = "";
     IndexMode index_mode_ = IndexMode::MODE_CPU;
-    std::vector<IDType> uids_;
+    std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
 
  private:
