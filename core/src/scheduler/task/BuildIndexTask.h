@@ -43,6 +43,9 @@ class BuildIndexTask : public Task {
     Status
     OnExecute() override;
 
+    std::string
+    GetIndexType();
+
  private:
     void
     CreateExecEngine();

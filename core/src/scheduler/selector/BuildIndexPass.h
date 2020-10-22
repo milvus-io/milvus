@@ -44,6 +44,11 @@ class BuildIndexPass : public Pass, public ConfigObserver {
     ConfigUpdate(const std::string& name) override;
 
  private:
+    bool
+    isCPUIndex(const std::string& type);
+
+ private:
+    std::unordered_set<std::string> cpu_type_list_;
     uint64_t idx_ = 0;
     bool gpu_enable_ = false;
     std::vector<int64_t> build_gpus_;
