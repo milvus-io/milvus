@@ -46,6 +46,7 @@ HasPartitionReq::OnExecute() {
 
         // step 1: check arguments
         STATUS_CHECK(ValidateCollectionName(collection_name_));
+        STATUS_CHECK(ValidatePartitionTags({partition_tag_}, true));
 
         bool exists = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exists));
