@@ -14,6 +14,7 @@
 #include <fiu/fiu-local.h>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "db/Utils.h"
 #include "db/engine/EngineFactory.h"
@@ -117,6 +118,30 @@ BuildIndexTask::OnExecute() {
     }
 
     return Status::OK();
+}
+
+std::string
+BuildIndexTask::GetIndexType() {
+    auto segment_visitor = engine::SegmentVisitor::Build(snapshot_, segment_id_);
+    auto& field_visitors = segment_visitor->GetFieldVisitors();
+
+    std::vector<std::string> index_types;
+
+    for (auto& pair : field_visitors) {
+        auto& field_visitor = pair.second;
+        auto element_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_INDEX);
+        if (element_visitor == nullptr) {
+            continue;  // index undefined
+        }
+        auto element = element_visitor->GetElement();
+        index_types.push_back(element->GetTypeName());
+    }
+
+    if (index_types.size() != 1) {
+        throw std::runtime_error("index type size not correct." + std::to_string(index_types.size()));
+    }
+
+    return index_types[0];
 }
 
 }  // namespace scheduler
