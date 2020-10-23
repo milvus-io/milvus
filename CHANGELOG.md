@@ -6,6 +6,7 @@ Please mark all changes in change log and use the issue from GitHub
 
 ## Bug
 -   \#4030 The configurations name is not effective after update config file and restart docker
+-   \#4059 milvus raise exception when passing a complex dsl during searching
 
 ## Feature
 
