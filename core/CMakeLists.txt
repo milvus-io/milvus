@@ -26,7 +26,7 @@ get_build_type( TARGET  BUILD_TYPE
 message( STATUS "Build type = ${BUILD_TYPE}" )
 
 get_milvus_version( TARGET  MILVUS_VERSION 
-                            DEFAULT "0.11.0" )
+                            DEFAULT "0.11.1" )
 message( STATUS "Build version = ${MILVUS_VERSION}" )
 
 get_last_commit_id( LAST_COMMIT_ID )
