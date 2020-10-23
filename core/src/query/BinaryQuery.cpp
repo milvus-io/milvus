@@ -228,28 +228,28 @@ BinaryQueryHeight(BinaryQueryPtr& binary_query) {
  */
 
 Status
-rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) {
+rule_1(BooleanQueryPtr& boolean_query, std::vector<BooleanQueryPtr>& paths) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
-        path_stack.push(boolean_query);
+        paths.push_back(boolean_query);
         for (const auto& leaf_query : boolean_query->getLeafQueries()) {
             if (!leaf_query->vector_placeholder.empty()) {
-                while (!path_stack.empty()) {
-                    auto query = path_stack.top();
+                for (const auto& query : paths) {
                     if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
                         std::string msg =
                             "The child node of 'should' and 'must_not' can only be 'term query' and 'range query'.";
                         return Status{SERVER_INVALID_DSL_PARAMETER, msg};
                     }
-                    path_stack.pop();
                 }
+                return status;
             }
         }
         for (auto query : boolean_query->getBooleanQueries()) {
-            status = rule_1(query, path_stack);
+            status = rule_1(query, paths);
             if (!status.ok()) {
                 return status;
             }
+            paths.pop_back();
         }
     }
     return status;
@@ -284,8 +284,8 @@ ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
                 return Status{SERVER_INVALID_DSL_PARAMETER, msg};
             }
         }
-        std::stack<BooleanQueryPtr> path_stack;
-        status = rule_1(boolean_query, path_stack);
+        std::vector<BooleanQueryPtr> paths;
+        status = rule_1(boolean_query, paths);
         if (!status.ok()) {
             return status;
         }
