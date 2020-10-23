@@ -2,7 +2,7 @@
 @Library('mpl') _
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 3 * * * " : ""
+String cron_string = BRANCH_NAME == "0.11.1" ? "30 0 * * * " : ""
 
 pipeline {
     agent none
