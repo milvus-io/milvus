@@ -661,13 +661,13 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
 
-    SuspendIfFirst();
+    // SuspendIfFirst();
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
 
-    ResumeIfLast();
+    // ResumeIfLast();
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 
