@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#define protected public
+
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 #include <vector>
@@ -35,17 +37,18 @@ CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType met
         json_params);
 
     std::vector<float> data;
-    std::vector<int64_t> ids;
+    std::shared_ptr<std::vector<int64_t>> ids = std::make_shared<std::vector<int64_t>>();
     data.reserve(ROW_COUNT * DIMENSION);
-    ids.reserve(ROW_COUNT);
+    ids->reserve(ROW_COUNT);
     for (int64_t i = 0; i < ROW_COUNT; i++) {
-        ids.push_back(i);
+        ids->push_back(i);
         for (uint16_t k = 0; k < DIMENSION; k++) {
             data.push_back(i * DIMENSION + k);
         }
     }
 
-    auto status = engine_ptr->AddWithIds((int64_t)ids.size(), data.data(), ids.data());
+    auto status = engine_ptr->AddWithIds((int64_t)ids->size(), data.data(), ids->data());
+    (std::static_pointer_cast<milvus::engine::ExecutionEngineImpl>(engine_ptr))->index_->SetUids(ids);
     return engine_ptr;
 }
 
