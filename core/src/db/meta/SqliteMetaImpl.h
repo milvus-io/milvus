@@ -107,6 +107,9 @@ class SqliteMetaImpl : public Meta {
                    std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
+    CountPartitions(const std::string& collection_id, int64_t& partition_count) override;
+
+    Status
     GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
 
     Status

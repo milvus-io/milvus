@@ -80,9 +80,9 @@ CreatePartitionRequest::OnExecute() {
         }
 
         // check partition total count
-        std::vector<engine::meta::CollectionSchema> schema_array;
-        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
-        if (schema_array.size() >= MAX_PARTITION_LIMIT) {
+        int64_t partition_count = 0;
+        status = DBWrapper::DB()->CountPartitions(collection_name_, partition_count);
+        if (partition_count >= MAX_PARTITION_LIMIT) {
             return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(4096)");
         }
 

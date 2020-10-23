@@ -1024,6 +1024,25 @@ SqliteMetaImpl::ShowPartitions(const std::string& collection_id,
 }
 
 Status
+SqliteMetaImpl::CountPartitions(const std::string& collection_id, int64_t& partition_count) {
+    try {
+        partition_count = 0;
+        auto ret = ConnectorPtr->select(count(),
+                                        where(c(&CollectionSchema::owner_collection_) == collection_id and
+                                              c(&CollectionSchema::state_) != (int)CollectionSchema::TO_DELETE));
+        if (ret.size() == 1) {
+            partition_count = ret[0];
+        } else {
+            return Status(DB_NOT_FOUND, "Collection " + collection_id + " not found");
+        }
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when count partitions", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 SqliteMetaImpl::GetPartitionName(const std::string& collection_id, const std::string& tag,
                                  std::string& partition_name) {
     try {

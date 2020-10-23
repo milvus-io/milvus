@@ -1618,6 +1618,38 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
 }
 
 Status
+MySQLMetaImpl::CountPartitions(const std::string& collection_id, int64_t& partition_count) {
+    try {
+        server::MetricCollector metric;
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT count(*) FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
+                      << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
+
+            LOG_ENGINE_DEBUG_ << "CountPartitions: " << statement.str();
+
+            res = statement.store();
+        }  // Scoped Connection
+
+        for (auto& resRow : res) {
+            partition_count = resRow["count"];
+        }
+    } catch (std::exception& e) {
+        return HandleException("Failed to count partitions", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
 MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) {
     try {
         server::MetricCollector metric;

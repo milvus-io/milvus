@@ -688,6 +688,15 @@ DBImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::Colle
 }
 
 Status
+DBImpl::CountPartitions(const std::string& collection_id, int64_t& partition_count) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    return meta_ptr_->CountPartitions(collection_id, partition_count);
+}
+
+Status
 DBImpl::InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) {
     //    LOG_ENGINE_DEBUG_ << "Insert " << n << " vectors to cache";
     if (!initialized_.load(std::memory_order_acquire)) {
