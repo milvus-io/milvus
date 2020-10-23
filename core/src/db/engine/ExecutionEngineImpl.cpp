@@ -682,10 +682,7 @@ ExecutionEngineImpl::CopyToFpga() {
         indexFpga->SetIndexSize(indexsize);
         indexFpga->CopyIndexToFpga();
         indexFpga->SetBlacklist(index_->GetBlacklist());
-
-        // do real copy now, may optimizer later
-        auto uids = index_->GetUids();
-        indexFpga->SetUids(uids);
+        indexFpga->SetUids(index_->GetUids());
 
         index_ = indexFpga;
         FpgaCache();
