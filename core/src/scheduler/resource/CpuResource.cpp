@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "scheduler/resource/CpuResource.h"
+#include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
 
 #include <utility>
 
@@ -33,7 +34,13 @@ CpuResource::LoadFile(TaskPtr task) {
 
 void
 CpuResource::Process(TaskPtr task) {
+    if (task->Type() == TaskType::SearchTask) {
+        knowhere::BuilderSuspend();
+    }
     task->Execute();
+    if (task->Type() == TaskType::SearchTask) {
+        knowhere::BuildResume();
+    }
 }
 
 }  // namespace scheduler
