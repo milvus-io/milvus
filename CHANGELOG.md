@@ -10,6 +10,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4012 Milvus hangs when continually creating and dropping partitions.
 
 ## Feature
+-   \#3773 Support IVF_PQ to run on FPGA.
 
 ## Improvement
 -   \#3775 Improve search performance in the case that no item deleted.

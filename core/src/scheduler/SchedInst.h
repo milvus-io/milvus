@@ -17,6 +17,7 @@
 #include "ResourceMgr.h"
 #include "Scheduler.h"
 #include "Utils.h"
+#include "config/Config.h"
 #include "selector/BuildIndexPass.h"
 #include "selector/FaissFlatPass.h"
 #include "selector/FaissIVFPass.h"
@@ -122,6 +123,14 @@ class OptimizerInst {
                     pass_list.push_back(std::make_shared<FaissFlatPass>());
                     pass_list.push_back(std::make_shared<FaissIVFPass>());
                     pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
+                }
+#elif defined MILVUS_FPGA_VERSION
+                bool enable_fpga = false;
+                server::Config& config = server::Config::GetInstance();
+                config.GetFpgaResourceConfigEnable(enable_fpga);
+                if (enable_fpga) {
+                    pass_list.push_back(std::make_shared<FaissIVFPass>());
+                    LOG_SERVER_DEBUG_ << LogOut("add fpga ");
                 }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());

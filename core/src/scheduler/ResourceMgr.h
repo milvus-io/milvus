@@ -119,6 +119,7 @@ class ResourceMgr : public interface::dumpable {
     std::vector<ResourceWPtr> disk_resources_;
     std::vector<ResourceWPtr> cpu_resources_;
     std::vector<ResourceWPtr> gpu_resources_;
+    std::vector<ResourceWPtr> fpga_resources_;
     std::vector<ResourcePtr> resources_;
     mutable std::mutex resources_mutex_;
 

@@ -24,7 +24,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Opentracing
         fiu
         AWS
-        oatpp)
+        oatpp
+        armadillo)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -64,6 +65,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "armadillo")
+        build_armadillo()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -332,6 +335,12 @@ if (DEFINED ENV{MILVUS_AWS_URL})
     set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
 else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
+endif ()
+
+if (DEFINED ENV{MILVUS_ARMADILLO_URL})
+    set(ARMADILLO_SOURCE_URL "$ENV{MILVUS_ARMADILLO_URL}")
+else ()
+    set(ARMADILLO_SOURCE_URL "https://gitlab.com/conradsnicta/armadillo-code/-/archive/9.900.x/armadillo-code-9.900.x.tar.gz")
 endif ()
 
 # ----------------------------------------------------------------------
@@ -1157,4 +1166,49 @@ if(MILVUS_WITH_AWS)
     get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
 
+endif()
+
+# ----------------------------------------------------------------------
+# armadillo
+
+macro(build_armadillo)
+    message(STATUS "Building armadillo 9.9.x from source")
+    set(ARMADILLO_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/armadillo_ep-prefix/src/armadillo_ep")
+    set(ARMADILLO_INCLUDE_DIR "${ARMADILLO_PREFIX}/include")
+    set(ARMADILLO_CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${ARMADILLO_PREFIX}")
+
+    externalproject_add(armadillo_ep
+            URL ${ARMADILLO_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            PREFIX ${ARMADILLO_PREFIX}
+            INSTALL_DIR ${ARMADILLO_PREFIX}
+            CMAKE_ARGS  ${ARMADILLO_CMAKE_ARGS}
+            BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND ${MAKE} install
+            BUILD_BYPRODUCTS
+            ${ARMADILLO_SHARED_LIB}
+            )
+
+        file(MAKE_DIRECTORY "${ARMADILLO_INCLUDE_DIR}")
+        add_library(armadillo SHARED IMPORTED)
+        ExTernalProject_Get_Property(armadillo_ep INSTALL_DIR)
+    set_target_properties(armadillo
+        PROPERTIES
+            IMPORTED_GLOBAL    TRUE
+            IMPORTED_LOCATION "${INSTALL_DIR}/lib/libarmadillo.so"
+            INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include")
+
+    add_dependencies(armadillo armadillo_ep)
+endmacro()
+
+if(MILVUS_FPGA_VERSION)
+    resolve_dependency(armadillo)
+
+    get_target_property(ARMADILLO_INCLUDE_DIR armadillo INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
+    install(FILES
+            ${INSTALL_DIR}/lib/libarmadillo.so
+            ${INSTALL_DIR}/lib/libarmadillo.so.9
+            ${INSTALL_DIR}/lib/libarmadillo.so.9.900.4
+            DESTINATION lib)
 endif()

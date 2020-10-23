@@ -75,6 +75,20 @@ else ()
             ${LAPACK_LIBRARIES}
             )
 endif ()
+if (MILVUS_FPGA_VERSION)
+    set(depend_libs 
+              armadillo
+             ${depend_libs}             
+    )
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/fpga/Fpga.cpp
+            knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
+            knowhere/index/vector_index/fpga/xilinx_c.cpp
+            knowhere/index/vector_index/fpga/utils.cpp
+            knowhere/index/vector_index/fpga/FpgaInst.cpp
+    )
+
+endif ()
 
 if (KNOWHERE_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})

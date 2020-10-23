@@ -50,10 +50,30 @@ load_simple_config() {
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
+#if defined(MILVUS_GPU_VERSION) || defined(MILVUS_FPGA_VERSION)
+    server::Config& config = server::Config::GetInstance();
+#endif
+
+#ifdef MILVUS_FPGA_VERSION
+    bool enable_fpga = false;
+    config.GetFpgaResourceConfigEnable(enable_fpga);
+    if (enable_fpga) {
+        std::vector<int64_t> fpga_ids;
+        config.GetFpgaResourceConfigSearchResources(fpga_ids);
+        auto pcie = Connection("pcie", 12000);
+
+        for (auto& fpga_id : fpga_ids) {
+            LOG_SERVER_DEBUG_ << LogOut("[%ld]", fpga_id);
+            std::string fpga_name = "fpga" + std::to_string(fpga_id);
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(fpga_name, "FPGA", fpga_id));
+            ResMgrInst::GetInstance()->Connect("cpu", fpga_name, pcie);
+        }
+    }
+
+#endif
 // get resources
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = false;
-    server::Config& config = server::Config::GetInstance();
     config.GetGpuResourceConfigEnable(enable_gpu);
     if (enable_gpu) {
         std::vector<int64_t> gpu_ids;
@@ -78,13 +98,15 @@ load_simple_config() {
         }
 
         for (auto& gpu_id : gpu_ids) {
-            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id));
-            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
+            std::string gpu_name = "gpu" + std::to_string(gpu_id);
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(gpu_name, "GPU", gpu_id));
+            ResMgrInst::GetInstance()->Connect("cpu", gpu_name, pcie);
         }
 
         for (auto& not_find_id : not_find_build_ids) {
-            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(not_find_id), "GPU", not_find_id));
-            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(not_find_id), pcie);
+            std::string gpu_name = "gpu" + std::to_string(not_find_id);
+            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(gpu_name, "GPU", not_find_id));
+            ResMgrInst::GetInstance()->Connect("cpu", gpu_name, pcie);
         }
     }
 #endif

@@ -8,48 +8,35 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 #pragma once
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
+
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-#ifdef MILVUS_GPU_VERSION
-#include "config/handler/GpuResourceConfigHandler.h"
-#endif
-#include "scheduler/selector/Pass.h"
+
+#include "cache/CacheMgr.h"
+#include "cache/DataObj.h"
+#include "config/handler/CacheConfigHandler.h"
 
 namespace milvus {
-namespace scheduler {
+namespace cache {
 
-class FaissIVFPass : public Pass
-#ifdef MILVUS_GPU_VERSION
-    ,
-                     public server::GpuResourceConfigHandler
-#endif
-{
- public:
-    FaissIVFPass() = default;
-
- public:
-    void
-    Init() override;
-
- public:
-    bool
-    Run(const TaskPtr& task) override;
-
+class FpgaCacheMgr : public CacheMgr<DataObjPtr>, public server::CacheConfigHandler {
  private:
-    int64_t idx_ = 0;
+    FpgaCacheMgr();
+
+ public:
+    // TODO(myh): use smart pointer instead
+    static FpgaCacheMgr*
+    GetInstance();
+
+    DataObjPtr
+    GetIndex(const std::string& key);
+
+ protected:
+    void
+    OnCpuCacheCapacityChanged(int64_t value) override;
 };
 
-using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
-
-}  // namespace scheduler
+}  // namespace cache
 }  // namespace milvus

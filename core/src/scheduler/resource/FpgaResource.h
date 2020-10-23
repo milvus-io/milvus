@@ -8,48 +8,30 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 #pragma once
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
+
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-#ifdef MILVUS_GPU_VERSION
-#include "config/handler/GpuResourceConfigHandler.h"
-#endif
-#include "scheduler/selector/Pass.h"
+
+#include "Resource.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFPass : public Pass
-#ifdef MILVUS_GPU_VERSION
-    ,
-                     public server::GpuResourceConfigHandler
-#endif
-{
+class FpgaResource : public Resource {
  public:
-    FaissIVFPass() = default;
+    explicit FpgaResource(std::string name, uint64_t device_id, bool enable_executor);
 
- public:
+    friend std::ostream&
+    operator<<(std::ostream& out, const FpgaResource& resource);
+
+ protected:
     void
-    Init() override;
+    LoadFile(TaskPtr task) override;
 
- public:
-    bool
-    Run(const TaskPtr& task) override;
-
- private:
-    int64_t idx_ = 0;
+    void
+    Process(TaskPtr task) override;
 };
-
-using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

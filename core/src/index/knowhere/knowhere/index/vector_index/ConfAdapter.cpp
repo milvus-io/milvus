@@ -169,7 +169,7 @@ IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
         mode = knowhere::IndexMode::MODE_CPU;
     }
 #endif
-    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+    if (mode != knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
         return false;
     }
 
