@@ -70,123 +70,118 @@ is_cachesize_valid(int64_t size, std::string& err) {
     }
 }
 
+#define Bool_(name, modifiable, default, is_valid, update) \
+    { #name, CreateBoolConfig_(#name, modifiable, &config.name.value, default, is_valid, update) }
+#define String_(name, modifiable, default, is_valid, update) \
+    { #name, CreateStringConfig_(#name, modifiable, &config.name.value, default, is_valid, update) }
+#define Enum_(name, modifiable, enumd, default, is_valid, update) \
+    { #name, CreateEnumConfig_(#name, modifiable, enumd, &config.name.value, default, is_valid, update) }
+#define Integer_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                       \
+    {                                                                                                         \
+#name, CreateIntegerConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, \
+                                    is_valid, update)                                                         \
+    }
+#define Floating_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                       \
+    {                                                                                                          \
+#name, CreateFloatingConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, \
+                                     is_valid, update)                                                         \
+    }
+#define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                                 \
+    {                                                                                                                \
+#name, CreateSizeConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid, \
+                                 update)                                                                             \
+    }
+
+#define Bool(name, default) Bool_(name, true, default, nullptr, nullptr)
+#define String(name, default) String_(name, true, default, nullptr, nullptr)
+#define Enum(name, enumd, default) Enum_(name, true, enumd, default, nullptr, nullptr)
+#define Integer(name, lower_bound, upper_bound, default) \
+    Integer_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
+#define Floating(name, lower_bound, upper_bound, default) \
+    Floating_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
+#define Size(name, lower_bound, upper_bound, default) \
+    Size_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
+
 std::unordered_map<std::string, BaseConfigPtr>
 InitConfig() {
     return std::unordered_map<std::string, BaseConfigPtr>{
         /* version */
-        {"version", CreateStringConfig("version", &config.version.value, "unknown")},
+        String(version, "unknown"),
 
         /* cluster */
-        {"cluster.enable", CreateBoolConfig("cluster.enable", &config.cluster.enable.value, false)},
-        {"cluster.role",
-         CreateEnumConfig("cluster.role", &ClusterRoleMap, &config.cluster.role.value, ClusterRole::RW)},
+        Bool(cluster.enable, false),
+        Enum(cluster.role, &ClusterRoleMap, ClusterRole::RW),
 
         /* general */
-        {"general.timezone", CreateStringConfig_("general.timezone", _MODIFIABLE, &config.general.timezone.value,
-                                                 "UTC+8", is_timezone_valid, nullptr)},
-        {"general.meta_uri", CreateStringConfig("general.meta_uri", &config.general.meta_uri.value, "sqlite://:@:/")},
+        String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid, nullptr),
+        String(general.meta_uri, "sqlite://:@:/"),
 
         /* network */
-        {"network.bind.address",
-         CreateStringConfig("network.bind.address", &config.network.bind.address.value, "0.0.0.0")},
-        {"network.bind.port",
-         CreateIntegerConfig("network.bind.port", 1025, 65534, &config.network.bind.port.value, 19530)},
-        {"network.http.enable", CreateBoolConfig("network.http.enable", &config.network.http.enable.value, true)},
-        {"network.http.port",
-         CreateIntegerConfig("network.http.port", 1025, 65534, &config.network.http.port.value, 19121)},
+        String(network.bind.address, "0.0.0.0"),
+        Integer(network.bind.port, 1025, 65534, 19530),
+        Bool(network.http.enable, true),
+        Integer(network.http.port, 1025, 65534, 19121),
 
         /* storage */
-        {"storage.path", CreateStringConfig("storage.path", &config.storage.path.value, "/var/lib/milvus")},
-        {"storage.auto_flush_interval",
-         CreateIntegerConfig("storage.auto_flush_interval", 0, std::numeric_limits<int64_t>::max(),
-                             &config.storage.auto_flush_interval.value, 1)},
+        String(storage.path, "/var/lib/milvus"),
+        Integer(storage.auto_flush_interval, 0, std::numeric_limits<int64_t>::max(), 1),
 
         /* wal */
-        {"wal.enable", CreateBoolConfig("wal.enable", &config.wal.enable.value, true)},
-        {"wal.sync_mode", CreateBoolConfig("wal.sync_mode", &config.wal.sync_mode.value, false)},
-        {"wal.recovery_error_ignore",
-         CreateBoolConfig("wal.recovery_error_ignore", &config.wal.recovery_error_ignore.value, false)},
-        {"wal.buffer_size",
-         CreateSizeConfig("wal.buffer_size", 64 * MB, 4096 * MB, &config.wal.buffer_size.value, 256 * MB)},
-        {"wal.path", CreateStringConfig("wal.path", &config.wal.path.value, "/var/lib/milvus/wal")},
+        Bool(wal.enable, true),
+        Bool(wal.sync_mode, false),
+        Bool(wal.recovery_error_ignore, false),
+        Size(wal.buffer_size, 64 * MB, 4096 * MB, 256 * MB),
+        String(wal.path, "/var/lib/milvus/wal"),
 
         /* cache */
-        {"cache.cache_size", CreateSizeConfig_("cache.cache_size", _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(),
-                                               &config.cache.cache_size.value, 4 * GB, is_cachesize_valid, nullptr)},
-        {"cache.cpu_cache_threshold",
-         CreateFloatingConfig("cache.cpu_cache_threshold", 0.0, 1.0, &config.cache.cpu_cache_threshold.value, 0.7)},
-        {"cache.insert_buffer_size",
-         CreateSizeConfig("cache.insert_buffer_size", 0, std::numeric_limits<int64_t>::max(),
-                          &config.cache.insert_buffer_size.value, 1 * GB)},
-        {"cache.cache_insert_data",
-         CreateBoolConfig("cache.cache_insert_data", &config.cache.cache_insert_data.value, false)},
-        {"cache.preload_collection",
-         CreateStringConfig("cache.preload_collection", &config.cache.preload_collection.value, "")},
-        {"cache.max_concurrent_insert_request_size",
-         CreateSizeConfig("cache.max_concurrent_insert_request_size", 256 * MB, std::numeric_limits<int64_t>::max(),
-                          &config.cache.max_concurrent_insert_request_size.value, 2 * GB)},
+        Size_(cache.cache_size, _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(), 4 * GB, is_cachesize_valid,
+              nullptr),
+        Floating(cache.cpu_cache_threshold, 0.0, 1.0, 0.7),
+        Size(cache.insert_buffer_size, 0, std::numeric_limits<int64_t>::max(), 1 * GB),
+        Bool(cache.cache_insert_data, false),
+        String(cache.preload_collection, ""),
+        Size(cache.max_concurrent_insert_request_size, 256 * MB, std::numeric_limits<int64_t>::max(), 2 * GB),
 
         /* gpu */
-        {"gpu.enable", CreateBoolConfig("gpu.enable", &config.gpu.enable.value, false)},
-        {"gpu.cache_size", CreateSizeConfig("gpu.cache_size", 0, std::numeric_limits<int64_t>::max(),
-                                            &config.gpu.cache_size.value, 1 * GB)},
-        {"gpu.cache_threshold",
-         CreateFloatingConfig("gpu.cache_threshold", 0.0, 1.0, &config.gpu.cache_threshold.value, 0.7)},
-        {"gpu.gpu_search_threshold",
-         CreateIntegerConfig("gpu.gpu_search_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.gpu.gpu_search_threshold.value, 1000)},
-        {"gpu.search_devices", CreateStringConfig("gpu.search_devices", &config.gpu.search_devices.value, "gpu0")},
-        {"gpu.build_index_devices",
-         CreateStringConfig("gpu.build_index_devices", &config.gpu.build_index_devices.value, "gpu0")},
+        Bool(gpu.enable, false),
+        Size(gpu.cache_size, 0, std::numeric_limits<int64_t>::max(), 1 * GB),
+        Floating(gpu.cache_threshold, 0.0, 1.0, 0.7),
+        Integer(gpu.gpu_search_threshold, 0, std::numeric_limits<int64_t>::max(), 1000),
+        String(gpu.search_devices, "gpu0"),
+        String(gpu.build_index_devices, "gpu0"),
 
         /* log */
-        {"logs.level", CreateStringConfig("logs.level", &config.logs.level.value, "debug")},
-        {"logs.trace.enable", CreateBoolConfig("logs.trace.enable", &config.logs.trace.enable.value, true)},
-        {"logs.path", CreateStringConfig("logs.path", &config.logs.path.value, "/var/lib/milvus/logs")},
-        {"logs.max_log_file_size", CreateSizeConfig("logs.max_log_file_size", 512 * MB, 4096 * MB,
-                                                    &config.logs.max_log_file_size.value, 1024 * MB)},
-        {"logs.log_rotate_num",
-         CreateIntegerConfig("logs.log_rotate_num", 0, 1024, &config.logs.log_rotate_num.value, 0)},
-        {"logs.log_to_stdout", CreateBoolConfig("logs.log_to_stdout", &config.logs.log_to_stdout.value, false)},
-        {"logs.log_to_file", CreateBoolConfig("logs.log_to_file", &config.logs.log_to_file.value, true)},
+        String(logs.level, "debug"),
+        Bool(logs.trace.enable, true),
+        String(logs.path, "/var/lib/milvus/logs"),
+        Size(logs.max_log_file_size, 512 * MB, 4096 * MB, 1024 * MB),
+        Integer(logs.log_rotate_num, 0, 1024, 0),
+        Bool(logs.log_to_stdout, false),
+        Bool(logs.log_to_file, true),
 
         /* metric */
-        {"metric.enable", CreateBoolConfig("metric.enable", &config.metric.enable.value, false)},
-        {"metric.address", CreateStringConfig("metric.address", &config.metric.address.value, "127.0.0.1")},
-        {"metric.port", CreateIntegerConfig("metric.port", 1025, 65534, &config.metric.port.value, 9091)},
+        Bool(metric.enable, false),
+        String(metric.address, "127.0.0.1"),
+        Integer(metric.port, 1025, 65534, 9091),
 
         /* tracing */
-        {"tracing.json_config_path",
-         CreateStringConfig("tracing.json_config_path", &config.tracing.json_config_path.value, "")},
+        String(tracing.json_config_path, ""),
 
         /* invisible */
         /* engine */
-        {"engine.max_partition_num",
-         CreateIntegerConfig("engine.build_index_threshold", 1, std::numeric_limits<int64_t>::max(),
-                             &config.engine.max_partition_num.value, 4096)},
-        {"engine.build_index_threshold",
-         CreateIntegerConfig("engine.build_index_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.build_index_threshold.value, 4096)},
-        {"engine.search_combine_nq",
-         CreateIntegerConfig("engine.search_combine_nq", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.search_combine_nq.value, 64)},
-        {"engine.use_blas_threshold",
-         CreateIntegerConfig("engine.use_blas_threshold", 0, std::numeric_limits<int64_t>::max(),
-                             &config.engine.use_blas_threshold.value, 16385)},
-        {"engine.omp_thread_num", CreateIntegerConfig("engine.omp_thread_num", 0, std::numeric_limits<int64_t>::max(),
-                                                      &config.engine.omp_thread_num.value, 0)},
-        {"engine.clustering_type", CreateEnumConfig("engine.clustering_type", &ClusteringMap,
-                                                    &config.engine.clustering_type.value, ClusteringType::K_MEANS)},
-        {"engine.simd_type",
-         CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
+        Integer(engine.max_partition_num, 1, std::numeric_limits<int64_t>::max(), 4096),
+        Integer(engine.build_index_threshold, 0, std::numeric_limits<int64_t>::max(), 4096),
+        Integer(engine.search_combine_nq, 0, std::numeric_limits<int64_t>::max(), 64),
+        Integer(engine.use_blas_threshold, 0, std::numeric_limits<int64_t>::max(), 16385),
+        Integer(engine.omp_thread_num, 0, std::numeric_limits<int64_t>::max(), 0),
+        Enum(engine.clustering_type, &ClusteringMap, ClusteringType::K_MEANS),
+        Enum(engine.simd_type, &SimdMap, SimdType::AUTO),
+        Bool(engine.stat_optimizer_enable, true),
 
-        {"engine.stat_optimizer_enable",
-         CreateBoolConfig("engine.stat_optimizer_enable", &config.engine.stat_optimizer_enable.value, true)},
+        Bool(system.lock.enable, true),
 
-        {"system.lock.enable", CreateBoolConfig("system.lock.enable", &config.system.lock.enable.value, true)},
-
-        {"transcript.enable", CreateBoolConfig("transcript.enable", &config.transcript.enable.value, false)},
-        {"transcript.replay", CreateStringConfig("transcript.replay", &config.transcript.replay.value, "")},
+        Bool(transcript.enable, false),
+        String(transcript.replay, ""),
     };
 }
 
