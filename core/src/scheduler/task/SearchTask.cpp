@@ -52,7 +52,7 @@ SearchTask::CreateExecEngine() {
 json
 SearchTask::Dump() const {
     json ret{
-        {"type", type_},
+        {"type", "SearchTask"},
         {"segment_id", segment_id_},
     };
 

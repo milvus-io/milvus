@@ -45,7 +45,7 @@ BuildIndexTask::CreateExecEngine() {
 json
 BuildIndexTask::Dump() const {
     json ret{
-        {"type", type_},
+        {"type", "BuildIndexTask"},
         {"segment_id", segment_id_},
     };
 
