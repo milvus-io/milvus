@@ -112,7 +112,7 @@ class VecIndex : public Index {
 
     size_t
     UidsSize() {
-        return uids_->size() * sizeof(IDType);
+        return (uids_ == nullptr) ? 0 : (uids_->size() * sizeof(IDType));
     }
 
     virtual int64_t
