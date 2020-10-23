@@ -57,7 +57,7 @@ extern Status
 ValidateSearchTopk(int64_t top_k);
 
 extern Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags);
+ValidatePartitionTags(const std::vector<std::string>& partition_tags, bool for_create);
 
 extern Status
 ValidateInsertDataSize(const InsertParam& insert_param);
