@@ -33,7 +33,7 @@ generate_data(int N) {
     std::default_random_engine er(42);
     std::normal_distribution<> distribution(0.0, 1.0);
     std::default_random_engine ei(42);
-    
+
     for (int i = 0; i < N; ++i) {
         uids.push_back(10 * N + i);
         timestamps.push_back(0);
@@ -42,16 +42,13 @@ generate_data(int N) {
         for (auto& x : vec) {
             x = distribution(er);
         }
-        raw_data.insert(
-                raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
         int age = ei() % 100;
-        raw_data.insert(
-                raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
-}    // namespace
-
+}  // namespace
 
 TEST(DogSegmentTest, TestABI) {
     using namespace milvus::engine;
@@ -66,14 +63,12 @@ TEST(DogSegmentTest, NormalDistributionTest) {
     auto schema = std::make_shared<Schema>();
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
     schema->AddField("age", DataType::INT32);
-    int N = 1000* 1000;
+    int N = 1000 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto segment = CreateSegment(schema);
     segment->PreInsert(N);
     segment->PreDelete(N);
-
 }
-
 
 TEST(DogSegmentTest, MockTest) {
     using namespace milvus::dog_segment;
@@ -86,12 +81,12 @@ TEST(DogSegmentTest, MockTest) {
     std::vector<int64_t> uids;
     int N = 10000;
     std::default_random_engine e(67);
-    for(int i = 0; i < N; ++i) {
+    for (int i = 0; i < N; ++i) {
         uids.push_back(100000 + i);
         timestamps.push_back(0);
         // append vec
         float vec[16];
-        for(auto &x: vec) {
+        for (auto& x : vec) {
             x = e() % 2000 * 0.001 - 1.0;
         }
         raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
@@ -101,7 +96,6 @@ TEST(DogSegmentTest, MockTest) {
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     assert(raw_data.size() == line_sizeof * N);
 
-
     // auto index_meta = std::make_shared<IndexMeta>(schema);
     auto segment = CreateSegment(schema);
 
@@ -109,10 +103,9 @@ TEST(DogSegmentTest, MockTest) {
     auto offset = segment->PreInsert(N);
     segment->Insert(offset, N, uids.data(), timestamps.data(), data_chunk);
     QueryResult query_result;
-//    segment->Query(nullptr, 0, query_result);
+    //    segment->Query(nullptr, 0, query_result);
     segment->Close();
-//    segment->BuildIndex();
+    //    segment->BuildIndex();
     int i = 0;
     i++;
 }
-

@@ -90,7 +90,8 @@ class VectorBase {
     virtual void
     grow_to_at_least(int64_t element_count) = 0;
 
-    virtual void set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
+    virtual void
+    set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
 };
 
 template <typename Type, bool is_scalar = false, ssize_t ElementsPerChunk = DefaultElementPerChunk>
@@ -101,10 +102,12 @@ class ConcurrentVector : public VectorBase {
     ConcurrentVector(ConcurrentVector&&) = delete;
     ConcurrentVector(const ConcurrentVector&) = delete;
 
-    ConcurrentVector& operator=(ConcurrentVector&&) = delete;
-    ConcurrentVector& operator=(const ConcurrentVector&) = delete;
- public:
+    ConcurrentVector&
+    operator=(ConcurrentVector&&) = delete;
+    ConcurrentVector&
+    operator=(const ConcurrentVector&) = delete;
 
+ public:
     explicit ConcurrentVector(ssize_t dim = 1) : Dim(is_scalar ? 1 : dim), SizePerChunk(Dim * ElementsPerChunk) {
         Assert(is_scalar ? dim == 1 : dim != 1);
     }
@@ -185,8 +188,8 @@ class ConcurrentVector : public VectorBase {
 
  private:
     void
-    fill_chunk(ssize_t chunk_id, ssize_t chunk_offset, ssize_t element_count, const Type* source,
-               ssize_t source_offset) {
+    fill_chunk(
+        ssize_t chunk_id, ssize_t chunk_offset, ssize_t element_count, const Type* source, ssize_t source_offset) {
         if (element_count <= 0) {
             return;
         }
@@ -199,6 +202,7 @@ class ConcurrentVector : public VectorBase {
 
     const ssize_t Dim;
     const ssize_t SizePerChunk;
+
  private:
     ThreadSafeVector<Chunk> chunks_;
 };

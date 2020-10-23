@@ -16,8 +16,10 @@
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <knowhere/index/vector_index/IndexIVF.h>
 #include <algorithm>
-
+#include <chrono>
+#include "test_utils/Timer.h"
 
 using std::cin;
 using std::cout;
@@ -28,9 +30,10 @@ using std::vector;
 using namespace milvus;
 
 namespace {
-template<int DIM>
-auto generate_data(int N) {
-    std::vector<char> raw_data;
+template <int DIM>
+auto
+generate_data(int N) {
+    std::vector<float> raw_data;
     std::vector<uint64_t> timestamps;
     std::vector<int64_t> uids;
     std::default_random_engine er(42);
@@ -41,22 +44,23 @@ auto generate_data(int N) {
         timestamps.push_back(0);
         // append vec
         float vec[DIM];
-        for (auto &x: vec) {
+        for (auto& x : vec) {
             x = distribution(er);
         }
-        raw_data.insert(raw_data.end(), (const char *) std::begin(vec), (const char *) std::end(vec));
-//            int age = ei() % 100;
-//            raw_data.insert(raw_data.end(), (const char *) &age, ((const char *) &age) + sizeof(age));
+        raw_data.insert(raw_data.end(), std::begin(vec), std::end(vec));
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
-}
-
-
+}  // namespace
 
 void
-merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const float *new_distances, const int64_t *new_uids) {
-    for(int64_t qn = 0; qn < queries; ++qn) {
+merge_into(int64_t queries,
+           int64_t topk,
+           float* distances,
+           int64_t* uids,
+           const float* new_distances,
+           const int64_t* new_uids) {
+    for (int64_t qn = 0; qn < queries; ++qn) {
         auto base = qn * topk;
         auto src2_dis = distances + base;
         auto src2_uids = uids + base;
@@ -70,8 +74,8 @@ merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const
         auto it1 = 0;
         auto it2 = 0;
 
-        for(auto buf = 0; buf < topk; ++buf){
-            if(src1_dis[it1] <= src2_dis[it2]) {
+        for (auto buf = 0; buf < topk; ++buf) {
+            if (src1_dis[it1] <= src2_dis[it2]) {
                 buf_dis[buf] = src1_dis[it1];
                 buf_uids[buf] = src1_uids[it1];
                 ++it1;
@@ -83,11 +87,10 @@ merge_into(int64_t queries, int64_t topk, float *distances, int64_t *uids, const
         }
         std::copy_n(buf_dis.data(), topk, src2_dis);
         std::copy_n(buf_uids.data(), topk, src2_uids);
-   }
+    }
 }
 
-
-TEST(TestIndex, SmartBruteForce) {
+TEST(Indexing, SmartBruteForce) {
     // how to ?
     // I'd know
     constexpr int N = 100000;
@@ -100,10 +103,9 @@ TEST(TestIndex, SmartBruteForce) {
         bitmap->set(i);
     }
 
-    auto[raw_data, timestamps, uids] = generate_data<DIM>(N);
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     auto total_count = DIM * TOPK;
-    auto raw = (const float *) raw_data.data();
-
+    auto raw = (const float*)raw_data.data();
 
     constexpr int64_t queries = 3;
     auto heap = faiss::float_maxheap_array_t{};
@@ -113,14 +115,11 @@ TEST(TestIndex, SmartBruteForce) {
     vector<int64_t> final_uids(total_count);
     vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
-
-
     for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
         vector<int64_t> buf_uids(total_count, -1);
         vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
-        faiss::float_maxheap_array_t buf = {
-                queries, TOPK, buf_uids.data(), buf_dis.data()};
+        faiss::float_maxheap_array_t buf = {queries, TOPK, buf_uids.data(), buf_dis.data()};
 
         auto end = beg + DefaultElementPerChunk;
         if (end > N) {
@@ -130,7 +129,7 @@ TEST(TestIndex, SmartBruteForce) {
         auto src_data = raw + beg * DIM;
 
         faiss::knn_L2sqr(query_data, src_data, DIM, queries, nsize, &buf, nullptr);
-        if(beg == 0) {
+        if (beg == 0) {
             final_uids = buf_uids;
             final_dis = buf_dis;
         } else {
@@ -147,39 +146,38 @@ TEST(TestIndex, SmartBruteForce) {
     }
 }
 
-
-TEST(TestIndex, Naive) {
+TEST(Indexing, Naive) {
     constexpr int N = 100000;
     constexpr int DIM = 16;
     constexpr int TOPK = 10;
 
-    auto[raw_data, timestamps, uids] = generate_data<DIM>(N);
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
                                                                          knowhere::IndexMode::MODE_CPU);
+
     auto conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM,           DIM},
-            {milvus::knowhere::meta::TOPK,          TOPK},
-            {milvus::knowhere::IndexParams::nlist,  100},
-            {milvus::knowhere::IndexParams::nprobe, 4},
-            {milvus::knowhere::IndexParams::m,      4},
-            {milvus::knowhere::IndexParams::nbits,  8},
-            {milvus::knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
-            {milvus::knowhere::meta::DEVICEID,      0},
+        {knowhere::meta::DIM, DIM},
+        {knowhere::meta::TOPK, TOPK},
+        {knowhere::IndexParams::nlist, 100},
+        {knowhere::IndexParams::nprobe, 4},
+        {knowhere::IndexParams::m, 4},
+        {knowhere::IndexParams::nbits, 8},
+        {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+        {knowhere::meta::DEVICEID, 0},
     };
 
-//    auto ds = knowhere::GenDataset(N, DIM, raw_data.data());
-//    auto ds2 = knowhere::GenDatasetWithIds(N / 2, DIM, raw_data.data() + sizeof(float[DIM]) * N / 2, uids.data() + N / 2);
+    //    auto ds = knowhere::GenDataset(N, DIM, raw_data.data());
+    //    auto ds2 = knowhere::GenDatasetWithIds(N / 2, DIM, raw_data.data() +
+    //    sizeof(float[DIM]) * N / 2, uids.data() + N / 2);
     // NOTE: you must train first and then add
-//    index->Train(ds, conf);
-//    index->Train(ds2, conf);
-//    index->AddWithoutIds(ds, conf);
-//    index->Add(ds2, conf);
-
-
+    //    index->Train(ds, conf);
+    //    index->Train(ds2, conf);
+    //    index->AddWithoutIds(ds, conf);
+    //    index->Add(ds2, conf);
 
     std::vector<knowhere::DatasetPtr> datasets;
     std::vector<std::vector<float>> ftrashs;
-    auto raw = (const float *) raw_data.data();
+    auto raw = raw_data.data();
     for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
         auto end = beg + DefaultElementPerChunk;
         if (end > N) {
@@ -196,10 +194,10 @@ TEST(TestIndex, Naive) {
         // index->Add(ds, conf);
     }
 
-    for (auto &ds: datasets) {
+    for (auto& ds : datasets) {
         index->Train(ds, conf);
     }
-    for (auto &ds: datasets) {
+    for (auto& ds : datasets) {
         index->AddWithoutIds(ds, conf);
     }
 
@@ -209,12 +207,12 @@ TEST(TestIndex, Naive) {
         bitmap->set(i);
     }
 
-//    index->SetBlacklist(bitmap);
+    //    index->SetBlacklist(bitmap);
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
 
-    auto final = index->Query(query_ds, conf);
-    auto ids = final->Get<idx_t *>(knowhere::meta::IDS);
-    auto distances = final->Get<float *>(knowhere::meta::DISTANCE);
+    auto final = index->Query(query_ds, conf, bitmap);
+    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
+    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
     for (int i = 0; i < TOPK; ++i) {
         if (ids[i] < N / 2) {
             cout << "WRONG: ";
@@ -222,4 +220,43 @@ TEST(TestIndex, Naive) {
         cout << ids[i] << "->" << distances[i] << endl;
     }
     int i = 1 + 1;
+}
+
+TEST(Indexing, IVFFlatNM) {
+    // hello, world
+    constexpr auto DIM = 16;
+    constexpr auto K = 10;
+
+    auto N = 1024 * 1024 * 10;
+    auto num_query = 1000;
+    Timer timer;
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
+    std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << endl;
+    auto indexing = std::make_shared<knowhere::IVF>();
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, K},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 4},
+                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+
+    auto database = knowhere::GenDataset(N, DIM, raw_data.data());
+    std::cout << "init ivf " << timer.get_step_seconds() << " seconds" << endl;
+    indexing->Train(database, conf);
+    std::cout << "train ivf " << timer.get_step_seconds() << " seconds" << endl;
+    indexing->AddWithoutIds(database, conf);
+    std::cout << "insert ivf " << timer.get_step_seconds() << " seconds" << endl;
+
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(indexing->Dim(), DIM);
+    auto query_dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
+
+    auto result = indexing->Query(query_dataset, conf, nullptr);
+    std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << endl;
+
+    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    for (int i = 0; i < std::min(num_query * K, 100); ++i) {
+        cout << ids[i] << "->" << dis[i] << endl;
+    }
 }

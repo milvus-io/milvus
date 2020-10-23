@@ -53,7 +53,7 @@ TEST_P(AnnoyTest, annoy_basic) {
     // null faiss index
     {
         ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
-        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
         ASSERT_ANY_THROW(index_->Serialize(conf));
         ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
@@ -65,7 +65,7 @@ TEST_P(AnnoyTest, annoy_basic) {
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
 
     /*
@@ -104,11 +104,10 @@ TEST_P(AnnoyTest, annoy_delete) {
         bitset->set(i);
     }
 
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result1, nq, k);
 
-    index_->SetBlacklist(bitset);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, bitset);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
 
     /*
@@ -200,7 +199,7 @@ TEST_P(AnnoyTest, annoy_serialize) {
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);
         ASSERT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf);
+        auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     }
 }

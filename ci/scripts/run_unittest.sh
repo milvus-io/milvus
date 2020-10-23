@@ -11,12 +11,12 @@ done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../../internal/core"
-CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/milvus"
+CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
 
-# Currently core will install target lib to "core/lib"
-if [ -d "${MILVUS_CORE_DIR}/lib" ]; then
-	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${MILVUS_CORE_DIR}/lib
+# Currently core will install target lib to "core/output/lib"
+if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
+	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
 # run unittest

@@ -6,17 +6,14 @@
 
 namespace milvus::dog_segment {
 
-
-Collection::Collection(std::string &collection_name, std::string &schema):
-      collection_name_(collection_name), schema_json_(schema) {
+Collection::Collection(std::string& collection_name, std::string& schema)
+    : collection_name_(collection_name), schema_json_(schema) {
     parse();
     index_ = nullptr;
 }
 
-
 void
 Collection::AddIndex(const grpc::IndexParam& index_param) {
-
     auto& index_name = index_param.index_name();
     auto& field_name = index_param.field_name();
 
@@ -32,7 +29,7 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
     bool found_index_conf = false;
 
     auto extra_params = index_param.extra_params();
-    for (auto& extra_param: extra_params) {
+    for (auto& extra_param : extra_params) {
         if (extra_param.key() == "index_type") {
             index_type = extra_param.value().data();
             found_index_type = true;
@@ -67,21 +64,18 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
     if (!found_index_conf) {
         int dim = 0;
 
-        for (auto& field: schema_->get_fields()) {
+        for (auto& field : schema_->get_fields()) {
             if (field.get_data_type() == DataType::VECTOR_FLOAT) {
-              dim = field.get_dim();
+                dim = field.get_dim();
             }
         }
         Assert(dim != 0);
 
         index_conf = milvus::knowhere::Config{
-            {knowhere::meta::DIM,           dim},
-            {knowhere::IndexParams::nlist,  100},
-            {knowhere::IndexParams::nprobe, 4},
-            {knowhere::IndexParams::m,      4},
-            {knowhere::IndexParams::nbits,  8},
-            {knowhere::Metric::TYPE,        milvus::knowhere::Metric::L2},
-            {knowhere::meta::DEVICEID,      0},
+            {knowhere::meta::DIM, dim},         {knowhere::IndexParams::nlist, 100},
+            {knowhere::IndexParams::nprobe, 4}, {knowhere::IndexParams::m, 4},
+            {knowhere::IndexParams::nbits, 8},  {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {knowhere::meta::DEVICEID, 0},
         };
         std::cout << "WARN: Not specify index config, use default index config" << std::endl;
     }
@@ -89,11 +83,9 @@ Collection::AddIndex(const grpc::IndexParam& index_param) {
     index_->AddEntry(index_name, field_name, index_type, index_mode, index_conf);
 }
 
-
 void
-Collection::CreateIndex(std::string &index_config) {
-
-    if(index_config.empty()) {
+Collection::CreateIndex(std::string& index_config) {
+    if (index_config.empty()) {
         index_ = nullptr;
         std::cout << "null index config when create index" << std::endl;
         return;
@@ -108,18 +100,16 @@ Collection::CreateIndex(std::string &index_config) {
 
     index_ = std::make_shared<IndexMeta>(schema_);
 
-    for (const auto &index: collection.indexes()){
-        std::cout << "add index, index name =" << index.index_name()
-                  << ", field_name = " << index.field_name()
+    for (const auto& index : collection.indexes()) {
+        std::cout << "add index, index name =" << index.index_name() << ", field_name = " << index.field_name()
                   << std::endl;
         AddIndex(index);
     }
 }
 
-
 void
 Collection::parse() {
-    if(schema_json_.empty()) {
+    if (schema_json_.empty()) {
         std::cout << "WARN: Use default schema" << std::endl;
         auto schema = std::make_shared<Schema>();
         schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
@@ -131,22 +121,20 @@ Collection::parse() {
     masterpb::Collection collection;
     auto suc = google::protobuf::TextFormat::ParseFromString(schema_json_, &collection);
 
-
     if (!suc) {
         std::cerr << "unmarshal schema string failed" << std::endl;
     }
     auto schema = std::make_shared<Schema>();
-    for (const milvus::grpc::FieldMeta & child: collection.schema().field_metas()){
-        std::cout<<"add Field, name :" << child.field_name() << ", datatype :" << child.type() << ", dim :" << int(child.dim()) << std::endl;
-        schema->AddField(std::string_view(child.field_name()), DataType {child.type()}, int(child.dim()));
+    for (const milvus::grpc::FieldMeta& child : collection.schema().field_metas()) {
+        std::cout << "add Field, name :" << child.field_name() << ", datatype :" << child.type()
+                  << ", dim :" << int(child.dim()) << std::endl;
+        schema->AddField(std::string_view(child.field_name()), DataType{child.type()}, int(child.dim()));
     }
     /*
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
     schema->AddField("age", DataType::INT32);
     */
     schema_ = schema;
-    
 }
 
-}
-
+}  // namespace milvus::dog_segment

@@ -71,11 +71,10 @@ struct ServerConfig {
         Integer port{0};
     } network;
 
-    struct Pulsar{
+    struct Pulsar {
         String address{"localhost"};
         Integer port{6650};
-    }pulsar;
-
+    } pulsar;
 
     struct Engine {
         Integer build_index_threshold{4096};
@@ -88,7 +87,6 @@ struct ServerConfig {
     struct Tracing {
         String json_config_path{"unknown"};
     } tracing;
-
 
     struct Logs {
         String level{"unknown"};

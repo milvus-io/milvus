@@ -71,7 +71,8 @@ class KnowhereWrapperTest
 };
 
 INSTANTIATE_TEST_CASE_P(
-    WrapperParam, KnowhereWrapperTest,
+    WrapperParam,
+    KnowhereWrapperTest,
     Values(
 //["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
 #ifdef MILVUS_GPU_VERSION

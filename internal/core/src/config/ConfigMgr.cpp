@@ -13,7 +13,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_map>
-#include<iostream>
+#include <iostream>
 #include "config/ConfigMgr.h"
 #include "config/ServerConfig.h"
 
@@ -70,22 +70,19 @@ ConfigMgr::ConfigMgr() {
     config_list_ = {
 
         /* general */
-        {"timezone",
-         CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
+        {"timezone", CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
 
         /* network */
-        {"network.address", CreateStringConfig("network.address", false, &config.network.address.value,
-                                                    "0.0.0.0", nullptr, nullptr)},
-        {"network.port", CreateIntegerConfig("network.port", false, 0, 65535, &config.network.port.value,
-                                                  19530, nullptr, nullptr)},
+        {"network.address",
+         CreateStringConfig("network.address", false, &config.network.address.value, "0.0.0.0", nullptr, nullptr)},
+        {"network.port",
+         CreateIntegerConfig("network.port", false, 0, 65535, &config.network.port.value, 19530, nullptr, nullptr)},
 
-        
         /* pulsar */
-        {"pulsar.address", CreateStringConfig("pulsar.address", false, &config.pulsar.address.value,
-                                                    "localhost", nullptr, nullptr)},
-        {"pulsar.port", CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value,
-                                                  6650, nullptr, nullptr)},
-
+        {"pulsar.address",
+         CreateStringConfig("pulsar.address", false, &config.pulsar.address.value, "localhost", nullptr, nullptr)},
+        {"pulsar.port",
+         CreateIntegerConfig("pulsar.port", false, 0, 65535, &config.pulsar.port.value, 6650, nullptr, nullptr)},
 
         /* log */
         {"logs.level", CreateStringConfig("logs.level", false, &config.logs.level.value, "debug", nullptr, nullptr)},
@@ -147,9 +144,9 @@ ConfigMgr::Load(const std::string& path) {
 
 void
 ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
-    std::cout<<"InSet Config "<< name <<std::endl;
-    if (config_list_.find(name) == config_list_.end()){
-        std::cout<<"Config "<< name << " not found!"<<std::endl;
+    std::cout << "InSet Config " << name << std::endl;
+    if (config_list_.find(name) == config_list_.end()) {
+        std::cout << "Config " << name << " not found!" << std::endl;
         return;
     }
     try {

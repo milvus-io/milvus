@@ -7,29 +7,35 @@
 namespace milvus::dog_segment {
 
 class Collection {
-public:
-    explicit Collection(std::string &collection_name, std::string &schema);
+ public:
+    explicit Collection(std::string& collection_name, std::string& schema);
 
-    void AddIndex(const grpc::IndexParam &index_param);
+    void
+    AddIndex(const grpc::IndexParam& index_param);
 
-    void CreateIndex(std::string &index_config);
+    void
+    CreateIndex(std::string& index_config);
 
-    void parse();
+    void
+    parse();
 
-public:
-    SchemaPtr& get_schema() {
-      return schema_;
+ public:
+    SchemaPtr&
+    get_schema() {
+        return schema_;
     }
 
-    IndexMetaPtr& get_index() {
-      return index_;
+    IndexMetaPtr&
+    get_index() {
+        return index_;
     }
 
-    std::string& get_collection_name() {
-      return collection_name_;
+    std::string&
+    get_collection_name() {
+        return collection_name_;
     }
 
-private:
+ private:
     IndexMetaPtr index_;
     std::string collection_name_;
     std::string schema_json_;
@@ -38,4 +44,4 @@ private:
 
 using CollectionPtr = std::unique_ptr<Collection>;
 
-}
+}  // namespace milvus::dog_segment

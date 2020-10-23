@@ -11,7 +11,7 @@ void
 DeleteCollection(CCollection collection);
 
 void
-UpdateIndexes(CCollection c_collection, const char *index_string);
+UpdateIndexes(CCollection c_collection, const char* index_string);
 
 #ifdef __cplusplus
 }

@@ -124,7 +124,10 @@ NsgIndex::InitNavigationPoint(float* data) {
 
 // Specify Link
 void
-NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, std::vector<Neighbor>& fullset,
+NsgIndex::GetNeighbors(const float* query,
+                       float* data,
+                       std::vector<Neighbor>& resset,
+                       std::vector<Neighbor>& fullset,
                        boost::dynamic_bitset<>& has_calculated_dist) {
     auto& graph = knng;
     size_t buffer_size = search_length;
@@ -331,8 +334,8 @@ NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& r
 }
 
 void
-NsgIndex::GetNeighbors(const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph,
-                       SearchParams* params) {
+NsgIndex::GetNeighbors(
+    const float* query, float* data, std::vector<Neighbor>& resset, Graph& graph, SearchParams* params) {
     size_t buffer_size = params ? params->search_length : search_length;
 
     if (buffer_size > ntotal) {
@@ -482,7 +485,10 @@ NsgIndex::Link(float* data) {
 }
 
 void
-NsgIndex::SyncPrune(float* data, size_t n, std::vector<Neighbor>& pool, boost::dynamic_bitset<>& has_calculated,
+NsgIndex::SyncPrune(float* data,
+                    size_t n,
+                    std::vector<Neighbor>& pool,
+                    boost::dynamic_bitset<>& has_calculated,
                     float* cut_graph_dist) {
     // avoid lose nearest neighbor in knng
     for (size_t i = 0; i < knng[n].size(); ++i) {
@@ -597,8 +603,8 @@ NsgIndex::InterInsert(float* data, unsigned n, std::vector<std::mutex>& mutex_ve
 }
 
 void
-NsgIndex::SelectEdge(float* data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result,
-                     bool limit) {
+NsgIndex::SelectEdge(
+    float* data, unsigned& cursor, std::vector<Neighbor>& sort_pool, std::vector<Neighbor>& result, bool limit) {
     auto& pool = sort_pool;
 
     /*
@@ -850,8 +856,15 @@ NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, 
 // }
 
 void
-NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k,
-                 float* dist, int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
+NsgIndex::Search(const float* query,
+                 float* data,
+                 const unsigned& nq,
+                 const unsigned& dim,
+                 const unsigned& k,
+                 float* dist,
+                 int64_t* ids,
+                 SearchParams& params,
+                 faiss::ConcurrentBitsetPtr bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);

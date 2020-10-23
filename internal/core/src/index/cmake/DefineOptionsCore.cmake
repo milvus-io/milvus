@@ -64,7 +64,7 @@ define_option_string(KNOWHERE_DEPENDENCY_SOURCE
         "BUNDLED"
         "SYSTEM")
 
-define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" OFF)
+define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
@@ -82,7 +82,7 @@ define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
-define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" OFF)
+define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
 define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 

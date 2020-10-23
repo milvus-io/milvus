@@ -176,8 +176,6 @@ config_summary()
 add_subdirectory( thirdparty )
 add_subdirectory( src )
 
-
-
 # Unittest lib
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     if ( BUILD_COVERAGE STREQUAL "ON" )
@@ -189,7 +187,7 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     endif ()
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
 
-    add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/unittest )
+    add_subdirectory(unittest)
 endif ()
 
 
@@ -206,9 +204,9 @@ set( GPU_ENABLE "false" )
 
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/dog_segment/
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/include
+        DESTINATION include
         FILES_MATCHING PATTERN "*_c.h"
 )
 
 install(FILES ${CMAKE_BINARY_DIR}/src/dog_segment/libmilvus_dog_segment.so
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+        DESTINATION lib)

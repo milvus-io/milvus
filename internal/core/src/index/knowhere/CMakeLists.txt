@@ -13,6 +13,7 @@
 
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 
 if (MILVUS_SUPPORT_SPTAG)
     include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
@@ -68,6 +69,9 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexRHNSWFlat.cpp
         knowhere/index/vector_index/IndexRHNSWSQ.cpp
         knowhere/index/vector_index/IndexRHNSWPQ.cpp
+        knowhere/index/vector_index/IndexNGT.cpp
+        knowhere/index/vector_index/IndexNGTPANNG.cpp
+        knowhere/index/vector_index/IndexNGTONNG.cpp
         )
 
 set(vector_offset_index_srcs
@@ -90,6 +94,8 @@ set(depend_libs
         gomp
         gfortran
         pthread
+        fiu
+        ngt
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -99,6 +105,32 @@ if (MILVUS_SUPPORT_SPTAG)
             )
 endif ()
 
+
+if (MILVUS_GPU_VERSION)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+    set(cuda_lib
+            cudart
+            cublas
+            )
+    set(depend_libs ${depend_libs}
+            ${cuda_lib}
+            )
+
+    set(vector_index_srcs ${vector_index_srcs}
+            knowhere/index/vector_index/gpu/IndexGPUIDMAP.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVF.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFPQ.cpp
+            knowhere/index/vector_index/gpu/IndexGPUIVFSQ.cpp
+            knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
+            knowhere/index/vector_index/helpers/Cloner.cpp
+            knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+            )
+
+    set(vector_offset_index_srcs ${vector_offset_index_srcs}
+            knowhere/index/vector_offset_index/gpu/IndexGPUIVF_NM.cpp
+            )
+endif ()
 
 if (NOT TARGET knowhere)
     add_library(
@@ -130,11 +162,3 @@ if (MILVUS_SUPPORT_SPTAG)
 endif ()
 
 set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
-
-# **************************** Get&Print Include Directories ****************************
-get_property( dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES )
-
-foreach ( dir ${dirs} )
-    message( STATUS "Knowhere Current Include DIRS: " ${dir} )
-endforeach ()
-

@@ -114,12 +114,12 @@ TEST(ConcurrentVector, TestAckSingle) {
     std::default_random_engine e(42);
     AckResponder ack;
     int N = 10000;
-    for(int i = 0; i < 10000; ++i) {
+    for (int i = 0; i < 10000; ++i) {
         auto weight = i + e() % 100;
         raw_data.emplace_back(weight, i, (i + 1));
     }
     std::sort(raw_data.begin(), raw_data.end());
-    for(auto [_, b, e]: raw_data) {
+    for (auto [_, b, e] : raw_data) {
         EXPECT_LE(ack.GetAck(), b);
         ack.AddSegment(b, e);
         auto seg = ack.GetAck();

@@ -35,10 +35,11 @@ ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 # Install Go
 ENV GOPATH /go
 ENV GOROOT /usr/local/go
-RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
-    mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
+RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH" && \
+    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 
 # Set permissions on /etc/passwd and /home to allow arbitrary users to write
 COPY --chown=0:0 docker/build_env/entrypoint.sh /

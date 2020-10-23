@@ -60,7 +60,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) override;
 
     int64_t
     Count() override;
@@ -76,7 +76,13 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     GenParams(const Config& config);
 
     virtual void
-    QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
+    QueryImpl(int64_t n,
+              const uint8_t* data,
+              int64_t k,
+              float* distances,
+              int64_t* labels,
+              const Config& config,
+              const faiss::ConcurrentBitsetPtr& bitset);
 
  protected:
     std::mutex mutex_;

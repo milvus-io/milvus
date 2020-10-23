@@ -78,7 +78,8 @@ class IVFTest : public DataGen,
 };
 
 INSTANTIATE_TEST_CASE_P(
-    IVFParameters, IVFTest,
+    IVFParameters,
+    IVFTest,
     Values(
 #ifdef MILVUS_GPU_VERSION
         std::make_tuple(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::IndexMode::MODE_GPU),
@@ -104,7 +105,7 @@ TEST_P(IVFTest, ivf_basic_cpu) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf_);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
 
@@ -127,9 +128,8 @@ TEST_P(IVFTest, ivf_basic_cpu) {
         for (int64_t i = 0; i < nq; ++i) {
             concurrent_bitset_ptr->set(i);
         }
-        index_->SetBlacklist(concurrent_bitset_ptr);
 
-        auto result_bs_1 = index_->Query(query_dataset, conf_);
+        auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
         AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
         // PrintResult(result, nq, k);
 
@@ -163,7 +163,7 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf_);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
 
@@ -171,9 +171,8 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
-    index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result_bs_1 = index_->Query(query_dataset, conf_);
+    auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
     // PrintResult(result, nq, k);
 
@@ -210,7 +209,7 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf_);
+        auto result = index_->Query(query_dataset, conf_, nullptr);
         AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
     }
 }
@@ -228,7 +227,7 @@ TEST_P(IVFTest, clone_test) {
     /* set peseodo index size, avoid throw exception */
     index_->SetIndexSize(nq * dim * sizeof(float));
 
-    auto result = index_->Query(query_dataset, conf_);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
     // PrintResult(result, nq, k);
 
@@ -248,7 +247,7 @@ TEST_P(IVFTest, clone_test) {
         if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
             EXPECT_NO_THROW({
                 auto clone_index = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
-                auto clone_result = clone_index->Query(query_dataset, conf_);
+                auto clone_result = clone_index->Query(query_dataset, conf_, nullptr);
                 AssertEqual(result, clone_result);
                 std::cout << "clone G <=> C [" << index_type_ << "] success" << std::endl;
             });
@@ -267,7 +266,7 @@ TEST_P(IVFTest, clone_test) {
         if (index_type_ != milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H) {
             EXPECT_NO_THROW({
                 auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, milvus::knowhere::Config());
-                auto clone_result = clone_index->Query(query_dataset, conf_);
+                auto clone_result = clone_index->Query(query_dataset, conf_, nullptr);
                 AssertEqual(result, clone_result);
                 std::cout << "clone C <=> G [" << index_type_ << "] success" << std::endl;
             });
@@ -284,7 +283,7 @@ TEST_P(IVFTest, gpu_seal_test) {
     }
     assert(!xb.empty());
 
-    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_));
+    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_, nullptr));
     ASSERT_ANY_THROW(index_->Seal());
 
     index_->Train(base_dataset, conf_);
@@ -295,15 +294,15 @@ TEST_P(IVFTest, gpu_seal_test) {
     /* set peseodo index size, avoid throw exception */
     index_->SetIndexSize(nq * dim * sizeof(float));
 
-    auto result = index_->Query(query_dataset, conf_);
+    auto result = index_->Query(query_dataset, conf_, nullptr);
     AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
 
     fiu_init(0);
     fiu_enable("IVF.Search.throw_std_exception", 1, nullptr, 0);
-    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_));
+    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_, nullptr));
     fiu_disable("IVF.Search.throw_std_exception");
     fiu_enable("IVF.Search.throw_faiss_exception", 1, nullptr, 0);
-    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_));
+    ASSERT_ANY_THROW(index_->Query(query_dataset, conf_, nullptr));
     fiu_disable("IVF.Search.throw_faiss_exception");
 
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
@@ -344,7 +343,7 @@ TEST_P(IVFTest, invalid_gpu_source) {
     fiu_disable("GPUIVF.SerializeImpl.throw_exception");
 
     fiu_enable("GPUIVF.search_impl.invald_index", 1, nullptr, 0);
-    ASSERT_ANY_THROW(index_->Query(base_dataset, invalid_conf));
+    ASSERT_ANY_THROW(index_->Query(base_dataset, invalid_conf, nullptr));
     fiu_disable("GPUIVF.search_impl.invald_index");
 
     auto ivf_index = std::dynamic_pointer_cast<milvus::knowhere::GPUIVF>(index_);

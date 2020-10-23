@@ -18,7 +18,7 @@
 #include "utils/Status.h"
 
 namespace milvus {
-namespace query {
+namespace query_old {
 
 enum class Occur {
     INVALID = 0,
@@ -83,5 +83,5 @@ class BooleanQuery {
 };
 using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
 
-}  // namespace query
+}  // namespace query_old
 }  // namespace milvus

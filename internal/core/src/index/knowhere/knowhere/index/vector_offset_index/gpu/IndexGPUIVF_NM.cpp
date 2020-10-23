@@ -15,6 +15,7 @@
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/index_io.h>
+#include <fiu/fiu-local.h>
 #include <string>
 
 #include "knowhere/common/Exception.h"
@@ -97,6 +98,7 @@ GPUIVF_NM::SerializeImpl(const IndexType& type) {
     }
 
     try {
+        fiu_do_on("GPUIVF_NM.SerializeImpl.throw_exception", throw std::exception());
         MemoryIOWriter writer;
         {
             faiss::Index* index = index_.get();
@@ -116,10 +118,17 @@ GPUIVF_NM::SerializeImpl(const IndexType& type) {
 }
 
 void
-GPUIVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIVF_NM::QueryImpl(int64_t n,
+                     const float* data,
+                     int64_t k,
+                     float* distances,
+                     int64_t* labels,
+                     const Config& config,
+                     const faiss::ConcurrentBitsetPtr& bitset) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
+    fiu_do_on("GPUIVF_NM.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
         device_index->nprobe = config[IndexParams::nprobe];
         ResScope rs(res_, gpu_id_);
@@ -129,7 +138,7 @@ GPUIVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, 
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, data + i * dim, k, distances + i * k, labels + i * k, bitset_);
+            device_index->search(search_size, data + i * dim, k, distances + i * k, labels + i * k, bitset);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

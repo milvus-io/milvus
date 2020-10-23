@@ -19,8 +19,16 @@
 
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Log.h"
+#include "faiss/FaissHook.h"
 
 class DataGen {
+ public:
+    DataGen() {
+        std::string cpu_flag;
+        faiss::hook_init(cpu_flag);
+        std::cout << cpu_flag << std::endl;
+    }
+
  protected:
     void
     Init_with_default(const bool is_binary = false);
@@ -46,16 +54,32 @@ class DataGen {
 };
 
 extern void
-GenAll(const int64_t dim, const int64_t nb, std::vector<float>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t nq, std::vector<float>& xq);
+GenAll(const int64_t dim,
+       const int64_t nb,
+       std::vector<float>& xb,
+       std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids,
+       const int64_t nq,
+       std::vector<float>& xq);
 
 extern void
-GenAll(const int64_t dim, const int64_t nb, std::vector<uint8_t>& xb, std::vector<int64_t>& ids,
-       std::vector<int64_t>& xids, const int64_t nq, std::vector<uint8_t>& xq);
+GenAll(const int64_t dim,
+       const int64_t nb,
+       std::vector<uint8_t>& xb,
+       std::vector<int64_t>& ids,
+       std::vector<int64_t>& xids,
+       const int64_t nq,
+       std::vector<uint8_t>& xq);
 
 extern void
-GenBase(const int64_t dim, const int64_t nb, const void* xb, int64_t* ids, const int64_t nq, const void* xq,
-        int64_t* xids, const bool is_binary);
+GenBase(const int64_t dim,
+        const int64_t nb,
+        const void* xb,
+        int64_t* ids,
+        const int64_t nq,
+        const void* xq,
+        int64_t* xids,
+        const bool is_binary);
 
 extern void
 InitLog();
@@ -67,17 +91,25 @@ enum class CheckMode {
 };
 
 void
-AssertAnns(const milvus::knowhere::DatasetPtr& result, const int nq, const int k,
+AssertAnns(const milvus::knowhere::DatasetPtr& result,
+           const int nq,
+           const int k,
            const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
-          const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+AssertVec(const milvus::knowhere::DatasetPtr& result,
+          const milvus::knowhere::DatasetPtr& base_dataset,
+          const milvus::knowhere::DatasetPtr& id_dataset,
+          const int n,
+          const int dim,
           const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void
-AssertBinVec(const milvus::knowhere::DatasetPtr& result, const milvus::knowhere::DatasetPtr& base_dataset,
-             const milvus::knowhere::DatasetPtr& id_dataset, const int n, const int dim,
+AssertBinVec(const milvus::knowhere::DatasetPtr& result,
+             const milvus::knowhere::DatasetPtr& base_dataset,
+             const milvus::knowhere::DatasetPtr& id_dataset,
+             const int n,
+             const int dim,
              const CheckMode check_mode = CheckMode::CHECK_EQUAL);
 
 void

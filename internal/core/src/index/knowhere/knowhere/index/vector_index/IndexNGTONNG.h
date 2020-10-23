@@ -7,27 +7,24 @@
 //
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #pragma once
 
-#include <memory>
-#include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/IndexNGT.h"
 
 namespace milvus {
 namespace knowhere {
 
-struct Quantizer {
-    virtual ~Quantizer() = default;
+class IndexNGTONNG : public IndexNGT {
+ public:
+    IndexNGTONNG() {
+        index_type_ = IndexEnum::INDEX_NGTONNG;
+    }
 
-    int64_t size = -1;
+    void
+    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override;
 };
-using QuantizerPtr = std::shared_ptr<Quantizer>;
-
-// struct QuantizerCfg : Cfg {
-//     int64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
-// };
-// using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
 
 }  // namespace knowhere
 }  // namespace milvus

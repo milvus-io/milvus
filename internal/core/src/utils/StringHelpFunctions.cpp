@@ -35,7 +35,8 @@ StringHelpFunctions::TrimStringQuote(std::string& string, const std::string& qou
 }
 
 void
-StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::string& delimeter,
+StringHelpFunctions::SplitStringByDelimeter(const std::string& str,
+                                            const std::string& delimeter,
                                             std::vector<std::string>& result) {
     if (str.empty()) {
         return;
@@ -55,7 +56,8 @@ StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::s
 }
 
 void
-StringHelpFunctions::MergeStringWithDelimeter(const std::vector<std::string>& strs, const std::string& delimeter,
+StringHelpFunctions::MergeStringWithDelimeter(const std::vector<std::string>& strs,
+                                              const std::string& delimeter,
                                               std::string& result) {
     if (strs.empty()) {
         result = "";
@@ -69,7 +71,9 @@ StringHelpFunctions::MergeStringWithDelimeter(const std::vector<std::string>& st
 }
 
 Status
-StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
+StringHelpFunctions::SplitStringByQuote(const std::string& str,
+                                        const std::string& delimeter,
+                                        const std::string& quote,
                                         std::vector<std::string>& result) {
     if (quote.empty()) {
         SplitStringByDelimeter(str, delimeter, result);
@@ -99,7 +103,6 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
 
-
         if (index == std::string::npos) {
             return Status(SERVER_UNEXPECTED_ERROR, "");
         }
@@ -108,7 +111,6 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
 
         last = index + 1;
         index = postfix.find_first_of(delimeter, last);
-
 
         if (index != std::string::npos) {
             if (index > last) {

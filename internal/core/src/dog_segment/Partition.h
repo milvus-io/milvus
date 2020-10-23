@@ -5,23 +5,26 @@
 namespace milvus::dog_segment {
 
 class Partition {
-public:
+ public:
     explicit Partition(std::string& partition_name, SchemaPtr& schema, IndexMetaPtr& index);
 
-public:
-    SchemaPtr& get_schema() {
-      return schema_;
+ public:
+    SchemaPtr&
+    get_schema() {
+        return schema_;
     }
 
-    IndexMetaPtr& get_index() {
-      return index_;
+    IndexMetaPtr&
+    get_index() {
+        return index_;
     }
 
-    std::string& get_partition_name() {
-      return partition_name_;
+    std::string&
+    get_partition_name() {
+        return partition_name_;
     }
 
-private:
+ private:
     std::string partition_name_;
     SchemaPtr schema_;
     IndexMetaPtr index_;
@@ -29,4 +32,4 @@ private:
 
 using PartitionPtr = std::unique_ptr<Partition>;
 
-}
+}  // namespace milvus::dog_segment

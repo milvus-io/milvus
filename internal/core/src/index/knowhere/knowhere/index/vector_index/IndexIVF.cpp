@@ -23,6 +23,8 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
+#include <fiu/fiu-local.h>
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -95,7 +97,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -103,6 +105,8 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     try {
+        fiu_do_on("IVF.Search.throw_std_exception", throw std::exception());
+        fiu_do_on("IVF.Search.throw_faiss_exception", throw faiss::FaissException(""));
         auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
@@ -111,7 +115,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = static_cast<int64_t*>(malloc(p_id_size));
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
 
         //    std::stringstream ss_res_id, ss_res_dist;
         //    for (int i = 0; i < 10; ++i) {
@@ -292,7 +296,7 @@ IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config
         res.resize(K * b_size);
 
         const float* xq = data + batch_size * dim * i;
-        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config);
+        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config, nullptr);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
@@ -314,17 +318,23 @@ IVF::GenParams(const Config& config) {
 }
 
 void
-IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IVF::QueryImpl(int64_t n,
+               const float* data,
+               int64_t k,
+               float* distances,
+               int64_t* labels,
+               const Config& config,
+               const faiss::ConcurrentBitsetPtr& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    ivf_index->nprobe = params->nprobe;
+    ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);
     stdclock::time_point before = stdclock::now();
     if (params->nprobe > 1 && n <= 4) {
         ivf_index->parallel_mode = 1;
     } else {
         ivf_index->parallel_mode = 0;
     }
-    ivf_index->search(n, data, k, distances, labels, bitset_);
+    ivf_index->search(n, data, k, distances, labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost

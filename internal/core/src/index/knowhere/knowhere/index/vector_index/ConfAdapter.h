@@ -51,8 +51,14 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     bool
     CheckTrain(Config& oricfg, const IndexMode mode) override;
 
-    static void
-    GetValidMList(int64_t dimension, std::vector<int64_t>& resset);
+    static bool
+    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
+
+    static bool
+    GetValidGPUM(int64_t dimension, int64_t m);
+
+    static bool
+    GetValidCPUM(int64_t dimension, int64_t m);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
@@ -120,5 +126,24 @@ class RHNSWSQConfAdapter : public ConfAdapter {
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
 };
+
+class NGTPANNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
+class NGTONNGConfAdapter : public ConfAdapter {
+ public:
+    bool
+    CheckTrain(Config& oricfg, const IndexMode mode) override;
+
+    bool
+    CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
+};
+
 }  // namespace knowhere
 }  // namespace milvus

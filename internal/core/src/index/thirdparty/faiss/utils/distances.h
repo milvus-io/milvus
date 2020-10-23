@@ -13,7 +13,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <optional>
 
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>

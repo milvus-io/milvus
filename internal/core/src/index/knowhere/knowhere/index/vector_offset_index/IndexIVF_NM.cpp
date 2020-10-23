@@ -23,6 +23,7 @@
 #include <faiss/gpu/GpuCloner.h>
 #endif
 
+#include <fiu/fiu-local.h>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -66,13 +67,13 @@ IVF_NM::Load(const BinarySet& binary_set) {
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
     auto d = ivf_index->d;
-    size_t nb = binary->size / invlists->code_size;
-    auto arranged_data = new float[d * nb];
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
 
 #ifndef MILVUS_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
+    size_t nb = binary->size / invlists->code_size;
+    auto arranged_data = new float[d * nb];
     for (size_t i = 0; i < invlists->nlist; i++) {
         auto list_size = ails->ids[i].size();
         for (size_t j = 0; j < list_size; j++) {
@@ -81,8 +82,10 @@ IVF_NM::Load(const BinarySet& binary_set) {
         prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
+    data_ = std::shared_ptr<uint8_t[]>(reinterpret_cast<uint8_t*>(arranged_data));
 #else
     auto rol = dynamic_cast<faiss::ReadOnlyArrayInvertedLists*>(invlists);
+    auto arranged_data = reinterpret_cast<float*>(rol->pin_readonly_codes->data);
     auto lengths = rol->readonly_length;
     auto rol_ids = reinterpret_cast<const int64_t*>(rol->pin_readonly_ids->data);
     for (size_t i = 0; i < invlists->nlist; i++) {
@@ -94,8 +97,11 @@ IVF_NM::Load(const BinarySet& binary_set) {
         prefix_sum[i] = curr_index;
         curr_index += list_size;
     }
+
+    /* hold codes shared pointer */
+    ro_codes = rol->pin_readonly_codes;
+    data_ = nullptr;
 #endif
-    data_ = std::shared_ptr<uint8_t[]>(reinterpret_cast<uint8_t*>(arranged_data));
 }
 
 void
@@ -132,7 +138,7 @@ IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -140,6 +146,8 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     try {
+        fiu_do_on("IVF_NM.Search.throw_std_exception", throw std::exception());
+        fiu_do_on("IVF_NM.Search.throw_faiss_exception", throw faiss::FaissException(""));
         auto k = config[meta::TOPK].get<int64_t>();
         auto elems = rows * k;
 
@@ -148,7 +156,7 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = static_cast<int64_t*>(malloc(p_id_size));
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
-        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config);
+        QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
@@ -236,8 +244,8 @@ IVF_NM::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 #ifdef MILVUS_GPU_VERSION
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
-        auto gpu_index =
-            faiss::gpu::index_cpu_to_gpu_without_codes(res->faiss_res.get(), device_id, index_.get(), data_.get());
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu_without_codes(res->faiss_res.get(), device_id, index_.get(),
+                                                                    static_cast<const uint8_t*>(ro_codes->data));
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
@@ -275,7 +283,7 @@ IVF_NM::GenGraph(const float* data, const int64_t k, GraphType& graph, const Con
         res.resize(K * b_size);
 
         const float* xq = data + batch_size * dim * i;
-        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config);
+        QueryImpl(b_size, xq, K, res_dis.data(), res.data(), config, nullptr);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
@@ -297,7 +305,13 @@ IVF_NM::GenParams(const Config& config) {
 }
 
 void
-IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IVF_NM::QueryImpl(int64_t n,
+                  const float* query,
+                  int64_t k,
+                  float* distances,
+                  int64_t* labels,
+                  const Config& config,
+                  const faiss::ConcurrentBitsetPtr& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;
@@ -308,8 +322,15 @@ IVF_NM::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         ivf_index->parallel_mode = 0;
     }
     bool is_sq8 = (index_type_ == IndexEnum::INDEX_FAISS_IVFSQ8) ? true : false;
-    ivf_index->search_without_codes(n, reinterpret_cast<const float*>(data), data_.get(), prefix_sum, is_sq8, k,
-                                    distances, labels, bitset_);
+
+#ifndef MILVUS_GPU_VERSION
+    auto data = static_cast<const uint8_t*>(data_.get());
+#else
+    auto data = static_cast<const uint8_t*>(ro_codes->data);
+#endif
+
+    ivf_index->search_without_codes(n, reinterpret_cast<const float*>(query), data, prefix_sum, is_sq8, k, distances,
+                                    labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost

@@ -21,12 +21,12 @@ struct ColumnBasedDataChunk {
     std::vector<std::vector<float>> entity_vecs;
 
     static ColumnBasedDataChunk
-    from(const DogDataChunk &source, const Schema &schema) {
+    from(const DogDataChunk& source, const Schema& schema) {
         ColumnBasedDataChunk dest;
         auto count = source.count;
-        auto raw_data = reinterpret_cast<const char *>(source.raw_data);
+        auto raw_data = reinterpret_cast<const char*>(source.raw_data);
         auto align = source.sizeof_per_row;
-        for (auto &field : schema) {
+        for (auto& field : schema) {
             auto len = field.get_sizeof();
             Assert(len % sizeof(float) == 0);
             std::vector<float> new_col(len * count / sizeof(float));
@@ -42,28 +42,33 @@ struct ColumnBasedDataChunk {
 };
 
 class SegmentNaive : public SegmentBase {
-public:
+ public:
     virtual ~SegmentNaive() = default;
 
     // SegmentBase(std::shared_ptr<FieldsInfo> collection);
 
-    int64_t PreInsert(int64_t size) override;
+    int64_t
+    PreInsert(int64_t size) override;
 
     // TODO: originally, id should be put into data_chunk
     // TODO: Is it ok to put them the other side?
     Status
-    Insert(int64_t reserverd_offset, int64_t size, const int64_t *primary_keys, const Timestamp *timestamps,
-           const DogDataChunk &values) override;
+    Insert(int64_t reserverd_offset,
+           int64_t size,
+           const int64_t* primary_keys,
+           const Timestamp* timestamps,
+           const DogDataChunk& values) override;
 
-    int64_t PreDelete(int64_t size) override;
+    int64_t
+    PreDelete(int64_t size) override;
 
     // TODO: add id into delete log, possibly bitmap
     Status
-    Delete(int64_t reserverd_offset, int64_t size, const int64_t *primary_keys, const Timestamp *timestamps) override;
+    Delete(int64_t reserverd_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) override;
 
     // query contains metadata of
     Status
-    Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult &results) override;
+    Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
 
     // stop receive insert requests
     // will move data to immutable vector or something
@@ -87,7 +92,7 @@ public:
     }
 
     Status
-    LoadRawData(std::string_view field_name, const char *blob, int64_t blob_size) override {
+    LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) override {
         // TODO: NO-OP
         return Status::OK();
     }
@@ -95,7 +100,7 @@ public:
     int64_t
     GetMemoryUsageInBytes() override;
 
-public:
+ public:
     ssize_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
@@ -111,23 +116,22 @@ public:
         return 0;
     }
 
-public:
+ public:
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
 
-    explicit SegmentNaive(SchemaPtr schema)
-            : schema_(schema), record_(*schema) {
+    explicit SegmentNaive(SchemaPtr schema) : schema_(schema), record_(*schema) {
     }
 
-private:
-//    struct MutableRecord {
-//        ConcurrentVector<uint64_t> uids_;
-//        tbb::concurrent_vector<Timestamp> timestamps_;
-//        std::vector<tbb::concurrent_vector<float>> entity_vecs_;
-//
-//        MutableRecord(int entity_size) : entity_vecs_(entity_size) {
-//        }
-//    };
+ private:
+    //    struct MutableRecord {
+    //        ConcurrentVector<uint64_t> uids_;
+    //        tbb::concurrent_vector<Timestamp> timestamps_;
+    //        std::vector<tbb::concurrent_vector<float>> entity_vecs_;
+    //
+    //        MutableRecord(int entity_size) : entity_vecs_(entity_size) {
+    //        }
+    //    };
 
     struct Record {
         std::atomic<int64_t> reserved = 0;
@@ -136,31 +140,32 @@ private:
         ConcurrentVector<idx_t, true> uids_;
         std::vector<std::shared_ptr<VectorBase>> entity_vec_;
 
-        Record(const Schema &schema);
+        Record(const Schema& schema);
 
-        template<typename Type>
-        auto get_vec_entity(int offset) {
+        template <typename Type>
+        auto
+        get_vec_entity(int offset) {
             return std::static_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
         }
     };
-
 
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
     Status
-    QueryImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
+    QueryImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
 
     Status
-    QuerySlowImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
+    QuerySlowImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
 
     Status
-    QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult &results);
+    QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
 
-    template<typename Type>
-    knowhere::IndexPtr BuildVecIndexImpl(const IndexMeta::Entry &entry);
+    template <typename Type>
+    knowhere::IndexPtr
+    BuildVecIndexImpl(const IndexMeta::Entry& entry);
 
-private:
+ private:
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
     Record record_;
@@ -168,7 +173,7 @@ private:
 
     std::atomic<bool> index_ready_ = false;
     IndexMetaPtr index_meta_;
-    std::unordered_map<std::string, knowhere::IndexPtr> indexings_; // index_name => indexing
+    std::unordered_map<std::string, knowhere::IndexPtr> indexings_;  // index_name => indexing
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
 }  // namespace milvus::dog_segment

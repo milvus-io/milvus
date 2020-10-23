@@ -142,7 +142,11 @@ BaseConfig::Init() {
     inited_ = true;
 }
 
-BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, bool* config, bool default_value,
+BoolConfig::BoolConfig(const char* name,
+                       const char* alias,
+                       bool modifiable,
+                       bool* config,
+                       bool default_value,
                        std::function<bool(bool val, std::string& err)> is_valid_fn,
                        std::function<bool(bool val, bool prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
@@ -199,7 +203,11 @@ BoolConfig::Get() {
 }
 
 StringConfig::StringConfig(
-    const char* name, const char* alias, bool modifiable, std::string* config, const char* default_value,
+    const char* name,
+    const char* alias,
+    bool modifiable,
+    std::string* config,
+    const char* default_value,
     std::function<bool(const std::string& val, std::string& err)> is_valid_fn,
     std::function<bool(const std::string& val, const std::string& prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
@@ -251,8 +259,13 @@ StringConfig::Get() {
     return *config_;
 }
 
-EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, int64_t* config,
-                       int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn,
+EnumConfig::EnumConfig(const char* name,
+                       const char* alias,
+                       bool modifiable,
+                       configEnum* enumd,
+                       int64_t* config,
+                       int64_t default_value,
+                       std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                        std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -324,8 +337,13 @@ EnumConfig::Get() {
     return "unknown";
 }
 
-IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
-                             int64_t upper_bound, int64_t* config, int64_t default_value,
+IntegerConfig::IntegerConfig(const char* name,
+                             const char* alias,
+                             bool modifiable,
+                             int64_t lower_bound,
+                             int64_t upper_bound,
+                             int64_t* config,
+                             int64_t default_value,
                              std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                              std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
@@ -393,8 +411,13 @@ IntegerConfig::Get() {
     return std::to_string(*config_);
 }
 
-FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound,
-                               double upper_bound, double* config, double default_value,
+FloatingConfig::FloatingConfig(const char* name,
+                               const char* alias,
+                               bool modifiable,
+                               double lower_bound,
+                               double upper_bound,
+                               double* config,
+                               double default_value,
                                std::function<bool(double val, std::string& err)> is_valid_fn,
                                std::function<bool(double val, double prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
@@ -457,8 +480,13 @@ FloatingConfig::Get() {
     return std::to_string(*config_);
 }
 
-SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                       int64_t* config, int64_t default_value,
+SizeConfig::SizeConfig(const char* name,
+                       const char* alias,
+                       bool modifiable,
+                       int64_t lower_bound,
+                       int64_t upper_bound,
+                       int64_t* config,
+                       int64_t default_value,
                        std::function<bool(int64_t val, std::string& err)> is_valid_fn,
                        std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
     : BaseConfig(name, alias, modifiable),
