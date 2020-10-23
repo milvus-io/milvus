@@ -5,6 +5,8 @@ Please mark all changes in change log and use the issue from GitHub
 # Milvus 0.11.1 (TBD)
 
 ## Bug
+-   \#4030 The configurations name is not effective after update config file and restart docker
+-   \#4059 milvus raise exception when passing a complex dsl during searching
 
 ## Feature
 
@@ -13,7 +15,7 @@ Please mark all changes in change log and use the issue from GitHub
 ## Task
 
 
-# Milvus 0.11.0 (2020-09-16)
+# Milvus 0.11.0 (2020-10-16)
 
 ## Bug
 -   \#2532 Fix Milvus docker image report illegal instruction
