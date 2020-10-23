@@ -17,6 +17,19 @@ namespace scheduler {
 namespace {
 std::mutex unique_job_mutex;
 uint64_t unique_job_id = 0;
+
+std::string
+JobTypeToString(JobType type) {
+    switch (type) {
+        case JobType::BUILD:
+            return "build_index";
+        case JobType::SEARCH:
+            return "search";
+        default:
+            return "unknown";
+    }
+}
+
 }  // namespace
 
 Job::Job(JobType type) : type_(type) {
@@ -27,9 +40,19 @@ Job::Job(JobType type) : type_(type) {
 json
 Job::Dump() const {
     json ret{
-        {"id", id_},
-        {"type", type_},
+        {"job_id", id_},
+        {"job_type", JobTypeToString(type_)},
     };
+
+    json tasks_dump;
+    for (auto& task : tasks_) {
+        auto json = task->Dump();
+        tasks_dump.push_back(json);
+    }
+    ret["tasks"] = tasks_dump;
+
+    LOG_SERVER_DEBUG_ << ret.dump();
+
     return ret;
 }
 
@@ -42,6 +65,8 @@ Job::CreateTasks() {
     if (tasks_.empty()) {
         cv_.notify_all();
     }
+
+    //    Dump(); // uncomment it when you want to debug
     return tasks_;
 }
 
@@ -72,9 +97,7 @@ Job::WaitFinish() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return tasks_created_ && tasks_.empty(); });
 
-    auto json = Dump();
-    std::string job_desc = json.dump();
-    LOG_SERVER_DEBUG_ << LogOut("scheduler job [%ld] %s all done", id(), job_desc.c_str());
+    LOG_SERVER_DEBUG_ << "scheduler job " << id() << " all done.";
 }
 
 }  // namespace scheduler
