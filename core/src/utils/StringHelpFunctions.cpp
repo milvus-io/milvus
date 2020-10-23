@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "utils/StringHelpFunctions.h"
+#include "utils/Log.h"
 
 #include <fiu/fiu-local.h>
 #include <algorithm>
@@ -146,9 +147,16 @@ StringHelpFunctions::IsRegexMatch(const std::string& target_str, const std::stri
     }
 
     // regex match
-    std::regex pattern(pattern_str);
-    std::smatch results;
-    return std::regex_match(target_str, results, pattern);
+    // for illegal regex expression, the std::regex will throw exception, regard as unmatch
+    try {
+        std::regex pattern(pattern_str);
+        std::smatch results;
+        return std::regex_match(target_str, results, pattern);
+    } catch (std::exception& e) {
+        LOG_SERVER_ERROR_ << "Regex exception: " << e.what();
+    }
+
+    return false;
 }
 
 Status
