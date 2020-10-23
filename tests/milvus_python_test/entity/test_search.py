@@ -1025,6 +1025,21 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == 0
 
+    def test_query_complex_dsl(self, connect, collection):
+        '''
+        method: query with complicated dsl
+        expected: no error raised
+        '''
+        expr = {"must": [
+            {"must": [{"should": [gen_default_term_expr(values=[1]), gen_default_range_expr()]}]}, 
+            {"must": [gen_default_vector_expr(default_query)]}
+            ]}
+        logging.getLogger().info(expr)
+        query = update_query_expr(default_query, expr=expr)
+        logging.getLogger().info(query)
+        res = connect.search(collection, query)
+        logging.getLogger().info(res)
+
     """
     ******************************************************************
     #  The following cases are used to build invalid term query expr
