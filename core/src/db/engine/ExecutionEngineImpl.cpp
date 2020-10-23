@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "cache/CpuCacheMgr.h"
+#include "cache/FpgaCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
 #include "db/Utils.h"
@@ -31,6 +32,12 @@
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#ifdef MILVUS_FPGA_VERSION
+#include <faiss/index_io.h>
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
+#include "knowhere/index/vector_index/fpga/utils.h"
+#endif
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
@@ -168,7 +175,6 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
         mode = knowhere::IndexMode::MODE_GPU;
     }
 #endif
-
     fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
@@ -492,7 +498,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
                             }
                         }
                     }
-
                     index_->SetBlacklist(concurrent_bitset_ptr);
                     std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
                     segment_reader_ptr->LoadUids(*uids_ptr);
@@ -664,6 +669,33 @@ ExecutionEngineImpl::CopyToCpu() {
 #endif
 }
 
+Status
+ExecutionEngineImpl::CopyToFpga() {
+#ifdef MILVUS_FPGA_VERSION
+    auto cache_index_ =
+        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    bool already_in_cache = (cache_index_ != nullptr);
+    if (!already_in_cache) {
+        int64_t indexsize = index_->IndexSize();
+        std::shared_ptr<knowhere::IVFPQ> ivfpq = std::static_pointer_cast<knowhere::IVFPQ>(index_);
+        std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
+        indexFpga->SetIndexSize(indexsize);
+        indexFpga->CopyIndexToFpga();
+        indexFpga->SetBlacklist(index_->GetBlacklist());
+
+        // do real copy now, may optimizer later
+        auto uids = index_->GetUids();
+        indexFpga->SetUids(uids);
+
+        index_ = indexFpga;
+        FpgaCache();
+    } else {
+        index_ = cache_index_;
+    }
+    LOG_ENGINE_DEBUG_ << "copy to fpga time ";
+#endif
+    return Status::OK();
+}
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
@@ -714,14 +746,12 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         to_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
-
     to_index->SetUids(uids);
     LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids()->size() << "uids for " << location;
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
     }
-
     LOG_ENGINE_DEBUG_ << "Finish build index: " << location;
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
 }
@@ -1248,7 +1278,15 @@ ExecutionEngineImpl::Cache() {
     cpu_cache_mgr->InsertItem(location_, obj);
     return Status::OK();
 }
-
+Status
+ExecutionEngineImpl::FpgaCache() {
+#ifdef MILVUS_FPGA_VERSION
+    auto fpga_cache_mgr = milvus::cache::FpgaCacheMgr::GetInstance();
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
+    fpga_cache_mgr->InsertItem(location_, obj);
+#endif
+    return Status::OK();
+}
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {

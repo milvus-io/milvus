@@ -95,6 +95,9 @@ class ExecutionEngine {
     Load(bool to_cache = true) = 0;
 
     virtual Status
+    CopyToFpga() = 0;
+
+    virtual Status
     CopyToGpu(uint64_t device_id, bool hybrid) = 0;
 
     virtual Status
@@ -135,6 +138,9 @@ class ExecutionEngine {
 
     virtual Status
     Cache() = 0;
+
+    virtual Status
+    FpgaCache() = 0;
 
     virtual Status
     Init() = 0;
