@@ -8,7 +8,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/timesync"
 	"github.com/golang/protobuf/proto"
@@ -77,7 +77,7 @@ func (mc *ReaderMessageClient) SendResult(ctx context.Context, msg msgpb.QueryRe
 	}
 }
 
-func (mc *ReaderMessageClient) SendSegmentsStatistic(ctx context.Context, statisticData *[]masterPb.SegmentStat) {
+func (mc *ReaderMessageClient) SendSegmentsStatistic(ctx context.Context, statisticData *[]internalpb.SegmentStatistics) {
 	for _, data := range *statisticData {
 		var stat, _ = proto.Marshal(&data)
 		if _, err := mc.segmentsStatisticProducer.Send(ctx, &pulsar.ProducerMessage{

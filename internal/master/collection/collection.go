@@ -3,7 +3,8 @@ package collection
 import (
 	"time"
 
-	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/gogo/protobuf/proto"
 	jsoniter "github.com/json-iterator/go"
@@ -33,27 +34,24 @@ func GrpcMarshal(c *Collection) *Collection {
 	if c.GrpcMarshalString != "" {
 		c.GrpcMarshalString = ""
 	}
-	pbSchema := &messagepb.Schema{
-		FieldMetas: []*messagepb.FieldMeta{},
+	pbSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{},
 	}
-	schemaSlice := []*messagepb.FieldMeta{}
+	schemaSlice := []*schemapb.FieldSchema{}
 	for _, v := range c.Schema {
-		newpbMeta := &messagepb.FieldMeta{
-			FieldName: v.FieldName,
-			Type:      v.Type,
-			Dim:       v.DIM,
+		newpbMeta := &schemapb.FieldSchema{
+			Name: v.FieldName,
+			DataType:      schemapb.DataType(v.Type), //czs_tag
 		}
 		schemaSlice = append(schemaSlice, newpbMeta)
 	}
-	pbSchema.FieldMetas = schemaSlice
-	grpcCollection := &masterpb.Collection{
+	pbSchema.Fields = schemaSlice
+	grpcCollection := &etcdpb.CollectionMeta{
 		Id:            c.ID,
-		Name:          c.Name,
 		Schema:        pbSchema,
 		CreateTime:    c.CreateTime,
 		SegmentIds:    c.SegmentIDs,
 		PartitionTags: c.PartitionTags,
-		Indexes:       c.IndexParam,
 	}
 	out := proto.MarshalTextString(grpcCollection)
 	c.GrpcMarshalString = out

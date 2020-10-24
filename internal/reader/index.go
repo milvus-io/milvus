@@ -13,28 +13,29 @@ package reader
 */
 import "C"
 import (
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 type IndexConfig struct{}
 
-func (s *Segment) BuildIndex(collection *Collection) msgPb.Status {
+func (s *Segment) buildIndex(collection* Collection) commonpb.Status {
 	/*
-		int
-		BuildIndex(CCollection c_collection, CSegmentBase c_segment);
+	int
+	BuildIndex(CCollection c_collection, CSegmentBase c_segment);
 	*/
 	var status = C.BuildIndex(collection.CollectionPtr, s.SegmentPtr)
 	if status != 0 {
-		return msgPb.Status{ErrorCode: msgPb.ErrorCode_BUILD_INDEX_ERROR}
+		return commonpb.Status{ErrorCode: commonpb.ErrorCode_BUILD_INDEX_ERROR}
 	}
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (s *Segment) DropIndex(fieldName string) msgPb.Status {
+func (s *Segment) dropIndex(fieldName string) commonpb.Status {
 	// WARN: Not support yet
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
+
 
 func (node *QueryNode) UpdateIndexes(collection *Collection, indexConfig *string) {
 	/*

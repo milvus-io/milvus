@@ -1,3 +1,7 @@
+syntax = "proto3";
+
+package milvus.proto.common;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/commonpb";
 
 enum ErrorCode {
     SUCCESS = 0;
@@ -26,6 +30,8 @@ enum ErrorCode {
     OUT_OF_MEMORY = 24;
 }
 
+message Empty{}
+
 
 message Status {
     ErrorCode error_code = 1;
@@ -43,4 +49,9 @@ message Blob {
     bytes value = 1;
 }
 
+
+message Address {
+  string ip = 1;
+  int64 port = 2;
+}
 

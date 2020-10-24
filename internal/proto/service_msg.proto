@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package milvus.proto.service;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/servicepb";
+
+import "common.proto";
+import "schema.proto";
+
+/**
+ * @brief Collection name
+ */
+message CollectionName {
+    string collection_name = 1;
+}
+
+
+/**
+ * @brief Partition name
+ */
+message PartitionName {
+    string collection_name = 1;
+    string tag = 2;
+}
+
+
+/**
+ * @brief Row batch for Insert call
+ */
+message RowBatch {
+    string collection_name = 1;
+    string partition_tag = 2;
+    repeated common.Blob row_data = 3;
+    repeated int32 hash_values = 4;
+}
+
+
+/**
+ * @brief Placeholder value in DSL
+ */
+message PlaceholderValue {
+    string tag = 1;
+    common.Blob value = 2;
+}
+
+
+/**
+ * @brief Query for Search call
+ */
+message Query {
+    string collection_name = 1;
+    repeated string partition_tags = 2;
+    string dsl = 3;
+    repeated PlaceholderValue placeholders = 4;
+}
+
+
+/**
+ * @brief String response
+ */
+message StringResponse {
+    common.Status status = 1;
+    string value = 2;
+}
+
+
+/**
+ * @brief Bool response
+ */
+message BoolResponse {
+    common.Status status = 1;
+    bool value = 2;
+}
+
+
+/**
+ * @brief String list response
+ */
+message StringListResponse {
+    common.Status status = 1;
+    repeated string values = 2;
+}
+
+
+/**
+ * @brief Integer list response
+ */
+message IntegerListResponse {
+    common.Status status = 1;
+    repeated int64 values = 2;
+}
+
+
+/**
+ * @brief Range response, [begin, end)
+ */
+message IntegerRangeResponse {
+    common.Status status = 1;
+    repeated int64 begin = 2;
+    repeated int64 end = 3;
+}
+
+
+/**
+ * @brief Response of DescribeCollection 
+ */
+message CollectionDescription {
+    common.Status status = 1;
+    schema.CollectionSchema schema = 2;
+    repeated common.KeyValuePair statistics = 3;
+}
+
+
+/**
+ * @brief Response of DescribePartition
+ */
+message PartitionDescription {
+    common.Status status = 1;
+    PartitionName name = 2;
+    repeated common.KeyValuePair statistics = 3;
+}
+
+
+/**
+ * @brief Scores of a query. 
+ *        The default value of tag is "root". 
+ *        It corresponds to the final score of each hit.
+ */
+message Score {
+    string tag = 1;
+    repeated float values = 2;
+}
+
+
+/**
+ * @brief Entities hit by query
+ */
+message Hits {
+    repeated int64 ids = 1;
+    repeated common.Blob row_data = 2;
+    repeated Score scores = 3;
+}
+
+
+/**
+ * @brief Query result
+ */
+message QueryResult {
+    common.Status status = 1;
+    repeated Hits hits = 2;
+}
+

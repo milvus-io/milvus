@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
@@ -14,14 +15,13 @@ import (
 )
 
 func SegmentStatsController(kvbase kv.Base, errch chan error) {
-	ssChan := make(chan segment.SegmentStats, 10)
+	ssChan := make(chan internalpb.SegmentStatistics, 10)
 	ssClient := informer.NewPulsarClient()
 	go segment.Listener(ssChan, ssClient)
 	for {
 		select {
 		case ss := <-ssChan:
 			errch <- ComputeCloseTime(ss, kvbase)
-			errch <- UpdateSegmentStatus(ss, kvbase)
 		case <-time.After(5 * time.Second):
 			fmt.Println("wait for new request")
 			return
@@ -30,15 +30,16 @@ func SegmentStatsController(kvbase kv.Base, errch chan error) {
 
 }
 
-func ComputeCloseTime(ss segment.SegmentStats, kvbase kv.Base) error {
+func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
 		currentTime := time.Now()
-		memRate := int(ss.MemoryRate)
+		//memRate := int(ss.MemoryRate)
+		memRate := 1 // to do
 		if memRate == 0 {
 			memRate = 1
 		}
 		sec := int(conf.Config.Master.SegmentThreshole*0.2) / memRate
-		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
+		data, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegmentId)))
 		if err != nil {
 			return err
 		}
@@ -52,7 +53,7 @@ func ComputeCloseTime(ss segment.SegmentStats, kvbase kv.Base) error {
 		if err != nil {
 			return err
 		}
-		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegementID)), updateData)
+		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegmentId)), updateData)
 		//create new segment
 		newSegID := id.New().Uint64()
 		newSeg := segment.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))
@@ -80,35 +81,3 @@ func ComputeCloseTime(ss segment.SegmentStats, kvbase kv.Base) error {
 	return nil
 }
 
-func UpdateSegmentStatus(ss segment.SegmentStats, kvbase kv.Base) error {
-	segmentData, err := kvbase.Load("segment/" + strconv.Itoa(int(ss.SegementID)))
-	if err != nil {
-		return err
-	}
-	seg, err := segment.JSON2Segment(segmentData)
-	if err != nil {
-		return err
-	}
-	var changed bool
-	changed = false
-	if seg.Status != ss.Status {
-		changed = true
-		seg.Status = ss.Status
-	}
-	if seg.Rows != ss.Rows {
-		changed = true
-		seg.Rows = ss.Rows
-	}
-
-	if changed {
-		segData, err := segment.Segment2JSON(*seg)
-		if err != nil {
-			return err
-		}
-		err = kvbase.Save("segment/"+strconv.Itoa(int(seg.CollectionID)), segData)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}

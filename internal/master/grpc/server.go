@@ -2,15 +2,16 @@ package grpc
 
 import (
 	"context"
-	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"net"
 	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/controller"
-	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/master/kv"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"google.golang.org/grpc"
 )
 
@@ -37,33 +38,119 @@ type GRPCMasterServer struct {
 	kvbase        kv.Base
 }
 
-func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
-	//	ms.CreateRequest <- in2
-	fmt.Println("Handle a new create collection request")
-	err := controller.WriteCollection2Datastore(in, ms.kvbase)
-	if err != nil {
-		return &messagepb.Status{
-			ErrorCode: 100,
-			Reason:    "",
-		}, err
-	}
-	return &messagepb.Status{
+func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
 		ErrorCode: 0,
 		Reason:    "",
 	}, nil
 }
 
-func (ms GRPCMasterServer) CreateIndex(ctx context.Context, in *messagepb.IndexParam) (*messagepb.Status, error) {
-	fmt.Println("Handle a new create index request")
-	err := controller.UpdateCollectionIndex(in, ms.kvbase)
-	if err != nil {
-		return &messagepb.Status{
-			ErrorCode: 100,
-			Reason:    "",
-		}, err
-	}
-	return &messagepb.Status{
+func (ms GRPCMasterServer) DropCollection(ctx context.Context, in *internalpb.DropCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
 		ErrorCode: 0,
 		Reason:    "",
 	}, nil
 }
+
+func (ms GRPCMasterServer) HasCollection(ctx context.Context, in *internalpb.HasCollectionRequest) (*servicepb.BoolResponse, error) {
+	return &servicepb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+		Value: true,
+	},nil
+}
+
+func (ms GRPCMasterServer) DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error) {
+	return &servicepb.CollectionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+func (ms GRPCMasterServer) ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error) {
+	return &servicepb.StringListResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+
+func (ms GRPCMasterServer) CreatePartition(ctx context.Context, in *internalpb.CreatePartitionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
+	}, nil
+}
+
+
+func (ms GRPCMasterServer) DropPartition(ctx context.Context, in *internalpb.DropPartitionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: 0,
+		Reason:    "",
+	}, nil
+}
+
+func (ms GRPCMasterServer) HasPartition(ctx context.Context, in *internalpb.HasPartitionRequest) (*servicepb.BoolResponse, error) {
+	return &servicepb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+		Value: true,
+	},nil
+}
+
+func (ms GRPCMasterServer) DescribePartition(ctx context.Context, in *internalpb.DescribePartitionRequest) (*servicepb.PartitionDescription, error) {
+	return &servicepb.PartitionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+func (ms GRPCMasterServer) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error) {
+	return &servicepb.StringListResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "",
+		},
+	},nil
+}
+
+//func (ms GRPCMasterServer) CreateCollection(ctx context.Context, in *messagepb.Mapping) (*messagepb.Status, error) {
+//	//	ms.CreateRequest <- in2
+//	fmt.Println("Handle a new create collection request")
+//	err := controller.WriteCollection2Datastore(in, ms.kvbase)
+//	if err != nil {
+//		return &messagepb.Status{
+//			ErrorCode: 100,
+//			Reason:    "",
+//		}, err
+//	}
+//	return &messagepb.Status{
+//		ErrorCode: 0,
+//		Reason:    "",
+//	}, nil
+//}
+
+//func (ms GRPCMasterServer) CreateIndex(ctx context.Context, in *messagepb.IndexParam) (*messagepb.Status, error) {
+//	fmt.Println("Handle a new create index request")
+//	err := controller.UpdateCollectionIndex(in, ms.kvbase)
+//	if err != nil {
+//		return &messagepb.Status{
+//			ErrorCode: 100,
+//			Reason:    "",
+//		}, err
+//	}
+//	return &messagepb.Status{
+//		ErrorCode: 0,
+//		Reason:    "",
+//	}, nil
+//}

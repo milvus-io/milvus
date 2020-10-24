@@ -2,8 +2,9 @@ package reader
 
 import (
 	"context"
-	masterPb "github.com/zilliztech/milvus-distributed/internal/proto/master"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 type ResultEntityIds []int64
@@ -13,32 +14,28 @@ type SearchResult struct {
 	ResultDistances []float32
 }
 
-func (node *QueryNode) PublishSearchResult(results *msgPb.QueryResult) msgPb.Status {
+func (node *QueryNode) PublishSearchResult(results *msgpb.QueryResult) commonpb.Status {
 	var ctx = context.Background()
 
 	node.messageClient.SendResult(ctx, *results, results.ProxyId)
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (node *QueryNode) PublishFailedSearchResult() msgPb.Status {
-	var results = msgPb.QueryResult{
-		Status: &msgPb.Status{
-			ErrorCode: 1,
-			Reason:    "Search Failed",
-		},
+func (node *QueryNode) PublishFailedSearchResult() commonpb.Status {
+	var results = msgpb.QueryResult{
 	}
 
 	var ctx = context.Background()
 
 	node.messageClient.SendResult(ctx, results, results.ProxyId)
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (node *QueryNode) PublicStatistic(statisticData *[]masterPb.SegmentStat) msgPb.Status {
+func (node *QueryNode) PublicStatistic(statisticData *[]internalpb.SegmentStatistics) commonpb.Status {
 	var ctx = context.Background()
 
 	node.messageClient.SendSegmentsStatistic(ctx, statisticData)
 
-	return msgPb.Status{ErrorCode: msgPb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }

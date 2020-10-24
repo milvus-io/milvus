@@ -1,150 +1,11 @@
-import "google/protobuf/empty.proto";
+syntax = "proto3";
 
+package milvus.proto.service;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/servicepb";
 
-/**
- * @brief Collection name
- */
-message CollectionName {
-    string collection_name = 1;
-}
-
-
-/**
- * @brief Partition name
- */
-message PartitionName {
-    string collection_name = 1;
-    string tag = 2;
-}
-
-
-/**
- * @brief Row batch for Insert call
- */
-message RowBatch {
-    string collection_name = 1;
-    string partition_tag = 2;
-    repeated Blob row_data = 3;
-    repeated uint64 row_id = 4;
-}
-
-
-/**
- * @brief Placeholder value in DSL
- */
-message PlaceholderValue {
-    string tag = 1;
-    Blob value = 2;
-}
-
-
-/**
- * @brief Query for Search call
- */
-message Query {
-    string collection_name = 1;
-    repeated string partition_tags = 2;
-    string dsl = 3;
-    repeated PlaceholderValue placeholders = 4;
-}
-
-
-/**
- * @brief String response
- */
-message StringResponse {
-    Status status = 1;
-    string value = 2;
-}
-
-
-/**
- * @brief Bool response
- */
-message BoolResponse {
-    Status status = 1;
-    bool value = 2;
-}
-
-
-/**
- * @brief String list response
- */
-message StringListResponse {
-    Status status = 1;
-    repeated string values = 2;
-}
-
-
-/**
- * @brief Integer list response
- */
-message IntegerListResponse {
-    Status status = 1;
-    repeated int64 values = 2;
-}
-
-
-/**
- * @brief Range response, [begin, end)
- */
-message IntegerRangeResponse {
-    Status status = 1;
-    repeated int64 begin = 2;
-    repeated int64 end = 2;
-}
-
-
-/**
- * @brief Response of DescribeCollection 
- */
-message CollectionDescription {
-    Status status = 1;
-    CollectionSchema schema = 2;
-    repeated KeyValuePair statistics = 3;
-}
-
-
-/**
- * @brief Response of DescribePartition
- */
-message PartitionDescription {
-    Status status = 1;
-    PartitionName name = 2;
-    repeated KeyValuePair statistics = 3;
-}
-
-
-/**
- * @brief Scores of a query. 
- *        The default value of tag is "root". 
- *        It corresponds to the final score of each hit.
- */
-message Score {
-    string tag = 1;
-    repeated float values = 2;
-}
-
-
-/**
- * @brief Entities hit by query
- */
-message Hits {
-    Status status = 1;
-    repeated int64 ids = 2;
-    repeated Blob row_data = 4;
-    repeated Score scores = 5;
-}
-
-
-/**
- * @brief Query result
- */
-message QueryResult {
-    Status status = 1;
-    repeated Hits hits = 2;
-}
-
+import "common.proto";
+import "service_msg.proto";
+import "schema.proto";
 
 service MilvusService {
     /**
@@ -154,7 +15,7 @@ service MilvusService {
      *
      * @return Status
      */
-    rpc CreateCollection(CollectionSchema) returns (Status){}
+    rpc CreateCollection(schema.CollectionSchema) returns (common.Status){}
     
     /**
      * @brief This method is used to delete collection.
@@ -163,7 +24,7 @@ service MilvusService {
      *
      * @return Status
      */
-    rpc DropCollection(CollectionName) returns (Status) {}
+    rpc DropCollection(CollectionName) returns (common.Status) {}
 
     /**
      * @brief This method is used to test collection existence.
@@ -179,7 +40,7 @@ service MilvusService {
      *
      * @param CollectionName, target collection name.
      *
-     * @return CollectionSchema
+     * @return CollectionDescription
      */
     rpc DescribeCollection(CollectionName) returns (CollectionDescription) {}
 
@@ -188,21 +49,21 @@ service MilvusService {
      *
      * @return CollectionNameList
      */
-    rpc ShowCollections(google.protobuf.Empty) returns (StringListResponse) {}
+    rpc ShowCollections(common.Empty) returns (StringListResponse) {}
 
     /**
      * @brief This method is used to create partition
      *
      * @return Status
      */
-    rpc CreatePartition(PartitionName) returns (Status) {}
+    rpc CreatePartition(PartitionName) returns (common.Status) {}
 
     /**
      * @brief This method is used to drop partition
      *
      * @return Status
      */
-    rpc DropPartition(PartitionName) returns (Status) {}
+    rpc DropPartition(PartitionName) returns (common.Status) {}
 
     /**
      * @brief This method is used to test partition existence.

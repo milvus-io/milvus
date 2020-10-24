@@ -3,7 +3,6 @@ package segment
 import (
 	"time"
 
-	masterpb "github.com/zilliztech/milvus-distributed/internal/proto/master"
 	jsoniter "github.com/json-iterator/go"
 )
 
@@ -18,7 +17,6 @@ type Segment struct {
 	OpenTimeStamp  uint64                 `json:"open_timestamp"`
 	CloseTimeStamp uint64                 `json:"close_timestamp"`
 	CollectionName string                 `json:"collection_name"`
-	Status         masterpb.SegmentStatus `json:"segment_status"`
 	Rows           int64                  `json:"rows"`
 }
 

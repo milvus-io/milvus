@@ -1,4 +1,4 @@
-#include <dog_segment/SegmentNaive.h>
+#include <dog_segment/SegmentSmallIndex.h>
 #include <random>
 #include <algorithm>
 #include <numeric>
@@ -10,7 +10,8 @@
 #include <faiss/utils/distances.h>
 
 namespace milvus::dog_segment {
-SegmentNaive::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
+
+SegmentSmallIndex::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
     for (auto& field : schema) {
         if (field.is_vector()) {
             Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
@@ -23,20 +24,22 @@ SegmentNaive::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
 }
 
 int64_t
-SegmentNaive::PreInsert(int64_t size) {
+SegmentSmallIndex::PreInsert(int64_t size) {
     auto reserved_begin = record_.reserved.fetch_add(size);
     return reserved_begin;
 }
 
 int64_t
-SegmentNaive::PreDelete(int64_t size) {
+SegmentSmallIndex::PreDelete(int64_t size) {
     auto reserved_begin = deleted_record_.reserved.fetch_add(size);
     return reserved_begin;
 }
 
 auto
-SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force)
-    -> std::shared_ptr<DeletedRecord::TmpBitmap> {
+SegmentSmallIndex::get_deleted_bitmap(int64_t del_barrier,
+                                      Timestamp query_timestamp,
+                                      int64_t insert_barrier,
+                                      bool force) -> std::shared_ptr<DeletedRecord::TmpBitmap> {
     auto old = deleted_record_.get_lru_entry();
 
     if (!force || old->bitmap_ptr->count() == insert_barrier) {
@@ -105,11 +108,11 @@ SegmentNaive::get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp,
 }
 
 Status
-SegmentNaive::Insert(int64_t reserved_begin,
-                     int64_t size,
-                     const int64_t* uids_raw,
-                     const Timestamp* timestamps_raw,
-                     const DogDataChunk& entities_raw) {
+SegmentSmallIndex::Insert(int64_t reserved_begin,
+                          int64_t size,
+                          const int64_t* uids_raw,
+                          const Timestamp* timestamps_raw,
+                          const DogDataChunk& entities_raw) {
     Assert(entities_raw.count == size);
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
         std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
@@ -201,7 +204,10 @@ SegmentNaive::Insert(int64_t reserved_begin,
 }
 
 Status
-SegmentNaive::Delete(int64_t reserved_begin, int64_t size, const int64_t* uids_raw, const Timestamp* timestamps_raw) {
+SegmentSmallIndex::Delete(int64_t reserved_begin,
+                          int64_t size,
+                          const int64_t* uids_raw,
+                          const Timestamp* timestamps_raw) {
     std::vector<std::tuple<Timestamp, idx_t>> ordering;
     ordering.resize(size);
     // #pragma omp parallel for
@@ -247,7 +253,7 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
 }
 
 Status
-SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentSmallIndex::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier, true);
@@ -344,7 +350,7 @@ merge_into(int64_t queries,
 }
 
 Status
-SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) {
+SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
@@ -403,7 +409,7 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
 }
 
 Status
-SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentSmallIndex::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
@@ -472,7 +478,7 @@ SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, Que
 }
 
 Status
-SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentSmallIndex::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
     // TODO: remove mock
@@ -499,7 +505,7 @@ SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult
 }
 
 Status
-SegmentNaive::Close() {
+SegmentSmallIndex::Close() {
     if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
         std::runtime_error("insert not ready");
     }
@@ -512,7 +518,7 @@ SegmentNaive::Close() {
 
 template <typename Type>
 knowhere::IndexPtr
-SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
+SegmentSmallIndex::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     auto offset_opt = schema_->get_offset(entry.field_name);
     Assert(offset_opt.has_value());
     auto offset = offset_opt.value();
@@ -542,7 +548,7 @@ SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
 }
 
 Status
-SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
+SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     if (remote_index_meta == nullptr) {
         std::cout << "WARN: Null index ptr is detected, use default index" << std::endl;
 
@@ -596,7 +602,7 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
 }
 
 int64_t
-SegmentNaive::GetMemoryUsageInBytes() {
+SegmentSmallIndex::GetMemoryUsageInBytes() {
     int64_t total_bytes = 0;
     if (index_ready_) {
         auto& index_entries = index_meta_->get_entries();
