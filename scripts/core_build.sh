@@ -13,7 +13,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-CPP_SRC_DIR="${SCRIPTS_DIR}/../../internal/core"
+CPP_SRC_DIR="${SCRIPTS_DIR}/../internal/core"
 CPP_BUILD_DIR="${CPP_SRC_DIR}/cmake_build"
 
 BUILD_OUTPUT_DIR=${CPP_BUILD_DIR}
