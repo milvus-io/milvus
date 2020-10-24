@@ -107,7 +107,7 @@ class Meta {
     DropCollectionIndex(const std::string& collection_id) = 0;
 
     virtual Status
-    CreatePartition(const std::string& collection_name, const std::string& partition_name, const std::string& tag,
+    CreatePartition(const std::string& collection_id, const std::string& partition_name, const std::string& tag,
                     uint64_t lsn) = 0;
 
     virtual Status
@@ -117,10 +117,13 @@ class Meta {
     DropPartition(const std::string& partition_name) = 0;
 
     virtual Status
-    ShowPartitions(const std::string& collection_name, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
+    ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
 
     virtual Status
-    GetPartitionName(const std::string& collection_name, const std::string& tag, std::string& partition_name) = 0;
+    CountPartitions(const std::string& collection_id, int64_t& partition_count) = 0;
+
+    virtual Status
+    GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
     FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) = 0;
