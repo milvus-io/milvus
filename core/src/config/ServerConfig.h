@@ -26,9 +26,6 @@ GetConfigMutex();
 template <typename T>
 class ConfigValue {
  public:
-    explicit ConfigValue(T init_value) : value(std::move(init_value)) {
-    }
-
     const T&
     operator()() {
         std::lock_guard<std::mutex> lock(GetConfigMutex());
@@ -79,102 +76,102 @@ struct ServerConfig {
     using Integer = ConfigValue<int64_t>;
     using Floating = ConfigValue<double>;
 
-    String version{"unknown"};
+    String version;
 
     struct Cluster {
-        Bool enable{false};
-        Integer role{0};
+        Bool enable;
+        Integer role;
     } cluster;
 
     struct General {
-        String timezone{"unknown"};
-        String meta_uri{"unknown"};
+        String timezone;
+        String meta_uri;
     } general;
 
     struct Network {
         struct Bind {
-            String address{"unknown"};
-            Integer port{0};
+            String address;
+            Integer port;
         } bind;
         struct Http {
-            Bool enable{false};
-            Integer port{0};
+            Bool enable;
+            Integer port;
         } http;
     } network;
 
     struct Storage {
-        String path{"unknown"};
-        Integer auto_flush_interval{0};
+        String path;
+        Integer auto_flush_interval;
     } storage;
 
     struct Cache {
-        Integer cache_size{0};
-        Floating cpu_cache_threshold{0.0};
-        Integer insert_buffer_size{0};
-        Bool cache_insert_data{false};
-        String preload_collection{"unknown"};
-        Integer max_concurrent_insert_request_size{0};
+        Integer cache_size;
+        Floating cpu_cache_threshold;
+        Integer insert_buffer_size;
+        Bool cache_insert_data;
+        String preload_collection;
+        Integer max_concurrent_insert_request_size;
     } cache;
 
     struct Metric {
-        Bool enable{false};
-        String address{"unknown"};
-        Integer port{0};
+        Bool enable;
+        String address;
+        Integer port;
     } metric;
 
     struct Engine {
-        Integer max_partition_num{4096};
-        Integer build_index_threshold{4096};
-        Integer search_combine_nq{0};
-        Integer use_blas_threshold{0};
-        Integer omp_thread_num{0};
-        Integer clustering_type{0};
-        Integer simd_type{0};
-        Bool stat_optimizer_enable{true};
+        Integer max_partition_num;
+        Integer build_index_threshold;
+        Integer search_combine_nq;
+        Integer use_blas_threshold;
+        Integer omp_thread_num;
+        Integer clustering_type;
+        Integer simd_type;
+        Bool stat_optimizer_enable;
     } engine;
 
     struct GPU {
-        Bool enable{false};
-        Integer cache_size{0};
-        Floating cache_threshold{0.0};
-        Integer gpu_search_threshold{0};
-        String search_devices{"unknown"};
-        String build_index_devices{"unknown"};
+        Bool enable;
+        Integer cache_size;
+        Floating cache_threshold;
+        Integer gpu_search_threshold;
+        String search_devices;
+        String build_index_devices;
     } gpu;
 
     struct Tracing {
-        String json_config_path{"unknown"};
+        String json_config_path;
     } tracing;
 
     struct WAL {
-        Bool enable{false};
-        Bool sync_mode{false};
-        Bool recovery_error_ignore{false};
-        Integer buffer_size{0};
-        String path{"unknown"};
+        Bool enable;
+        Bool sync_mode;
+        Bool recovery_error_ignore;
+        Integer buffer_size;
+        String path;
     } wal;
 
     struct Logs {
-        String level{"unknown"};
+        String level;
         struct Trace {
-            Bool enable{false};
+            Bool enable;
         } trace;
-        String path{"unknown"};
-        Integer max_log_file_size{0};
-        Integer log_rotate_num{0};
-        Bool log_to_stdout{false};
-        Bool log_to_file{true};
+        String path;
+        Integer max_log_file_size;
+        Integer log_rotate_num;
+        Bool log_to_stdout;
+        Bool log_to_file;
     } logs;
 
     struct System {
         struct Lock {
-            Bool enable{false};
+            Bool enable;
         } lock;
     } system;
 
     struct Transcript {
-        Bool enable{false};
-        String replay{""};
+        Bool enable;
+        String replay;
     } transcript;
 };
 
