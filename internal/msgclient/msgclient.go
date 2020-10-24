@@ -34,7 +34,7 @@ type ReaderMessageClient struct {
 
 	// message channel
 	searchChan  chan *msgpb.SearchMsg
-	key2SegChan chan *msgpb.Key2SegMsg
+	Key2SegChan chan *msgpb.Key2SegMsg
 
 	// pulsar
 	client pulsar.Client
@@ -130,7 +130,7 @@ func (mc *ReaderMessageClient) receiveKey2SegMsg() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			mc.key2SegChan <- &key2SegMsg
+			mc.Key2SegChan <- &key2SegMsg
 			mc.key2segConsumer.Ack(msg)
 		}
 	}
@@ -235,7 +235,7 @@ func (mc *ReaderMessageClient) InitClient(ctx context.Context, url string) {
 
 	// init channel
 	mc.searchChan = make(chan *msgpb.SearchMsg, conf.Config.Reader.SearchChanSize)
-	mc.key2SegChan = make(chan *msgpb.Key2SegMsg, conf.Config.Reader.Key2SegChanSize)
+	mc.Key2SegChan = make(chan *msgpb.Key2SegMsg, conf.Config.Reader.Key2SegChanSize)
 
 	mc.InsertOrDeleteMsg = make([]*msgpb.InsertOrDeleteMsg, 0)
 	mc.Key2SegMsg = make([]*msgpb.Key2SegMsg, 0)
@@ -335,9 +335,9 @@ func (mc *ReaderMessageClient) PrepareBatchMsg() []int {
 
 func (mc *ReaderMessageClient) PrepareKey2SegmentMsg() {
 	mc.Key2SegMsg = mc.Key2SegMsg[:0]
-	msgLen := len(mc.key2SegChan)
+	msgLen := len(mc.Key2SegChan)
 	for i := 0; i < msgLen; i++ {
-		msg := <-mc.key2SegChan
+		msg := <-mc.Key2SegChan
 		mc.Key2SegMsg = append(mc.Key2SegMsg, msg)
 	}
 }

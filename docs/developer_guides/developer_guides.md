@@ -1,0 +1,592 @@
+
+
+# Milvus Developer Guides
+
+​                                                                                                                                   by Rentong Guo, Sep 15, 2020
+
+
+
+## 1. System Overview
+
+In this section, we sketch the system design of Milvus , including data model, data organization, architecture, and state synchronization. 
+
+
+
+#### 1.1 Data Model
+
+Milvus exposes the following set of data features to applications:
+
+* a data model based on schematized relational tables, in that rows must have primary-keys,
+
+* a query language specifies data definition, data manipulation, and data query, where data definition includes create, drop, and data manipulation includes insert, upsert, delete, and data query falls into three types, primary key search, approximate nearest neighbor search (ANNS), ANNS with predicates.
+
+The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a requst's issue time. For a batch request, all its sub-requests share a same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
+
+Transaction is currently not supported by Milvus. Only batch requests such as batch insert/delete/query are supported. A batch insert/delete is guaranteed to become visible atomically.
+
+
+
+#### 1.2 Data Organization
+
+
+
+<img src="./figs/data_organization.pdf" width=550>
+
+In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When use parition, users should clearly know how a collection should be partitioned. In most cases, parition leads to more flexible data management and more efficient quering. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
+
+Each collection or parition contains a set of 'segment groups'. Segment group is the basic unit of data-to-node mapping. It's also the basic unit of replica. For instance, if a query node failed, its segment groups will be redistributed accross other nodes. If a query node is overloaded, part of its  segment groups will be migrated to underloaded ones. If a hot collection/partition is detected, its segment groups will be replicated to smooth the system load skewness.
+
+'Segment' is the finest unit of data organization. It is where the data and indexes are actually kept. Each segment contains a set of rows. In order to reduce the memory footprint during a query execution and to fully utilize SIMD, the physical data layout within segments is organized in a column-based manner. 
+
+
+
+#### 1.3 Architecture Overview
+
+
+
+<img src="./figs/system_framework.pdf" width=800>
+
+The main components, proxy, WAL, query node and write node can scale to multiple instances. These components scale seperately for better tradeoff between availability and cost.
+
+The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will be repacked by proxy. Operations shared identical hash value (the hash value of primary key) will be routed to the same hash bucket. In addtion, some preprocessing work will be done by proxy, such as static validity checking, primary key assignment (if not given by user), timestamp assignment.
+
+The query/write nodes are linked to the hash ring, with each node covers some portion of the buckets. Once the hash function and bucket coverage are settled, the chain 'proxy -> WAL -> query/write node' will act as a producer-consumer pipeline. Logs in each bucket is a determined operation stream. Via performing the operation stream in order, the query nodes keep themselves up to date.
+
+The query nodes hold all the indexes in memory. Since building index is time-consuming, the query nodes will dump their index to disk (store engine) for fast failure recovery and cross node index copy.
+
+The write nodes are stateless. They simply transforms the newly arrived WALs to binlog format, then append the binlog to store enginey. 
+
+Note that not all the components are necessarily replicated. The system provides failure tolerance by maintaining multiple copies of WAL and binlog. When there is no in-memory index replica and there occurs a query node failure, other query nodes will take over its indexes by loading the dumped index files, or rebuilding them from binlog and WALs. The links from query nodes to the hash ring will also be adjusted such that the failure node's input WAL stream can be properly handled by its neighbors.
+
+
+
+#### 1.4 State Synchronization
+
+<img src="./figs/state_sync.pdf" width=800>
+
+Data in Milvus have three different forms, namely WAL, binlog, and index. As mentioned in the previous section, WAL can be viewed as a determined operation stream. Other two data forms keep themselves up to date by performing the operation stream in time order.
+
+Each of the WAL is attached with a timestamp, which is the time when the log is sent to the hash bucket. Binlog records, table rows, index cells will also keep that timestamp. In this way, different data forms can offer consistent snapshot for a given time T. For example, requests such as "fetch binlogs before T for point-in-time recovery", "get the row with primary key K at time T", "launch a similarity search at time T for vector V" perform on binlog, index respectively. Though different data forms these three requests are performed, they observe identical snapshot, namely all the state changes before T.
+
+For better throughput, Milvus allows asynchronous state synchronization between WAL and index/binlog/table. Whenever the data is not fresh enough to satisfiy a query, the query will be suspended until the data is up-to-date, or timeout will be returned.
+
+
+
+## 2. Schema
+
+#### 2.1 Collection Schema
+
+``` go
+type CollectionSchema struct {
+  Name string
+  Fields []FieldSchema
+}
+```
+
+#### 2.2 Field Schema
+
+``` go
+type FieldSchema struct {
+  Id uint64
+  Name string
+  Description string
+  DataType DataType 
+  TypeParams map[string]string
+  IndexParams map[string]string
+}
+```
+
+
+
+#### 2.3 Type Params
+
+#### 2.4 Index Params
+
+
+
+## 3. Request
+
+
+
+#### 3.1 Base Request
+
+``` go
+type BaseRequest interface {
+  Type() ReqType
+  PreExecute() Status
+  Execute() Status
+  PostExecute() Status
+  WaitToFinish() Status
+}
+```
+
+
+
+#### 3.2 Definition Requests
+
+###### 3.2.1 Collection
+
+* CreateCollection
+* DropCollection
+* HasCollection
+* DescribeCollection
+* ShowCollections
+
+###### 3.2.2 Partition
+
+* CreatePartition
+* DropPartition
+* HasPartition
+* DescribePartition
+* ShowPartitions
+
+###### 3.2.3 Index
+
+* CreateIndex
+* DropIndex
+* DescribeIndex
+
+###### 3.2.4 Definition Request & Task
+
+```go
+type DDRequest struct {
+  CollectionName string
+  PartitionName string
+  SegmentId uint64
+  ChannelId uint64
+  
+  PrimaryKeys []uint64
+  RowData []*RowDataBlob
+  
+  reqType ReqType
+  ts Timestamp
+}
+
+type DDTask struct {
+  DDRequest
+}
+
+// TsMsg interfaces
+func (req *DDTask) Ts() Timestamp
+func (req *DDTask) SetTs(ts Timestamp)
+
+// BaseRequest interfaces
+func (req *DDTask) Type() ReqType
+func (req *DDTask) PreExecute() Status
+func (req *DDTask) Execute() Status
+func (req *DDTask) PostExecute() Status
+func (req *DDTask) WaitToFinish() Status
+```
+
+
+
+#### 3.3 Manipulation Requsts
+
+###### 3.3.1 Insert
+
+* Insert
+
+###### 3.3.2 Delete
+
+* DeleteByID
+
+###### 3.3.3 Manipulation Requst
+
+```go
+type DMRequest struct {
+  CollectionName string
+  PartitionTag string
+  SegmentId uint64
+  ChannelId uint64
+  
+  PrimaryKeys []uint64
+  RowData []*RowDataBlob
+  
+  reqType ReqType
+  ts Timestamp
+}
+
+type DMTask struct {
+  DMRequest
+}
+
+// TsMsg interfaces
+func (req *DMTask) Ts() Timestamp
+func (req *DMTask) SetTs(ts Timestamp)
+
+// BaseRequest interfaces
+func (req *DMTask) Type() ReqType
+func (req *DMTask) PreExecute() Status
+func (req *DMTask) Execute() Status
+func (req *DMTask) PostExecute() Status
+func (req *DMTask) WaitToFinish() Status
+```
+
+
+
+#### 3.5 Query
+
+
+
+##  4. Time
+
+
+
+#### 4.1 Timestamp
+
+Before we discuss timestamp, let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and a 18-bits logical component (used to distinguish between events with the same physical component).
+
+<img src="./figs/hlc.pdf" width=450>
+
+HLC's logical part is advanced on each request. The phsical part can be increased in two cases: 
+
+A. when the local wall time is greater than HLC's physical part,
+
+B. or the logical part overflows.
+
+In either cases, the physical part will be updated, and the logical part will be set to 0.
+
+Keep the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus montonicity is guaranteed.
+
+Milvus does not support transaction, but it should gurantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
+
+- have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction senarios),
+- and be globally unique.
+
+HLC leverages on physical clocks at nodes that are synchronized using the NTP. NTP usually maintain time to within tens of milliseconds over local networks in datacenter. Asymmetric routes and network congestion occasionally cause errors of hundreds of milliseconds. Both the normal time error and the spike are acceptable for Milvus use cases. 
+
+The interface of Timestamp is as follows.
+
+```
+type timestamp struct {
+  physical uint64 // 18-63 bits
+  logical uint64  // 0-17 bits
+}
+
+type Timestamp uint64
+```
+
+
+
+#### 4.2 Timestamp Oracle
+
+```
+type timestampOracle struct {
+  client *etcd.Client // client of a reliable meta service, i.e. etcd client
+  rootPath string // this timestampOracle's working root path on the reliable kv service
+  saveInterval uint64
+  lastSavedTime uint64
+  tso Timestamp // monotonically increasing timestamp
+}
+
+func (tso *timestampOracle) GetTimestamp(count uint32) ([]Timestamp, Status)
+
+func (tso *timestampOracle) saveTimestamp() Status
+func (tso *timestampOracle) loadTimestamp() Status
+```
+
+
+
+#### 4.3 Batch Allocation of Timestamps
+
+
+
+#### 4.4 Expiration of Timestamps
+
+
+
+#### 4.5 T_safe
+
+
+
+
+
+## 5. Basic Components
+
+#### 5.1 Watchdog
+
+``` go
+type ActiveComponent interface {
+  Id() string
+  Status() Status
+  Clean() Status
+  Restart() Status
+}
+
+type ComponentHeartbeat interface {
+  Id() string
+  Status() Status
+  Serialize() string
+}
+
+type Watchdog struct {
+  targets [] *ActiveComponent
+  heartbeats ComponentHeartbeat chan
+}
+
+// register ActiveComponent
+func (dog *Watchdog) Register(target *ActiveComponent)
+
+// called by ActiveComponents
+func (dog *Watchdog) PutHeartbeat(heartbeat *ComponentHeartbeat)
+
+// dump heatbeats as log stream
+func (dog *Watchdog) dumpHeartbeat(heartbeat *ComponentHeartbeat)
+```
+
+
+
+#### 5.2 Global Parameter Table
+
+``` go
+type GlobalParamsTable struct {
+  params memoryKV
+}
+
+func (gparams *GlobalParamsTable) Save(key, value string) Status
+func (gparams *GlobalParamsTable) Load(key string) (string, Status)
+func (gparams *GlobalParamsTable) LoadRange(key, endKey string, limit int) ([]string, []string, Status)
+func (gparams *GlobalParamsTable) Remove(key string) Status
+```
+
+
+
+
+
+## 6. Proxy
+
+#### 6.1 Overview
+
+#### 6.2 Request Scheduler
+
+``` go
+type requestScheduler struct {
+  definitions requestQueue
+  manipulations requestQueue
+  queries requestQueue
+}
+
+func (rs *requestScheduler) ExecuteRequest(req *Request) Status
+
+func (rs *requestScheduler) staticValidityCheck(req *Request) Status
+func (rs *requestScheduler) setTimestamp(req *Request)
+func (rs *requestScheduler) setPrimaryKey(req *Request)
+func (rs *requestScheduler) setSegmentId(req *Request)
+func (rs *requestScheduler) setProxyId(req *Request)
+
+// @param selection
+// bit_0 = 1: select definition queue
+// bit_1 = 1: select manipulation queue
+// bit_2 = 1: select query queue
+// example: if mode = 3, then both definition and manipulation queues are selected
+func (rs *requestScheduler) AreRequestsDelivered(ts Timestamp, selection uint32) bool
+
+// ActiveComponent interfaces
+func (rs *requestScheduler) Id() String
+func (rs *requestScheduler) Status() Status
+func (rs *requestScheduler) Clean() Status
+func (rs *requestScheduler) Restart() Status
+func (rs *requestScheduler) heartbeat()
+
+// protobuf
+message ReqSchedulerHeartbeat {
+  string id
+  uint64 definition_queue_length
+  uint64 manipulation_queue_length
+  uint64 query_queue_length
+  uint64 num_delivered_definitions
+  uint64 num_delivered_manipulations
+  uint64 num_delivered_queries
+}
+```
+
+
+
+#### 6.3 Time Tick
+
+``` go
+type timeTick struct {
+  lastTick Timestamp
+  currentTick Timestamp
+}
+
+func (tt *timeTick) tick() Status
+
+// ActiveComponent interfaces
+func (tt *timeTick) ID() String
+func (tt *timeTick) Status() Status
+func (tt *timeTick) Clean() Status
+func (tt *timeTick) Restart() Status
+func (tt *timeTick) heartbeat()
+
+// protobuf
+message TimeTickHeartbeat {
+  string id
+  uint64 last_tick
+}
+```
+
+
+
+## 7. Message Stream
+
+#### 7.1 Overview
+
+
+
+#### 7.2 Message Stream
+
+``` go
+type TsMsg interface {
+  SetTs(ts Timestamp)
+  Ts() Timestamp
+}
+
+type TsMsgMarshaler interface {
+  Marshal(input *TsMsg) ([]byte, Status)
+  Unmarshal(input []byte) (*TsMsg, Status)
+}
+
+type MsgPack struct {
+  BeginTs Timestamp
+  EndTs Timestamp
+  Msgs []*TsMsg
+}
+
+type MsgStream interface {
+  SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
+  Produce(*MsgPack) Status
+  Consume() *MsgPack // message can be consumed exactly once
+}
+
+type PulsarMsgStream struct {
+  client *pulsar.Client
+  produceChannels []string
+  consumeChannels []string
+  
+  msgMarshaler *TsMsgMarshaler
+  msgUnmarshaler *TsMsgMarshaler
+}
+
+func (ms *PulsarMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
+func (ms *PulsarMsgStream) Produce(*MsgPack) Status
+func (ms *PulsarMsgStream) Consume() *MsgPack //return messages in one time tick
+
+type PulsarTtMsgStream struct {
+  client *pulsar.Client
+  produceChannels []string
+  consumeChannels []string
+  
+  msgMarshaler *TsMsgMarshaler
+  msgUnmarshaler *TsMsgMarshaler
+  inputBuf []*TsMsg
+  unsolvedBuf []*TsMsg
+  msgPacks []*MsgPack
+}
+
+func (ms *PulsarTtMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
+func (ms *PulsarTtMsgStream) Produce(*MsgPack) Status
+func (ms *PulsarTtMsgStream) Consume() *MsgPack //return messages in one time tick
+```
+
+
+
+## 8. Query Node
+
+
+
+#### 8.1 Collection and Segment Meta
+
+###### 8.1.1 Collection
+
+``` go
+type Collection struct {
+  Name string
+  Id uint64
+  Fields map[string]FieldMeta
+  SegmentsId []uint64
+  
+  cCollectionSchema C.CCollectionSchema
+}
+```
+
+
+
+###### 8.1.2 Field Meta
+
+```go
+type FieldMeta struct {
+  Name string
+  Id uint64
+  IsPrimaryKey bool
+  TypeParams map[string]string
+  IndexParams map[string]string
+}
+```
+
+
+
+###### 8.1.3 Segment
+
+``` go
+type Segment struct {
+  Id uint64
+  ParitionName string
+  CollectionId uint64
+  OpenTime Timestamp
+  CloseTime Timestamp
+  NumRows uint64
+  
+  cSegment C.CSegmentBase
+}
+```
+
+
+
+#### 8.2 Message Streams
+
+```go
+type ManipulationReqUnmarshaler struct {}
+
+// implementations of MsgUnmarshaler interfaces
+func (unmarshaler *InsertMsgUnmarshaler) Unmarshal(input *pulsar.Message) (*TsMsg, Status)
+
+
+type QueryReqUnmarshaler struct {}
+
+// implementations of MsgUnmarshaler interfaces
+func (unmarshaler *QueryReqUnmarshaler) Unmarshal(input *pulsar.Message) (*TsMsg, Status)
+```
+
+
+
+#### 8.3 Query Node
+
+
+
+
+
+
+
+
+
+## 4. Storage Engine
+
+
+
+#### 4.X Interfaces
+
+
+
+
+
+## 5. Master
+
+
+
+#### 5.X Interfaces
+
+
+
+
+

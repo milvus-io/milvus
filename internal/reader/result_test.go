@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"strconv"
@@ -24,8 +25,8 @@ func TestResult_PublishSearchResult(t *testing.T) {
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	mc.InitClient(ctx, pulsarAddr)
 
+	mc.InitClient(ctx, pulsarAddr)
 	node := CreateQueryNode(ctx, 0, 0, &mc)
 
 	// Construct node, collection, partition and segment
@@ -46,7 +47,10 @@ func TestResult_PublishSearchResult(t *testing.T) {
 		result.Entities.Ids = append(result.Entities.Ids, int64(i))
 		result.Distances = append(result.Distances, float32(i))
 	}
-	node.PublishSearchResult(&result)
+
+	status := node.PublishSearchResult(&result)
+	assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
+
 	node.Close()
 }
 
@@ -62,8 +66,8 @@ func TestResult_PublishFailedSearchResult(t *testing.T) {
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	mc.InitClient(ctx, pulsarAddr)
 
+	mc.InitClient(ctx, pulsarAddr)
 	node := CreateQueryNode(ctx, 0, 0, &mc)
 
 	// Construct node, collection, partition and segment
@@ -72,8 +76,8 @@ func TestResult_PublishFailedSearchResult(t *testing.T) {
 	var segment = partition.NewSegment(0)
 	node.SegmentsMap[0] = segment
 
-	// TODO: start pulsar server
-	node.PublishFailedSearchResult()
+	status := node.PublishFailedSearchResult()
+	assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
 
 	node.Close()
 }
@@ -90,8 +94,8 @@ func TestResult_PublicStatistic(t *testing.T) {
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
-	mc.InitClient(ctx, pulsarAddr)
 
+	mc.InitClient(ctx, pulsarAddr)
 	node := CreateQueryNode(ctx, 0, 0, &mc)
 
 	// Construct node, collection, partition and segment
@@ -113,8 +117,8 @@ func TestResult_PublicStatistic(t *testing.T) {
 		statisticData = append(statisticData, stat)
 	}
 
-	// TODO: start pulsar server
-	node.PublicStatistic(&statisticData)
+	status := node.PublicStatistic(&statisticData)
+	assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
 
 	node.Close()
 }

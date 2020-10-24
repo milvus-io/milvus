@@ -11,20 +11,20 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 const (
-	CollectonPrefix = "/collection/"
-	SegmentPrefix   = "/segment/"
+	CollectionPrefix = "/collection/"
+	SegmentPrefix    = "/segment/"
 )
 
 func GetCollectionObjId(key string) string {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectonPrefix) + "/"
+	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
@@ -34,7 +34,7 @@ func GetSegmentObjId(key string) string {
 }
 
 func isCollectionObj(key string) bool {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectonPrefix) + "/"
+	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	// println("prefix is :$", prefix)
 	index := strings.Index(key, prefix)
@@ -122,7 +122,7 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 			newSegmentID := int64(segment.SegmentID) // todo change all to uint64
 			// start new segment and add it into partition.OpenedSegments
 			newSegment := partition.NewSegment(newSegmentID)
-			newSegment.SegmentStatus = SegmentOpened
+			// newSegment.SegmentStatus = SegmentOpened
 			newSegment.SegmentCloseTime = segment.CloseTimeStamp
 			node.SegmentsMap[newSegmentID] = newSegment
 		}
@@ -195,10 +195,32 @@ func (node *QueryNode) processModify(key string, msg string) {
 func (node *QueryNode) processSegmentDelete(id string) {
 	println("Delete segment: ", id)
 
+	segmentId, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		log.Println("Cannot parse segment id:" + id)
+	}
+
+	for _, col := range node.Collections {
+		for _, p := range col.Partitions {
+			for _, s := range p.Segments {
+				if s.SegmentId == segmentId {
+					p.DeleteSegment(node, s)
+				}
+			}
+		}
+	}
 }
 
 func (node *QueryNode) processCollectionDelete(id string) {
 	println("Delete collection: ", id)
+
+	collectionId, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		log.Println("Cannot parse collection id:" + id)
+	}
+
+	targetCollection := node.GetCollectionByID(uint64(collectionId))
+	node.DeleteCollection(targetCollection)
 }
 
 func (node *QueryNode) processDelete(key string) {
@@ -241,7 +263,7 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 }
 
 func (node *QueryNode) loadCollections() error {
-	keys, values := node.kvBase.LoadWithPrefix(CollectonPrefix)
+	keys, values := node.kvBase.LoadWithPrefix(CollectionPrefix)
 	for i := range keys {
 		objID := GetCollectionObjId(keys[i])
 		node.processCollectionCreate(objID, values[i])

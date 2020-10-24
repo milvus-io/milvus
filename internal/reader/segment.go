@@ -13,10 +13,9 @@ package reader
 */
 import "C"
 import (
-	"fmt"
+	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/stretchr/testify/assert"
 	"strconv"
 	"unsafe"
 )
@@ -24,10 +23,10 @@ import (
 const SegmentLifetime = 20000
 
 const (
-	SegmentOpened  = 0
-	SegmentClosed  = 1
-	SegmentIndexing = 2
-	SegmentIndexed = 3
+//SegmentOpened  = 0
+//SegmentClosed  = 1
+//SegmentIndexing = 2
+//SegmentIndexed = 3
 )
 
 type Segment struct {
@@ -38,23 +37,23 @@ type Segment struct {
 	SegmentStatus    int
 }
 
-func (s *Segment) GetStatus() int {
-	/*
-	bool
-	IsOpened(CSegmentBase c_segment);
-	*/
-	var isOpened = C.IsOpened(s.SegmentPtr)
-	if isOpened {
-		return SegmentOpened
-	} else {
-		return SegmentClosed
-	}
-}
+//func (s *Segment) GetStatus() int {
+//	/*
+//	bool
+//	IsOpened(CSegmentBase c_segment);
+//	*/
+//	var isOpened = C.IsOpened(s.SegmentPtr)
+//	if isOpened {
+//		return SegmentOpened
+//	} else {
+//		return SegmentClosed
+//	}
+//}
 
 func (s *Segment) GetRowCount() int64 {
 	/*
-	long int
-	GetRowCount(CSegmentBase c_segment);
+		long int
+		GetRowCount(CSegmentBase c_segment);
 	*/
 	var rowCount = C.GetRowCount(s.SegmentPtr)
 	return int64(rowCount)
@@ -62,45 +61,45 @@ func (s *Segment) GetRowCount() int64 {
 
 func (s *Segment) GetDeletedCount() int64 {
 	/*
-	long int
-	GetDeletedCount(CSegmentBase c_segment);
+		long int
+		GetDeletedCount(CSegmentBase c_segment);
 	*/
 	var deletedCount = C.GetDeletedCount(s.SegmentPtr)
 	return int64(deletedCount)
 }
 
-func (s *Segment) CloseSegment(collection* Collection) error {
-	/*
-	int
-	Close(CSegmentBase c_segment);
-	*/
-	fmt.Println("Closing segment :", s.SegmentId)
-
-	var status = C.Close(s.SegmentPtr)
-	s.SegmentStatus = SegmentClosed
-
-	if status != 0 {
-		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
-	}
-
-	// Build index after closing segment
-	//s.SegmentStatus = SegmentIndexing
-	//fmt.Println("Building index...")
-	//s.buildIndex(collection)
-
-	// TODO: remove redundant segment indexed status
-	// Change segment status to indexed
-	//s.SegmentStatus = SegmentIndexed
-	//fmt.Println("Segment closed and indexed")
-
-	fmt.Println("Segment closed")
-	return nil
-}
+//func (s *Segment) CloseSegment(collection* Collection) error {
+//	/*
+//	int
+//	Close(CSegmentBase c_segment);
+//	*/
+//	fmt.Println("Closing segment :", s.SegmentId)
+//
+//	var status = C.Close(s.SegmentPtr)
+//	s.SegmentStatus = SegmentClosed
+//
+//	if status != 0 {
+//		return errors.New("Close segment failed, error code = " + strconv.Itoa(int(status)))
+//	}
+//
+//	// Build index after closing segment
+//	//s.SegmentStatus = SegmentIndexing
+//	//fmt.Println("Building index...")
+//	//s.BuildIndex(collection)
+//
+//	// TODO: remove redundant segment indexed status
+//	// Change segment status to indexed
+//	//s.SegmentStatus = SegmentIndexed
+//	//fmt.Println("Segment closed and indexed")
+//
+//	fmt.Println("Segment closed")
+//	return nil
+//}
 
 func (s *Segment) GetMemSize() uint64 {
 	/*
-	long int
-	GetMemoryUsageInBytes(CSegmentBase c_segment);
+		long int
+		GetMemoryUsageInBytes(CSegmentBase c_segment);
 	*/
 	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.SegmentPtr)
 
@@ -110,8 +109,8 @@ func (s *Segment) GetMemSize() uint64 {
 ////////////////////////////////////////////////////////////////////////////
 func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 	/*
-	long int
-	PreInsert(CSegmentBase c_segment, long int size);
+		long int
+		PreInsert(CSegmentBase c_segment, long int size);
 	*/
 	var offset = C.PreInsert(s.SegmentPtr, C.long(int64(numOfRecords)))
 
@@ -120,8 +119,8 @@ func (s *Segment) SegmentPreInsert(numOfRecords int) int64 {
 
 func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 	/*
-	long int
-	PreDelete(CSegmentBase c_segment, long int size);
+		long int
+		PreDelete(CSegmentBase c_segment, long int size);
 	*/
 	var offset = C.PreDelete(s.SegmentPtr, C.long(int64(numOfRecords)))
 
@@ -130,15 +129,15 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 
 func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[][]byte) error {
 	/*
-	int
-	Insert(CSegmentBase c_segment,
-	           long int reserved_offset,
-	           signed long int size,
-	           const long* primary_keys,
-	           const unsigned long* timestamps,
-	           void* raw_data,
-	           int sizeof_per_row,
-	           signed long int count);
+		int
+		Insert(CSegmentBase c_segment,
+		           long int reserved_offset,
+		           signed long int size,
+		           const long* primary_keys,
+		           const unsigned long* timestamps,
+		           void* raw_data,
+		           int sizeof_per_row,
+		           signed long int count);
 	*/
 	// Blobs to one big blob
 	var numOfRow = len(*entityIDs)
@@ -146,7 +145,7 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 
 	assert.Equal(nil, numOfRow, len(*records))
 
-	var rawData = make([]byte, numOfRow * sizeofPerRow)
+	var rawData = make([]byte, numOfRow*sizeofPerRow)
 	var copyOffset = 0
 	for i := 0; i < len(*records); i++ {
 		copy(rawData[copyOffset:], (*records)[i])
@@ -178,12 +177,12 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 
 func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]uint64) error {
 	/*
-	int
-	Delete(CSegmentBase c_segment,
-	           long int reserved_offset,
-	           long size,
-	           const long* primary_keys,
-	           const unsigned long* timestamps);
+		int
+		Delete(CSegmentBase c_segment,
+		           long int reserved_offset,
+		           long size,
+		           const long* primary_keys,
+		           const unsigned long* timestamps);
 	*/
 	var cOffset = C.long(offset)
 	var cSize = C.long(len(*entityIDs))
@@ -201,14 +200,14 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 
 func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
 	/*
-	int
-	Search(CSegmentBase c_segment,
-	       CQueryInfo  c_query_info,
-	       unsigned long timestamp,
-	       float* query_raw_data,
-	       int num_of_query_raw_data,
-	       long int* result_ids,
-	       float* result_distances);
+		int
+		Search(CSegmentBase c_segment,
+		       CQueryInfo  c_query_info,
+		       unsigned long timestamp,
+		       float* query_raw_data,
+		       int num_of_query_raw_data,
+		       long int* result_ids,
+		       float* result_distances);
 	*/
 	//type CQueryInfo C.CQueryInfo
 
@@ -218,8 +217,8 @@ func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord
 		field_name:  C.CString(query.FieldName),
 	}
 
-	resultIds := make([]int64, int64(query.TopK) * query.NumQueries)
-	resultDistances := make([]float32, int64(query.TopK) * query.NumQueries)
+	resultIds := make([]int64, int64(query.TopK)*query.NumQueries)
+	resultDistances := make([]float32, int64(query.TopK)*query.NumQueries)
 
 	var cTimestamp = C.ulong(timestamp)
 	var cResultIds = (*C.long)(&resultIds[0])
