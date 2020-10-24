@@ -35,7 +35,7 @@ The Milvus team members will review your pull requests, and once it is accepted,
 Please create a new branch from an up-to-date master on your fork.
 
 1.  Fork the repository on GitHub.
-2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus-io/milvus.git`.
+2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus.git`.
 3.  Create a branch with `git checkout -b my-topic-branch`.
 4.  Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`. You must record your changes in [CHANGELOG.md](CHANGELOG.md) with issue numbers and descriptions.
 5.  Visit GitHub and make your pull request.
