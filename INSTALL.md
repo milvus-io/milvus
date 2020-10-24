@@ -46,7 +46,7 @@
   
 -   GCC 7.0 or higher to support C++ 17
 
--   CMake 3.12 or higher
+-   CMake 3.14 or higher
 
 -   Git
 
@@ -302,16 +302,16 @@ Follow the steps below to solve this problem:
 Follow the steps below to install a supported version of CMake:
 
 1.  Remove the unsupported version of CMake.
-2.  Get CMake 3.12 or higher. Here we get CMake 3.12.
+2.  Get CMake 3.14 or higher. Here we get CMake 3.14.
 
     ```shell
-    $ wget https://cmake.org/files/v3.12/cmake-3.12.2-Linux-x86_64.tar.gz
+    $ wget https://cmake.org/files/v3.14/cmake-3.14.7-Linux-x86_64.tar.gz
     ```
 
 3.  Extract the file and install CMake.
 
     ```shell
-    $ tar zxvf cmake-3.12.2-Linux-x86_64.tar.gz
-    $ mv cmake-3.12.2-Linux-x86_64 /opt/cmake-3.12.2
-    $ ln -sf /opt/cmake-3.12.2/bin/* /usr/bin/
+    $ tar zxvf cmake-3.14.7-Linux-x86_64.tar.gz
+    $ mv cmake-3.14.7-Linux-x86_64 /opt/cmake-3.14.7
+    $ ln -sf /opt/cmake-3.14.7/bin/* /usr/bin/
     ```
