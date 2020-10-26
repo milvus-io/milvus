@@ -294,6 +294,53 @@ public class TestSearchEntities {
         );
     }
 
+    @Test(dataProvider="Collection", dataProviderClass=MainClass. class )
+    public void testSearchVectorsWithTerm(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        client.insert(insertParam);
+        client.flush(collectionName);
+        String
+                dsl = String.format(
+                "{\"bool\": {"
+                        + "\"must\": [{"
+                        + "    \"term\": {"
+                        + "        \"int64\": [0,1]"
+                        + "    }},{"
+                        + "    \"vector\": {"
+                        + "        \"float_vector\": {"
+                        + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
+                        + "    }}}]}}",
+                top_k, queryVectors);
+        SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
+        SearchResult resSearch = client.search(searchParam);
+        Assert.assertEquals(resSearch.getResultIdsList().size(), Constants.nq);
+        Assert.assertEquals(resSearch.getResultDistancesList().size(), Constants.nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), 2);
+    }
+
+    @Test(dataProvider="Collection", dataProviderClass=MainClass. class )
+    public void testSearchEntitiesLessThanTopK(MilvusClient client, String collectionName) {
+        InsertParam insertParam = Utils.genInsertParam(collectionName);
+        client.insert(insertParam);
+        client.flush(collectionName);
+        List < List < Float >> query = Utils.genVectors(nq, Constants.dimension, false);
+        String
+                dsl = String.format(
+                "{\"bool\": {"
+                        + "\"must\": [{"
+                        + "    \"range\": {"
+                        + "        \"int64\": {\"GT\": -1, \"LT\": 1}"
+                        + "    }},{"
+                        + "    \"vector\": {"
+                        + "        \"float_vector\": {"
+                        + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
+                        + "    }}}]}}",
+                top_k, query);
+        SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl).setParamsInJson("{\"fields\": [\"int64\", \"float_vector\"]}");
+        SearchResult searchResult = client.search(searchParam);
+        Assert.assertEquals(searchResult.getQueryResultsList().get(0).size(), 1);
+    }
+
     // Binary tests
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
