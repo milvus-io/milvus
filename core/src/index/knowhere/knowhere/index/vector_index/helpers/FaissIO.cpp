@@ -63,10 +63,5 @@ MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
     return nitems;
 }
 
-void
-enable_faiss_logging() {
-    faiss::LOG_DEBUG_ = &log_debug_;
-}
-
 }  // namespace knowhere
 }  // namespace milvus
