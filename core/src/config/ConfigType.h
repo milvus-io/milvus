@@ -212,11 +212,11 @@ class SizeConfig : public BaseConfig {
 #define CreateEnumConfig(name, modifiable, enumd, config_addr, default, is_valid) \
     std::make_shared<EnumConfig>(name, nullptr, modifiable, enumd, config_addr, (default), is_valid)
 
-#define CreateIntegerConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)         \
+#define CreateIntegerConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
     std::make_shared<IntegerConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
                                     is_valid)
 
-#define CreateFloatingConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)         \
+#define CreateFloatingConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
     std::make_shared<FloatingConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
                                      is_valid)
 

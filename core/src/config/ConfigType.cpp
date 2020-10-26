@@ -196,9 +196,9 @@ BoolConfig::Get() {
     return *config_ ? "true" : "false";
 }
 
-StringConfig::StringConfig(
-    const char* name, const char* alias, bool modifiable, std::string* config, const char* default_value,
-    std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
+StringConfig::StringConfig(const char* name, const char* alias, bool modifiable, std::string* config,
+                           const char* default_value,
+                           std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       default_value_(default_value),

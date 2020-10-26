@@ -187,8 +187,7 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
         std::bind(&ValidFloatingConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     double floating_value = 0.0;
-    auto floating_config =
-        CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate);
+    auto floating_config = CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate);
     ASSERT_FLOAT_EQ(floating_value, 0.0);
     ASSERT_EQ(floating_config->modifiable_, true);
 
