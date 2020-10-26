@@ -70,37 +70,27 @@ is_cachesize_valid(int64_t size, std::string& err) {
     }
 }
 
-#define Bool_(name, modifiable, default, is_valid, update) \
-    { #name, CreateBoolConfig_(#name, modifiable, &config.name.value, default, is_valid, update) }
-#define String_(name, modifiable, default, is_valid, update) \
-    { #name, CreateStringConfig_(#name, modifiable, &config.name.value, default, is_valid, update) }
-#define Enum_(name, modifiable, enumd, default, is_valid, update) \
-    { #name, CreateEnumConfig_(#name, modifiable, enumd, &config.name.value, default, is_valid, update) }
-#define Integer_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                       \
-    {                                                                                                         \
-#name, CreateIntegerConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, \
-                                    is_valid, update)                                                         \
-    }
-#define Floating_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                       \
-    {                                                                                                          \
-#name, CreateFloatingConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, \
-                                     is_valid, update)                                                         \
-    }
-#define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid, update)                                 \
-    {                                                                                                                \
-#name, CreateSizeConfig_(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid, \
-                                 update)                                                                             \
-    }
+#define Bool_(name, modifiable, default, is_valid) \
+    { #name, CreateBoolConfig(#name, modifiable, &config.name.value, default, is_valid) }
+#define String_(name, modifiable, default, is_valid) \
+    { #name, CreateStringConfig(#name, modifiable, &config.name.value, default, is_valid) }
+#define Enum_(name, modifiable, enumd, default, is_valid) \
+    { #name, CreateEnumConfig(#name, modifiable, enumd, &config.name.value, default, is_valid) }
+#define Integer_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateIntegerConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
+#define Floating_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateFloatingConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
+#define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateSizeConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
 
-#define Bool(name, default) Bool_(name, true, default, nullptr, nullptr)
-#define String(name, default) String_(name, true, default, nullptr, nullptr)
-#define Enum(name, enumd, default) Enum_(name, true, enumd, default, nullptr, nullptr)
+#define Bool(name, default) Bool_(name, true, default, nullptr)
+#define String(name, default) String_(name, true, default, nullptr)
+#define Enum(name, enumd, default) Enum_(name, true, enumd, default, nullptr)
 #define Integer(name, lower_bound, upper_bound, default) \
-    Integer_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
+    Integer_(name, true, lower_bound, upper_bound, default, nullptr)
 #define Floating(name, lower_bound, upper_bound, default) \
-    Floating_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
-#define Size(name, lower_bound, upper_bound, default) \
-    Size_(name, true, lower_bound, upper_bound, default, nullptr, nullptr)
+    Floating_(name, true, lower_bound, upper_bound, default, nullptr)
+#define Size(name, lower_bound, upper_bound, default) Size_(name, true, lower_bound, upper_bound, default, nullptr)
 
 std::unordered_map<std::string, BaseConfigPtr>
 InitConfig() {
@@ -113,7 +103,7 @@ InitConfig() {
         Enum(cluster.role, &ClusterRoleMap, ClusterRole::RW),
 
         /* general */
-        String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid, nullptr),
+        String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid),
         String(general.meta_uri, "sqlite://:@:/"),
 
         /* network */
@@ -134,8 +124,7 @@ InitConfig() {
         String(wal.path, "/var/lib/milvus/wal"),
 
         /* cache */
-        Size_(cache.cache_size, _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(), 4 * GB, is_cachesize_valid,
-              nullptr),
+        Size_(cache.cache_size, _MODIFIABLE, 0, std::numeric_limits<int64_t>::max(), 4 * GB, is_cachesize_valid),
         Floating(cache.cpu_cache_threshold, 0.0, 1.0, 0.7),
         Size(cache.insert_buffer_size, 0, std::numeric_limits<int64_t>::max(), 1 * GB),
         Bool(cache.cache_insert_data, false),

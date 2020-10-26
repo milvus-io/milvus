@@ -147,13 +147,11 @@ BaseConfig::Init() {
 }
 
 BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, bool* config, bool default_value,
-                       std::function<bool(bool val, std::string& err)> is_valid_fn,
-                       std::function<bool(bool val, bool prev, std::string& err)> update_fn)
+                       std::function<bool(bool val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -183,13 +181,7 @@ BoolConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        bool prev = *config_;
         *config_ = value;
-        if (update && update_fn_ && not update_fn_(value, prev, err)) {
-            *config_ = prev;
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -206,13 +198,11 @@ BoolConfig::Get() {
 
 StringConfig::StringConfig(
     const char* name, const char* alias, bool modifiable, std::string* config, const char* default_value,
-    std::function<bool(const std::string& val, std::string& err)> is_valid_fn,
-    std::function<bool(const std::string& val, const std::string& prev, std::string& err)> update_fn)
+    std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -237,13 +227,7 @@ StringConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        std::string prev = *config_;
         *config_ = val;
-        if (update && update_fn_ && not update_fn_(val, prev, err)) {
-            *config_ = prev;
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -259,14 +243,12 @@ StringConfig::Get() {
 }
 
 EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, int64_t* config,
-                       int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn,
-                       std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
+                       int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       enum_value_(enumd),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -305,13 +287,7 @@ EnumConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        int64_t prev = *config_;
         *config_ = value;
-        if (update && update_fn_ && not update_fn_(value, prev, err)) {
-            *config_ = prev;
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -333,15 +309,13 @@ EnumConfig::Get() {
 
 IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
                              int64_t upper_bound, int64_t* config, int64_t default_value,
-                             std::function<bool(int64_t val, std::string& err)> is_valid_fn,
-                             std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
+                             std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -380,13 +354,7 @@ IntegerConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        int64_t prev = *config_;
         *config_ = value;
-        if (update && update_fn_ && not update_fn_(value, prev, err)) {
-            *config_ = prev;
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -403,15 +371,13 @@ IntegerConfig::Get() {
 
 FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound,
                                double upper_bound, double* config, double default_value,
-                               std::function<bool(double val, std::string& err)> is_valid_fn,
-                               std::function<bool(double val, double prev, std::string& err)> update_fn)
+                               std::function<bool(double val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -444,14 +410,7 @@ FloatingConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        double prev = *config_;
         *config_ = value;
-        if (update && update_fn_ && not update_fn_(value, prev, err)) {
-            *config_ = prev;
-
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -468,15 +427,13 @@ FloatingConfig::Get() {
 
 SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
                        int64_t* config, int64_t default_value,
-                       std::function<bool(int64_t val, std::string& err)> is_valid_fn,
-                       std::function<bool(int64_t val, int64_t prev, std::string& err)> update_fn)
+                       std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
       default_value_(default_value),
-      is_valid_fn_(std::move(is_valid_fn)),
-      update_fn_(std::move(update_fn)) {
+      is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
@@ -513,13 +470,7 @@ SizeConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        int64_t prev = *config_;
         *config_ = value;
-        if (update && update_fn_ && not update_fn_(value, prev, err)) {
-            *config_ = prev;
-            return ConfigStatus(SetReturn::UPDATE_FAILURE, err);
-        }
-
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
