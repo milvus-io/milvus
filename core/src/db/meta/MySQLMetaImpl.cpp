@@ -1640,7 +1640,7 @@ MySQLMetaImpl::CountPartitions(const std::string& collection_id, int64_t& partit
         }  // Scoped Connection
 
         for (auto& resRow : res) {
-            partition_count = resRow["count"];
+            partition_count = resRow["count(*)"];
         }
     } catch (std::exception& e) {
         return HandleException("Failed to count partitions", e.what());
