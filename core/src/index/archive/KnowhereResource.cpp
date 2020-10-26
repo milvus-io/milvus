@@ -18,6 +18,8 @@
 
 #include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
+#include "faiss/utils/utils.h"
+#include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/ConfigUtils.h"
@@ -130,8 +132,10 @@ KnowhereResource::Initialize() {
     }
 #endif
 
+    faiss::LOG_ERROR_ = &knowhere::log_error_;
+    faiss::LOG_WARNING_ = &knowhere::log_warning_;
     if (config.engine.stat_optimizer_enable()) {
-        knowhere::enable_faiss_logging();
+        faiss::LOG_DEBUG_ = &knowhere::log_debug_;
     }
 
     return Status::OK();
