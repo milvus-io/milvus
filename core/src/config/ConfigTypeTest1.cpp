@@ -12,7 +12,7 @@
 #include <cstring>
 #include <functional>
 
-#include "config/ServerConfig.h"
+#include "config/ConfigType.h"
 #include "gtest/gtest.h"
 
 namespace milvus {
@@ -29,17 +29,8 @@ class Utils {
         return true;
     }
 
-    bool
-    update_fn(const T& value, const T& prev, std::string& err) {
-        new_value = value;
-        prev_value = prev;
-        return true;
-    }
-
  protected:
     T validate_value;
-    T new_value;
-    T prev_value;
 };
 
 /* ValidBoolConfigTest */
@@ -49,11 +40,9 @@ class ValidBoolConfigTest : public testing::Test, public Utils<bool> {
 
 TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
     auto validate = std::bind(&ValidBoolConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidBoolConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     bool bool_value = true;
-    auto bool_config = CreateBoolConfig_("b", _MODIFIABLE, &bool_value, false, validate, update);
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, false, validate);
     ASSERT_EQ(bool_value, true);
     ASSERT_EQ(bool_config->modifiable_, true);
 
@@ -62,10 +51,8 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
     ASSERT_EQ(bool_config->Get(), "false");
 
     {
-        // now `bool_value` is `false`, calling Set(update=false) to set it to `true`, but not notify update_fn()
+        // now `bool_value` is `false`, calling Set(update=false) to set it to `true`
         validate_value = false;
-        new_value = false;
-        prev_value = true;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = bool_config->Set("true", false);
@@ -76,16 +63,11 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, true);
-        // expect not change
-        EXPECT_EQ(new_value, false);
-        EXPECT_EQ(prev_value, true);
     }
 
     {
-        // now `bool_value` is `true`, calling Set(update=true) to set it to `false`, will notify update_fn()
+        // now `bool_value` is `true`, calling Set(update=true) to set it to `false`
         validate_value = true;
-        new_value = true;
-        prev_value = false;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = bool_config->Set("false", true);
@@ -96,8 +78,6 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, false);
-        EXPECT_EQ(new_value, false);
-        EXPECT_EQ(prev_value, true);
     }
 }
 
@@ -108,11 +88,9 @@ class ValidStringConfigTest : public testing::Test, public Utils<std::string> {
 
 TEST_F(ValidStringConfigTest, init_load_update_get_test) {
     auto validate = std::bind(&ValidStringConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidStringConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     std::string string_value;
-    auto string_config = CreateStringConfig_("s", _MODIFIABLE, &string_value, "Magic", validate, update);
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", validate);
     ASSERT_EQ(string_value, "");
     ASSERT_EQ(string_config->modifiable_, true);
 
@@ -121,10 +99,8 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
     ASSERT_EQ(string_config->Get(), "Magic");
 
     {
-        // now `string_value` is `Magic`, calling Set(update=false) to set it to `cigaM`, but not notify update_fn()
+        // now `string_value` is `Magic`, calling Set(update=false) to set it to `cigaM`
         validate_value = "";
-        new_value = "";
-        prev_value = "";
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = string_config->Set("cigaM", false);
@@ -135,16 +111,11 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, "cigaM");
-        // expect not change
-        EXPECT_EQ(new_value, "");
-        EXPECT_EQ(prev_value, "");
     }
 
     {
-        // now `string_value` is `cigaM`, calling Set(update=true) to set it to `Check`, will notify update_fn()
+        // now `string_value` is `cigaM`, calling Set(update=true) to set it to `Check`
         validate_value = "";
-        new_value = "";
-        prev_value = "";
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = string_config->Set("Check", true);
@@ -155,8 +126,6 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, "Check");
-        EXPECT_EQ(new_value, "Check");
-        EXPECT_EQ(prev_value, "cigaM");
     }
 }
 
@@ -167,11 +136,9 @@ class ValidIntegerConfigTest : public testing::Test, public Utils<int64_t> {
 
 TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
     auto validate = std::bind(&ValidIntegerConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidIntegerConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     int64_t integer_value = 0;
-    auto integer_config = CreateIntegerConfig_("i", _MODIFIABLE, -100, 100, &integer_value, 42, validate, update);
+    auto integer_config = CreateIntegerConfig("i", _MODIFIABLE, -100, 100, &integer_value, 42, validate);
     ASSERT_EQ(integer_value, 0);
     ASSERT_EQ(integer_config->modifiable_, true);
 
@@ -180,10 +147,8 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
     ASSERT_EQ(integer_config->Get(), "42");
 
     {
-        // now `integer_value` is `42`, calling Set(update=false) to set it to `24`, but not notify update_fn()
+        // now `integer_value` is `42`, calling Set(update=false) to set it to `24`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = integer_config->Set("24", false);
@@ -194,16 +159,11 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, 24);
-        // expect not change
-        EXPECT_EQ(new_value, 0);
-        EXPECT_EQ(prev_value, 0);
     }
 
     {
-        // now `integer_value` is `24`, calling Set(update=true) to set it to `36`, will notify update_fn()
+        // now `integer_value` is `24`, calling Set(update=true) to set it to `36`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = integer_config->Set("36", true);
@@ -214,8 +174,6 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
 
         // expect change
         EXPECT_EQ(validate_value, 36);
-        EXPECT_EQ(new_value, 36);
-        EXPECT_EQ(prev_value, 24);
     }
 }
 
@@ -227,12 +185,9 @@ class ValidFloatingConfigTest : public testing::Test, public Utils<double> {
 TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
     auto validate =
         std::bind(&ValidFloatingConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidFloatingConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     double floating_value = 0.0;
-    auto floating_config =
-        CreateFloatingConfig_("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate, update);
+    auto floating_config = CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, &floating_value, 3.14, validate);
     ASSERT_FLOAT_EQ(floating_value, 0.0);
     ASSERT_EQ(floating_config->modifiable_, true);
 
@@ -241,10 +196,8 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 3.14);
 
     {
-        // now `floating_value` is `3.14`, calling Set(update=false) to set it to `6.22`, but not notify update_fn()
+        // now `floating_value` is `3.14`, calling Set(update=false) to set it to `6.22`
         validate_value = 0.0;
-        new_value = 0.0;
-        prev_value = 0.0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = floating_config->Set("6.22", false);
@@ -255,16 +208,11 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
 
         // expect change
         ASSERT_FLOAT_EQ(validate_value, 6.22);
-        // expect not change
-        ASSERT_FLOAT_EQ(new_value, 0.0);
-        ASSERT_FLOAT_EQ(prev_value, 0.0);
     }
 
     {
-        // now `integer_value` is `6.22`, calling Set(update=true) to set it to `-3.14`, will notify update_fn()
+        // now `integer_value` is `6.22`, calling Set(update=true) to set it to `-3.14`
         validate_value = 0.0;
-        new_value = 0.0;
-        prev_value = 0.0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = floating_config->Set("-3.14", true);
@@ -275,8 +223,6 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
 
         // expect change
         ASSERT_FLOAT_EQ(validate_value, -3.14);
-        ASSERT_FLOAT_EQ(new_value, -3.14);
-        ASSERT_FLOAT_EQ(prev_value, 6.22);
     }
 }
 
@@ -294,8 +240,6 @@ class ValidEnumConfigTest : public testing::Test, public Utils<int64_t> {
 
 TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
     auto validate = std::bind(&ValidEnumConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidEnumConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     configEnum testEnum{
         {"a", 1},
@@ -303,7 +247,7 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
         {"c", 3},
     };
     int64_t enum_value = 0;
-    auto enum_config = CreateEnumConfig_("e", _MODIFIABLE, &testEnum, &enum_value, 1, validate, update);
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, validate);
     ASSERT_EQ(enum_value, 0);
     ASSERT_EQ(enum_config->modifiable_, true);
 
@@ -312,10 +256,8 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
     ASSERT_EQ(enum_config->Get(), "a");
 
     {
-        // now `enum_value` is `a`, calling Set(update=false) to set it to `b`, but not notify update_fn()
+        // now `enum_value` is `a`, calling Set(update=false) to set it to `b`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = enum_config->Set("b", false);
@@ -326,16 +268,11 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
 
         // expect change
         ASSERT_EQ(validate_value, 2);
-        // expect not change
-        ASSERT_EQ(new_value, 0);
-        ASSERT_EQ(prev_value, 0);
     }
 
     {
-        // now `enum_value` is `b`, calling Set(update=true) to set it to `c`, will notify update_fn()
+        // now `enum_value` is `b`, calling Set(update=true) to set it to `c`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = enum_config->Set("c", true);
@@ -346,8 +283,6 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
 
         // expect change
         ASSERT_EQ(validate_value, 3);
-        ASSERT_EQ(new_value, 3);
-        ASSERT_EQ(prev_value, 2);
     }
 }
 
@@ -365,55 +300,44 @@ class ValidSizeConfigTest : public testing::Test, public Utils<int64_t> {
 
 TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
     auto validate = std::bind(&ValidSizeConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
-    auto update = std::bind(&ValidSizeConfigTest::update_fn, this, std::placeholders::_1, std::placeholders::_2,
-                            std::placeholders::_3);
 
     int64_t size_value = 0;
-    auto size_config = CreateSizeConfig_("i", _MODIFIABLE, 0, 1024 * 1024, &size_value, 1024, validate, update);
+    auto size_config = CreateSizeConfig("i", _MODIFIABLE, 0, 1024 * 1024, &size_value, 1024, validate);
     ASSERT_EQ(size_value, 0);
     ASSERT_EQ(size_config->modifiable_, true);
 
     size_config->Init();
     ASSERT_EQ(size_value, 1024);
-    ASSERT_EQ(size_config->Get(), "1024");
+    ASSERT_EQ(size_config->Get(), "1KB");
 
     {
-        // now `size_value` is `1024`, calling Set(update=false) to set it to `4096`, but not notify update_fn()
+        // now `size_value` is `1024`, calling Set(update=false) to set it to `4096`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = size_config->Set("4096", false);
 
         EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(size_value, 4096);
-        EXPECT_EQ(size_config->Get(), "4096");
+        EXPECT_EQ(size_config->Get(), "4KB");
 
         // expect change
         EXPECT_EQ(validate_value, 4096);
-        // expect not change
-        EXPECT_EQ(new_value, 0);
-        EXPECT_EQ(prev_value, 0);
     }
 
     {
-        // now `size_value` is `4096`, calling Set(update=true) to set it to `256kb`, will notify update_fn()
+        // now `size_value` is `4096`, calling Set(update=true) to set it to `256kb`
         validate_value = 0;
-        new_value = 0;
-        prev_value = 0;
 
         ConfigStatus status(SetReturn::SUCCESS, "");
         status = size_config->Set("256kb", true);
 
         EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(size_value, 256 * 1024);
-        EXPECT_EQ(size_config->Get(), "262144");
+        EXPECT_EQ(size_config->Get(), "256KB");
 
         // expect change
         EXPECT_EQ(validate_value, 262144);
-        EXPECT_EQ(new_value, 262144);
-        EXPECT_EQ(prev_value, 4096);
     }
 }
 
@@ -438,11 +362,11 @@ class ValidTest : public testing::Test {
     void
     SetUp() override {
         config_list = {
-            CreateBoolConfig_("running", true, &server.running, true, nullptr, nullptr),
-            CreateStringConfig_("hostname", true, &server.hostname, "Magic", nullptr, nullptr),
-            CreateEnumConfig_("socket_family", false, &family, &server.family, 2, nullptr, nullptr),
-            CreateIntegerConfig_("port", true, 1024, 65535, &server.port, 19530, nullptr, nullptr),
-            CreateFloatingConfig_("uptime", true, 0, 9999.0, &server.uptime, 0, nullptr, nullptr),
+            CreateBoolConfig("running", true, &server.running, true, nullptr),
+            CreateStringConfig("hostname", true, &server.hostname, "Magic", nullptr),
+            CreateEnumConfig("socket_family", false, &family, &server.family, 2, nullptr),
+            CreateIntegerConfig("port", true, 1024, 65535, &server.port, 19530, nullptr),
+            CreateFloatingConfig("uptime", true, 0, 9999.0, &server.uptime, 0, nullptr),
         };
     }
 
