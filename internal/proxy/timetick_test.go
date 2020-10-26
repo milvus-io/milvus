@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/apache/pulsar-client-go/pulsar"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -35,9 +36,9 @@ func TestTimeTick(t *testing.T) {
 		peer_id:              1,
 		ctx:                  ctx,
 		areRequestsDelivered: func(ts Timestamp) bool { return true },
-		getTimestamp: func() (Timestamp, pb.Status) {
+		getTimestamp: func() (Timestamp, commonpb.Status) {
 			curTs = curTs + 100
-			return curTs, pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+			return curTs, commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 		},
 	}
 	tt.Restart()

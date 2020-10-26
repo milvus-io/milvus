@@ -4,24 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	mpb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	mpb "github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	"github.com/golang/protobuf/proto"
 	etcd "go.etcd.io/etcd/clientv3"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"log"
-	"net"
-	"sync"
-	"time"
 )
 
 const (
@@ -42,7 +43,7 @@ type proxyServer struct {
 	resultGroup   string
 	numReaderNode int
 	proxyId       int64
-	getTimestamp  func(count uint32) ([]Timestamp, pb.Status)
+	getTimestamp  func(count uint32) ([]Timestamp, commonpb.Status)
 	client        *etcd.Client
 	ctx           context.Context
 	wg            sync.WaitGroup
@@ -59,15 +60,12 @@ type proxyServer struct {
 	queryId          atomic.Uint64
 }
 
-
-
 func (s *proxyServer) CreateCollection(ctx context.Context, req *schemapb.CollectionSchema) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: 0,
 		Reason:    "",
 	}, nil
 }
-
 
 func (s *proxyServer) DropCollection(ctx context.Context, req *servicepb.CollectionName) (*commonpb.Status, error) {
 	return &commonpb.Status{
@@ -83,7 +81,7 @@ func (s *proxyServer) HasCollection(ctx context.Context, req *servicepb.Collecti
 			Reason:    "",
 		},
 		Value: true,
-	},nil
+	}, nil
 }
 
 func (s *proxyServer) DescribeCollection(ctx context.Context, req *servicepb.CollectionName) (*servicepb.CollectionDescription, error) {
@@ -92,18 +90,17 @@ func (s *proxyServer) DescribeCollection(ctx context.Context, req *servicepb.Col
 			ErrorCode: 0,
 			Reason:    "",
 		},
-	},nil
+	}, nil
 }
 
-func (s *proxyServer) ShowCollections(ctx context.Context, req * commonpb.Empty) (*servicepb.StringListResponse, error) {
+func (s *proxyServer) ShowCollections(ctx context.Context, req *commonpb.Empty) (*servicepb.StringListResponse, error) {
 	return &servicepb.StringListResponse{
 		Status: &commonpb.Status{
 			ErrorCode: 0,
 			Reason:    "",
 		},
-	},nil
+	}, nil
 }
-
 
 func (s *proxyServer) CreatePartition(ctx context.Context, in *servicepb.PartitionName) (*commonpb.Status, error) {
 	return &commonpb.Status{
@@ -126,7 +123,7 @@ func (s *proxyServer) HasPartition(ctx context.Context, in *servicepb.PartitionN
 			Reason:    "",
 		},
 		Value: true,
-	},nil
+	}, nil
 }
 
 func (s *proxyServer) DescribePartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
@@ -135,7 +132,7 @@ func (s *proxyServer) DescribePartition(ctx context.Context, in *servicepb.Parti
 			ErrorCode: 0,
 			Reason:    "",
 		},
-	},nil
+	}, nil
 }
 
 func (s *proxyServer) ShowPartitions(ctx context.Context, req *servicepb.CollectionName) (*servicepb.StringListResponse, error) {
@@ -144,10 +141,10 @@ func (s *proxyServer) ShowPartitions(ctx context.Context, req *servicepb.Collect
 			ErrorCode: 0,
 			Reason:    "",
 		},
-	},nil
+	}, nil
 }
 
-func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (*pb.Status, error) {
+func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (*commonpb.Status, error) {
 	log.Printf("delete entites, total = %d", len(req.IdArray))
 	pm := &manipulationReq{
 		ManipulationReqMsg: pb.ManipulationReqMsg{
@@ -161,22 +158,21 @@ func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (
 		pm.PrimaryKeys = append(pm.PrimaryKeys, uint64(id))
 	}
 	if len(pm.PrimaryKeys) > 1 {
-		if st := pm.PreExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
+		if st := pm.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.Execute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
+		if st := pm.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.PostExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS {
+		if st := pm.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
-		if st := pm.WaitToFinish(); st.ErrorCode != pb.ErrorCode_SUCCESS {
+		if st := pm.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return &st, nil
 		}
 	}
-	return &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}, nil
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
-
 
 func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
 	log.Printf("Insert Entities, total =  %d", len(req.RowData))
@@ -223,27 +219,27 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 			ip = ipm[hash]
 		}
 		ip.PrimaryKeys = append(ip.PrimaryKeys, key)
-		ip.RowsData = append(ip.RowsData, &pb.RowData{Blob:req.RowData[i].Value}) // czs_tag
+		ip.RowsData = append(ip.RowsData, &pb.RowData{Blob: req.RowData[i].Value}) // czs_tag
 	}
 	for _, ip := range ipm {
-		if st := ip.PreExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS { //do nothing
+		if st := ip.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //do nothing
 			return &servicepb.IntegerRangeResponse{
-				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
-		if st := ip.Execute(); st.ErrorCode != pb.ErrorCode_SUCCESS { // push into chan
+		if st := ip.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { // push into chan
 			return &servicepb.IntegerRangeResponse{
-				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
-		if st := ip.PostExecute(); st.ErrorCode != pb.ErrorCode_SUCCESS { //post to pulsar
+		if st := ip.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS { //post to pulsar
 			return &servicepb.IntegerRangeResponse{
-				Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 			}, nil
 		}
 	}
 	for _, ip := range ipm {
-		if st := ip.WaitToFinish(); st.ErrorCode != pb.ErrorCode_SUCCESS {
+		if st := ip.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			log.Printf("Wait to finish failed, error code = %d", st.ErrorCode)
 		}
 	}
@@ -258,10 +254,10 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 func (s *proxyServer) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
 	qm := &queryReq{
 		SearchRequest: internalpb.SearchRequest{
-			ReqType:        internalpb.ReqType_kSearch,
-			ProxyId:        s.proxyId,
-			ReqId:        s.queryId.Add(1),
-			Timestamp: 0,
+			ReqType:         internalpb.ReqType_kSearch,
+			ProxyId:         s.proxyId,
+			ReqId:           s.queryId.Add(1),
+			Timestamp:       0,
 			ResultChannelId: 0,
 		},
 		proxy: s,
@@ -269,22 +265,22 @@ func (s *proxyServer) Search(ctx context.Context, req *servicepb.Query) (*servic
 	log.Printf("search on collection %s, proxy id = %d, query id = %d", req.CollectionName, qm.ProxyId, qm.ReqId)
 	if st := qm.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return &servicepb.QueryResult{
-			Status:  &st,
+			Status: &st,
 		}, nil
 	}
 	if st := qm.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return &servicepb.QueryResult{
-			Status:  &st,
+			Status: &st,
 		}, nil
 	}
 	if st := qm.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return &servicepb.QueryResult{
-			Status:  &st,
+			Status: &st,
 		}, nil
 	}
 	if st := qm.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return &servicepb.QueryResult{
-			Status:  &st,
+			Status: &st,
 		}, nil
 	}
 	return s.reduceResults(qm), nil

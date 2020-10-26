@@ -42,7 +42,7 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 
 # Set permissions on /etc/passwd and /home to allow arbitrary users to write
-COPY --chown=0:0 docker/build_env/entrypoint.sh /
+COPY --chown=0:0 build/docker/env/entrypoint.sh /
 RUN mkdir -p /home/user && chgrp -R 0 /home && chmod -R g=u /etc/passwd /etc/group /home && chmod +x /entrypoint.sh
 
 ENV HOME=/home/user

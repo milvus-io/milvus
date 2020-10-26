@@ -25,12 +25,12 @@ func init() {
 	//	go mock.FakePulsarProducer()
 }
 func main() {
-        var yamlFile string
-        flag.StringVar(&yamlFile, "yaml", "", "yaml file")
-        flag.Parse()
-        // flag.Usage()
-        fmt.Println("yaml file: ", yamlFile)
-        conf.LoadConfig(yamlFile)
+	var yamlFile string
+	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
+	flag.Parse()
+	// flag.Usage()
+	fmt.Println("yaml file: ", yamlFile)
+	conf.LoadConfig(yamlFile)
 
 	master.Run()
 	//master.SegmentStatsController()

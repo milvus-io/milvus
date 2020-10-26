@@ -7,7 +7,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -25,12 +25,11 @@ func newKvBase() kv.Base {
 
 func TestComputeClosetTime(t *testing.T) {
 	kvbase := newKvBase()
-	var news segment.SegmentStats
+	var news internalpb.SegmentStatistics
 	for i := 0; i < 10; i++ {
-		news = segment.SegmentStats{
-			SegementID: uint64(6875940398055133887),
+		news = internalpb.SegmentStatistics{
+			SegmentId: uint64(6875940398055133887),
 			MemorySize: uint64(i * 1000),
-			MemoryRate: 0.9,
 		}
 		ComputeCloseTime(news, kvbase)
 	}

@@ -5,10 +5,19 @@ if [[ ! ${jobs+1} ]]; then
     jobs=$(nproc)
 fi
 
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+
 BUILD_OUTPUT_DIR="cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
-INSTALL_PREFIX=$(pwd)/output
+INSTALL_PREFIX=${SCRIPTS_DIR}/output
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/tmp/milvus"

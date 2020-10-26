@@ -3,7 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	etcd "go.etcd.io/etcd/clientv3"
 	"log"
 	"strconv"
@@ -51,7 +51,7 @@ func (tso *timestampOracle) Restart(id int64) {
 			select {
 			case <-ticker:
 				_, s := tso.GetTimestamp(1)
-				if s.ErrorCode == pb.ErrorCode_SUCCESS {
+				if s.ErrorCode == commonpb.ErrorCode_SUCCESS {
 					_ = tso.saveTimestamp()
 				}
 				break
@@ -65,7 +65,7 @@ func (tso *timestampOracle) Restart(id int64) {
 	}()
 }
 
-func (tso *timestampOracle) GetTimestamp(count uint32) ([]Timestamp, pb.Status) {
+func (tso *timestampOracle) GetTimestamp(count uint32) ([]Timestamp, commonpb.Status) {
 	physical := uint64(time.Now().UnixNano()) / uint64(1e6)
 	var ctso timestamp
 	tso.mux.Lock()
@@ -80,31 +80,31 @@ func (tso *timestampOracle) GetTimestamp(count uint32) ([]Timestamp, pb.Status) 
 		ctso.logical = uint64(i)
 		tt = append(tt, ToTimeStamp(&ctso))
 	}
-	return tt, pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return tt, commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (tso *timestampOracle) saveTimestamp() pb.Status {
+func (tso *timestampOracle) saveTimestamp() commonpb.Status {
 	tso.mux.Lock()
 	physical := tso.tso.physical
 	tso.mux.Unlock()
 	if _, err := tso.client.Put(tso.ctx, tso.rootPath+tsoKeyPath, strconv.FormatUint(physical, 10)); err != nil {
-		return pb.Status{ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("put into etcd failed, error = %v", err)}
+		return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("put into etcd failed, error = %v", err)}
 	}
 	tso.mux.Lock()
 	tso.lastSavedTime = physical
 	tso.mux.Unlock()
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (tso *timestampOracle) loadTimestamp() pb.Status {
+func (tso *timestampOracle) loadTimestamp() commonpb.Status {
 	ts, err := tso.client.Get(tso.ctx, tso.rootPath+tsoKeyPath)
 	if err != nil {
-		return pb.Status{ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("get from etcd failed, error = %v", err)}
+		return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("get from etcd failed, error = %v", err)}
 	}
 	if len(ts.Kvs) != 0 {
 		n, err := strconv.ParseUint(string(ts.Kvs[0].Value), 10, 64)
 		if err != nil {
-			return pb.Status{ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("ParseUint failed, error = %v", err)}
+			return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("ParseUint failed, error = %v", err)}
 		}
 		tso.mux.Lock()
 		tso.tso.physical = n
@@ -116,5 +116,5 @@ func (tso *timestampOracle) loadTimestamp() pb.Status {
 		tso.lastSavedTime = tso.tso.physical
 		tso.mux.Unlock()
 	}
-	return pb.Status{ErrorCode: pb.ErrorCode_UNEXPECTED_ERROR}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR}
 }

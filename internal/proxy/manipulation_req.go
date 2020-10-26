@@ -3,6 +3,8 @@ package proxy
 import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	//pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 	"log"
 	"sync"
@@ -27,23 +29,23 @@ func (req *manipulationReq) Type() pb.ReqType {
 	return req.ReqType
 }
 
-func (req *manipulationReq) PreExecute() pb.Status {
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+func (req *manipulationReq) PreExecute() commonpb.Status {
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *manipulationReq) Execute() pb.Status {
+func (req *manipulationReq) Execute() commonpb.Status {
 	req.proxy.reqSch.manipulationsChan <- req
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *manipulationReq) PostExecute() pb.Status { // send into pulsar
+func (req *manipulationReq) PostExecute() commonpb.Status { // send into pulsar
 	req.wg.Add(1)
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *manipulationReq) WaitToFinish() pb.Status { // wait unitl send into pulsar
+func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait unitl send into pulsar
 	req.wg.Wait()
-	return pb.Status{ErrorCode: pb.ErrorCode_SUCCESS}
+	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
 func (s *proxyServer) restartManipulationRoutine(buf_size int) error {
@@ -77,7 +79,7 @@ func (s *proxyServer) restartManipulationRoutine(buf_size int) error {
 				return
 			case ip := <-s.reqSch.manipulationsChan:
 				ts, st := s.getTimestamp(1)
-				if st.ErrorCode != pb.ErrorCode_SUCCESS {
+				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
 					log.Printf("get time stamp failed, error code = %d, msg = %s, drop inset rows = %d", st.ErrorCode, st.Reason, len(ip.RowsData))
 					continue
 				}

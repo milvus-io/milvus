@@ -5,7 +5,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	messagepb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/gogo/protobuf/proto"
 	jsoniter "github.com/json-iterator/go"
 )
@@ -21,12 +20,11 @@ type Collection struct {
 	SegmentIDs        []uint64                `json:"segment_ids"`
 	PartitionTags     []string                `json:"partition_tags"`
 	GrpcMarshalString string                  `json:"grpc_marshal_string"`
-	IndexParam        []*messagepb.IndexParam `json:"index_param"`
 }
 
 type FieldMeta struct {
 	FieldName string             `json:"field_name"`
-	Type      messagepb.DataType `json:"type"`
+	Type      schemapb.DataType `json:"type"`
 	DIM       int64              `json:"dimension"`
 }
 
@@ -59,12 +57,12 @@ func GrpcMarshal(c *Collection) *Collection {
 }
 
 func NewCollection(id uint64, name string, createTime time.Time,
-	schema []*messagepb.FieldMeta, sIds []uint64, ptags []string) Collection {
+	schema []*schemapb.FieldSchema, sIds []uint64, ptags []string) Collection {
 
 	segementIDs := []uint64{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
-		newSchema = append(newSchema, FieldMeta{FieldName: v.FieldName, Type: v.Type, DIM: v.Dim})
+		newSchema = append(newSchema, FieldMeta{FieldName: v.Name, Type: v.DataType, DIM: 16})
 	}
 	for _, sid := range sIds {
 		segementIDs = append(segementIDs, sid)
