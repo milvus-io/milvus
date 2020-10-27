@@ -28,6 +28,11 @@ COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/
 RUN ln -s /var/lib/milvus/lib/libopenblas-r0.3.9.so /var/lib/milvus/lib/libopenblas.so.0 && \
     ln -s /var/lib/milvus/lib/libopenblas.so.0 /var/lib/milvus/lib/libopenblas.so
 
+RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
+    chmod +x /tini
+
+ENTRYPOINT ["/tini", "--"]
+
 WORKDIR /var/lib/milvus
 
 CMD [ "/var/lib/milvus/bin/milvus_server", "-c", "/var/lib/milvus/conf/milvus.yaml" ]
