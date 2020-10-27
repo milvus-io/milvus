@@ -23,11 +23,6 @@ namespace milvus {
 
 std::mutex config_mutex;
 
-std::mutex&
-GetConfigMutex() {
-    return config_mutex;
-}
-
 ServerConfig config;
 
 std::vector<std::string>

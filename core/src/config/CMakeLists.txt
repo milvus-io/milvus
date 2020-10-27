@@ -19,6 +19,7 @@ set( CONFIG_SRCS    ConfigInit.cpp
                     ConfigType.cpp
                     ServerConfig.h
                     ServerConfig.cpp
+                    Value.h
                     )
 
 set( CONFIG_LIBS    yaml-cpp
