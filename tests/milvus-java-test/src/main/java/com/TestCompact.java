@@ -5,6 +5,7 @@ import io.milvus.client.*;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
+
 import java.util.List;
 
 public class TestCompact {
@@ -57,8 +58,8 @@ public class TestCompact {
     // TODO delete not correct
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testCompactThresholdLessThanDeleted(MilvusClient client, String collectionName) {
-        int segmentRowLimit = nb+1000;
-        String collectionNameNew = collectionName+"_";
+        int segmentRowLimit = nb + 1000;
+        String collectionNameNew = collectionName + "_";
         CollectionMapping cm = CollectionMapping.create(collectionNameNew)
                 .addField(Constants.intFieldName, DataType.INT64)
                 .addField(Constants.floatFieldName, DataType.FLOAT)
@@ -74,11 +75,11 @@ public class TestCompact {
         Assert.assertEquals(client.countEntities(collectionNameNew), nb - (nb / 4));
         // before compact
         String stats = client.getCollectionStats(collectionNameNew);
-        JSONObject segmentsBefore = (JSONObject)Utils.parseJsonArray(stats, "segments").get(0);
+        JSONObject segmentsBefore = (JSONObject) Utils.parseJsonArray(stats, "segments").get(0);
         client.compact(CompactParam.create(collectionNameNew).setThreshold(0.9));
         // after compact
         String statsAfter = client.getCollectionStats(collectionNameNew);
-        JSONObject segmentsAfter = (JSONObject)Utils.parseJsonArray(statsAfter, "segments").get(0);
+        JSONObject segmentsAfter = (JSONObject) Utils.parseJsonArray(statsAfter, "segments").get(0);
         Assert.assertEquals(segmentsAfter.get("data_size"), segmentsBefore.get("data_size"));
     }
 

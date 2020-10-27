@@ -1,10 +1,11 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
+
 import java.util.List;
 
 public class TestPartition {

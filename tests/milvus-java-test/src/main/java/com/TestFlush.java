@@ -53,7 +53,7 @@ public class TestFlush {
         }
     }
 
-//    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
+    //    @Test(dataProvider = "ConnectInstance", dataProviderClass = MainClass.class)
 //    public void testAddCollectionsFlushAsync(MilvusClient client, String collectionName) throws ExecutionException, InterruptedException {
 //        List<String> names = new ArrayList<>();
 //        for (int i = 0; i < 100; i++) {
@@ -81,7 +81,7 @@ public class TestFlush {
             InsertParam insertParam = Utils.genInsertParam(collectionName);
             List<Long> ids = client.insert(insertParam);
             client.flush(collectionName);
-            Assert.assertEquals(client.countEntities(collectionName), nb * (i+1));
+            Assert.assertEquals(client.countEntities(collectionName), nb * (i + 1));
         }
     }
 
@@ -91,7 +91,7 @@ public class TestFlush {
             InsertParam insertParam = Utils.genBinaryInsertParam(collectionName);
             List<Long> ids = client.insert(insertParam);
             client.flush(collectionName);
-            Assert.assertEquals(client.countEntities(collectionName), nb * (i+1));
+            Assert.assertEquals(client.countEntities(collectionName), nb * (i + 1));
         }
     }
 }

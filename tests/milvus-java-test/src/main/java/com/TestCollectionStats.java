@@ -21,7 +21,7 @@ public class TestCollectionStats {
         String stats = client.getCollectionStats(collectionName);
         JSONObject collectionStats = JSONObject.parseObject(stats);
         int rowCount = collectionStats.getIntValue("row_count");
-        assert(rowCount == nb - 1);
+        assert (rowCount == nb - 1);
     }
 
     // case-02
@@ -41,7 +41,7 @@ public class TestCollectionStats {
         String stats = client.getCollectionStats(collectionName);
         JSONObject collectionStats = JSONObject.parseObject(stats);
         int rowCount = collectionStats.getIntValue("row_count");
-        assert(rowCount == nb - 1);
+        assert (rowCount == nb - 1);
     }
 
     // case-03
@@ -56,7 +56,7 @@ public class TestCollectionStats {
         System.out.println(stats);
         JSONObject collectionStats = JSONObject.parseObject(stats);
         int rowCount = collectionStats.getIntValue("row_count");
-        assert(rowCount == nb - 1);
+        assert (rowCount == nb - 1);
     }
 
 }

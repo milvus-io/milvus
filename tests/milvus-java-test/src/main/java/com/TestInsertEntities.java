@@ -2,14 +2,18 @@ package com;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import io.milvus.client.*;
+import io.milvus.client.DataType;
+import io.milvus.client.InsertParam;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -38,7 +42,7 @@ public class TestInsertEntities {
 
     // case-03
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testInsertEntities(MilvusClient client, String collectionName)  {
+    public void testInsertEntities(MilvusClient client, String collectionName) {
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
@@ -73,7 +77,7 @@ public class TestInsertEntities {
     @Test(dataProvider = "IdCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testInsertEntityWithInvalidIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
-        List<Long> entityIds = LongStream.range(0, nb+1).boxed().collect(Collectors.toList());
+        List<Long> entityIds = LongStream.range(0, nb + 1).boxed().collect(Collectors.toList());
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
@@ -86,8 +90,8 @@ public class TestInsertEntities {
     // case-06
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testInsertEntityWithInvalidDimension(MilvusClient client, String collectionName) {
-        List<List<Float>> vectors = Utils.genVectors(nb, dimension+1, true);
-        Map<String, List>  entities = Utils.genDefaultEntities(nb,vectors);
+        List<List<Float>> vectors = Utils.genVectors(nb, dimension + 1, true);
+        Map<String, List> entities = Utils.genDefaultEntities(nb, vectors);
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
@@ -99,7 +103,7 @@ public class TestInsertEntities {
     // case-07
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testInsertEntityWithInvalidVectors(MilvusClient client, String collectionName) {
-        Map<String, List> entities = Utils.genDefaultEntities(nb,new ArrayList<>());
+        Map<String, List> entities = Utils.genDefaultEntities(nb, new ArrayList<>());
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
@@ -124,7 +128,7 @@ public class TestInsertEntities {
         // Assert collection row count
         String stats = client.getCollectionStats(collectionName);
         JSONArray partitionsJsonArray = Utils.parseJsonArray(stats, "partitions");
-        partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item->item.containsValue(tag)).forEach(obj -> {
+        partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item -> item.containsValue(tag)).forEach(obj -> {
             Assert.assertEquals(obj.get("row_count"), nb);
             Assert.assertEquals(obj.get("tag"), tag);
         });
@@ -164,7 +168,7 @@ public class TestInsertEntities {
         // Assert collection row count
         String stats = client.getCollectionStats(collectionName);
         JSONArray partitionsJsonArray = Utils.parseJsonArray(stats, "partitions");
-        partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item->item.containsValue(tag)).forEach(obj -> {
+        partitionsJsonArray.stream().map(item -> (JSONObject) item).filter(item -> item.containsValue(tag)).forEach(obj -> {
             Assert.assertEquals(obj.get("tag"), tag);
             Assert.assertEquals(obj.get("row_count"), nb);
         });
@@ -172,7 +176,7 @@ public class TestInsertEntities {
 
     // case-11
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void testInsertEntityBinary(MilvusClient client, String collectionName)  {
+    public void testInsertEntityBinary(MilvusClient client, String collectionName) {
         List<Long> intValues = new ArrayList<>(Constants.nb);
         List<Float> floatValues = new ArrayList<>(Constants.nb);
         List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
@@ -221,7 +225,7 @@ public class TestInsertEntities {
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testInsertBinaryEntityWithInvalidIds(MilvusClient client, String collectionName) {
         // Add vectors with ids
-        List<Long> invalidEntityIds = LongStream.range(0, nb+1).boxed().collect(Collectors.toList());
+        List<Long> invalidEntityIds = LongStream.range(0, nb + 1).boxed().collect(Collectors.toList());
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, binaryEntities.get(Constants.intFieldName))
@@ -234,8 +238,8 @@ public class TestInsertEntities {
     // case-14
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testInsertBinaryEntityWithInvalidDimension(MilvusClient client, String collectionName) {
-        List<ByteBuffer> vectors = Utils.genBinaryVectors(nb, dimension-1);
-        Map<String, List>  entities = Utils.genDefaultBinaryEntities(nb,vectors);
+        List<ByteBuffer> vectors = Utils.genBinaryVectors(nb, dimension - 1);
+        Map<String, List> entities = Utils.genDefaultBinaryEntities(nb, vectors);
         InsertParam insertParam = InsertParam
                 .create(collectionName)
                 .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))

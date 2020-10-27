@@ -24,7 +24,7 @@ public class TestIndex {
         client.createIndex(index);
         String stats = client.getCollectionStats(collectionName);
         JSONArray filesJsonArray = Utils.parseJsonArray(stats, "files");
-        filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+        filesJsonArray.stream().map(item -> (JSONObject) item).filter(item -> item.containsKey("index_type")).forEach(file ->
                 Assert.assertEquals(file.get("index_type"), Constants.indexType.toString()));
     }
 
@@ -40,7 +40,7 @@ public class TestIndex {
         client.createIndex(index);
         String stats = client.getCollectionStats(collectionName);
         JSONArray filesJsonArray = Utils.parseJsonArray(stats, "files");
-        filesJsonArray.stream().map(item-> (JSONObject)item).filter(item->item.containsKey("index_type")).forEach(file->
+        filesJsonArray.stream().map(item -> (JSONObject) item).filter(item -> item.containsKey("index_type")).forEach(file ->
                 Assert.assertEquals(file.get("index_type"), Constants.defaultBinaryIndexType.toString()));
     }
 

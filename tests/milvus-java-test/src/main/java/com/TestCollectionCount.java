@@ -1,6 +1,8 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.CollectionMapping;
+import io.milvus.client.InsertParam;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
@@ -20,7 +22,7 @@ public class TestCollectionCount {
     // case-02
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
     public void testCollectionCountCollectionNotExisted(MilvusClient client, String collectionName) {
-        client.countEntities(collectionName+"_");
+        client.countEntities(collectionName + "_");
     }
 
     // case-03

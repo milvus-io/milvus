@@ -1,12 +1,17 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.DataType;
+import io.milvus.client.InsertParam;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 public class TestGetEntityByID {
     public List<Long> get_ids = Utils.toListIds(1111);
@@ -19,7 +24,7 @@ public class TestGetEntityByID {
         client.flush(collectionName);
         Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, ids.subList(0, get_length));
         for (int i = 0; i < get_length; i++) {
-            Map<String,Object> fieldsMap = resEntities.get(ids.get(i));
+            Map<String, Object> fieldsMap = resEntities.get(ids.get(i));
             assert (fieldsMap.get("float_vector").equals(Constants.vectors.get(i)));
         }
     }
@@ -29,9 +34,9 @@ public class TestGetEntityByID {
         List<Long> ids = Utils.initData(client, collectionName);
         client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(1)));
         client.flush(collectionName);
-        List<Long> getIds = ids.subList(0,2);
+        List<Long> getIds = ids.subList(0, 2);
         Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, getIds);
-        Assert.assertEquals(resEntities.size(), getIds.size()-1);
+        Assert.assertEquals(resEntities.size(), getIds.size() - 1);
         Assert.assertEquals(resEntities.get(getIds.get(0)).get(Constants.floatVectorFieldName), Constants.vectors.get(0));
     }
 
@@ -44,7 +49,7 @@ public class TestGetEntityByID {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testGetVectorIdNotExisted(MilvusClient client, String collectionName) {
         List<Long> ids = Utils.initData(client, collectionName);
-        Map<Long, Map<String, Object>> resEntities =  client.getEntityByID(collectionName, get_ids);
+        Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, get_ids);
         Assert.assertEquals(resEntities.size(), 0);
     }
 

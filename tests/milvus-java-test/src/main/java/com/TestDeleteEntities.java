@@ -1,6 +1,7 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.InsertParam;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
 import org.testng.annotations.Test;

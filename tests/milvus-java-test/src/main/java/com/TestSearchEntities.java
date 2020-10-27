@@ -13,36 +13,37 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class TestSearchEntities {
 
+    public String floatDsl = Constants.searchParam;
+    public String binaryDsl = Constants.binarySearchParam;
     int n_probe = 20;
     int top_k = Constants.topk;
     int nq = Constants.nq;
-
     List<List<Float>> queryVectors = Constants.vectors.subList(0, nq);
 
-    public String floatDsl = Constants.searchParam;
-    public String binaryDsl = Constants.binarySearchParam;
-
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testSearchCollectionNotExisted(MilvusClient client, String collectionName)  {
+    public void testSearchCollectionNotExisted(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
         SearchParam searchParam = SearchParam.create(collectionNameNew).setDsl(floatDsl);
         client.search(searchParam);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testSearchCollectionEmpty(MilvusClient client, String collectionName)  {
+    public void testSearchCollectionEmpty(MilvusClient client, String collectionName) {
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(floatDsl);
         SearchResult res_search = client.search(searchParam);
         Assert.assertEquals(res_search.getResultIdsList().size(), 0);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testSearchCollection(MilvusClient client, String collectionName)  {
+    public void testSearchCollection(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
@@ -56,7 +57,7 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testSearchDistance(MilvusClient client, String collectionName)  {
+    public void testSearchDistance(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
@@ -69,7 +70,7 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testSearchDistanceIP(MilvusClient client, String collectionName)  {
+    public void testSearchDistanceIP(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
@@ -105,10 +106,10 @@ public class TestSearchEntities {
         client.createPartition(collectionName, tag);
         Map<String, List> entities = Constants.defaultEntities;
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
-            .addField(Constants.floatFieldName, DataType.FLOAT, entities.get(Constants.floatFieldName))
-            .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, entities.get(Constants.floatVectorFieldName));
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
+                .addField(Constants.floatFieldName, DataType.FLOAT, entities.get(Constants.floatFieldName))
+                .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, entities.get(Constants.floatVectorFieldName));
         client.insert(insertParam);
         client.flush(collectionName);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(floatDsl).setPartitionTags(queryTags);
@@ -117,16 +118,16 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testSearchInvalidNProbe(MilvusClient client, String collectionName)  {
+    public void testSearchInvalidNProbe(MilvusClient client, String collectionName) {
         int n_probe_new = -1;
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
         Index index = Index
-            .create(collectionName, Constants.floatVectorFieldName)
-            .setIndexType(IndexType.IVF_SQ8)
-            .setMetricType(MetricType.L2)
-            .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
+                .create(collectionName, Constants.floatVectorFieldName)
+                .setIndexType(IndexType.IVF_SQ8)
+                .setMetricType(MetricType.L2)
+                .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
         client.createIndex(index);
         String dsl = Utils.setSearchParam(Constants.defaultMetricType, queryVectors, top_k, n_probe_new);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
@@ -137,12 +138,12 @@ public class TestSearchEntities {
     public void testSearchCountLessThanTopK(MilvusClient client, String collectionName) {
         int top_k_new = 100;
         int nb = 50;
-        Map<String,List> entities = Utils.genDefaultEntities(nb, Utils.genVectors(nb, Constants.dimension, false));
+        Map<String, List> entities = Utils.genDefaultEntities(nb, Utils.genVectors(nb, Constants.dimension, false));
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
-            .addField(Constants.floatFieldName, DataType.FLOAT, entities.get(Constants.floatFieldName))
-            .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, entities.get(Constants.floatVectorFieldName));
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, entities.get(Constants.intFieldName))
+                .addField(Constants.floatFieldName, DataType.FLOAT, entities.get(Constants.floatFieldName))
+                .addVectorField(Constants.floatVectorFieldName, DataType.VECTOR_FLOAT, entities.get(Constants.floatVectorFieldName));
         client.insert(insertParam);
         client.flush(collectionName);
         String dsl = Utils.setSearchParam(Constants.defaultMetricType, queryVectors, top_k_new, n_probe);
@@ -165,8 +166,8 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void testSearchMultiMust(MilvusClient client, String collectionName){
-        JSONObject vectorParam = Utils.genVectorParam(Constants.defaultMetricType, Constants.vectors.subList(0,nq), top_k, n_probe);
+    public void testSearchMultiMust(MilvusClient client, String collectionName) {
+        JSONObject vectorParam = Utils.genVectorParam(Constants.defaultMetricType, Constants.vectors.subList(0, nq), top_k, n_probe);
         JSONObject boolParam = new JSONObject();
         JSONObject mustParam = new JSONObject();
         JSONArray jsonArray = new JSONArray();
@@ -203,7 +204,8 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}\"\n"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k, queryVectors, top_k, queryVectors);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         client.search(searchParam);
@@ -220,14 +222,15 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"params\": {\"nprobe\": 20}"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         client.search(searchParam);
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-    public void  testSearchVectorNotExisted(MilvusClient client, String collectionName) {
+    public void testSearchVectorNotExisted(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
@@ -240,7 +243,8 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k, new ArrayList<>());
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         SearchResult resSearch = client.search(searchParam);
@@ -249,11 +253,11 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void  testSearchVectorDifferentDim(MilvusClient client, String collectionName) {
+    public void testSearchVectorDifferentDim(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
-        List<List<Float>> query = Utils.genVectors(nq,64, false);
+        List<List<Float>> query = Utils.genVectors(nq, 64, false);
         String dsl = String.format(
                 "{\"bool\": {"
                         + "\"must\": [{"
@@ -263,7 +267,8 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k, query);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         client.search(searchParam);
@@ -286,6 +291,7 @@ public class TestSearchEntities {
                         Assert.assertEquals(searchResult.getResultIdsList().get(0).size(), Constants.topk);
                         Assert.assertEquals(searchResult.getFieldsMap().get(0).size(), top_k);
                     }
+
                     @Override
                     public void onFailure(Throwable t) {
                         System.out.println(t.getMessage());
@@ -294,7 +300,7 @@ public class TestSearchEntities {
         );
     }
 
-    @Test(dataProvider="Collection", dataProviderClass=MainClass. class )
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchVectorsWithTerm(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
@@ -309,7 +315,8 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k, queryVectors);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         SearchResult resSearch = client.search(searchParam);
@@ -318,12 +325,12 @@ public class TestSearchEntities {
         Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), 2);
     }
 
-    @Test(dataProvider="Collection", dataProviderClass=MainClass. class )
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void testSearchEntitiesLessThanTopK(MilvusClient client, String collectionName) {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         client.insert(insertParam);
         client.flush(collectionName);
-        List < List < Float >> query = Utils.genVectors(nq, Constants.dimension, false);
+        List<List<Float>> query = Utils.genVectors(nq, Constants.dimension, false);
         String
                 dsl = String.format(
                 "{\"bool\": {"
@@ -334,7 +341,8 @@ public class TestSearchEntities {
                         + "    \"vector\": {"
                         + "        \"float_vector\": {"
                         + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
-                        + "    }}}]}}",
+                        + "    }}}"
+                        + "]}}",
                 top_k, query);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl).setParamsInJson("{\"fields\": [\"int64\", \"float_vector\"]}");
         SearchResult searchResult = client.search(searchParam);
@@ -344,14 +352,14 @@ public class TestSearchEntities {
 
     // Binary tests
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName)  {
+    public void testSearchCollectionNotExistedBinary(MilvusClient client, String collectionName) {
         String collectionNameNew = Utils.genUniqueStr(collectionName);
         SearchParam searchParam = SearchParam.create(collectionNameNew).setDsl(binaryDsl);
         client.search(searchParam);
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void testSearchCollectionBinary(MilvusClient client, String collectionName)  {
+    public void testSearchCollectionBinary(MilvusClient client, String collectionName) {
         List<Long> intValues = new ArrayList<>(Constants.nb);
         List<Float> floatValues = new ArrayList<>(Constants.nb);
         List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
@@ -360,23 +368,24 @@ public class TestSearchEntities {
             floatValues.add((float) i);
         }
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         client.insert(insertParam);
         client.flush(collectionName);
         List<String> vectorsToSearch = vectors.subList(0, Constants.nq)
-            .stream().map(byteBuffer -> Arrays.toString(byteBuffer.array()))
-            .collect(Collectors.toList());
+                .stream().map(byteBuffer -> Arrays.toString(byteBuffer.array()))
+                .collect(Collectors.toList());
         String dsl = String.format(
-            "{\"bool\": {"
-                + "\"must\": [{"
-                + "    \"vector\": {"
-                + "        \"binary_vector\": {"
-                + "            \"topk\": %d, \"metric_type\": \"JACCARD\", \"type\": \"binary\", \"query\": %s, \"params\": {\"nprobe\": 20}"
-                + "    }}}]}}",
-            top_k, vectorsToSearch.toString());
+                "{\"bool\": {"
+                        + "\"must\": [{"
+                        + "    \"vector\": {"
+                        + "        \"binary_vector\": {"
+                        + "            \"topk\": %d, \"metric_type\": \"JACCARD\", \"type\": \"binary\", \"query\": %s, \"params\": {\"nprobe\": 20}"
+                        + "    }}}"
+                        + "]}}",
+                top_k, vectorsToSearch.toString());
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
         SearchResult resSearch = client.search(searchParam);
         Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
@@ -385,7 +394,7 @@ public class TestSearchEntities {
     }
 
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-    public void testSearchIVFLATBinary(MilvusClient client, String collectionName)  {
+    public void testSearchIVFLATBinary(MilvusClient client, String collectionName) {
         List<Long> intValues = new ArrayList<>(Constants.nb);
         List<Float> floatValues = new ArrayList<>(Constants.nb);
         List<ByteBuffer> vectors = Utils.genBinaryVectors(Constants.nb, Constants.dimension);
@@ -394,21 +403,21 @@ public class TestSearchEntities {
             floatValues.add((float) i);
         }
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         List<Long> entityIds = client.insert(insertParam);
         client.flush(collectionName);
         Index index = Index
-            .create(collectionName, Constants.binaryVectorFieldName)
-            .setIndexType(IndexType.BIN_FLAT)
-            .setMetricType(Constants.defaultBinaryMetricType)
-            .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
+                .create(collectionName, Constants.binaryVectorFieldName)
+                .setIndexType(IndexType.BIN_FLAT)
+                .setMetricType(Constants.defaultBinaryMetricType)
+                .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
         client.createIndex(index);
         SearchParam searchParam = SearchParam
-            .create(collectionName)
-            .setDsl(Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, vectors.subList(0, Constants.nq), Constants.topk, n_probe));
+                .create(collectionName)
+                .setDsl(Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, vectors.subList(0, Constants.nq), Constants.topk, n_probe));
         SearchResult resSearch = client.search(searchParam);
         Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
         Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), top_k);
@@ -427,10 +436,10 @@ public class TestSearchEntities {
             floatValues.add((float) i);
         }
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         client.insert(insertParam);
         client.flush(collectionName);
         String tagNew = Utils.genUniqueStr("tagNew");
@@ -440,9 +449,9 @@ public class TestSearchEntities {
         client.search(searchParam);
     }
 
-//    #3656
+    //    #3656
     @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testSearchInvalidNProbeBinary(MilvusClient client, String collectionName)  {
+    public void testSearchInvalidNProbeBinary(MilvusClient client, String collectionName) {
         int n_probe_new = 0;
         List<Long> intValues = new ArrayList<>(Constants.nb);
         List<Float> floatValues = new ArrayList<>(Constants.nb);
@@ -452,17 +461,17 @@ public class TestSearchEntities {
             floatValues.add((float) i);
         }
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         client.insert(insertParam);
         client.flush(collectionName);
         Index index = Index
-            .create(collectionName, Constants.binaryVectorFieldName)
-            .setIndexType(Constants.defaultBinaryIndexType)
-            .setMetricType(Constants.defaultBinaryMetricType)
-            .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
+                .create(collectionName, Constants.binaryVectorFieldName)
+                .setIndexType(Constants.defaultBinaryIndexType)
+                .setMetricType(Constants.defaultBinaryMetricType)
+                .setParamsInJson(new JsonBuilder().param("nlist", Constants.n_list).build());
         client.createIndex(index);
         String dsl = Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, vectors.subList(0, Constants.nq), top_k, n_probe_new);
         SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
@@ -480,10 +489,10 @@ public class TestSearchEntities {
             floatValues.add((float) i);
         }
         InsertParam insertParam = InsertParam
-            .create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+                .create(collectionName)
+                .addField(Constants.intFieldName, DataType.INT64, intValues)
+                .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
         client.insert(insertParam);
         client.flush(collectionName);
         String dsl = Utils.setBinarySearchParam(Constants.defaultBinaryMetricType, vectors.subList(0, Constants.nq), top_k, n_probe);
