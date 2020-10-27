@@ -31,6 +31,7 @@ FetchContent_Declare(
 
 )
 
+set( protobuf_BUILD_TESTS CACHE BOOL OFF FORCE )
 
 if ( NOT protobuf_POPULATED )
     FetchContent_Populate( protobuf )
