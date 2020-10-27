@@ -262,14 +262,6 @@ ValidateDimension(int64_t dim, bool is_binary) {
 
 Status
 ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
-    int64_t nbits_value = 8;
-    if (index_params.find(knowhere::IndexParams::nbits) != index_params.end()) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nbits, 1, 16);
-        if (!status.ok()) {
-            return status;
-        }
-        nbits_value = index_params[knowhere::IndexParams::nbits];
-    }
     if (engine::utils::IsFlatIndexType(index_type)) {
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
@@ -291,7 +283,14 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             return status;
         }
 
-        // special check for 'm' and 'nbits' parameters
+        if (index_params.find(knowhere::IndexParams::nbits) != index_params.end()) {
+            status = CheckParameterRange(index_params, knowhere::IndexParams::nbits, 1, 16);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+
+        // special check for 'm' parameter
         int64_t m_value = index_params[knowhere::IndexParams::m];
         if (!milvus::knowhere::IVFPQConfAdapter::CheckCPUPQParams(dimension, m_value)) {
             std::string msg = "Invalid m, dimension cannot be divided by m ";
@@ -332,8 +331,14 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             if (!status.ok()) {
                 return status;
             }
+            if (index_params.find(knowhere::IndexParams::nbits) != index_params.end()) {
+                status = CheckParameterRange(index_params, knowhere::IndexParams::nbits, 1, 16);
+                if (!status.ok()) {
+                    return status;
+                }
+            }
 
-            // special check for 'PQM' and 'nbits' parameters
+            // special check for 'PQM' parameter
             int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
             if (!milvus::knowhere::IVFPQConfAdapter::CheckCPUPQParams(dimension, pqm_value)) {
                 std::string msg = "Invalid m, dimension cannot be divided by m ";
