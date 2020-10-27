@@ -23,7 +23,7 @@ default_nb = 1200
 default_top_k = 10
 max_top_k = 16384
 max_partition_num = 256
-default_segment_row_limit = 1000
+default_segment_row_limit = 5000
 default_server_segment_row_limit = 1024 * 512
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
@@ -676,6 +676,9 @@ def gen_invalid_index():
     for nlist in gen_invalid_params():
         index_param = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
+    for nbits in gen_invalid_params + [0, 17]:
+        index_param = {"index_type": "IVF_PQ", "params": {"nlist": nlist, "m": m, "nbits": nbits}}
+        index_params.append(index_param)
     for M in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
         index_param = {"index_type": "RHNSW_PQ", "params": {"M": M, "efConstruction": 100}}
@@ -717,6 +720,7 @@ def gen_invalid_index():
 def gen_index():
     nlists = [1, 1024, 16384]
     pq_ms = [128, 64, 32, 16, 8, 4]
+    pq_nbits = [1, 2, 4, 8, 9, 16]
     Ms = [5, 24, 48]
     efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
@@ -733,9 +737,10 @@ def gen_index():
                           for nlist in nlists]
             index_params.extend(ivf_params)
         elif index_type == "IVF_PQ":
-            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m, "nbits": nbits}} \
                             for nlist in nlists \
-                            for m in pq_ms]
+                            for m in pq_ms \
+                            for nbits in pq_nbits]
             index_params.extend(IVFPQ_params)
         elif index_type in ["HNSW", "RHNSW_SQ", "RHNSW_PQ"]:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \

@@ -24,6 +24,8 @@
 namespace milvus {
 namespace knowhere {
 
+static const int64_t MIN_NBITS = 1;
+static const int64_t MAX_NBITS = 16;
 static const int64_t MIN_NLIST = 1;
 static const int64_t MAX_NLIST = 65536;
 static const int64_t MIN_NPROBE = 1;
@@ -138,49 +140,43 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    const int64_t DEFAULT_NBITS = 8;
-
-    oricfg[knowhere::IndexParams::nbits] = DEFAULT_NBITS;
 
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
-
-    // int64_t nlist = oricfg[knowhere::IndexParams::nlist];
-    // CheckIntByRange(knowhere::meta::ROWS, nlist, DEFAULT_MAX_ROWS);
+    CheckIntByRange(knowhere::IndexParams::nbits, MIN_NBITS, MAX_NBITS);
 
     // auto tune params
     oricfg[knowhere::IndexParams::nlist] =
         MatchNlist(oricfg[knowhere::meta::ROWS].get<int64_t>(), oricfg[knowhere::IndexParams::nlist].get<int64_t>());
     auto m = oricfg[knowhere::IndexParams::m].get<int64_t>();
+    auto nbits = oricfg[knowhere::IndexParams::nbits].get<int64_t>();
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
     // Best Practice
     // static int64_t MIN_POINTS_PER_CENTROID = 40;
     // static int64_t MAX_POINTS_PER_CENTROID = 256;
     // CheckIntByRange(knowhere::meta::ROWS, MIN_POINTS_PER_CENTROID * nlist, MAX_POINTS_PER_CENTROID * nlist);
 
-    /*std::vector<int64_t> resset;
-    IVFPQConfAdapter::GetValidCPUM(dimension, resset);*/
     IndexMode ivfpq_mode = mode;
-    return GetValidM(dimension, m, ivfpq_mode);
+    return CheckPQParams(dimension, m, nbits, ivfpq_mode);
 }
 
 bool
-IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
+IVFPQConfAdapter::CheckPQParams(int64_t dimension, int64_t m, int64_t nbits, IndexMode& mode) {
 #ifdef MILVUS_GPU_VERSION
-    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidGPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::CheckGPUPQParams(dimension, m, nbits)) {
         mode = knowhere::IndexMode::MODE_CPU;
     }
 #endif
-    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::CheckCPUPQParams(dimension, m)) {
         return false;
     }
     return true;
 }
 
 bool
-IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
+IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) {
     /*
      * Faiss 1.6
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with
@@ -193,7 +189,7 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
-            support_dim_per_subquantizer.end());
+            support_dim_per_subquantizer.end()) && (nbits == 8);
 
     /*resset.clear();
       for (const auto& dimperquantizer : support_dim_per_subquantizer) {
@@ -208,7 +204,7 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
 }
 
 bool
-IVFPQConfAdapter::GetValidCPUM(int64_t dimension, int64_t m) {
+IVFPQConfAdapter::CheckCPUPQParams(int64_t dimension, int64_t m) {
     return (dimension % m == 0);
 }
 
@@ -289,7 +285,7 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
 
-    IVFPQConfAdapter::GetValidCPUM(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>());
+    IVFPQConfAdapter::CheckCPUPQParams(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>());
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }

@@ -743,6 +743,9 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     conf[knowhere::meta::ROWS] = row_count;
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     conf[knowhere::Metric::TYPE] = index_info.metric_name_;
+    if (!conf.contains(knowhere::IndexParams::nbits)) {
+        conf[knowhere::IndexParams::nbits] = 8;
+    }
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
 
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
@@ -752,7 +755,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     if (index_info.index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         auto m = conf[knowhere::IndexParams::m].get<int64_t>();
-        knowhere::IVFPQConfAdapter::GetValidM(dimension, m, mode);
+        auto nbits = conf[knowhere::IndexParams::nbits].get<int64_t>();
+        knowhere::IVFPQConfAdapter::CheckPQParams(dimension, m, nbits, mode);
     }
 #endif
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_info.index_type_);
