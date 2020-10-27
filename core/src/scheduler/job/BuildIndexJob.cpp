@@ -64,7 +64,7 @@ BuildIndexJob::OnCreateTasks(JobTasks& tasks) {
         std::vector<engine::TargetFields> field_groups;
         WhichFieldsToBuild(snapshot_, segment_id, field_groups);
         for (auto& group : field_groups) {
-            auto task = std::make_shared<BuildIndexTask>(snapshot_, options_, segment_id, group, nullptr);
+            auto task = std::make_shared<BuildIndexTask>(snapshot_, options_, segment_id, group);
             task->job_ = this;
             tasks.emplace_back(task);
         }

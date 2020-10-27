@@ -15,7 +15,6 @@
 #include "scheduler/Utils.h"
 #include "scheduler/selector/BuildIndexPass.h"
 #include "scheduler/task/BuildIndexTask.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #ifdef MILVUS_GPU_VERSION
 namespace milvus {
 namespace scheduler {
@@ -74,8 +73,7 @@ BuildIndexPass::Run(const TaskPtr& task) {
             idx_ = (idx_ + 1) % build_gpus_.size();
         }
 
-        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-        task->label() = label;
+        task->resource() = res_ptr;
 
         return true;
     } catch (std::exception ex) {

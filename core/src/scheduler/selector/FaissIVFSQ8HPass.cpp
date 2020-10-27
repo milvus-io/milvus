@@ -17,7 +17,6 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 
@@ -86,8 +85,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
-    auto label = std::make_shared<SpecResLabel>(res_ptr, hybrid);
-    task->label() = label;
+    task->resource() = res_ptr;
     return true;
 }
 

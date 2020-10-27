@@ -20,7 +20,6 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/selector/Optimizer.h"
 #include "scheduler/task/Task.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
@@ -112,15 +111,10 @@ JobMgr::calculate_path(const ResourceMgrPtr& res_mgr, const TaskPtr& task) {
         return;
     }
 
-    if (task->label()->Type() != TaskLabelType::SPECIFIED_RESOURCE) {
-        return;
-    }
-
     std::vector<std::string> path;
-    auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
     auto src = res_mgr->GetDiskResources()[0];
-    auto dest = spec_label->resource();
-    ShortestPath(src.lock(), dest.lock(), res_mgr, path);
+    auto dest = task->resource();
+    ShortestPath(src.lock(), dest, res_mgr, path);
     task->path() = Path(path, path.size() - 1);
 }
 

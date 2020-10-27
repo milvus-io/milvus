@@ -26,9 +26,8 @@ namespace milvus {
 namespace scheduler {
 
 BuildIndexTask::BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
-                               engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
-                               TaskLabelPtr label)
-    : Task(TaskType::BuildIndexTask, std::move(label)),
+                               engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields)
+    : Task(TaskType::BuildIndexTask),
       snapshot_(snapshot),
       options_(options),
       segment_id_(segment_id),

@@ -32,8 +32,8 @@ namespace scheduler {
 
 SearchTask::SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
                        const engine::DBOptions& options, const query::QueryPtr& query_ptr,
-                       engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
-    : Task(TaskType::SearchTask, std::move(label)),
+                       engine::snapshot::ID_TYPE segment_id)
+    : Task(TaskType::SearchTask),
       context_(context),
       snapshot_(snapshot),
       options_(options),
