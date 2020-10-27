@@ -370,8 +370,8 @@ func TestProxyServer_InsertAndDelete(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		assert.Equalf(t, primaryKey[i], uint64(i+1), "insert failed")
 	}
-	t.Logf("m_timestamp = %d", ps.reqSch.m_timestamp)
-	assert.Equalf(t, ps.reqSch.m_timestamp, Timestamp(1300), "insert failed")
+	t.Logf("m_timestamp = %d", ps.reqSch.mTimestamp)
+	assert.Equalf(t, ps.reqSch.mTimestamp, Timestamp(1300), "insert failed")
 }
 
 func TestProxyServer_Search(t *testing.T) {

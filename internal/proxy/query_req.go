@@ -89,13 +89,13 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 				if _, err := query.Send(s.ctx, &pulsar.ProducerMessage{Payload: qb}); err != nil {
 					log.Printf("post into puslar failed, error = %v", err)
 				}
-				s.reqSch.q_timestamp_mux.Lock()
-				if s.reqSch.q_timestamp <= ts[0] {
-					s.reqSch.q_timestamp = ts[0]
+				s.reqSch.qTimestampMux.Lock()
+				if s.reqSch.qTimestamp <= ts[0] {
+					s.reqSch.qTimestamp = ts[0]
 				} else {
-					log.Printf("there is some wrong with q_timestamp, it goes back, current = %d, previous = %d", ts[0], s.reqSch.q_timestamp)
+					log.Printf("there is some wrong with q_timestamp, it goes back, current = %d, previous = %d", ts[0], s.reqSch.qTimestamp)
 				}
-				s.reqSch.q_timestamp_mux.Unlock()
+				s.reqSch.qTimestampMux.Unlock()
 				resultMap[qm.ReqId] = qm
 				//log.Printf("start search, query id = %d", qm.QueryId)
 			case cm, ok := <-result.Chan():

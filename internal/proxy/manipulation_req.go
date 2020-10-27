@@ -1,33 +1,51 @@
 package proxy
 
 import (
+	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	//pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"log"
 	"sync"
 )
 
 type manipulationReq struct {
-	pb.ManipulationReqMsg
+	stats []commonpb.Status
+	msgs  []*pb.ManipulationReqMsg
 	wg    sync.WaitGroup
 	proxy *proxyServer
 }
 
 // TsMsg interfaces
-func (req *manipulationReq) Ts() Timestamp {
-	return Timestamp(req.Timestamp)
+func (req *manipulationReq) Ts() (Timestamp, error) {
+	if req.msgs == nil {
+		return 0, errors.New("No typed manipulation request message in ")
+	}
+	return Timestamp(req.msgs[0].Timestamp), nil
 }
 func (req *manipulationReq) SetTs(ts Timestamp) {
-	req.Timestamp = uint64(ts)
+	for _, msg := range req.msgs {
+		msg.Timestamp = uint64(ts)
+	}
 }
 
 // BaseRequest interfaces
 func (req *manipulationReq) Type() pb.ReqType {
-	return req.ReqType
+	if req.msgs == nil {
+		return 0
+	}
+	return req.msgs[0].ReqType
 }
+
+// TODO: use a ProcessReq function to wrap details?
+// like func (req *manipulationReq) ProcessReq() commonpb.Status{
+//	req.PreExecute()
+//  req.Execute()
+//  req.PostExecute()
+//  req.WaitToFinish()
+//}
 
 func (req *manipulationReq) PreExecute() commonpb.Status {
 	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
@@ -43,13 +61,28 @@ func (req *manipulationReq) PostExecute() commonpb.Status { // send into pulsar
 	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait unitl send into pulsar
+func (req *manipulationReq) WaitToFinish() commonpb.Status { // wait until send into pulsar
 	req.wg.Wait()
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+
+	for _, stat := range req.stats{
+		if stat.ErrorCode != commonpb.ErrorCode_SUCCESS{
+			return stat
+		}
+	}
+	// update timestamp if necessary
+	ts, _ := req.Ts()
+	req.proxy.reqSch.mTimestampMux.Lock()
+	defer req.proxy.reqSch.mTimestampMux.Unlock()
+	if req.proxy.reqSch.mTimestamp <= ts {
+		req.proxy.reqSch.mTimestamp = ts
+	} else {
+		log.Printf("there is some wrong with m_timestamp, it goes back, current = %d, previous = %d", ts, req.proxy.reqSch.mTimestamp)
+	}
+	return req.stats[0]
 }
 
-func (s *proxyServer) restartManipulationRoutine(buf_size int) error {
-	s.reqSch.manipulationsChan = make(chan *manipulationReq, buf_size)
+func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
+	s.reqSch.manipulationsChan = make(chan *manipulationReq, bufSize)
 	pulsarClient, err := pulsar.NewClient(pulsar.ClientOptions{URL: s.pulsarAddr})
 	if err != nil {
 		return err
@@ -80,51 +113,58 @@ func (s *proxyServer) restartManipulationRoutine(buf_size int) error {
 			case ip := <-s.reqSch.manipulationsChan:
 				ts, st := s.getTimestamp(1)
 				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
-					log.Printf("get time stamp failed, error code = %d, msg = %s, drop inset rows = %d", st.ErrorCode, st.Reason, len(ip.RowsData))
-					continue
-				}
-
-				mq := pb.ManipulationReqMsg{
-					CollectionName: ip.CollectionName,
-					PartitionTag:   ip.PartitionTag,
-					PrimaryKeys:    ip.PrimaryKeys,
-					RowsData:       ip.RowsData,
-					Timestamp:      uint64(ts[0]),
-					SegmentId:      ip.SegmentId,
-					ChannelId:      ip.ChannelId,
-					ReqType:        ip.ReqType,
-					ProxyId:        ip.ProxyId,
-					ExtraParams:    ip.ExtraParams,
-				}
-
-				mb, err := proto.Marshal(&mq)
-				if err != nil {
-					log.Printf("Marshal ManipulationReqMsg failed, error = %v", err)
-					continue
-				}
-
-				switch ip.ReqType {
-				case pb.ReqType_kInsert:
-					if _, err := readers[mq.ChannelId].Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
-						log.Printf("post into puslar failed, error = %v", err)
-					}
-					break
-				case pb.ReqType_kDeleteEntityByID:
-					if _, err = deleter.Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
-						log.Printf("post into pulsar filed, error = %v", err)
-					}
-				default:
-					log.Printf("post unexpect ReqType = %d", ip.ReqType)
+					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
+					ip.stats[0] = st
+					ip.wg.Done()
 					break
 				}
-				s.reqSch.m_timestamp_mux.Lock()
-				if s.reqSch.m_timestamp <= ts[0] {
-					s.reqSch.m_timestamp = ts[0]
-				} else {
-					log.Printf("there is some wrong with m_timestamp, it goes back, current = %d, previous = %d", ts[0], s.reqSch.m_timestamp)
+				ip.SetTs(ts[0])
+
+				wg := sync.WaitGroup{}
+				for i, mq := range ip.msgs {
+					mq := mq
+					i := i
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						mb, err := proto.Marshal(mq)
+						if err != nil {
+							log.Printf("Marshal ManipulationReqMsg failed, error = %v", err)
+							ip.stats[i] = commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+								Reason:    fmt.Sprintf("Marshal ManipulationReqMsg failed, error=%v", err),
+							}
+							return
+						}
+
+						switch ip.Type() {
+						case pb.ReqType_kInsert:
+							if _, err := readers[mq.ChannelId].Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
+								log.Printf("post into puslar failed, error = %v", err)
+								ip.stats[i] = commonpb.Status{
+									ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+									Reason:    fmt.Sprintf("Post into puslar failed, error=%v", err.Error()),
+								}
+								return
+							}
+						case pb.ReqType_kDeleteEntityByID:
+							if _, err = deleter.Send(s.ctx, &pulsar.ProducerMessage{Payload: mb}); err != nil {
+								log.Printf("post into pulsar filed, error = %v", err)
+								ip.stats[i] = commonpb.Status{
+									ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+									Reason:    fmt.Sprintf("Post into puslar failed, error=%v", err.Error()),
+								}
+								return
+							}
+						default:
+							log.Printf("post unexpect ReqType = %d", ip.Type())
+							return
+						}
+					}()
 				}
-				s.reqSch.m_timestamp_mux.Unlock()
+				wg.Wait()
 				ip.wg.Done()
+				break
 			}
 		}
 	}()

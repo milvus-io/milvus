@@ -7,13 +7,13 @@ type requestScheduler struct {
 
 	//manipulations requestQueue
 	manipulationsChan chan *manipulationReq // manipulation queue
-	m_timestamp       Timestamp
-	m_timestamp_mux   sync.Mutex
+	mTimestamp        Timestamp
+	mTimestampMux     sync.Mutex
 
 	//queries requestQueue
-	queryChan       chan *queryReq
-	q_timestamp     Timestamp
-	q_timestamp_mux sync.Mutex
+	queryChan     chan *queryReq
+	qTimestamp    Timestamp
+	qTimestampMux sync.Mutex
 }
 
 // @param selection
@@ -26,9 +26,9 @@ func (rs *requestScheduler) AreRequestsDelivered(ts Timestamp, selection uint32)
 		if selection&uint32(2) == 0 {
 			return true
 		}
-		rs.m_timestamp_mux.Lock()
-		defer rs.m_timestamp_mux.Unlock()
-		if rs.m_timestamp >= ts {
+		rs.mTimestampMux.Lock()
+		defer rs.mTimestampMux.Unlock()
+		if rs.mTimestamp >= ts {
 			return true
 		}
 		if len(rs.manipulationsChan) == 0 {
@@ -41,9 +41,9 @@ func (rs *requestScheduler) AreRequestsDelivered(ts Timestamp, selection uint32)
 		if selection&uint32(4) == 0 {
 			return true
 		}
-		rs.q_timestamp_mux.Lock()
-		defer rs.q_timestamp_mux.Unlock()
-		if rs.q_timestamp >= ts {
+		rs.qTimestampMux.Lock()
+		defer rs.qTimestampMux.Unlock()
+		if rs.qTimestamp >= ts {
 			return true
 		}
 		if len(rs.queryChan) == 0 {
