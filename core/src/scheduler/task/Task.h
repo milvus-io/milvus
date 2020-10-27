@@ -11,14 +11,13 @@
 
 #pragma once
 
-#include "Path.h"
-#include "scheduler/interface/interfaces.h"
-#include "scheduler/tasklabel/TaskLabel.h"
-#include "utils/Status.h"
-
 #include <memory>
 #include <string>
 #include <utility>
+
+#include "Path.h"
+#include "scheduler/interface/interfaces.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace scheduler {
@@ -36,11 +35,12 @@ enum class TaskType {
 };
 
 class Job;
+class Resource;
 
 // TODO: re-design
 class Task : public interface::dumpable {
  public:
-    explicit Task(TaskType type, TaskLabelPtr label) : type_(type), label_(std::move(label)) {
+    explicit Task(TaskType type) : type_(type) {
     }
 
     /*
@@ -70,9 +70,9 @@ class Task : public interface::dumpable {
     /*
      * Getter and Setter;
      */
-    inline TaskLabelPtr&
-    label() {
-        return label_;
+    inline std::shared_ptr<Resource>&
+    resource() {
+        return resource_;
     }
 
  public:
@@ -90,10 +90,10 @@ class Task : public interface::dumpable {
     OnExecute() = 0;
 
  public:
+    std::shared_ptr<Resource> resource_;
     Path task_path_;
     scheduler::Job* job_ = nullptr;
     TaskType type_;
-    TaskLabelPtr label_ = nullptr;
 };
 
 using TaskPtr = std::shared_ptr<Task>;

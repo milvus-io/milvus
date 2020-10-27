@@ -28,7 +28,7 @@ class SearchTask : public Task {
  public:
     explicit SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
                         const engine::DBOptions& options, const query::QueryPtr& query_ptr,
-                        engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+                        engine::snapshot::ID_TYPE segment_id);
 
     json
     Dump() const override;

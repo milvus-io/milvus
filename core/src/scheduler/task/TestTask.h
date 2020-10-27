@@ -20,7 +20,7 @@ namespace scheduler {
 
 class TestTask : public Task {
  public:
-    explicit TestTask(TaskLabelPtr label = nullptr);
+    TestTask();
 
  public:
     Status

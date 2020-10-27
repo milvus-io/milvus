@@ -16,7 +16,6 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
 
 #include <fiu/fiu-local.h>
@@ -65,8 +64,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
-    auto label = std::make_shared<SpecResLabel>(res_ptr);
-    task->label() = label;
+    task->resource() = res_ptr;
     return true;
 }
 
