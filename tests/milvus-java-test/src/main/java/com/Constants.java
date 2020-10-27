@@ -1,9 +1,11 @@
 package com;
 
+import io.milvus.client.IndexType;
+import io.milvus.client.MetricType;
+
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
-import io.milvus.client.*;
 
 public final class Constants {
 
