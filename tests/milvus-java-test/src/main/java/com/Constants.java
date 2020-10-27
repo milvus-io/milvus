@@ -2,7 +2,6 @@ package com;
 
 import io.milvus.client.IndexType;
 import io.milvus.client.MetricType;
-
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +54,13 @@ public final class Constants {
 
     public static final Map<String, List> defaultEntities = Utils.genDefaultEntities(nb, vectors);
 
-    public static final Map<String, List> defaultBinaryEntities = Utils.genDefaultBinaryEntities(nb, vectorsBinary);
+    public static final Map<String, List> defaultBinaryEntities =
+            Utils.genDefaultBinaryEntities(nb, vectorsBinary);
 
-    public static final String searchParam = Utils.setSearchParam(defaultMetricType, vectors.subList(0, nq), topk, n_probe);
+    public static final String searchParam =
+            Utils.setSearchParam(defaultMetricType, vectors.subList(0, nq), topk, n_probe);
 
-    public static final String binarySearchParam = Utils.setBinarySearchParam(defaultBinaryMetricType, vectorsBinary.subList(0, nq), topk, n_probe);
-
+    public static final String binarySearchParam =
+            Utils.setBinarySearchParam(
+                    defaultBinaryMetricType, vectorsBinary.subList(0, nq), topk, n_probe);
 }

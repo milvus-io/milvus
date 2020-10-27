@@ -1,12 +1,13 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.CollectionMapping;
+import io.milvus.client.InsertParam;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ClientSideMilvusException;
 import io.milvus.client.exception.ServerSideMilvusException;
+import java.util.List;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import java.util.List;
 
 public class TestCollectionCount {
     int nb = Constants.nb;
@@ -18,13 +19,20 @@ public class TestCollectionCount {
     }
 
     // case-02
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testCollectionCountCollectionNotExisted(MilvusClient client, String collectionName) {
-        client.countEntities(collectionName+"_");
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
+    public void testCollectionCountCollectionNotExisted(
+            MilvusClient client, String collectionName) {
+        client.countEntities(collectionName + "_");
     }
 
     // case-03
-    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class, expectedExceptions = ClientSideMilvusException.class)
+    @Test(
+            dataProvider = "DisConnectInstance",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ClientSideMilvusException.class)
     public void testCollectionCountWithoutConnect(MilvusClient client, String collectionName) {
         client.countEntities(collectionName);
     }
@@ -35,7 +43,8 @@ public class TestCollectionCount {
         InsertParam insertParam = Utils.genInsertParam(collectionName);
         List<Long> ids = client.insert(insertParam);
         client.flush(collectionName);
-        // Insert returns a list of entity ids that you will be using (if you did not supply the yourself) to reference the entities you just inserted
+        // Insert returns a list of entity ids that you will be using (if you did not supply the
+        // yourself) to reference the entities you just inserted
         Assert.assertEquals(client.countEntities(collectionName), nb);
     }
 
@@ -68,5 +77,3 @@ public class TestCollectionCount {
         }
     }
 }
-
-

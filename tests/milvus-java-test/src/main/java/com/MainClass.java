@@ -1,7 +1,18 @@
 package com;
 
-import io.milvus.client.*;
-import org.apache.commons.cli.*;
+import io.milvus.client.CollectionMapping;
+import io.milvus.client.ConnectParam;
+import io.milvus.client.DataType;
+import io.milvus.client.JsonBuilder;
+import io.milvus.client.MilvusClient;
+import io.milvus.client.MilvusGrpcClient;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.TestNG;
 import org.testng.annotations.DataProvider;
@@ -9,17 +20,12 @@ import org.testng.xml.XmlClass;
 import org.testng.xml.XmlSuite;
 import org.testng.xml.XmlTest;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class MainClass {
     private static String HOST = "127.0.0.1";
     //    private static String HOST = "192.168.1.238";
     private static int PORT = 19530;
-    private static final ConnectParam CONNECT_PARAM = new ConnectParam.Builder()
-            .withHost(HOST)
-            .withPort(PORT)
-            .build();
+    private static final ConnectParam CONNECT_PARAM =
+            new ConnectParam.Builder().withHost(HOST).withPort(PORT).build();
     private static MilvusClient client;
     private final int segmentRowCount = 5000;
 
@@ -41,7 +47,7 @@ public class MainClass {
 
     @DataProvider(name = "DefaultConnectArgs")
     public static Object[][] defaultConnectArgs() {
-        return new Object[][]{{HOST, PORT}};
+        return new Object[][] {{HOST, PORT}};
     }
 
     public static void main(String[] args) {
@@ -71,20 +77,20 @@ public class MainClass {
         test.setName("TmpTest");
         List<XmlClass> classes = new ArrayList<XmlClass>();
 
-//        classes.add(new XmlClass("com.TestPing"));
-//        classes.add(new XmlClass("com.TestInsertEntities"));
-//        classes.add(new XmlClass("com.TestConnect"));
-//        classes.add(new XmlClass("com.TestDeleteEntities"));
-//        classes.add(new XmlClass("com.TestIndex"));
-//        classes.add(new XmlClass("com.TestCompact"));
-//        classes.add(new XmlClass("com.TestSearchEntities"));
-//        classes.add(new XmlClass("com.TestCollection"));
-//        classes.add(new XmlClass("com.TestCollectionCount"));
-//        classes.add(new XmlClass("com.TestFlush"));
-//        classes.add(new XmlClass("com.TestPartition"));
-//        classes.add(new XmlClass("com.TestGetEntityByID"));
-//        classes.add(new XmlClass("com.TestCollectionInfo"));
-//        classes.add(new XmlClass("com.TestSearchByIds"));
+        //        classes.add(new XmlClass("com.TestPing"));
+        //        classes.add(new XmlClass("com.TestInsertEntities"));
+        //        classes.add(new XmlClass("com.TestConnect"));
+        //        classes.add(new XmlClass("com.TestDeleteEntities"));
+        //        classes.add(new XmlClass("com.TestIndex"));
+        //        classes.add(new XmlClass("com.TestCompact"));
+        //        classes.add(new XmlClass("com.TestSearchEntities"));
+        //        classes.add(new XmlClass("com.TestCollection"));
+        //        classes.add(new XmlClass("com.TestCollectionCount"));
+        //        classes.add(new XmlClass("com.TestFlush"));
+        //        classes.add(new XmlClass("com.TestPartition"));
+        //        classes.add(new XmlClass("com.TestGetEntityByID"));
+        //        classes.add(new XmlClass("com.TestCollectionInfo"));
+        //        classes.add(new XmlClass("com.TestSearchByIds"));
         classes.add(new XmlClass("com.TestBeforeAndAfter"));
 
         test.setXmlClasses(classes);
@@ -94,18 +100,15 @@ public class MainClass {
         TestNG tng = new TestNG();
         tng.setXmlSuites(suites);
         tng.run();
-
     }
 
     @DataProvider(name = "ConnectInstance")
     public Object[][] connectInstance() throws Exception {
-        ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost(HOST)
-                .withPort(PORT)
-                .build();
+        ConnectParam connectParam =
+                new ConnectParam.Builder().withHost(HOST).withPort(PORT).build();
         client = new MilvusGrpcClient(connectParam).withLogging();
         String collectionName = RandomStringUtils.randomAlphabetic(10);
-        return new Object[][]{{client, collectionName}};
+        return new Object[][] {{client, collectionName}};
     }
 
     @DataProvider(name = "DisConnectInstance")
@@ -114,7 +117,7 @@ public class MainClass {
         client = new MilvusGrpcClient(CONNECT_PARAM).withLogging();
         client.close();
         String collectionName = RandomStringUtils.randomAlphabetic(10);
-        return new Object[][]{{client, collectionName}};
+        return new Object[][] {{client, collectionName}};
     }
 
     private Object[][] genCollection(boolean isBinary, boolean autoId) throws Exception {
@@ -122,21 +125,22 @@ public class MainClass {
         String collectionName = Utils.genUniqueStr("collection");
         // Generate connection instance
         client = new MilvusGrpcClient(CONNECT_PARAM).withLogging();
-        CollectionMapping cm = CollectionMapping
-                .create(collectionName)
-                .addField(Constants.intFieldName, DataType.INT64)
-                .addField(Constants.floatFieldName, DataType.FLOAT)
-                .setParamsInJson(new JsonBuilder()
-                        .param("segment_row_limit", segmentRowCount)
-                        .param("auto_id", autoId)
-                        .build());
+        CollectionMapping cm =
+                CollectionMapping.create(collectionName)
+                        .addField(Constants.intFieldName, DataType.INT64)
+                        .addField(Constants.floatFieldName, DataType.FLOAT)
+                        .setParamsInJson(
+                                new JsonBuilder()
+                                        .param("segment_row_limit", segmentRowCount)
+                                        .param("auto_id", autoId)
+                                        .build());
         if (isBinary) {
             cm.addVectorField("binary_vector", DataType.VECTOR_BINARY, Constants.dimension);
         } else {
             cm.addVectorField("float_vector", DataType.VECTOR_FLOAT, Constants.dimension);
         }
         client.createCollection(cm);
-        collection = new Object[][]{{client, collectionName}};
+        collection = new Object[][] {{client, collectionName}};
         return collection;
     }
 
@@ -163,5 +167,4 @@ public class MainClass {
         Object[][] binaryIdCollection = genCollection(true, false);
         return binaryIdCollection;
     }
-
 }

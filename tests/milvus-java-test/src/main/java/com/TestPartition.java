@@ -1,11 +1,11 @@
 package com;
 
-import io.milvus.client.*;
+import io.milvus.client.MilvusClient;
 import io.milvus.client.exception.ServerSideMilvusException;
+import java.util.List;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-import java.util.List;
 
 public class TestPartition {
 
@@ -23,7 +23,10 @@ public class TestPartition {
     }
 
     // create partition, tag name existed
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
     public void testCreatePartitionTagNameExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         client.createPartition(collectionName, tag);
@@ -63,15 +66,22 @@ public class TestPartition {
         Assert.assertEquals(length, 1);
     }
 
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
     public void testDropPartitionDefault(MilvusClient client, String collectionName) {
         String tag = "_default";
         client.createPartition(collectionName, tag);
     }
 
     // drop a partition repeat created before, drop by partition name
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
-    public void testDropPartitionRepeat(MilvusClient client, String collectionName) throws InterruptedException {
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
+    public void testDropPartitionRepeat(MilvusClient client, String collectionName)
+            throws InterruptedException {
         String tag = RandomStringUtils.randomAlphabetic(10);
         client.createPartition(collectionName, tag);
         client.dropPartition(collectionName, tag);
@@ -80,7 +90,10 @@ public class TestPartition {
     }
 
     // drop a partition not created before
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
     public void testDropPartitionNotExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         client.createPartition(collectionName, tag);
@@ -89,7 +102,10 @@ public class TestPartition {
     }
 
     // drop a partition not created before
-    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class, expectedExceptions = ServerSideMilvusException.class)
+    @Test(
+            dataProvider = "Collection",
+            dataProviderClass = MainClass.class,
+            expectedExceptions = ServerSideMilvusException.class)
     public void testDropPartitionTagNotExisted(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
         client.createPartition(collectionName, tag);
@@ -120,5 +136,4 @@ public class TestPartition {
         Assert.assertTrue(partitions.contains(tag));
         Assert.assertTrue(partitions.contains(tagNew));
     }
-
 }
