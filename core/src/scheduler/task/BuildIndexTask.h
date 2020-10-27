@@ -25,8 +25,7 @@ namespace scheduler {
 class BuildIndexTask : public Task {
  public:
     explicit BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
-                            engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
-                            TaskLabelPtr label);
+                            engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields);
 
     json
     Dump() const override;

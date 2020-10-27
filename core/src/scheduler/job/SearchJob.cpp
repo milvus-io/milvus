@@ -30,7 +30,7 @@ SearchJob::SearchJob(const server::ContextPtr& context, const engine::snapshot::
 void
 SearchJob::OnCreateTasks(JobTasks& tasks) {
     for (auto& id : segment_ids_) {
-        auto task = std::make_shared<SearchTask>(context_, snapshot_, options_, query_ptr_, id, nullptr);
+        auto task = std::make_shared<SearchTask>(context_, snapshot_, options_, query_ptr_, id);
         task->job_ = this;
         tasks.emplace_back(task);
     }

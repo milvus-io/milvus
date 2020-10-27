@@ -18,7 +18,7 @@
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(TaskLabelPtr label) : Task(TaskType::SearchTask, std::move(label)) {
+TestTask::TestTask() : Task(TaskType::SearchTask) {
 }
 
 Status
