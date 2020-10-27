@@ -67,6 +67,7 @@ class TestFlushBase:
         assert len(ids) == default_nb
         status = connect.delete_entity_by_id(collection, ids)
         assert status.OK()
+        connect.flush([collection])
         res = connect.count_entities(collection)
         assert 0 == res
         # with pytest.raises(Exception) as e:
