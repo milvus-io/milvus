@@ -140,7 +140,6 @@ IVFSQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 IVFPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
@@ -189,7 +188,8 @@ IVFPQConfAdapter::CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits) 
     return (std::find(std::begin(support_subquantizer), std::end(support_subquantizer), m) !=
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
-            support_dim_per_subquantizer.end()) && (nbits == 8);
+            support_dim_per_subquantizer.end()) &&
+           (nbits == 8);
 
     /*resset.clear();
       for (const auto& dimperquantizer : support_dim_per_subquantizer) {

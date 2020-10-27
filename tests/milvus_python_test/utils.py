@@ -720,7 +720,7 @@ def gen_invalid_index():
 def gen_index():
     nlists = [1, 1024, 16384]
     pq_ms = [128, 64, 32, 16, 8, 4]
-    pq_nbits = [1, 2, 4, 8, 9, 16]
+    pq_nbits = [1, 2, 4, 8, 9]
     Ms = [5, 24, 48]
     efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
