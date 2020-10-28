@@ -32,8 +32,8 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
-#define DEVICE_C2H0 "/dev/xdma/card0/c2h0"
-#define DEVICE_H2C0 "/dev/xdma/card0/h2c0"
+#define DEVICE_C2H0 "/dev/xdma0_c2h_0"
+#define DEVICE_H2C0 "/dev/xdma0_h2c_0"
 #define DEVICE_CTRL "/dev/xdma0_bypass"
 
 // extern "C"{
