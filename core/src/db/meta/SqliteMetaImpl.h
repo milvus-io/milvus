@@ -14,20 +14,20 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Meta.h"
 #include "db/Options.h"
 
+#include <sqlite3.h>
+
 namespace milvus {
 namespace engine {
 namespace meta {
 
-auto
-StoragePrototype(const std::string& path);
-
-auto
-CollectionPrototype(const std::string& path);
+using AttrsMap = std::unordered_map<std::string, std::string>;
+using AttrsMapList = std::vector<AttrsMap>;
 
 class SqliteMetaImpl : public Meta {
  public:
@@ -179,10 +179,18 @@ class SqliteMetaImpl : public Meta {
     Status
     Initialize();
 
+    Status
+    SqlQuery(const std::string& sql, AttrsMapList* res = nullptr);
+
+    Status
+    SqlTransaction(const std::vector<std::string>& sql_statements);
+
  private:
     const DBMetaOptions options_;
     std::mutex meta_mutex_;
     std::mutex genid_mutex_;
+
+    sqlite3* db_;
 };  // DBMetaImpl
 
 }  // namespace meta
