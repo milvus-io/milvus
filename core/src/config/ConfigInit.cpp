@@ -71,17 +71,17 @@ is_cachesize_valid(int64_t size, std::string& err) {
 }
 
 #define Bool_(name, modifiable, default, is_valid) \
-    { #name, CreateBoolConfig(#name, modifiable, &config.name.value, default, is_valid) }
+    { #name, CreateBoolConfig(#name, modifiable, config.name, default, is_valid) }
 #define String_(name, modifiable, default, is_valid) \
-    { #name, CreateStringConfig(#name, modifiable, &config.name.value, default, is_valid) }
+    { #name, CreateStringConfig(#name, modifiable, config.name, default, is_valid) }
 #define Enum_(name, modifiable, enumd, default, is_valid) \
-    { #name, CreateEnumConfig(#name, modifiable, enumd, &config.name.value, default, is_valid) }
+    { #name, CreateEnumConfig(#name, modifiable, enumd, config.name, default, is_valid) }
 #define Integer_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
-    { #name, CreateIntegerConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
+    { #name, CreateIntegerConfig(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 #define Floating_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
-    { #name, CreateFloatingConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
+    { #name, CreateFloatingConfig(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 #define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
-    { #name, CreateSizeConfig(#name, modifiable, lower_bound, upper_bound, &config.name.value, default, is_valid) }
+    { #name, CreateSizeConfig(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 
 #define Bool(name, default) Bool_(name, true, default, nullptr)
 #define String(name, default) String_(name, true, default, nullptr)

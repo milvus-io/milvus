@@ -18,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+#include "Value.h"
+
 namespace milvus {
 
 using configEnum = const std::unordered_map<std::string, int64_t>;
@@ -67,11 +69,11 @@ using BaseConfigPtr = std::shared_ptr<BaseConfig>;
 
 class BoolConfig : public BaseConfig {
  public:
-    BoolConfig(const char* name, const char* alias, bool modifiable, bool* config, bool default_value,
+    BoolConfig(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
                std::function<bool(bool val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    bool* config_;
+    Value<bool>& config_;
     const bool default_value_;
     std::function<bool(bool val, std::string& err)> is_valid_fn_;
 
@@ -88,11 +90,12 @@ class BoolConfig : public BaseConfig {
 
 class StringConfig : public BaseConfig {
  public:
-    StringConfig(const char* name, const char* alias, bool modifiable, std::string* config, const char* default_value,
+    StringConfig(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
+                 const char* default_value,
                  std::function<bool(const std::string& val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    std::string* config_;
+    Value<std::string>& config_;
     const char* default_value_;
     std::function<bool(const std::string& val, std::string& err)> is_valid_fn_;
 
@@ -109,11 +112,11 @@ class StringConfig : public BaseConfig {
 
 class EnumConfig : public BaseConfig {
  public:
-    EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, int64_t* config,
+    EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, Value<int64_t>& config,
                int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    int64_t* config_;
+    Value<int64_t>& config_;
     configEnum* enum_value_;
     const int64_t default_value_;
     std::function<bool(int64_t val, std::string& err)> is_valid_fn_;
@@ -132,11 +135,11 @@ class EnumConfig : public BaseConfig {
 class IntegerConfig : public BaseConfig {
  public:
     IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                  int64_t* config, int64_t default_value,
+                  Value<int64_t>& config, int64_t default_value,
                   std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    int64_t* config_;
+    Value<int64_t>& config_;
     int64_t lower_bound_;
     int64_t upper_bound_;
     const int64_t default_value_;
@@ -156,11 +159,11 @@ class IntegerConfig : public BaseConfig {
 class FloatingConfig : public BaseConfig {
  public:
     FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound, double upper_bound,
-                   double* config, double default_value,
+                   Value<double>& config, double default_value,
                    std::function<bool(double val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    double* config_;
+    Value<double>& config_;
     double lower_bound_;
     double upper_bound_;
     const double default_value_;
@@ -180,11 +183,11 @@ class FloatingConfig : public BaseConfig {
 class SizeConfig : public BaseConfig {
  public:
     SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-               int64_t* config, int64_t default_value,
+               Value<int64_t>& config, int64_t default_value,
                std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
-    int64_t* config_;
+    Value<int64_t>& config_;
     int64_t lower_bound_;
     int64_t upper_bound_;
     const int64_t default_value_;

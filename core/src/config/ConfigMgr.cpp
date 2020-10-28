@@ -62,9 +62,6 @@ ThrowIfNotSuccess(const milvus::ConfigStatus& cs) {
 
 namespace milvus {
 
-extern std::mutex&
-GetConfigMutex();
-
 extern std::unordered_map<std::string, BaseConfigPtr>
 InitConfig();
 
@@ -115,7 +112,6 @@ ConfigMgr::ConfigMgr() : config_list_(InitConfig()) {
 
 void
 ConfigMgr::Init() {
-    std::lock_guard<std::mutex> lock(GetConfigMutex());
     for (auto& kv : config_list_) {
         kv.second->Init();
     }
@@ -162,7 +158,6 @@ void
 ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
     try {
         auto& config = config_list_.at(name);
-        std::unique_lock<std::mutex> lock(GetConfigMutex());
         if (not update) {
             /* update=false when loading from config file */
             ThrowIfNotSuccess(config->Set(value, update));
@@ -174,7 +169,6 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
             ThrowIfNotSuccess(config->Set(value, update));
             try {
                 Save(FilePath());
-                lock.unlock();
                 Notify(name);
                 /* if not found in effective immediately list, need restart */
                 if (effective_immediately_.find(name) == effective_immediately_.end()) {
@@ -183,7 +177,6 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
             } catch (...) {
                 /* rollback */
                 ThrowIfNotSuccess(config->Set(old_value, false));
-                lock.unlock();
                 throw;
             }
         } else {
@@ -205,7 +198,6 @@ std::string
 ConfigMgr::Get(const std::string& name) const {
     try {
         auto& config = config_list_.at(name);
-        std::lock_guard<std::mutex> lock(GetConfigMutex());
         return config->Get();
     } catch (std::out_of_range& ex) {
         throw std::runtime_error("Config " + name + " not found.");
