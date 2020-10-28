@@ -657,7 +657,7 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
 
-            auto& values = vector_param_it.value()["values"];
+            auto& values = vector_param_it.value()["query"];
             vector_query->query_vector.vector_count = values.size();
             for (auto& vector_records : values) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
@@ -823,7 +823,9 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         result_json["nq"] = result->row_num_;
         if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
-            result_str = result_json.dump();
+            nlohmann::json data_json;
+            data_json["data"] = result_json;
+            result_str = data_json.dump();
             return Status::OK();
         }
 

@@ -9,6 +9,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4030 The configurations name is not effective after update config file and restart docker
 -   \#4059 milvus raise exception when passing a complex dsl during searching
 -   \#4113 After milvus 0.11.0 version vector data is misaligned
+-   \#4116 ResfulApi Search return null
 
 ## Feature
 
