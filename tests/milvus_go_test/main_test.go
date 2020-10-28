@@ -23,6 +23,15 @@ var fieldBinaryVectorName string = "binary_vector"
 var dimension int = 128
 var segmentRowLimit int = 5000
 var defaultNb = 6000
+var defaultIntValues = utils.GenDefaultValues(defaultNb, "int")
+var defaultFloatValues = utils.GenDefaultValues(defaultNb, "float")
+var defaultFloatVector = utils.GenFloatVectors(dimension, 1, false)
+var defaultFloatVectors = utils.GenFloatVectors(dimension, defaultNb, false)
+
+var defaultBinaryVector = utils.GenBinaryVectors(dimension, 1)
+var defaultBinaryVectors = utils.GenBinaryVectors(dimension, defaultNb)
+
+// var defaultFloatEntities = GenDefaultFieldValues()
 
 // type _Suite struct {
 // 	suite.Suite
@@ -85,26 +94,26 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 	return append(fields, field)
 }
 
-// func GenDefaultFieldValues(fieldType milvus.DataType) []milvus.FieldValue {
-// 	fieldValues := []milvus.FieldValue{
-// 		Name: fieldFloatName,
-// 		RawData: make([]float32, defaultNb)
-// 	}
-// 	var fieldValue milvus.FieldValue
-// 	if fieldType == milvus.VECTORFLOAT {
-// 		embeddingValues = 
-// 		fieldValue = {
-// 			Name: fieldFloatVectorName,
-// 			RawData: embeddingValues
-// 		}
-// 	} else {
-// 		embeddingValues = 
-// 		fieldValue = {
-// 			Name: fieldFloatVectorName,
-// 			RawData: embeddingValues
-// 		}
-// 	}
-// 	return append(fieldValues, fieldValue)
+func GenDefaultFieldValues(fieldType milvus.DataType) []milvus.FieldValue {
+	fieldValues := []milvus.FieldValue{
+		{
+			fieldFloatName,
+			defaultFloatValues,
+		},
+	}
+	var fieldValue milvus.FieldValue
+	if fieldType == milvus.VECTORFLOAT {
+		fieldValue = milvus.FieldValue{
+			fieldFloatVectorName,
+			defaultFloatVectors,
+		}
+	} else {
+		fieldValue = milvus.FieldValue{
+			fieldBinaryVectorName,
+			defaultBinaryVectors,
+		}
+	}
+	return append(fieldValues, fieldValue)
 }
 
 func Collection(autoid bool, vectorType milvus.DataType) (milvus.MilvusClient, string) {
