@@ -84,6 +84,10 @@ class ClientProxy : public Connection {
                   std::string& entities) override;
 
     Status
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                  Entities& entities) override;
+
+    Status
     DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
 
     Status

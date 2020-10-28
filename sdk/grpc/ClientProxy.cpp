@@ -100,60 +100,59 @@ ConstructTopkQueryResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQue
 
     const auto& grpc_entity = grpc_result.entities();
     int64_t topk = grpc_entity.ids_size() / nq;
-    // TODO(yukun): filter -1 results
+    int64_t offset = 0;
     for (int64_t i = 0; i < grpc_result.row_num(); i++) {
-        milvus::QueryResult one_result;
+        milvus::QueryResult one_result = milvus::QueryResult();
         one_result.ids.resize(topk);
         one_result.distances.resize(topk);
         memcpy(one_result.ids.data(), grpc_entity.ids().data() + topk * i, topk * sizeof(int64_t));
         memcpy(one_result.distances.data(), grpc_result.distances().data() + topk * i, topk * sizeof(float));
-        int64_t j;
-        for (j = 0; j < grpc_entity.fields_size(); j++) {
-            auto grpc_field = grpc_entity.fields(j);
-            if (grpc_field.has_attr_record()) {
-                if (grpc_field.attr_record().int32_value_size() > 0) {
-                    std::vector<int32_t> int32_data(topk);
-                    memcpy(int32_data.data(), grpc_field.attr_record().int32_value().data() + topk * i,
-                           topk * sizeof(int32_t));
 
-                    one_result.field_value.int32_value.insert(std::make_pair(grpc_field.field_name(), int32_data));
-                } else if (grpc_field.attr_record().int64_value_size() > 0) {
-                    std::vector<int64_t> int64_data(topk);
-                    memcpy(int64_data.data(), grpc_field.attr_record().int64_value().data() + topk * i,
-                           topk * sizeof(int64_t));
-                    one_result.field_value.int64_value.insert(std::make_pair(grpc_field.field_name(), int64_data));
-                } else if (grpc_field.attr_record().float_value_size() > 0) {
-                    std::vector<float> float_data(topk);
-                    memcpy(float_data.data(), grpc_field.attr_record().float_value().data() + topk * i,
-                           topk * sizeof(float));
-                    one_result.field_value.float_value.insert(std::make_pair(grpc_field.field_name(), float_data));
-                } else if (grpc_field.attr_record().double_value_size() > 0) {
-                    std::vector<double> double_data(topk);
-                    memcpy(double_data.data(), grpc_field.attr_record().double_value().data() + topk * i,
-                           topk * sizeof(double));
-                    one_result.field_value.double_value.insert(std::make_pair(grpc_field.field_name(), double_data));
-                }
-            }
-            if (grpc_field.has_vector_record()) {
-                int64_t vector_row_count = grpc_field.vector_record().records_size();
-                if (vector_row_count > 0) {
-                    std::vector<VectorData> vector_data(topk);
-                    for (int64_t k = topk * i; k < topk * (i + 1); k++) {
-                        auto grpc_vector_data = grpc_field.vector_record().records(k);
-                        if (grpc_vector_data.float_data_size() > 0) {
-                            vector_data[k].float_data.resize(grpc_vector_data.float_data_size());
-                            memcpy(vector_data[k].float_data.data(), grpc_vector_data.float_data().data(),
-                                   grpc_vector_data.float_data_size() * sizeof(float));
-                        } else if (!grpc_vector_data.binary_data().empty()) {
-                            vector_data[k].binary_data.resize(grpc_vector_data.binary_data().size() / 8);
-                            memcpy(vector_data[k].binary_data.data(), grpc_vector_data.binary_data().data(),
-                                   grpc_vector_data.binary_data().size());
+        int valid_size = one_result.ids.size();
+        while (valid_size > 0 && one_result.ids[valid_size - 1] == -1) {
+            valid_size--;
+        }
+        if (valid_size != topk) {
+            one_result.ids.resize(valid_size);
+            one_result.distances.resize(valid_size);
+        }
+
+        for (int64_t k = 0; k < topk; k++) {
+            std::unordered_map<std::string, std::any> data;
+            if (grpc_entity.valid_row(i * topk + k)) {
+                for (int64_t j = 0; j < grpc_entity.fields_size(); j++) {
+                    const auto& grpc_field = grpc_entity.fields(j);
+                    if (grpc_field.has_attr_record()) {
+                        if (grpc_field.attr_record().int32_value_size() > 0) {
+                            data.insert({grpc_field.field_name(), grpc_field.attr_record().int32_value(offset)});
+                        } else if (grpc_field.attr_record().int64_value_size() > 0) {
+                            data.insert({grpc_field.field_name(), grpc_field.attr_record().int64_value(offset)});
+                        } else if (grpc_field.attr_record().float_value_size() > 0) {
+                            data.insert({grpc_field.field_name(), grpc_field.attr_record().float_value(offset)});
+                        } else {
+                            data.insert({grpc_field.field_name(), grpc_field.attr_record().double_value(offset)});
+                        }
+                    } else {
+                        auto float_size = grpc_field.vector_record().records(offset).float_data_size();
+                        auto bin_size = grpc_field.vector_record().records(offset).binary_data().size();
+                        if (float_size > 0) {
+                            std::vector<float> float_data(float_size);
+                            memcpy(float_data.data(), grpc_field.vector_record().records(offset).float_data().data(),
+                                   sizeof(float) * float_size);
+                            data.insert(
+                                {grpc_field.field_name(), grpc_field.vector_record().records(offset).float_data()});
+                        } else if (bin_size > 0) {
+                            std::vector<int8_t> bin_data(bin_size / 8);
+                            memcpy(bin_data.data(), grpc_field.vector_record().records(offset).binary_data().data(),
+                                   bin_size);
                         }
                     }
-                    one_result.field_value.vector_value.insert(std::make_pair(grpc_field.field_name(), vector_data));
                 }
+                one_result.entities[offset].entity_data = data;
+                offset++;
             }
         }
+
         topk_query_result.emplace_back(one_result);
     }
 }
@@ -694,6 +693,40 @@ ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector
         JSON json_entities;
         CopyEntityToJson(grpc_entities, json_entities);
         entities = json_entities.dump();
+        return status;
+    } catch (std::exception& ex) {
+        return Status(StatusCode::UnknownError, "Failed to get entity by id: " + std::string(ex.what()));
+    }
+}
+
+void
+CopyEntities(::milvus::grpc::Entities& grpc_entities, Entities& entities) {
+    int i;
+    auto grpc_field_size = grpc_entities.fields_size();
+    std::vector<std::string> field_names(grpc_field_size);
+    for (i = 0; i < grpc_field_size; i++) {
+        field_names[i] = grpc_entities.fields(i).field_name();
+    }
+}
+
+Status
+ClientProxy::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
+                           Entities& entities) {
+    CLIENT_NULL_CHECK(client_ptr_);
+    try {
+        ::milvus::grpc::EntityIdentity entity_identity;
+        entity_identity.set_collection_name(collection_name);
+        for (auto id : id_array) {
+            entity_identity.add_id_array(id);
+        }
+        ::milvus::grpc::Entities grpc_entities;
+
+        Status status = client_ptr_->GetEntityByID(entity_identity, grpc_entities);
+        if (!status.ok()) {
+            return status;
+        }
+
+        CopyEntities(grpc_entities, entities);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to get entity by id: " + std::string(ex.what()));

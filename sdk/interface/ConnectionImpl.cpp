@@ -129,6 +129,11 @@ ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vec
 }
 
 Status
+ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, Entities& entities) {
+    return client_proxy_->GetEntityByID(collection_name, id_array, entities);
+}
+
+Status
 ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
     return client_proxy_->DeleteEntityByID(collection_name, id_array);
 }
