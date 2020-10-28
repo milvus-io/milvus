@@ -221,8 +221,6 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                 continue;
             }
 
-            auto single_size = data->data_.size() / id_size;
-
             switch (static_cast<engine::DataType>(type)) {
                 case engine::DataType::INT32: {
                     int32_t int32_value;
@@ -254,19 +252,19 @@ WebRequestHandler::CopyData2Json(const milvus::engine::DataChunkPtr& data_chunk,
                 }
                 case engine::DataType::VECTOR_BINARY: {
                     std::vector<int8_t> binary_vector;
-                    auto vector_size = single_size * sizeof(int8_t) / sizeof(int8_t);
-                    binary_vector.resize(vector_size);
-                    int64_t offset = vector_size * i;
-                    memcpy(binary_vector.data(), data->data_.data() + offset, vector_size);
+                    auto dim = data->data_.size() / id_size;
+                    int64_t offset = dim * i;
+                    binary_vector.resize(dim);
+                    memcpy(binary_vector.data(), data->data_.data() + offset, dim);
                     entity_json[name] = binary_vector;
                     break;
                 }
                 case engine::DataType::VECTOR_FLOAT: {
                     std::vector<float> float_vector;
-                    auto vector_size = single_size * sizeof(int8_t) / sizeof(float);
-                    float_vector.resize(vector_size);
-                    int64_t offset = vector_size * i;
-                    memcpy(float_vector.data(), data->data_.data() + offset, vector_size * sizeof(float));
+                    auto dim = (data->data_.size() * sizeof(int8_t) / sizeof(float)) / id_size;
+                    float_vector.resize(dim);
+                    int64_t offset = dim * sizeof(float) * i;
+                    memcpy(float_vector.data(), data->data_.data() + offset, dim * sizeof(float));
                     entity_json[name] = float_vector;
                     break;
                 }
