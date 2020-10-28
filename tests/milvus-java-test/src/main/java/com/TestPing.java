@@ -1,9 +1,9 @@
-//package com1;
+// package com1;
 //
-//import io.milvus.client.*;
-//import org.testng.annotations.Test;
+// import io.milvus.client.*;
+// import org.testng.annotations.Test;
 //
-//public class TestPing {
+// public class TestPing {
 //    @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
 //    public void testServerStatus(String host, int port) throws ConnectFailedException {
 //        System.out.println("Host: "+host+", Port: "+port);
@@ -18,8 +18,9 @@
 //    }
 //
 //    @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-//    public void testServerStatusWithoutConnected(MilvusClient client, String collectionName) throws ConnectFailedException {
+//    public void testServerStatusWithoutConnected(MilvusClient client, String collectionName)
+// throws ConnectFailedException {
 //        Response res = client.getServerStatus();
 //        assert (!res.ok());
 //    }
-//}
+// }
