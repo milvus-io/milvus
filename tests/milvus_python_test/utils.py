@@ -677,7 +677,7 @@ def gen_invalid_index():
         index_param = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
     for nbits in gen_invalid_params() + [0, 17]:
-        index_param = {"index_type": "IVF_PQ", "params": {"nlist": nlist, "m": m, "nbits": nbits}}
+        index_param = {"index_type": "IVF_PQ", "params": {"nlist": nlist, "m": 16, "nbits": nbits}}
         index_params.append(index_param)
     for M in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
