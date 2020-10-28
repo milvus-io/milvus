@@ -28,23 +28,6 @@ using configEnum = const std::unordered_map<std::string, int64_t>;
 std::vector<std::string>
 OptionValue(const configEnum& ce);
 
-enum SetReturn {
-    SUCCESS = 1,
-    IMMUTABLE,
-    ENUM_VALUE_NOTFOUND,
-    INVALID,
-    OUT_OF_RANGE,
-    EXCEPTION,
-    UNEXPECTED,
-};
-
-struct ConfigStatus {
-    ConfigStatus(SetReturn sr, std::string msg) : set_return(sr), message(std::move(msg)) {
-    }
-    SetReturn set_return;
-    std::string message;
-};
-
 struct ConfigError : public std::exception {
     explicit ConfigError(const std::string& name, const std::string& value) : name_(name), value_(value) {
     }

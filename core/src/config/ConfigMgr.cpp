@@ -50,14 +50,6 @@ Flatten(const YAML::Node& node, std::unordered_map<std::string, std::string>& ta
         }
     }
 }
-
-void
-ThrowIfNotSuccess(const milvus::ConfigStatus& cs) {
-    if (cs.set_return != milvus::SetReturn::SUCCESS) {
-        throw cs;
-    }
-}
-
 };  // namespace
 
 namespace milvus {
