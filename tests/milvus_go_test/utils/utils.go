@@ -31,16 +31,18 @@ func Normalize(d int, v []float32) {
 	}
 }
 
-func GenDefaultValues(nb int, valueType string) []int {
-	values := make([]int, nb)
-	if valueType == "float" {
-		for i := 0; i < nb; i++ {
-			values[i] = i + 0.0
-		}
-	} else {
-		for i := 0; i < nb; i++ {
-			values[i] = i
-		}
+func GenDefaultIntValues(nb int) []int64 {
+	values := make([]int64, nb)
+	for i := 0; i < nb; i++ {
+		values[i] = int64(i)
+	}
+	return values
+}
+
+func GenDefaultFloatValues(nb int) []float32 {
+	values := make([]float32, nb)
+	for i := 0; i < nb; i++ {
+		values[i] = float32(i)
 	}
 	return values
 }

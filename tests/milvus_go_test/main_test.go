@@ -23,8 +23,8 @@ var fieldBinaryVectorName string = "binary_vector"
 var dimension int = 128
 var segmentRowLimit int = 5000
 var defaultNb = 6000
-var defaultIntValues = utils.GenDefaultValues(defaultNb, "int")
-var defaultFloatValues = utils.GenDefaultValues(defaultNb, "float")
+var defaultIntValues = utils.GenDefaultIntValues(defaultNb)
+var defaultFloatValues = utils.GenDefaultFloatValues(defaultNb)
 var defaultFloatVector = utils.GenFloatVectors(dimension, 1, false)
 var defaultFloatVectors = utils.GenFloatVectors(dimension, defaultNb, false)
 
