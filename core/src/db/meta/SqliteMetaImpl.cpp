@@ -80,7 +80,7 @@ HandleException(const std::string& desc, const char* what = nullptr) {
 std::string
 ErrorMsg(sqlite3* db) {
     std::stringstream ss;
-    ss << "(code:" << sqlite3_errcode(db) << ", extend code: " << sqlite3_extended_errcode(db)
+    ss << "(sqlite3 error code:" << sqlite3_errcode(db) << ", extend code: " << sqlite3_extended_errcode(db)
        << ", sys errno:" << sqlite3_system_errno(db) << ", sys err msg:" << strerror(errno)
        << ", msg:" << sqlite3_errmsg(db) << ")";
     return ss.str();
@@ -151,12 +151,9 @@ QueryCallback(void* data, int argc, char** argv, char** azColName) {
         raw.insert(std::make_pair(azColName[i], argv[i]));
     }
 
-    if (!QueryData) {
-        // TODO: check return value -1 or 1
-        return -1;
+    if (QueryData) {
+        QueryData->push_back(raw);
     }
-
-    QueryData->push_back(raw);
 
     return 0;
 }
@@ -192,12 +189,12 @@ SqliteMetaImpl::NextFileId(std::string& file_id) {
 
 void
 SqliteMetaImpl::ValidateMetaSchema() {
-//    bool is_null_connector{ConnectorPtr == nullptr};
-//    fiu_do_on("SqliteMetaImpl.ValidateMetaSchema.NullConnection", is_null_connector = true);
-//    if (is_null_connector) {
-//        throw Exception(DB_ERROR, "Connector is null pointer");
-//    }
-//
+    bool is_null_connector{db_ == nullptr};
+    fiu_do_on("SqliteMetaImpl.ValidateMetaSchema.NullConnection", is_null_connector = true);
+    if (is_null_connector) {
+        throw Exception(DB_ERROR, "Connector is null pointer");
+    }
+
 //    // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
 //    auto ret = ConnectorPtr->sync_schema_simulate();
 //    if (ret.find(META_TABLES) != ret.end() &&
@@ -216,22 +213,26 @@ SqliteMetaImpl::ValidateMetaSchema() {
 
 Status
 SqliteMetaImpl::SqlQuery(const std::string& sql, AttrsMapList* res) {
-    int (* call_back)(void*, int, char**, char**) = nullptr;
-    if (res) {
-        QueryData = res;
-        call_back = QueryCallback;
-    }
-
     try {
         LOG_ENGINE_DEBUG_ << sql;
+
+        std::lock_guard<std::mutex> meta_lock(sqlite_mutex_);
+
+        int (* call_back)(void*, int, char**, char**) = nullptr;
+        if (res) {
+            QueryData = res;
+            call_back = QueryCallback;
+        }
 
         auto rc = sqlite3_exec(db_, sql.c_str(), call_back, nullptr, nullptr);
         QueryData = nullptr;
         if (rc != SQLITE_OK) {
-            std::string err = sqlite3_errmsg(db_);
+            std::string err = ErrorMsg(db_);
+            LOG_ENGINE_ERROR_ << err;
             return Status(DB_ERROR, err);
         }
     } catch (std::exception& e) {
+        LOG_ENGINE_ERROR_ << e.what();
         return Status(DB_ERROR, e.what());
     }
 
@@ -241,6 +242,8 @@ SqliteMetaImpl::SqlQuery(const std::string& sql, AttrsMapList* res) {
 Status
 SqliteMetaImpl::SqlTransaction(const std::vector<std::string>& sql_statements) {
     try {
+        std::lock_guard<std::mutex> meta_lock(sqlite_mutex_);
+
         if (SQLITE_OK != sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr)) {
             std::string sql_err = "Sqlite begin transaction failed: " + ErrorMsg(db_);
             return Status(DB_META_TRANSACTION_FAILED, sql_err);
@@ -257,9 +260,10 @@ SqliteMetaImpl::SqlTransaction(const std::vector<std::string>& sql_statements) {
         }
 
         if (SQLITE_OK != rc || SQLITE_OK != sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr)) {
-            std::string err = "Execute sql failed:" + ErrorMsg(db_);
+            std::string err = ErrorMsg(db_);
+            LOG_ENGINE_ERROR_ << err;
             sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
-            return Status(DB_ERROR, err);
+            return Status(DB_META_TRANSACTION_FAILED, err);
         }
     } catch (std::exception& e) {
         return Status(DB_META_TRANSACTION_FAILED, e.what());
@@ -375,6 +379,7 @@ SqliteMetaImpl::CreateCollection(CollectionSchema& collection_schema) {
 
         LOG_ENGINE_DEBUG_ << statement;
 
+        fiu_do_on("SqliteMetaImpl.CreateCollection.insert_throw_exception", throw std::exception());
         auto status = SqlTransaction({statement});
         if (status.ok()) {
             collection_schema.id_ = sqlite3_last_insert_rowid(db_);
@@ -395,7 +400,7 @@ SqliteMetaImpl::DescribeCollection(CollectionSchema& collection_schema) {
         fiu_do_on("SqliteMetaImpl.DescribeCollection.throw_exception", throw std::exception());
         server::MetricCollector metric;
         std::string statement = "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type,"
-                                " index_params, metric_type ,owner_table, partition_tag, version, flush_lsn FROM"
+                                " index_params, metric_type ,owner_table, partition_tag, version, flush_lsn FROM "
                                 + std::string(META_TABLES) + " WHERE table_id = "
                                 + Quote(collection_schema.collection_id_) + " AND state <> "
                                 + std::to_string(CollectionSchema::TO_DELETE) + ";";
@@ -514,15 +519,12 @@ SqliteMetaImpl::DropCollections(const std::vector<std::string>& collection_id_ar
         std::vector<std::vector<std::string>> id_groups;
         DistributeBatch(collection_id_array, id_groups);
 
-        // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
-
         // soft delete collections
         std::vector<std::string> statements;
         for (auto group : id_groups) {
             std::string statement = "UPDATE " + std::string(META_TABLES) + " SET state = "
                                     + std::to_string(CollectionSchema::TO_DELETE) + " WHERE table_id in(";
-            for (size_t i = 0; i < id_groups.size(); i++) {
+            for (size_t i = 0; i < group.size(); i++) {
                 statement += Quote(group[i]);
                 if (i != group.size() - 1) {
                     statement += ",";
@@ -532,12 +534,17 @@ SqliteMetaImpl::DropCollections(const std::vector<std::string>& collection_id_ar
             statements.emplace_back(statement);
         }
 
-        auto status = SqlTransaction(statements);
-        if (!status.ok()) {
-            return HandleException("Failed to drop collections", status.message().c_str());
+        {
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
+
+            auto status = SqlTransaction(statements);
+            if (!status.ok()) {
+                return HandleException("Failed to drop collections", status.message().c_str());
+            }
         }
 
-        status = DeleteCollectionFiles(collection_id_array);
+        auto status = DeleteCollectionFiles(collection_id_array);
         LOG_ENGINE_DEBUG_ << "Successfully delete collections";
         return status;
     } catch (std::exception& e) {
@@ -556,7 +563,7 @@ SqliteMetaImpl::DeleteCollectionFiles(const std::vector<std::string>& collection
         DistributeBatch(collection_id_array, id_groups);
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         // soft delete collection files
         std::vector<std::string> statements;
@@ -637,7 +644,7 @@ SqliteMetaImpl::CreateCollectionFile(SegmentSchema& file_schema) {
                                 + ", " + updated_time + ", " + created_on + ", " + date + ", " + flush_lsn + ");";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         auto status = SqlTransaction({statement});
         if (!status.ok()) {
@@ -723,7 +730,7 @@ SqliteMetaImpl::GetCollectionFilesBySegmentId(const std::string& segment_id, Fil
         AttrsMapList res;
         {
             // to ensure UpdateCollectionFiles to be a atomic operation
-            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
             auto status = SqlQuery(statement, &res);
             if (!status.ok()) {
@@ -853,7 +860,7 @@ SqliteMetaImpl::UpdateCollectionFile(SegmentSchema& file_schema) {
                                 + Quote(file_schema.collection_id_) + ";";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -906,7 +913,7 @@ SqliteMetaImpl::UpdateCollectionFiles(SegmentsSchema& files) {
         fiu_do_on("SqliteMetaImpl.UpdateCollectionFiles.throw_exception", throw std::exception());
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         std::map<std::string, bool> has_collections;
         for (auto& file : files) {
@@ -1058,7 +1065,7 @@ SqliteMetaImpl::UpdateCollectionFilesToIndex(const std::string& collection_id) {
                                 + " AND file_type = " + std::to_string(SegmentSchema::RAW) + ";";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         auto status = SqlTransaction({statement});
         if (!status.ok()) {
@@ -1362,7 +1369,7 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& fil
                                 + " OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -1469,7 +1476,7 @@ SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::s
             statement += (" OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");");
 
             // to ensure UpdateCollectionFiles to be a atomic operation
-            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
             AttrsMapList res;
             auto status = SqlQuery(statement, &res);
@@ -1542,7 +1549,7 @@ SqliteMetaImpl::FilesToMerge(const std::string& collection_id, FilesHolder& file
                                 + " ORDER BY row_count DESC;";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         status = SqlQuery(statement, &res);
@@ -1609,7 +1616,7 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
                                 + " WHERE file_type = " + std::to_string(SegmentSchema::TO_INDEX) + ";";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -1639,6 +1646,8 @@ SqliteMetaImpl::FilesToIndex(FilesHolder& files_holder) {
                 CollectionSchema collection_schema;
                 collection_schema.collection_id_ = collection_file.collection_id_;
                 auto status = DescribeCollection(collection_schema);
+                fiu_do_on("SqliteMetaImpl_FilesToIndex_CollectionNotFound",
+                          status = Status(DB_NOT_FOUND, "collection not found"));
                 if (!status.ok()) {
                     return status;
                 }
@@ -1694,7 +1703,7 @@ SqliteMetaImpl::FilesByType(const std::string& collection_id, const std::vector<
                                 + " AND file_type in (" + types + ");";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -1845,7 +1854,7 @@ SqliteMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collect
             statement += (") AND file_type in (" + types + ");");
 
             // to ensure UpdateCollectionFiles to be a atomic operation
-            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
             AttrsMapList res;
             auto status = SqlQuery(statement, &res);
@@ -1953,7 +1962,7 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
         statement += (" WHERE (" + idStr + ")");
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -2024,11 +2033,45 @@ SqliteMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hol
 Status
 SqliteMetaImpl::Archive() {
     auto& criterias = options_.archive_conf_.GetCriterias();
-    if (criterias.size() == 0) {
+    if (criterias.empty()) {
         return Status::OK();
     }
 
-    // deprecate function, no need to implement
+    for (auto& kv : criterias) {
+        auto& criteria = kv.first;
+        auto& limit = kv.second;
+        if (criteria == engine::ARCHIVE_CONF_DAYS) {
+            size_t usecs = limit * DAY * US_PS;
+            int64_t now = utils::GetMicroSecTimeStamp();
+
+            try {
+                fiu_do_on("SqliteMetaImpl.Archive.throw_exception", throw std::exception());
+
+                std::string statement = "UPDATE " + std::string(META_TABLEFILES)
+                          + " SET file_type = " + std::to_string(SegmentSchema::TO_DELETE)
+                          + " WHERE created_on < " + std::to_string(now - usecs)
+                          + " AND file_type <> " + std::to_string(SegmentSchema::TO_DELETE) + ";";
+
+                auto status = SqlTransaction({statement});
+                if (!status.ok()) {
+                    return HandleException("Failed to archive", status.message().c_str());
+                }
+
+                LOG_ENGINE_DEBUG_ << "Archive old files";
+            } catch (std::exception& e) {
+                return HandleException("Failed to archive", e.what());
+            }
+        }
+        if (criteria == engine::ARCHIVE_CONF_DISK) {
+            uint64_t sum = 0;
+            Size(sum);
+
+            auto to_delete = (sum - limit * GB);
+            DiscardFiles(to_delete);
+
+            LOG_ENGINE_DEBUG_ << "Archive files to free disk";
+        }
+    }
 
     return Status::OK();
 }
@@ -2043,7 +2086,7 @@ SqliteMetaImpl::Size(uint64_t& result) {
                                 + " WHERE file_type <> " + std::to_string(SegmentSchema::TO_DELETE) + ";";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
@@ -2114,7 +2157,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
         AttrsMapList res;
         {
             // to ensure UpdateCollectionFiles to be a atomic operation
-            std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
             auto status = SqlQuery(statement, &res);
             if (!status.ok()) {
@@ -2181,7 +2224,7 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
         }
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         auto status = SqlTransaction(statements);
         fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_FailCommited", status = Status(DB_ERROR, ""));
@@ -2223,12 +2266,12 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
             statement = "DELETE FROM " + std::string(META_TABLES) + " WHERE " + idsToDeleteStr + ";";
 
             status = SqlTransaction({statement});
-            fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_Failcommited",
-                      status = Status(DB_ERROR, ""));
             if (!status.ok()) {
                 return HandleException("Failed to clean up with ttl", status.message().c_str());
             }
         }
+
+        fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveCollection_Failcommited", throw std::exception());
 
         if (remove_collections > 0) {
             LOG_ENGINE_DEBUG_ << "Remove " << remove_collections << " collections from meta";
@@ -2324,7 +2367,7 @@ SqliteMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
             + " OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");";
 
         // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
         status = SqlQuery(statement, &res);
@@ -2349,13 +2392,15 @@ SqliteMetaImpl::DropAll() {
     LOG_ENGINE_DEBUG_ << "Drop all sqlite meta";
 
     try {
-        std::string statement = "DROP TABLE IF EXISTS "
-            + TABLES_SCHEMA.name() + ", "
-            + TABLEFILES_SCHEMA.name() + ", "
-            + ENVIRONMENT_SCHEMA.name() + ", "
-            + FIELDS_SCHEMA.name() + ";";
+        std::string statement = "DROP TABLE IF EXISTS ";
+        std::vector<std::string> statements = {
+            statement + TABLES_SCHEMA.name() + ";",
+            statement + TABLEFILES_SCHEMA.name() + ";",
+            statement + ENVIRONMENT_SCHEMA.name() + ";",
+            statement + FIELDS_SCHEMA.name() + ";",
+        };
 
-        auto status = SqlTransaction({statement});
+        auto status = SqlTransaction(statements);
         if (!status.ok()) {
             return HandleException("Failed to drop all", status.message().c_str());
         }
@@ -2570,7 +2615,7 @@ SqliteMetaImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema
             std::string field_params = schema.field_params_;
 
             statement = "INSERT INTO " + std::string(META_FIELDS) + " VALUES(" + Quote(collection_id) + ", "
-                      + Quote(field_name) + ", " + field_type + ", " + "''" + ", " + field_params + ");";
+                      + Quote(field_name) + ", " + field_type + ", " + Quote(field_params) + ");";
 
             status = SqlTransaction({statement});
             if (!status.ok()) {

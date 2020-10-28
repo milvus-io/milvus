@@ -187,10 +187,11 @@ class SqliteMetaImpl : public Meta {
 
  private:
     const DBMetaOptions options_;
-    std::mutex meta_mutex_;
+    std::mutex sqlite_mutex_;     // make sqlite query/execute action to be atomic
+    std::mutex operation_mutex_;  // make operation such  UpdateTableFiles to be atomic
     std::mutex genid_mutex_;
 
-    sqlite3* db_;
+    sqlite3* db_ = nullptr;
 };  // DBMetaImpl
 
 }  // namespace meta
