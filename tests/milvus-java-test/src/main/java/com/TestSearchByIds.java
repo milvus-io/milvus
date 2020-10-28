@@ -1,15 +1,15 @@
-package com;//package com;
+package com; // package com;
 //
-//import io.milvus.client.*;
-//import org.apache.commons.lang3.RandomStringUtils;
-//import org.testng.Assert;
-//import org.testng.annotations.Test;
+// import io.milvus.client.*;
+// import org.apache.commons.lang3.RandomStringUtils;
+// import org.testng.Assert;
+// import org.testng.annotations.Test;
 //
-//import java.nio.ByteBuffer;
-//import java.util.ArrayList;
-//import java.util.List;
+// import java.nio.ByteBuffer;
+// import java.util.ArrayList;
+// import java.util.List;
 //
-//public class TestSearchByIds {
+// public class TestSearchByIds {
 //    int dimension = 128;
 //    int n_list = 1024;
 //    int default_n_list = 16384;
@@ -53,7 +53,8 @@ package com;//package com;
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_search_no_result(MilvusClient client, String collectionName)  {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        client.insert(insertParam);
 //        client.flush(collectionName);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
@@ -61,7 +62,8 @@ package com;//package com;
 //                .withTopK(top_k)
 //                .withIDs(default_ids)
 //                .build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
+//        List<List<SearchResponse.QueryResult>> res_search =
+// client.searchByIds(searchParam).getQueryResultsList();
 //        assert (client.searchByIds(searchParam).getResponse().ok());
 //        Assert.assertEquals(res_search.get(0).size(), 0);
 //    }
@@ -69,7 +71,8 @@ package com;//package com;
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_search_count_lt_top_k(MilvusClient client, String collectionName)  {
 //        int top_k = 100;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(small_vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(small_vectors).build();
 //        InsertResponse res_insert = client.insert(insertParam);
 //        client.flush(collectionName);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
@@ -77,8 +80,10 @@ package com;//package com;
 //                .withTopK(top_k)
 //                .withIDs(Utils.toListIds(res_insert.getVectorIds().get(0)))
 //                .build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
-//        // reason: "Failed to query by id in collection L2_FmVKbqSZaN, result doesn\'t match id count"
+//        List<List<SearchResponse.QueryResult>> res_search =
+// client.searchByIds(searchParam).getQueryResultsList();
+//        // reason: "Failed to query by id in collection L2_FmVKbqSZaN, result doesn\'t match id
+// count"
 //        assert (!client.searchByIds(searchParam).getResponse().ok());
 ////        Assert.assertEquals(res_search.size(), default_ids.size());
 ////        Assert.assertEquals(res_search.get(0).get(0).getVectorId(), -1);
@@ -87,17 +92,20 @@ package com;//package com;
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_search_index_IVFLAT(MilvusClient client, String collectionName)  {
 //        IndexType indexType = IndexType.IVFLAT;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        InsertResponse res_insert = client.insert(insertParam);
 //        client.flush(collectionName);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+//        Index index = new Index.Builder(collectionName,
+// indexType).withParamsInJson(indexParam).build();
 //        client.createIndex(index);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
 //                .withParamsInJson(searchParamStr)
 //                .withTopK(top_k)
 //                .withIDs(res_insert.getVectorIds())
 //                .build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
+//        List<List<SearchResponse.QueryResult>> res_search =
+// client.searchByIds(searchParam).getQueryResultsList();
 //        for (int i=0; i<vectors.size(); ++i) {
 //            Assert.assertEquals(res_search.get(i).size(), top_k);
 //            long vectorId = res_search.get(i).get(0).getVectorId();
@@ -117,10 +125,12 @@ package com;//package com;
 //        IndexType indexType = IndexType.IVFLAT;
 //        String tag = RandomStringUtils.randomAlphabetic(10);
 //        client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
 //        InsertResponse res_insert = client.insert(insertParam);
 //        client.flush(collectionName);
-//        Index index = new Index.Builder(collectionName, indexType).withParamsInJson(indexParam).build();
+//        Index index = new Index.Builder(collectionName,
+// indexType).withParamsInJson(indexParam).build();
 //        client.createIndex(index);
 //        List<String> queryTags = new ArrayList<>();
 //        queryTags.add(tag);
@@ -130,7 +140,8 @@ package com;//package com;
 //                .withIDs(Utils.toListIds(res_insert.getVectorIds().get(0)))
 //                .withPartitionTags(queryTags)
 //                .build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
+//        List<List<SearchResponse.QueryResult>> res_search =
+// client.searchByIds(searchParam).getQueryResultsList();
 //        double distance = res_search.get(0).get(0).getDistance();
 //        if (collectionName.startsWith("L2")) {
 //            Assert.assertEquals(distance, 0.0, epsilon);
@@ -143,7 +154,8 @@ package com;//package com;
 //    public void test_search_partition_not_exited(MilvusClient client, String collectionName) {
 //        String tag = RandomStringUtils.randomAlphabetic(10);
 //        client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
 //        client.insert(insertParam);
 //        client.flush(collectionName);
 //        String tagNew = RandomStringUtils.randomAlphabetic(10);
@@ -164,7 +176,8 @@ package com;//package com;
 //    public void test_search_partition_empty(MilvusClient client, String collectionName) {
 //        String tag = RandomStringUtils.randomAlphabetic(10);
 //        client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
 //        client.insert(insertParam);
 //        client.flush(collectionName);
 //        List<String> queryTags = new ArrayList<>();
@@ -184,7 +197,8 @@ package com;//package com;
 //    public void test_search_invalid_n_probe(MilvusClient client, String collectionName)  {
 //        int n_probe_new = 0;
 //        String searchParamStrNew = Utils.setSearchParam(n_probe_new);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        client.insert(insertParam);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
 //                .withParamsInJson(searchParamStrNew)
@@ -198,7 +212,8 @@ package com;//package com;
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
 //    public void test_search_invalid_top_k(MilvusClient client, String collectionName) {
 //        int top_k_new = 0;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        client.insert(insertParam);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
 //                .withParamsInJson(searchParamStr)
@@ -211,7 +226,8 @@ package com;//package com;
 //
 //    // Binary tests
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
-//    public void test_search_collection_not_existed_binary(MilvusClient client, String collectionName)  {
+//    public void test_search_collection_not_existed_binary(MilvusClient client, String
+// collectionName)  {
 //        String collectionNameNew = collectionName + "_";
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionNameNew)
 //                .withParamsInJson(searchParamStr)
@@ -224,7 +240,8 @@ package com;//package com;
 //
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
 //    public void test_search_ids_binary(MilvusClient client, String collectionName)  {
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
 //        InsertResponse res_insert = client.insert(insertParam);
 //        client.flush(collectionName);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
@@ -232,7 +249,8 @@ package com;//package com;
 //                .withTopK(top_k)
 //                .withIDs(res_insert.getVectorIds())
 //                .build();
-//        List<List<SearchResponse.QueryResult>> res_search = client.searchByIds(searchParam).getQueryResultsList();
+//        List<List<SearchResponse.QueryResult>> res_search =
+// client.searchByIds(searchParam).getQueryResultsList();
 //        for (int i = 0; i < top_k; i++) {
 //            long insert_id = res_insert.getVectorIds().get(i);
 //            long get_id = res_search.get(i).get(0).getVectorId();
@@ -245,7 +263,8 @@ package com;//package com;
 //    public void test_search_invalid_n_probe_binary(MilvusClient client, String collectionName)  {
 //        int n_probe_new = 0;
 //        String searchParamStrNew = Utils.setSearchParam(n_probe_new);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
 //        client.insert(insertParam);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
 //                .withParamsInJson(searchParamStrNew)
@@ -259,7 +278,8 @@ package com;//package com;
 //    @Test(dataProvider = "BinaryCollection", dataProviderClass = MainClass.class)
 //    public void test_search_invalid_top_k_binary(MilvusClient client, String collectionName) {
 //        int top_k_new = 0;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withBinaryVectors(vectorsBinary).build();
 //        client.insert(insertParam);
 //        SearchByIdsParam searchParam = new SearchByIdsParam.Builder(collectionName)
 //                .withParamsInJson(searchParamStr)
@@ -270,4 +290,4 @@ package com;//package com;
 //        assert (!res_search.getResponse().ok());
 //    }
 //
-//}
+// }

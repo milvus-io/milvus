@@ -1,15 +1,15 @@
-package com;//package com;
+package com; // package com;
 //
-//import io.milvus.client.*;
-//import org.apache.commons.cli.*;
+// import io.milvus.client.*;
+// import org.apache.commons.cli.*;
 //
-//import java.util.List;
-//import java.util.concurrent.ForkJoinPool;
-//import java.util.concurrent.TimeUnit;
-//import java.util.stream.Collectors;
-//import java.util.stream.Stream;
+// import java.util.List;
+// import java.util.concurrent.ForkJoinPool;
+// import java.util.concurrent.TimeUnit;
+// import java.util.stream.Collectors;
+// import java.util.stream.Stream;
 //
-//public class TestPS {
+// public class TestPS {
 //    private static int dimension = 128;
 //    private static String host = "127.0.0.1";
 //    private static String port = "19530";
@@ -73,7 +73,8 @@ package com;//package com;
 //        vectorIds = Stream.iterate(0L, n -> n)
 //                .limit(nb)
 //                .collect(Collectors.toList());
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withVectorIds(vectorIds).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).withVectorIds(vectorIds).build();
 //        ForkJoinPool executor_search = new ForkJoinPool();
 //        for (int i = 0; i < loops; i++) {
 //            executor_search.execute(
@@ -81,7 +82,8 @@ package com;//package com;
 //                        InsertResponse res_insert = client.insert(insertParam);
 //                        assert (res_insert.getResponse().ok());
 //                        System.out.println("In insert");
-//                        SearchParam searchParam = new SearchParam.Builder(collectionName).withFloatVectors(queryVectors).withTopK(top_k).build();
+//                        SearchParam searchParam = new
+// SearchParam.Builder(collectionName).withFloatVectors(queryVectors).withTopK(top_k).build();
 //                        SearchResponse res_search = client.search(searchParam);
 //                        assert (res_search.getResponse().ok());
 //                    });
@@ -91,4 +93,4 @@ package com;//package com;
 //        CountEntitiesResponse getTableRowCountResponse = client.countEntities(collectionName);
 //        System.out.println(getTableRowCountResponse.getCollectionEntityCount());
 //    }
-//}
+// }
