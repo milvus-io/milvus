@@ -40,14 +40,9 @@ class Utils {
 /* BoolConfigTest */
 class BoolConfigTest : public testing::Test, public Utils<bool> {};
 
-TEST_F(BoolConfigTest, nullptr_init_test) {
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, nullptr, true, nullptr);
-    ASSERT_DEATH(bool_config->Init(), "nullptr");
-}
-
 TEST_F(BoolConfigTest, init_twice_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, nullptr);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, nullptr);
     ASSERT_DEATH(
         {
             bool_config->Init();
@@ -57,27 +52,27 @@ TEST_F(BoolConfigTest, init_twice_test) {
 }
 
 TEST_F(BoolConfigTest, non_init_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, nullptr);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, nullptr);
     ASSERT_DEATH(bool_config->Set("false", true), "uninitialized");
     ASSERT_DEATH(bool_config->Get(), "uninitialized");
 }
 
 TEST_F(BoolConfigTest, immutable_update_test) {
-    bool bool_value = false;
-    auto bool_config = CreateBoolConfig("b", _IMMUTABLE, &bool_value, true, nullptr);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _IMMUTABLE, bool_value, true, nullptr);
     bool_config->Init();
-    ASSERT_EQ(bool_value, true);
+    ASSERT_EQ(bool_value(), true);
 
     ConfigStatus status(SUCCESS, "");
     status = bool_config->Set("false", true);
     ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
-    ASSERT_EQ(bool_value, true);
+    ASSERT_EQ(bool_value(), true);
 }
 
 TEST_F(BoolConfigTest, set_invalid_value_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, nullptr);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, nullptr);
     bool_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -111,8 +106,8 @@ TEST_F(BoolConfigTest, set_invalid_value_test) {
 }
 
 TEST_F(BoolConfigTest, valid_check_fail_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, valid_check_failure);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_failure);
     bool_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -122,8 +117,8 @@ TEST_F(BoolConfigTest, valid_check_fail_test) {
 }
 
 TEST_F(BoolConfigTest, string_exception_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, valid_check_raise_string);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_raise_string);
     bool_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -133,8 +128,8 @@ TEST_F(BoolConfigTest, string_exception_test) {
 }
 
 TEST_F(BoolConfigTest, standard_exception_test) {
-    bool bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, &bool_value, true, valid_check_raise_exception);
+    Value<bool> bool_value;
+    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_raise_exception);
     bool_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -146,14 +141,9 @@ TEST_F(BoolConfigTest, standard_exception_test) {
 /* StringConfigTest */
 class StringConfigTest : public testing::Test, public Utils<std::string> {};
 
-TEST_F(StringConfigTest, nullptr_init_test) {
-    auto string_config = CreateStringConfig("s", true, nullptr, "Magic", nullptr);
-    ASSERT_DEATH(string_config->Init(), "nullptr");
-}
-
 TEST_F(StringConfigTest, init_twice_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", nullptr);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", nullptr);
     ASSERT_DEATH(
         {
             string_config->Init();
@@ -163,27 +153,27 @@ TEST_F(StringConfigTest, init_twice_test) {
 }
 
 TEST_F(StringConfigTest, non_init_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", nullptr);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", nullptr);
     ASSERT_DEATH(string_config->Set("value", true), "uninitialized");
     ASSERT_DEATH(string_config->Get(), "uninitialized");
 }
 
 TEST_F(StringConfigTest, immutable_update_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _IMMUTABLE, &string_value, "Magic", nullptr);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _IMMUTABLE, string_value, "Magic", nullptr);
     string_config->Init();
-    ASSERT_EQ(string_value, "Magic");
+    ASSERT_EQ(string_value(), "Magic");
 
     ConfigStatus status(SUCCESS, "");
     status = string_config->Set("cigaM", true);
     ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
-    ASSERT_EQ(string_value, "Magic");
+    ASSERT_EQ(string_value(), "Magic");
 }
 
 TEST_F(StringConfigTest, valid_check_fail_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", valid_check_failure);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_failure);
     string_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -193,8 +183,8 @@ TEST_F(StringConfigTest, valid_check_fail_test) {
 }
 
 TEST_F(StringConfigTest, string_exception_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", valid_check_raise_string);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_raise_string);
     string_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -204,8 +194,8 @@ TEST_F(StringConfigTest, string_exception_test) {
 }
 
 TEST_F(StringConfigTest, standard_exception_test) {
-    std::string string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, &string_value, "Magic", valid_check_raise_exception);
+    Value<std::string> string_value;
+    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_raise_exception);
     string_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -217,14 +207,9 @@ TEST_F(StringConfigTest, standard_exception_test) {
 /* IntegerConfigTest */
 class IntegerConfigTest : public testing::Test, public Utils<int64_t> {};
 
-TEST_F(IntegerConfigTest, nullptr_init_test) {
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, nullptr, 19530, nullptr);
-    ASSERT_DEATH(integer_config->Init(), "nullptr");
-}
-
 TEST_F(IntegerConfigTest, init_twice_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, nullptr);
     ASSERT_DEATH(
         {
             integer_config->Init();
@@ -234,30 +219,30 @@ TEST_F(IntegerConfigTest, init_twice_test) {
 }
 
 TEST_F(IntegerConfigTest, non_init_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, nullptr);
     ASSERT_DEATH(integer_config->Set("42", true), "uninitialized");
     ASSERT_DEATH(integer_config->Get(), "uninitialized");
 }
 
 TEST_F(IntegerConfigTest, immutable_update_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", _IMMUTABLE, 1024, 65535, &integer_value, 19530, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", _IMMUTABLE, 1024, 65535, integer_value, 19530, nullptr);
     integer_config->Init();
-    ASSERT_EQ(integer_value, 19530);
+    ASSERT_EQ(integer_value(), 19530);
 
     ConfigStatus status(SUCCESS, "");
     status = integer_config->Set("2048", true);
     ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
-    ASSERT_EQ(integer_value, 19530);
+    ASSERT_EQ(integer_value(), 19530);
 }
 
 TEST_F(IntegerConfigTest, set_invalid_value_test) {
 }
 
 TEST_F(IntegerConfigTest, valid_check_fail_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, valid_check_failure);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_failure);
     integer_config->Init();
     ConfigStatus status(SUCCESS, "");
     status = integer_config->Set("2048", true);
@@ -266,8 +251,8 @@ TEST_F(IntegerConfigTest, valid_check_fail_test) {
 }
 
 TEST_F(IntegerConfigTest, string_exception_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, valid_check_raise_string);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_string);
     integer_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -277,9 +262,9 @@ TEST_F(IntegerConfigTest, string_exception_test) {
 }
 
 TEST_F(IntegerConfigTest, standard_exception_test) {
-    int64_t integer_value;
+    Value<int64_t> integer_value;
     auto integer_config =
-        CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, valid_check_raise_exception);
+        CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_exception);
     integer_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -289,8 +274,8 @@ TEST_F(IntegerConfigTest, standard_exception_test) {
 }
 
 TEST_F(IntegerConfigTest, out_of_range_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, &integer_value, 19530, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, nullptr);
     integer_config->Init();
 
     {
@@ -309,8 +294,8 @@ TEST_F(IntegerConfigTest, out_of_range_test) {
 }
 
 TEST_F(IntegerConfigTest, invalid_bound_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 100, 0, &integer_value, 50, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 100, 0, integer_value, 50, nullptr);
     integer_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -320,8 +305,8 @@ TEST_F(IntegerConfigTest, invalid_bound_test) {
 }
 
 TEST_F(IntegerConfigTest, invalid_format_test) {
-    int64_t integer_value;
-    auto integer_config = CreateIntegerConfig("i", true, 0, 100, &integer_value, 50, nullptr);
+    Value<int64_t> integer_value;
+    auto integer_config = CreateIntegerConfig("i", true, 0, 100, integer_value, 50, nullptr);
     integer_config->Init();
 
     {
@@ -370,14 +355,9 @@ TEST_F(IntegerConfigTest, invalid_format_test) {
 /* FloatingConfigTest */
 class FloatingConfigTest : public testing::Test, public Utils<double> {};
 
-TEST_F(FloatingConfigTest, nullptr_init_test) {
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, nullptr, 4.5, nullptr);
-    ASSERT_DEATH(floating_config->Init(), "nullptr");
-}
-
 TEST_F(FloatingConfigTest, init_twice_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, nullptr);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, nullptr);
     ASSERT_DEATH(
         {
             floating_config->Init();
@@ -387,17 +367,17 @@ TEST_F(FloatingConfigTest, init_twice_test) {
 }
 
 TEST_F(FloatingConfigTest, non_init_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, nullptr);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, nullptr);
     ASSERT_DEATH(floating_config->Set("3.14", true), "uninitialized");
     ASSERT_DEATH(floating_config->Get(), "uninitialized");
 }
 
 TEST_F(FloatingConfigTest, immutable_update_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", _IMMUTABLE, 1.0, 9.9, &floating_value, 4.5, nullptr);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", _IMMUTABLE, 1.0, 9.9, floating_value, 4.5, nullptr);
     floating_config->Init();
-    ASSERT_FLOAT_EQ(floating_value, 4.5);
+    ASSERT_FLOAT_EQ(floating_value(), 4.5);
 
     ConfigStatus status(SUCCESS, "");
     status = floating_config->Set("1.23", true);
@@ -409,8 +389,8 @@ TEST_F(FloatingConfigTest, set_invalid_value_test) {
 }
 
 TEST_F(FloatingConfigTest, valid_check_fail_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, valid_check_failure);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_failure);
     floating_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -420,8 +400,8 @@ TEST_F(FloatingConfigTest, valid_check_fail_test) {
 }
 
 TEST_F(FloatingConfigTest, string_exception_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, valid_check_raise_string);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_raise_string);
     floating_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -431,8 +411,8 @@ TEST_F(FloatingConfigTest, string_exception_test) {
 }
 
 TEST_F(FloatingConfigTest, standard_exception_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, valid_check_raise_exception);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_raise_exception);
     floating_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -442,8 +422,8 @@ TEST_F(FloatingConfigTest, standard_exception_test) {
 }
 
 TEST_F(FloatingConfigTest, out_of_range_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, &floating_value, 4.5, valid_check_raise_exception);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_raise_exception);
     floating_config->Init();
 
     {
@@ -462,8 +442,8 @@ TEST_F(FloatingConfigTest, out_of_range_test) {
 }
 
 TEST_F(FloatingConfigTest, invalid_bound_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 9.9, 1.0, &floating_value, 4.5, valid_check_raise_exception);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 9.9, 1.0, floating_value, 4.5, valid_check_raise_exception);
     floating_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -473,8 +453,8 @@ TEST_F(FloatingConfigTest, invalid_bound_test) {
 }
 
 TEST_F(FloatingConfigTest, DISABLED_invalid_format_test) {
-    double floating_value;
-    auto floating_config = CreateFloatingConfig("f", true, 1.0, 100.0, &floating_value, 4.5, nullptr);
+    Value<double> floating_value;
+    auto floating_config = CreateFloatingConfig("f", true, 1.0, 100.0, floating_value, 4.5, nullptr);
     floating_config->Init();
 
     {
@@ -495,27 +475,12 @@ TEST_F(FloatingConfigTest, DISABLED_invalid_format_test) {
 /* EnumConfigTest */
 class EnumConfigTest : public testing::Test, public Utils<int64_t> {};
 
-TEST_F(EnumConfigTest, nullptr_init_test) {
-    configEnum testEnum{
-        {"e", 1},
-    };
-    int64_t testEnumValue;
-    auto enum_config_1 = CreateEnumConfig("e", _MODIFIABLE, &testEnum, nullptr, 2, nullptr);
-    ASSERT_DEATH(enum_config_1->Init(), "nullptr");
-
-    auto enum_config_2 = CreateEnumConfig("e", _MODIFIABLE, nullptr, &testEnumValue, 2, nullptr);
-    ASSERT_DEATH(enum_config_2->Init(), "nullptr");
-
-    auto enum_config_3 = CreateEnumConfig("e", _MODIFIABLE, nullptr, nullptr, 2, nullptr);
-    ASSERT_DEATH(enum_config_3->Init(), "nullptr");
-}
-
 TEST_F(EnumConfigTest, init_twice_test) {
     configEnum testEnum{
         {"e", 1},
     };
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 2, nullptr);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 2, nullptr);
     ASSERT_DEATH(
         {
             enum_config->Init();
@@ -528,8 +493,8 @@ TEST_F(EnumConfigTest, non_init_test) {
     configEnum testEnum{
         {"e", 1},
     };
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 2, nullptr);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 2, nullptr);
     ASSERT_DEATH(enum_config->Set("e", true), "uninitialized");
     ASSERT_DEATH(enum_config->Get(), "uninitialized");
 }
@@ -540,23 +505,23 @@ TEST_F(EnumConfigTest, immutable_update_test) {
         {"b", 2},
         {"c", 3},
     };
-    int64_t enum_value = 0;
-    auto enum_config = CreateEnumConfig("e", _IMMUTABLE, &testEnum, &enum_value, 1, nullptr);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _IMMUTABLE, &testEnum, enum_value, 1, nullptr);
     enum_config->Init();
-    ASSERT_EQ(enum_value, 1);
+    ASSERT_EQ(enum_value(), 1);
 
     ConfigStatus status(SUCCESS, "");
     status = enum_config->Set("b", true);
     ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
-    ASSERT_EQ(enum_value, 1);
+    ASSERT_EQ(enum_value(), 1);
 }
 
 TEST_F(EnumConfigTest, set_invalid_value_check) {
     configEnum testEnum{
         {"a", 1},
     };
-    int64_t enum_value = 0;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, nullptr);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, nullptr);
     enum_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -567,8 +532,8 @@ TEST_F(EnumConfigTest, set_invalid_value_check) {
 
 TEST_F(EnumConfigTest, empty_enum_test) {
     configEnum testEnum{};
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 2, nullptr);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 2, nullptr);
     ASSERT_DEATH(enum_config->Init(), "empty");
 }
 
@@ -578,8 +543,8 @@ TEST_F(EnumConfigTest, valid_check_fail_test) {
         {"b", 2},
         {"c", 3},
     };
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, valid_check_failure);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_failure);
     enum_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -594,8 +559,8 @@ TEST_F(EnumConfigTest, string_exception_test) {
         {"b", 2},
         {"c", 3},
     };
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, valid_check_raise_string);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_raise_string);
     enum_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -610,8 +575,8 @@ TEST_F(EnumConfigTest, standard_exception_test) {
         {"b", 2},
         {"c", 3},
     };
-    int64_t enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, &enum_value, 1, valid_check_raise_exception);
+    Value<int64_t> enum_value;
+    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_raise_exception);
     enum_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -623,14 +588,9 @@ TEST_F(EnumConfigTest, standard_exception_test) {
 /* SizeConfigTest */
 class SizeConfigTest : public testing::Test, public Utils<int64_t> {};
 
-TEST_F(SizeConfigTest, nullptr_init_test) {
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, nullptr, 2048, nullptr);
-    ASSERT_DEATH(size_config->Init(), "nullptr");
-}
-
 TEST_F(SizeConfigTest, init_twice_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     ASSERT_DEATH(
         {
             size_config->Init();
@@ -640,30 +600,30 @@ TEST_F(SizeConfigTest, init_twice_test) {
 }
 
 TEST_F(SizeConfigTest, non_init_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     ASSERT_DEATH(size_config->Set("3000", true), "uninitialized");
     ASSERT_DEATH(size_config->Get(), "uninitialized");
 }
 
 TEST_F(SizeConfigTest, immutable_update_test) {
-    int64_t size_value = 0;
-    auto size_config = CreateSizeConfig("i", _IMMUTABLE, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", _IMMUTABLE, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
-    ASSERT_EQ(size_value, 2048);
+    ASSERT_EQ(size_value(), 2048);
 
     ConfigStatus status(SUCCESS, "");
     status = size_config->Set("3000", true);
     ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
-    ASSERT_EQ(size_value, 2048);
+    ASSERT_EQ(size_value(), 2048);
 }
 
 TEST_F(SizeConfigTest, set_invalid_value_test) {
 }
 
 TEST_F(SizeConfigTest, valid_check_fail_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, valid_check_failure);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_failure);
     size_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -673,8 +633,8 @@ TEST_F(SizeConfigTest, valid_check_fail_test) {
 }
 
 TEST_F(SizeConfigTest, string_exception_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, valid_check_raise_string);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_raise_string);
     size_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -684,8 +644,8 @@ TEST_F(SizeConfigTest, string_exception_test) {
 }
 
 TEST_F(SizeConfigTest, standard_exception_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, valid_check_raise_exception);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_raise_exception);
     size_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -695,8 +655,8 @@ TEST_F(SizeConfigTest, standard_exception_test) {
 }
 
 TEST_F(SizeConfigTest, out_of_range_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
 
     {
@@ -715,8 +675,8 @@ TEST_F(SizeConfigTest, out_of_range_test) {
 }
 
 TEST_F(SizeConfigTest, negative_integer_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
     ConfigStatus status(SUCCESS, "");
     status = size_config->Set("-3KB", true);
@@ -725,8 +685,8 @@ TEST_F(SizeConfigTest, negative_integer_test) {
 }
 
 TEST_F(SizeConfigTest, invalid_bound_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 100, 0, &size_value, 50, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 100, 0, size_value, 50, nullptr);
     size_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -736,8 +696,8 @@ TEST_F(SizeConfigTest, invalid_bound_test) {
 }
 
 TEST_F(SizeConfigTest, invalid_unit_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
 
     ConfigStatus status(SUCCESS, "");
@@ -747,8 +707,8 @@ TEST_F(SizeConfigTest, invalid_unit_test) {
 }
 
 TEST_F(SizeConfigTest, invalid_format_test) {
-    int64_t size_value;
-    auto size_config = CreateSizeConfig("i", true, 1024, 4096, &size_value, 2048, nullptr);
+    Value<int64_t> size_value;
+    auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
 
     {

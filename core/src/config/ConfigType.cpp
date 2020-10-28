@@ -146,7 +146,7 @@ BaseConfig::Init() {
     inited_ = true;
 }
 
-BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, bool* config, bool default_value,
+BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
                        std::function<bool(bool val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -157,8 +157,7 @@ BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, boo
 void
 BoolConfig::Init() {
     BaseConfig::Init();
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -181,7 +180,7 @@ BoolConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = value;
+        config_.set(value);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -193,10 +192,10 @@ BoolConfig::Set(const std::string& val, bool update) {
 std::string
 BoolConfig::Get() {
     assertm(inited_, "uninitialized");
-    return *config_ ? "true" : "false";
+    return config_() ? "true" : "false";
 }
 
-StringConfig::StringConfig(const char* name, const char* alias, bool modifiable, std::string* config,
+StringConfig::StringConfig(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
                            const char* default_value,
                            std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
@@ -208,8 +207,7 @@ StringConfig::StringConfig(const char* name, const char* alias, bool modifiable,
 void
 StringConfig::Init() {
     BaseConfig::Init();
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -227,7 +225,7 @@ StringConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = val;
+        config_.set(val);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -239,10 +237,10 @@ StringConfig::Set(const std::string& val, bool update) {
 std::string
 StringConfig::Get() {
     assertm(inited_, "uninitialized");
-    return *config_;
+    return config_();
 }
 
-EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, int64_t* config,
+EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, Value<int64_t>& config,
                        int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -256,8 +254,7 @@ EnumConfig::Init() {
     BaseConfig::Init();
     assert(enum_value_ != nullptr);
     assertm(not enum_value_->empty(), "enum value empty");
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -287,7 +284,7 @@ EnumConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = value;
+        config_.set(value);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -299,8 +296,9 @@ EnumConfig::Set(const std::string& val, bool update) {
 std::string
 EnumConfig::Get() {
     assertm(inited_, "uninitialized");
+    auto val = config_();
     for (auto& it : *enum_value_) {
-        if (*config_ == it.second) {
+        if (val == it.second) {
             return it.first;
         }
     }
@@ -308,7 +306,7 @@ EnumConfig::Get() {
 }
 
 IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
-                             int64_t upper_bound, int64_t* config, int64_t default_value,
+                             int64_t upper_bound, Value<int64_t>& config, int64_t default_value,
                              std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -321,8 +319,7 @@ IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiabl
 void
 IntegerConfig::Init() {
     BaseConfig::Init();
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -354,7 +351,7 @@ IntegerConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = value;
+        config_.set(value);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -366,11 +363,11 @@ IntegerConfig::Set(const std::string& val, bool update) {
 std::string
 IntegerConfig::Get() {
     assertm(inited_, "uninitialized");
-    return std::to_string(*config_);
+    return std::to_string(config_());
 }
 
 FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound,
-                               double upper_bound, double* config, double default_value,
+                               double upper_bound, Value<double>& config, double default_value,
                                std::function<bool(double val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -383,8 +380,7 @@ FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifia
 void
 FloatingConfig::Init() {
     BaseConfig::Init();
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -410,7 +406,7 @@ FloatingConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = value;
+        config_.set(value);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -422,11 +418,11 @@ FloatingConfig::Set(const std::string& val, bool update) {
 std::string
 FloatingConfig::Get() {
     assertm(inited_, "uninitialized");
-    return std::to_string(*config_);
+    return std::to_string(config_());
 }
 
 SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                       int64_t* config, int64_t default_value,
+                       Value<int64_t>& config, int64_t default_value,
                        std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseConfig(name, alias, modifiable),
       config_(config),
@@ -439,8 +435,7 @@ SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int
 void
 SizeConfig::Init() {
     BaseConfig::Init();
-    assert(config_ != nullptr);
-    *config_ = default_value_;
+    config_.set(default_value_);
 }
 
 ConfigStatus
@@ -470,7 +465,7 @@ SizeConfig::Set(const std::string& val, bool update) {
             return ConfigStatus(SetReturn::INVALID, err);
         }
 
-        *config_ = value;
+        config_.set(value);
         return ConfigStatus(SetReturn::SUCCESS, "");
     } catch (std::exception& e) {
         return ConfigStatus(SetReturn::EXCEPTION, e.what());
@@ -482,17 +477,18 @@ SizeConfig::Set(const std::string& val, bool update) {
 std::string
 SizeConfig::Get() {
     assertm(inited_, "uninitialized");
+    auto val = config_();
     const int64_t gb = 1024ll * 1024 * 1024;
     const int64_t mb = 1024ll * 1024;
     const int64_t kb = 1024ll;
-    if (*config_ % gb == 0) {
-        return std::to_string(*config_ / gb) + "GB";
-    } else if (*config_ % mb == 0) {
-        return std::to_string(*config_ / mb) + "MB";
-    } else if (*config_ % kb == 0) {
-        return std::to_string(*config_ / kb) + "KB";
+    if (val % gb == 0) {
+        return std::to_string(val / gb) + "GB";
+    } else if (val % mb == 0) {
+        return std::to_string(val / mb) + "MB";
+    } else if (val % kb == 0) {
+        return std::to_string(val / kb) + "KB";
     } else {
-        return std::to_string(*config_);
+        return std::to_string(val);
     }
 }
 

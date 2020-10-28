@@ -17,24 +17,9 @@
 #include <vector>
 
 #include "config/ConfigType.h"
+#include "config/Value.h"
 
 namespace milvus {
-
-extern std::mutex&
-GetConfigMutex();
-
-template <typename T>
-class ConfigValue {
- public:
-    const T&
-    operator()() {
-        std::lock_guard<std::mutex> lock(GetConfigMutex());
-        return value;
-    }
-
- public:
-    T value;
-};
 
 enum ClusterRole {
     RW = 1,
@@ -71,10 +56,10 @@ const configEnum ClusteringMap{
 };
 
 struct ServerConfig {
-    using String = ConfigValue<std::string>;
-    using Bool = ConfigValue<bool>;
-    using Integer = ConfigValue<int64_t>;
-    using Floating = ConfigValue<double>;
+    using String = Value<std::string>;
+    using Bool = Value<bool>;
+    using Integer = Value<int64_t>;
+    using Floating = Value<double>;
 
     String version;
 
