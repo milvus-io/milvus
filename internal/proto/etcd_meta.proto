@@ -12,6 +12,7 @@ message TenantMeta {
   string query_channel_id = 4;
 }
 
+
 message ProxyMeta {
   uint64 id = 1;
   common.Address address = 2;
