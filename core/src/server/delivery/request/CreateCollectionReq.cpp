@@ -18,6 +18,7 @@
 
 #include <fiu/fiu-local.h>
 #include <set>
+#include <utility>
 
 namespace milvus {
 namespace server {
@@ -57,6 +58,17 @@ CreateCollectionReq::OnExecute() {
             STATUS_CHECK(ValidateSegmentRowLimit(segment_row_limit));
         }
 
+        // validate field names
+        std::unordered_map<std::string, FieldSchema> valid_fields;
+        for (auto& field_kv : fields_) {
+            auto field_name = field_kv.first;
+            auto& field_schema = field_kv.second;
+
+            STATUS_CHECK(ValidateFieldName(field_name));
+
+            valid_fields.insert(std::make_pair(field_name, field_schema));
+        }
+
         rc.RecordSection("check validation");
 
         // step 2: create snapshot collection context
@@ -64,15 +76,13 @@ CreateCollectionReq::OnExecute() {
         auto collection_schema = std::make_shared<engine::snapshot::Collection>(collection_name_, extra_params_);
 
         create_collection_context.collection = collection_schema;
-        for (auto& field_kv : fields_) {
+        for (auto& field_kv : valid_fields) {
             auto& field_name = field_kv.first;
             auto& field_schema = field_kv.second;
 
             auto& field_type = field_schema.field_type_;
             auto& field_params = field_schema.field_params_;
             auto& index_params = field_schema.index_params_;
-
-            STATUS_CHECK(ValidateFieldName(field_name));
 
             std::string index_name;
             if (index_params.contains("name")) {

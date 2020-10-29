@@ -32,8 +32,8 @@ class DescribeIndexReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const std::string field_name_;
+    std::string collection_name_;
+    std::string field_name_;
     std::string& index_name_;
     milvus::json& json_params_;
 };

@@ -33,9 +33,9 @@ class DropIndexReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const std::string field_name_;
-    const std::string index_name_;
+    std::string collection_name_;
+    std::string field_name_;
+    std::string index_name_;
 };
 
 }  // namespace server

@@ -554,7 +554,6 @@ def gen_invalid_strs():
         # "",
         # None,
         "12 s",
-        " siede ",
         "(mn)",
         "中文",
         "a".join("a" for i in range(256))
