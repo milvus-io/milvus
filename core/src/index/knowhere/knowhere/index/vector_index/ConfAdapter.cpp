@@ -28,8 +28,11 @@ namespace knowhere {
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
 #define DEFAULT_MIN_ROWS 1  // minimum size for build index
+#ifdef MILVUS_FPGA_VERSION
+#define DEFAULT_MAX_ROWS 300000000
+#else
 #define DEFAULT_MAX_ROWS 50000000
-
+#endif
 #define CheckIntByRange(key, min, max)                                                                   \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
         oricfg[key].get<int64_t>() < min) {                                                              \
