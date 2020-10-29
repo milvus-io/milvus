@@ -51,7 +51,8 @@ IVFPQ::CopyCpuToGpu(const int64_t device_id, const Config& config) {
     auto ivfpq_index = dynamic_cast<faiss::IndexIVFPQ*>(index_.get());
     int64_t dim = ivfpq_index->d;
     int64_t m = ivfpq_index->pq.M;
-    if (!IVFPQConfAdapter::GetValidGPUM(dim, m)) {
+    int64_t nbits = ivfpq_index->pq.nbits;
+    if (!IVFPQConfAdapter::CheckGPUPQParams(dim, m, nbits)) {
         return nullptr;
     }
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {

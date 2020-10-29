@@ -52,13 +52,13 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     CheckTrain(Config& oricfg, const IndexMode mode) override;
 
     static bool
-    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
+    CheckPQParams(int64_t dimension, int64_t m, int64_t nbits, IndexMode& mode);
 
     static bool
-    GetValidGPUM(int64_t dimension, int64_t m);
+    CheckGPUPQParams(int64_t dimension, int64_t m, int64_t nbits);
 
     static bool
-    GetValidCPUM(int64_t dimension, int64_t m);
+    CheckCPUPQParams(int64_t dimension, int64_t m);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
