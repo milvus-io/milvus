@@ -43,22 +43,26 @@ print_banner() {
     std::cout << " /_/  /_/___/____/___/\\____/___/     " << std::endl;
     std::cout << std::endl;
     std::cout << "Welcome to use Milvus!" << std::endl;
-    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << ", with "
+    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME
+              << ", with "
 #ifdef WITH_MKL
-              << "MKL"
+                 "MKL"
 #else
-              << "OpenBLAS"
+                 "OpenBLAS"
 #endif
-              << " library." << std::endl;
+                 " library."
+              << std::endl;
+    std::cout << "You are using Milvus "
 #ifdef MILVUS_GPU_VERSION
-    std::cout << "You are using Milvus GPU edition" << std::endl;
+                 "GPU"
 #else
+                 "CPU"
+#endif
 #ifdef MILVUS_FPGA_VERSION
-    std::cout << "You are using Milvus FPGA edition" << std::endl;
-#else
-    std::cout << "You are using Milvus CPU edition" << std::endl;
+                 " + FPGA"
 #endif
-#endif
+                 " edition"
+              << std::endl;
     std::cout << "Last commit id: " << LAST_COMMIT_ID << std::endl;
     std::cout << std::endl;
 }

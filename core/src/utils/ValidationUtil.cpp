@@ -41,7 +41,7 @@ namespace {
 constexpr size_t COLLECTION_NAME_SIZE_LIMIT = 255;
 constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 #ifdef MILVUS_FPGA_VERSION
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 65536; //due to max size memory of fpga is 64G
+constexpr int32_t INDEX_FILE_SIZE_LIMIT = 65536;  // due to max size memory of fpga is 64G
 #else
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
 #endif
