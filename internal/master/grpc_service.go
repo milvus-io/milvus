@@ -2,43 +2,23 @@ package master
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"google.golang.org/grpc"
-	"net"
-	"strconv"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"io"
+	"log"
+	"time"
 )
 
-func Server(ch chan *schemapb.CollectionSchema, errch chan error, kvbase kv.Base) {
-	defaultGRPCPort := ":"
-	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
-	lis, err := net.Listen("tcp", defaultGRPCPort)
-	if err != nil {
-		//		log.Fatal("failed to listen: %v", err)
-		errch <- err
-		return
-	}
-	s := grpc.NewServer()
-	masterpb.RegisterMasterServer(s, Master{CreateRequest: ch, kvBase: kvbase})
-	if err := s.Serve(lis); err != nil {
-		//		log.Fatalf("failed to serve: %v", err)
-		errch <- err
-		return
-	}
-}
 
-type Master struct {
-	CreateRequest chan *schemapb.CollectionSchema
-	kvBase        kv.Base
-	scheduler     *ddRequestScheduler
-	mt            metaTable
-}
+const slowThreshold = 5 * time.Millisecond
+
+
 
 func (ms Master) CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest) (*commonpb.Status, error) {
 	var t task = &createCollectionTask{
@@ -146,4 +126,40 @@ func (ms Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 			Reason:    "",
 		},
 	}, nil
+}
+
+
+//----------------------------------------Internal GRPC Service--------------------------------
+
+// Tso implements gRPC PDServer.
+func (ms *Master) Tso(stream masterpb.Master_TsoServer) error {
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		start := time.Now()
+
+		count := request.GetCount()
+		ts, err := ms.tsoAllocator.GenerateTSO(count)
+		if err != nil {
+			return status.Errorf(codes.Unknown, err.Error())
+		}
+
+		elapsed := time.Since(start)
+		if elapsed > slowThreshold {
+			log.Println("get timestamp too slow", zap.Duration("cost", elapsed))
+		}
+		response := &internalpb.TsoResponse{
+			Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+			Timestamp: &ts,
+			Count:     count,
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
 }

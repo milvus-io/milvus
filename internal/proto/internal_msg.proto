@@ -29,6 +29,35 @@ enum ReqType {
     kSearch = 500;
 }
 
+enum PeerRole {
+
+    Master = 0;
+
+    Reader = 1;
+
+    Writer = 2;
+
+    Proxy = 3;
+
+}
+
+message TimestampMsg {
+    int64 physical = 1;
+    int64 logical = 2;
+}
+
+message TsoRequest {
+    int64 peer_id = 1;	
+    PeerRole role = 2;
+    uint32 count = 3;
+}
+
+message TsoResponse {
+    common.Status status = 1;
+    TimestampMsg timestamp = 2;
+    uint32 count = 3;
+}
+
 
 message CreateCollectionRequest {
     ReqType req_type = 1;

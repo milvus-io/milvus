@@ -10,7 +10,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
-func NewPulsarClient() PulsarClient {
+func NewPulsarClient() *PulsarClient {
 	pulsarAddr := "pulsar://"
 	pulsarAddr += conf.Config.Pulsar.Address
 	pulsarAddr += ":"
@@ -24,7 +24,7 @@ func NewPulsarClient() PulsarClient {
 		log.Fatalf("Could not instantiate Pulsar client: %v", err)
 	}
 
-	return PulsarClient{
+	return &PulsarClient{
 		Client: client,
 	}
 }
