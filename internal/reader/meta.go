@@ -12,7 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -290,7 +290,7 @@ func (node *QueryNode) InitFromMeta() error {
 		DialTimeout: 5 * time.Second,
 	})
 	//defer cli.Close()
-	node.kvBase = kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
+	node.kvBase = kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
 	node.loadCollections()
 	node.loadSegments()
 	return nil

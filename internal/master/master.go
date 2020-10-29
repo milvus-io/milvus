@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
-	"github.com/zilliztech/milvus-distributed/internal/master/kv"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
@@ -80,7 +80,7 @@ func newKvBase() kv.Base {
 		DialTimeout: 5 * time.Second,
 	})
 	//	defer cli.Close()
-	kvBase := kv.NewEtcdKVBase(cli, conf.Config.Etcd.Rootpath)
+	kvBase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
 	return kvBase
 }
 

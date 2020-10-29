@@ -5,9 +5,9 @@ import (
 	"path"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/util/etcdutil"
-	"github.com/pingcap/log"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -21,24 +21,24 @@ var (
 	errTxnFailed = errors.New("failed to commit transaction")
 )
 
-type EtcdKVBase struct {
+type EtcdKV struct {
 	client   *clientv3.Client
 	rootPath string
 }
 
-// NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
-	return &EtcdKVBase{
+// NewEtcdKV creates a new etcd kv.
+func NewEtcdKV(client *clientv3.Client, rootPath string) *EtcdKV {
+	return &EtcdKV{
 		client:   client,
 		rootPath: rootPath,
 	}
 }
 
-func (kv *EtcdKVBase) Close() {
+func (kv *EtcdKV) Close() {
 	kv.client.Close()
 }
 
-func (kv *EtcdKVBase) LoadWithPrefix(key string) ([]string, []string) {
+func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string) {
 	key = path.Join(kv.rootPath, key)
 	println("in loadWithPrefix,", key)
 	resp, err := etcdutil.EtcdKVGet(kv.client, key, clientv3.WithPrefix())
@@ -61,7 +61,7 @@ func (kv *EtcdKVBase) LoadWithPrefix(key string) ([]string, []string) {
 	return keys, values
 }
 
-func (kv *EtcdKVBase) Load(key string) (string, error) {
+func (kv *EtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
@@ -76,7 +76,7 @@ func (kv *EtcdKVBase) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *EtcdKVBase) Save(key, value string) error {
+func (kv *EtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 
 	txn := NewSlowLogTxn(kv.client)
@@ -91,7 +91,7 @@ func (kv *EtcdKVBase) Save(key, value string) error {
 	return nil
 }
 
-func (kv *EtcdKVBase) Remove(key string) error {
+func (kv *EtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 
 	txn := NewSlowLogTxn(kv.client)
@@ -106,13 +106,13 @@ func (kv *EtcdKVBase) Remove(key string) error {
 	return nil
 }
 
-func (kv *EtcdKVBase) Watch(key string) clientv3.WatchChan {
+func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key)
 	return rch
 }
 
-func (kv *EtcdKVBase) WatchWithPrefix(key string) clientv3.WatchChan {
+func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix())
 	return rch
