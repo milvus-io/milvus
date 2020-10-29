@@ -16,23 +16,6 @@ import (
 
 var ip string
 var port int
-var fieldFloatName string = "float"
-var fieldIntName string = "int64"
-var fieldFloatVectorName string = "float_vector"
-var fieldBinaryVectorName string = "binary_vector"
-var dimension int = 128
-var segmentRowLimit int = 5000
-var defaultNb = 6000
-var defaultIntValues = utils.GenDefaultIntValues(defaultNb)
-var defaultFloatValues = utils.GenDefaultFloatValues(defaultNb)
-var defaultFloatVector = utils.GenFloatVectors(dimension, 1, false)
-var defaultFloatVectors = utils.GenFloatVectors(dimension, defaultNb, false)
-
-var defaultBinaryVector = utils.GenBinaryVectors(dimension, 1)
-var defaultBinaryVectors = utils.GenBinaryVectors(dimension, defaultNb)
-
-var l2Indexes = utils.GenIndexes(milvus.L2)
-var ipIndexes = utils.GenIndexes(milvus.IP)
 
 // type _Suite struct {
 // 	suite.Suite
@@ -67,26 +50,26 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 	var field milvus.Field
 	fields := []milvus.Field{
 		{
-			fieldFloatName,
+			utils.DefaultFieldFloatName,
 			milvus.FLOAT,
 			"",
 			"",
 		},
 	}
 	params := map[string]interface{}{
-		"dim": dimension,
+		"dim": utils.DefaultDimension,
 	}
 	paramsStr, _ := json.Marshal(params)
 	if fieldType == milvus.VECTORFLOAT {
 		field = milvus.Field{
-			fieldFloatVectorName,
+			utils.DefaultFieldFloatVectorName,
 			milvus.VECTORFLOAT,
 			"",
 			string(paramsStr),
 		}
 	} else {
 		field = milvus.Field{
-			fieldBinaryVectorName,
+			utils.DefaultFieldBinaryVectorName,
 			milvus.VECTORBINARY,
 			"",
 			string(paramsStr),
@@ -98,20 +81,20 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 func GenDefaultFieldValues(fieldType milvus.DataType) []milvus.FieldValue {
 	fieldValues := []milvus.FieldValue{
 		{
-			fieldFloatName,
-			defaultFloatValues,
+			utils.DefaultFieldFloatName,
+			utils.DefaultFloatValues,
 		},
 	}
 	var fieldValue milvus.FieldValue
 	if fieldType == milvus.VECTORFLOAT {
 		fieldValue = milvus.FieldValue{
-			fieldFloatVectorName,
-			defaultFloatVectors,
+			utils.DefaultFieldFloatVectorName,
+			utils.DefaultFloatVectors,
 		}
 	} else {
 		fieldValue = milvus.FieldValue{
-			fieldBinaryVectorName,
-			defaultBinaryVectors,
+			utils.DefaultFieldBinaryVectorName,
+			utils.DefaultBinaryVectors,
 		}
 	}
 	return append(fieldValues, fieldValue)
@@ -125,7 +108,7 @@ func Collection(autoid bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 		fmt.Printf(name)
 		params := map[string]interface{}{
 			"auto_id":           autoid,
-			"segment_row_count": segmentRowLimit,
+			"segment_row_count": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
 		mapping := milvus.Mapping{name, GenDefaultFields(vectorType), string(paramsStr)}
@@ -146,7 +129,7 @@ func GenCollectionParams(name string) (milvus.MilvusClient, milvus.Mapping) {
 	if client != nil {
 		params := map[string]interface{}{
 			"auto_id":           false,
-			"segment_row_count": segmentRowLimit,
+			"segment_row_count": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
 		mapping = milvus.Mapping{name, GenDefaultFields(milvus.VECTORFLOAT), string(paramsStr)}
