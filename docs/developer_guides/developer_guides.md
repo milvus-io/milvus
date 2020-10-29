@@ -385,6 +385,43 @@ func NewIdAllocator() *IdAllocator
 
 
 
+#### 5.4 KV
+
+###### 5.4.1 KV Base
+
+```go
+type KVBase interface {
+	Load(key string) (string, error)
+  MultiLoad(keys []string)
+	Save(key, value string) error
+  MultiSave(kvs map[string]string)
+	Remove(key string) error
+  MultiRemove(keys []string)
+	Watch(key string) clientv3.WatchChan
+	WatchWithPrefix(key string) clientv3.WatchChan
+	LoadWithPrefix(key string) ( []string, []string)
+}
+```
+
+* *MultiLoad(keys []string)* Load multiple kv pairs. Loads are done transactional.
+* *MultiSave(kvs map[string]string)* Save multiple kv pairs. Saves are done transactional.
+* *MultiRemove(keys []string)* Remove multiple kv pairs. Removals are done transactional.
+
+
+
+###### 5.4.2 Etcd KV
+
+```go
+type EtcdKV struct {
+	client   *clientv3.Client
+	rootPath string
+}
+
+func NewEtcdKV(etcdAddr string, rootPath string) *EtcdKV
+```
+
+EtcdKV implements all *KVBase* interfaces.
+
 
 
 ## 6. Proxy
@@ -408,8 +445,6 @@ type Proxy struct {
 func (proxy *Proxy) Start() error
 func NewProxy(ctx context.Context) *Proxy
 ```
-
-
 
 #### Global Parameter Table
 
@@ -639,7 +674,6 @@ func newTimeTick(ctx context.Context, tickStep Timestamp, syncInterval Timestamp
 *Start()* will enter a loop. On each *tickStep*, it tries to send a *TIME_TICK* typed *TsMsg* into *ttStream*. After each *syncInterval*, it sychronizes its *wallTick* with *tsAllocator* by calling *synchronize()*. When *currentTick + tickStep < wallTick* holds, it will update *currentTick* with *wallTick* on next tick. Otherwise, it will update *currentTick* with *currentTick + tickStep*.
 
 
-
 * Statistics
 
 ```go
@@ -752,11 +786,11 @@ func (unmarshaler *QueryReqUnmarshaler) Unmarshal(input *pulsar.Message) (*TsMsg
 
 
 
-## 5. Master
+## 10. Master
 
 
 
-#### 5.1 Interfaces (RPC)
+#### 10.1 Interfaces (RPC)
 
 | RPC                | description                                                  |
 | :----------------- | ------------------------------------------------------------ |
@@ -778,7 +812,7 @@ func (unmarshaler *QueryReqUnmarshaler) Unmarshal(input *pulsar.Message) (*TsMsg
 
 
 
-#### 5.2 Master Instance
+#### 10.2 Master Instance
 
 ```go
 type Master interface {
@@ -804,9 +838,9 @@ Master serves as a centrol clock of the whole system. Other components (i.e. Pro
 
 
 
-#### 5.3 Data definition Request Scheduler
+#### 10.3 Data definition Request Scheduler
 
-###### 5.2.1 Task
+###### 10.2.1 Task
 
 Master receives data definition requests via grpc. Each request (described by a proto) will be wrapped as a task for further scheduling. The task interface is
 
@@ -838,7 +872,7 @@ func (task *createCollectionTask) WaitToFinish() error
 
 
 
-###### 5.2.2 Scheduler
+###### 10.2.2 Scheduler
 
 ```go
 type ddRequestScheduler struct {
@@ -851,18 +885,114 @@ func (rs *ddRequestScheduler) schedule() *task // implement scheduling policy
 
 
 
-#### 5.4 Meta Table
+#### 10.4 Meta Table
 
-```go
-type metaTable struct {
-  client *etcd.Client // client of a reliable kv service, i.e. etcd client
-  rootPath string // this metaTable's working root path on the reliable kv service
-  tenantMeta map[int64]TenantMeta // tenant id to tenant meta
-  proxyMeta map[int64]ProxyMeta // proxy id to proxy meta
-  collMeta map[int64]CollectionMeta // collection id to collection meta
-  segMeta map[int64]SegmentMeta // segment id to segment meta
+###### 10.4.1 Meta
+
+* Tenant Meta
+
+```protobuf
+message TenantMeta {
+  uint64 id = 1;
+  uint64 num_query_nodes = 2;
+  repeated string insert_channel_ids = 3;
+  string query_channel_id = 4;
+}
+```
+
+* Proxy Meta
+
+``` protobuf
+message ProxyMeta {
+  uint64 id = 1;
+  common.Address address = 2;
+  repeated string result_channel_ids = 3;
+}
+```
+
+* Collection Meta
+
+```protobuf
+message CollectionMeta {
+  uint64 id=1;
+  schema.CollectionSchema schema=2;
+  uint64 create_time=3;
+  repeated uint64 segment_ids=4;
+  repeated string partition_tags=5;
+}
+```
+
+* Segment Meta
+
+```protobuf
+message SegmentMeta {
+  uint64 segment_id=1;
+  uint64 collection_id =2;
+  string partition_tag=3;
+  int32 channel_start=4;
+  int32 channel_end=5;
+  uint64 open_time=6;
+  uint64 close_time=7;
+  int64 num_rows=8;
 }
 ```
 
 
+
+###### 10.4.2 KV pairs in EtcdKV
+
+```go
+tenantId string -> tenantMeta string
+proxyId string -> proxyMeta string
+collectionId string -> collectionMeta string
+segmentId string -> segmentMeta string
+```
+
+Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings converted from int64.
+
+*tenantMeta*, *proxyMeta*, *collectionMeta*, *segmentMeta* are serialized protos. 
+
+
+
+###### 10.4.3 Meta Table
+
+```go
+type metaTable struct {
+  kv *kv.EtcdKV // client of a reliable kv service, i.e. etcd client
+  tenantId2Meta map[int64]TenantMeta // tenant id to tenant meta
+  proxyId2Meta map[int64]ProxyMeta // proxy id to proxy meta
+  collId2Meta map[int64]CollectionMeta // collection id to collection meta
+  collName2Id map[string]int64 // collection name to collection id
+  segId2Meta map[int64]SegmentMeta // segment id to segment meta
+  
+  tenantLock sync.RWMutex
+  proxyLock sync.RWMutex
+  ddLock sync.RWMutex
+}
+
+func (meta *metaTable) AddTenant(tenant *TenantMeta) error
+func (meta *metaTable) DeleteTenant(tenantId int64) error
+
+func (meta *metaTable) AddProxy(proxy *ProxyMeta) error
+func (meta *metaTable) DeleteProxy(proxyId int64) error
+
+func (meta *metaTable) AddCollection(coll *CollectionMeta) error
+func (meta *metaTable) DeleteCollection(collId int64) error
+func (meta *metaTable) HasCollection(collId int64) bool
+func (meta *metaTable) GetCollectionByName(collName string) (*CollectionMeta, error)
+
+func (meta *metaTable) AddPartition(collId int64, tag string) error
+func (meta *metaTable) HasPartition(collId int64, tag string) bool
+func (meta *metaTable) DeletePartition(collId int64, tag string) error
+
+func (meta *metaTable) AddSegment(seg *SegmentMeta) error
+func (meta *metaTable) DeleteSegment(segId int64) error
+func (meta *metaTable) CloseSegment(segId int64, closeTs Timestamp, num_rows int64) error
+
+func NewMetaTable(kv *kv.EtcdKV) *metaTable
+```
+
+*metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
+
+*  *AddSegment(seg \*SegmentMeta)* first update *CollectionMeta* by adding the segment id, then it adds a new SegmentMeta to *kv*. All the modifications are done transactionally.
 
