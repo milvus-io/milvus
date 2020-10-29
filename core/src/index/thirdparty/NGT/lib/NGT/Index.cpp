@@ -266,7 +266,7 @@ void NGT::Index::loadRawDataAndCreateIndex(NGT::Index * index_, const float * ro
     timer.start();
     index_->createIndex(threadSize);
     timer.stop();
-    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
 }
 
 void 
@@ -280,17 +280,17 @@ NGT::Index::loadAndCreateIndex(Index &index, const string &database, const strin
     return;
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
   if (index.getObjectRepositorySize() == 0) {
     NGTThrowException("Index::create: Data file is empty.");
   }
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
 }
 
 // For milvus
@@ -307,13 +307,13 @@ void NGT::Index::append(NGT::Index * index_, const float * data, size_t dataSize
         NGTThrowException("Index::append: No data.");
     }
     timer.stop();
-    cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-    cerr << "# of objects=" << index_->getObjectRepositorySize() - 1 << endl;
+//    cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//    cerr << "# of objects=" << index_->getObjectRepositorySize() - 1 << endl;
     timer.reset();
     timer.start();
     index_->createIndex(threadSize);
     timer.stop();
-    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
     return;
 }
 
@@ -326,14 +326,14 @@ NGT::Index::append(const string &database, const string &dataFile, size_t thread
     index.append(dataFile, dataSize);
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
   return;
 }
 
@@ -348,14 +348,14 @@ NGT::Index::append(const string &database, const float *data, size_t dataSize, s
     NGTThrowException("Index::append: No data.");
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
   return;
 }
 
@@ -373,8 +373,8 @@ NGT::Index::remove(const string &database, vector<ObjectID> &objects, bool force
     }
   }
   timer.stop();
-  cerr << "Data removing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data removing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   index.saveIndex(database);
   return;
 }
@@ -411,8 +411,8 @@ NGT::Index::importIndex(const string &database, const string &file) {
   }
   idx->importIndex(file);
   timer.stop();
-  cerr << "Data importing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << idx->getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data importing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << idx->getObjectRepositorySize() - 1 << endl;
   idx->saveIndex(database);
   delete idx;
 }
@@ -424,8 +424,8 @@ NGT::Index::exportIndex(const string &database, const string &file) {
   timer.start();
   idx.exportIndex(file);
   timer.stop();
-  cerr << "Data exporting time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << idx.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data exporting time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << idx.getObjectRepositorySize() - 1 << endl;
 }
 
 std::vector<float>

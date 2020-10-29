@@ -38,9 +38,9 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    else if (metric_type == Metric::IP)
+    } else if (metric_type == Metric::IP) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeIP;
-    else if (metric_type == Metric::HAMMING)
+    } else if (metric_type == Metric::HAMMING) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
     } else if (metric_type == Metric::JACCARD) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
@@ -52,7 +52,7 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 
     // reconstruct graph
-    NGT::GraphOptimizer graphOptimizer(true);
+    NGT::GraphOptimizer graphOptimizer(false);
 
     auto number_of_outgoing_edges = config[IndexParams::outgoing_edge_size].get<size_t>();
     auto number_of_incoming_edges = config[IndexParams::incoming_edge_size].get<size_t>();

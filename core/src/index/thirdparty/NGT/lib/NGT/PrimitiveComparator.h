@@ -265,7 +265,8 @@ class PrimitiveComparator {
         _mm_store_ps(f, sum128);
 
         double s = f[0] + f[1] + f[2] + f[3];
-        return sqrt(s);
+//        return sqrt(s);
+        return s;
     }
 
     inline static double
@@ -291,7 +292,8 @@ class PrimitiveComparator {
             int d = (int)*a++ - (int)*b++;
             s += d * d;
         }
-        return sqrt(s);
+//        return sqrt(s);
+        return s;
     }
 #endif
 #if defined(NGT_NO_AVX)

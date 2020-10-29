@@ -47,6 +47,12 @@ static const std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Me
         return false;                                                                                    \
     }
 
+#define CheckFloatByRange(key, min, max)                                                                   \
+    if (!oricfg.contains(key) || !oricfg[key].is_number_float() || oricfg[key].get<float>() > max || \
+        oricfg[key].get<float>() < min) {                                                              \
+        return false;                                                                                    \
+    }
+
 #define CheckIntByValues(key, container)                                                                 \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
@@ -370,35 +376,47 @@ ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexM
 
 bool
 NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
 
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::forcedly_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::selectively_pruned_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    if (oricfg[knowhere::IndexParams::selectively_pruned_edge_size].get<int64_t>() >=
+        oricfg[knowhere::IndexParams::forcedly_pruned_edge_size].get<int64_t>()) {
+        return false;
+    }
 
     return true;
 }
 
 bool
 NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -2, NGT_MAX_EDGE_SIZE);
+    CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 
 bool
 NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
+    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::IP, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
 
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
     CheckIntByRange(knowhere::IndexParams::edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::outgoing_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::incoming_edge_size, NGT_MIN_EDGE_SIZE, NGT_MAX_EDGE_SIZE);
 
     return true;
 }
 
 bool
 NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -2, NGT_MAX_EDGE_SIZE);
+    CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 

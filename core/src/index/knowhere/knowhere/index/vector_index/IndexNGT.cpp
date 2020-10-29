@@ -124,7 +124,9 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
     }
     GET_TENSOR_DATA(dataset_ptr);
 
-    size_t k = config[meta::TOPK].get<int64_t>();
+    int k = config[meta::TOPK].get<int>();
+    auto epsilon = config[IndexParams::epsilon].get<float>();
+    auto edge_size = config[IndexParams::max_search_edges].get<int>();
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
@@ -140,11 +142,11 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         NGT::Object* object = index_->allocateObject(single_query, Dim());
         NGT::SearchContainer sc(*object);
 
-        double epsilon = sp.beginOfEpsilon;
+//        double epsilon = sp.beginOfEpsilon;
 
         NGT::ObjectDistances res;
         sc.setResults(&res);
-        sc.setSize(sp.size);
+        sc.setSize((size_t)sp.size);
         sc.setRadius(sp.radius);
 
         if (sp.accuracy > 0.0) {
@@ -152,7 +154,8 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         } else {
             sc.setEpsilon(epsilon);
         }
-        sc.setEdgeSize(sp.edgeSize);
+//        sc.setEdgeSize(sp.edgeSize);
+        sc.setEdgeSize(edge_size);
 
         try {
             index_->search(sc, bitset);

@@ -27,15 +27,15 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     prop.dimension = dim;
 
     auto edge_size = config[IndexParams::edge_size].get<int64_t>();
-    prop.edgeSizeLimitForCreation = edge_size;
+    prop.edgeSizeForCreation = edge_size;
 
     MetricType metric_type = config[Metric::TYPE];
 
     if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    else if (metric_type == Metric::IP)
+    } else if (metric_type == Metric::IP) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeIP;
-    else if (metric_type == Metric::HAMMING)
+    } else if (metric_type == Metric::HAMMING) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
     } else if (metric_type == Metric::JACCARD) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
@@ -50,6 +50,7 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto selectively_pruned_edge_size = config[IndexParams::selectively_pruned_edge_size].get<int64_t>();
 
     if (!forcedly_pruned_edge_size && !selectively_pruned_edge_size) {
+        KNOWHERE_THROW_MSG("a lack of parameters forcedly_pruned_edge_size and selectively_pruned_edge_size 4 index NGTPANNG");
         return;
     }
 
@@ -75,7 +76,7 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
                             if (t1 >= selectively_pruned_edge_size) {
                                 break;
                             }
-                            if (rank == t1) {
+                            if (rank == t1) { // can't reach here
                                 continue;
                             }
                             NGT::GraphNode& node2 = *graph.getNode(node[t1].id);
