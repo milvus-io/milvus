@@ -249,6 +249,7 @@ namespace NGT {
     virtual ObjectRepository &getRepository() = 0;
 
     virtual void setDistanceType(DistanceType t) = 0;
+    virtual DistanceType getDistanceType() = 0;
 
     virtual void *getObject(size_t idx) = 0;
     virtual void getObject(size_t idx, std::vector<float> &v) = 0;

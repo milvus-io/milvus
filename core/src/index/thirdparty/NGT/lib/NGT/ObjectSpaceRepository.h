@@ -89,7 +89,7 @@ namespace NGT {
 #else
         ComparatorIP(size_t d) : Comparator(d) {}
         double operator()(Object &objecta, Object &objectb) {
-                return PrimitiveComparator::compareDotProduct((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
+                return PrimitiveComparator::compareInnerProduct((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
             }
 #endif
     };
@@ -301,6 +301,8 @@ namespace NGT {
     void copy(Object &objecta, Object &objectb) {
       objecta.copy(objectb, getByteSizeOfObject());
     }
+
+    DistanceType getDistanceType() { return distanceType; }
 
     void setDistanceType(DistanceType t) {
       if (comparator != 0) {

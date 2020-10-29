@@ -22,7 +22,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/snapshot/ResourceTypes.h"
 #include "scheduler/Definition.h"
 #include "scheduler/job/Job.h"
 

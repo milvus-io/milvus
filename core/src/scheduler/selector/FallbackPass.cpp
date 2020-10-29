@@ -11,7 +11,6 @@
 
 #include "scheduler/selector/FallbackPass.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -29,8 +28,7 @@ FallbackPass::Run(const TaskPtr& task) {
     // NEVER be empty
     LOG_SERVER_DEBUG_ << "FallbackPass!";
     auto cpu = ResMgrInst::GetInstance()->GetCpuResources()[0];
-    auto label = std::make_shared<SpecResLabel>(cpu);
-    task->label() = label;
+    task->resource() = cpu.lock();
     return true;
 }
 

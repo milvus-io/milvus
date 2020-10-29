@@ -25,23 +25,19 @@ namespace scheduler {
 class BuildIndexTask : public Task {
  public:
     explicit BuildIndexTask(const engine::snapshot::ScopedSnapshotT& snapshot, const engine::DBOptions& options,
-                            engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields,
-                            TaskLabelPtr label);
+                            engine::snapshot::ID_TYPE segment_id, const engine::TargetFields& target_fields);
 
-    inline json
-    Dump() const override {
-        json ret{
-            {"type", type_},
-            {"segment_id", segment_id_},
-        };
-        return ret;
-    }
+    json
+    Dump() const override;
 
     Status
     OnLoad(LoadType type, uint8_t device_id) override;
 
     Status
     OnExecute() override;
+
+    std::string
+    GetIndexType();
 
  private:
     void

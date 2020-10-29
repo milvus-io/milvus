@@ -300,8 +300,16 @@ TaskTable::TaskToExecute() {
 
 json
 TaskTable::Dump() const {
-    json ret{{"error.message", "not support yet."}};
-    return ret;
+    std::vector<json> list;
+    std::cout << "for start" << std::endl;
+
+    std::cout << "table.front: " << table_.front() << std::endl;
+    std::cout << "table.rear: " << table_.rear() << std::endl;
+    for (auto i = table_.front(); i < table_.rear(); i++) {
+        list.push_back(table_[i]->Dump());
+    }
+    std::cout << "for end" << std::endl;
+    return json{list};
 }
 
 }  // namespace scheduler

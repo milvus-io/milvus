@@ -28,16 +28,10 @@ class SearchTask : public Task {
  public:
     explicit SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
                         const engine::DBOptions& options, const query::QueryPtr& query_ptr,
-                        engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label);
+                        engine::snapshot::ID_TYPE segment_id);
 
-    inline json
-    Dump() const override {
-        json ret{
-            {"type", type_},
-            {"segment_id", segment_id_},
-        };
-        return ret;
-    }
+    json
+    Dump() const override;
 
     Status
     OnLoad(LoadType type, uint8_t device_id) override;

@@ -11,20 +11,28 @@
 
 #pragma once
 
-#include "TaskLabel.h"
-
-#include <memory>
+#include <mutex>
 
 namespace milvus {
-namespace scheduler {
 
-class BroadcastLabel : public TaskLabel {
+template <typename T>
+class Value {
  public:
-    BroadcastLabel() : TaskLabel(TaskLabelType::BROADCAST) {
+    const T&
+    operator()() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return value_;
     }
+
+    void
+    set(const T& v) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        value_ = v;
+    }
+
+ private:
+    std::mutex mutex_;
+    T value_;
 };
 
-using BroadcastLabelPtr = std::shared_ptr<BroadcastLabel>;
-
-}  // namespace scheduler
 }  // namespace milvus

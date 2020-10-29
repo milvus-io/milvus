@@ -19,7 +19,6 @@ set(test_files
         ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_factory.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_resource_mgr.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_scheduler.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_task.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_job.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_selector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/test_tasktable.cpp)

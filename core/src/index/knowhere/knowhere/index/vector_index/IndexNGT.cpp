@@ -167,9 +167,12 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         auto local_dist = p_dist + i * k;
 
         int64_t res_num = res.size();
+        float dis_coefficient = 1.0;
+        if (index_->getObjectSpace().getDistanceType() == NGT::ObjectSpace::DistanceType::DistanceTypeIP)
+            dis_coefficient = -1.0;
         for (int64_t idx = 0; idx < res_num; ++idx) {
             *(local_id + idx) = res[idx].id - 1;
-            *(local_dist + idx) = res[idx].distance;
+            *(local_dist + idx) = res[idx].distance * dis_coefficient;
         }
         while (res_num < static_cast<int64_t>(k)) {
             *(local_id + res_num) = -1;

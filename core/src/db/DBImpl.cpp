@@ -19,8 +19,6 @@
 #include "db/merge/MergeManagerFactory.h"
 #include "db/merge/MergeTask.h"
 #include "db/snapshot/CompoundOperations.h"
-#include "db/snapshot/EventExecutor.h"
-#include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Snapshots.h"
@@ -32,16 +30,13 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
-#include "segment/SegmentWriter.h"
 #include "segment/Utils.h"
-#include "server/ValidationUtil.h"
 #include "utils/Exception.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
 #include <algorithm>
-#include <functional>
 #include <limits>
 #include <unordered_set>
 #include <utility>
@@ -319,7 +314,6 @@ DBImpl::HasPartition(const std::string& collection_name, const std::string& part
     CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
-    STATUS_CHECK(server::ValidatePartitionTags({partition_tag}));
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
 
     auto partition_tags = std::move(ss->GetPartitionNames());
@@ -667,13 +661,13 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info before query
 
-    SuspendIfFirst();
+    // SuspendIfFirst();
 
     /* put search job to scheduler and wait job finish */
     scheduler::JobMgrInst::GetInstance()->Put(job);
     job->WaitFinish();
 
-    ResumeIfLast();
+    // ResumeIfLast();
 
     cache::CpuCacheMgr::GetInstance().PrintInfo();  // print cache info after query
 

@@ -91,7 +91,7 @@
         <dependency>
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
-            <version>6.14.3</version>
+            <version>7.3.0</version>
         </dependency>
 
         <dependency>
@@ -104,7 +104,7 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.13</version>
+            <version>4.13.1</version>
         </dependency>
 
 <!--        <dependency>-->

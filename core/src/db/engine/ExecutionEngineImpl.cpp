@@ -177,7 +177,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& uids, int64_t nq, int64_t k,
+MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<idx_t>> uids, int64_t nq, int64_t k,
                  float* distances, int64_t* labels) {
     auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
     auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
@@ -189,7 +189,7 @@ MapAndCopyResult(const knowhere::DatasetPtr& dataset, const std::vector<idx_t>& 
     /* map offsets to ids */
     for (int64_t i = 0; i < num; ++i) {
         int64_t offset = res_ids[i];
-        labels[i] = (offset == -1) ? -1 : uids[offset];
+        labels[i] = (offset == -1) ? -1 : (*uids)[offset];
     }
 
     free(res_ids);
@@ -743,6 +743,9 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     conf[knowhere::meta::ROWS] = row_count;
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     conf[knowhere::Metric::TYPE] = index_info.metric_name_;
+    if (!conf.contains(knowhere::IndexParams::nbits)) {
+        conf[knowhere::IndexParams::nbits] = 8;
+    }
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
 
     knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
@@ -752,7 +755,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     if (index_info.index_type_ == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         auto m = conf[knowhere::IndexParams::m].get<int64_t>();
-        knowhere::IVFPQConfAdapter::GetValidM(dimension, m, mode);
+        auto nbits = conf[knowhere::IndexParams::nbits].get<int64_t>();
+        knowhere::IVFPQConfAdapter::CheckPQParams(dimension, m, nbits, mode);
     }
 #endif
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_info.index_type_);
@@ -766,7 +770,7 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
-    std::vector<idx_t> uids;
+    std::shared_ptr<std::vector<idx_t>> uids;
     ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {

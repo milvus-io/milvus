@@ -503,6 +503,17 @@ class PrimitiveComparator {
 
     template <typename OBJECT_TYPE>
     inline static double
+    compareInnerProduct(const OBJECT_TYPE* a, const OBJECT_TYPE* b, size_t size) {
+        double sum = 0.0;
+        for (size_t loc = 0; loc < size; loc++) {
+            sum += (double)a[loc] * (double)b[loc];
+//            sum += a[loc] * b[loc];
+        }
+        return -sum;
+    }
+
+    template <typename OBJECT_TYPE>
+    inline static double
     compareCosine(const OBJECT_TYPE* a, const OBJECT_TYPE* b, size_t size) {
         double normA = 0.0;
         double normB = 0.0;
@@ -555,12 +566,57 @@ class PrimitiveComparator {
     }
 
     inline static double
+    compareInnerProduct(const float* a, const float* b, size_t size) {
+        const float* last = a + size;
+#if defined(NGT_AVX512)
+        __m512 sum512 = _mm512_setzero_ps();
+        while (a < last) {
+            sum512 = _mm512_add_ps(sum512, _mm512_mul_ps(_mm512_loadu_ps(a), _mm512_loadu_ps(b)));
+            a += 16;
+            b += 16;
+        }
+
+        __m256 sum256 = _mm256_add_ps(_mm512_extractf32x8_ps(sum512, 0), _mm512_extractf32x8_ps(sum512, 1));
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+#elif defined(NGT_AVX2)
+        __m256 sum256 = _mm256_setzero_ps();
+        while (a < last) {
+            sum256 = _mm256_add_ps(sum256, _mm256_mul_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b)));
+            a += 8;
+            b += 8;
+        }
+        __m128 sum128 = _mm_add_ps(_mm256_extractf128_ps(sum256, 0), _mm256_extractf128_ps(sum256, 1));
+#else
+        __m128 sum128 = _mm_setzero_ps();
+        while (a < last) {
+            sum128 = _mm_add_ps(sum128, _mm_mul_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)));
+            a += 4;
+            b += 4;
+        }
+#endif
+        __attribute__((aligned(32))) float f[4];
+        _mm_store_ps(f, sum128);
+
+        double s = f[0] + f[1] + f[2] + f[3];
+        return -s;
+    }
+
+    inline static double
     compareDotProduct(const unsigned char* a, const unsigned char* b, size_t size) {
         double sum = 0.0;
         for (size_t loc = 0; loc < size; loc++) {
             sum += (double)a[loc] * (double)b[loc];
         }
         return sum;
+    }
+
+    inline static double
+    compareInnerProduct(const unsigned char* a, const unsigned char* b, size_t size) {
+        double sum = 0.0;
+        for (size_t loc = 0; loc < size; loc++) {
+            sum += (double)a[loc] * (double)b[loc];
+        }
+        return -sum;
     }
 
     inline static double

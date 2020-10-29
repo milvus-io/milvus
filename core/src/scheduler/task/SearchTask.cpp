@@ -32,8 +32,8 @@ namespace scheduler {
 
 SearchTask::SearchTask(const server::ContextPtr& context, engine::snapshot::ScopedSnapshotT snapshot,
                        const engine::DBOptions& options, const query::QueryPtr& query_ptr,
-                       engine::snapshot::ID_TYPE segment_id, TaskLabelPtr label)
-    : Task(TaskType::SearchTask, std::move(label)),
+                       engine::snapshot::ID_TYPE segment_id)
+    : Task(TaskType::SearchTask),
       context_(context),
       snapshot_(snapshot),
       options_(options),
@@ -47,6 +47,16 @@ SearchTask::CreateExecEngine() {
     if (execution_engine_ == nullptr && query_ptr_ != nullptr) {
         execution_engine_ = engine::EngineFactory::Build(snapshot_, options_.meta_.path_, segment_id_);
     }
+}
+
+json
+SearchTask::Dump() const {
+    json ret{
+        {"type", "SearchTask"},
+        {"segment_id", segment_id_},
+    };
+
+    return ret;
 }
 
 Status

@@ -17,12 +17,26 @@
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 
+#include <utility>
+
 namespace milvus {
 namespace scheduler {
+
+namespace {
+bool
+SpecifyToCPU(milvus::json json) {
+    try {
+        // if the 'nprobe' field is missed or empty value, an exception will be thrown
+        auto nprobe = json[knowhere::IndexParams::nprobe].get<int64_t>();
+        return nprobe > server::GPU_QUERY_MAX_NPROBE;
+    } catch (std::exception& e) {
+        return true;
+    }
+}
+}  // namespace
 
 FaissIVFSQ8HPass::FaissIVFSQ8HPass() {
     ConfigMgr::GetInstance().Attach("gpu.gpu_search_threshold", this);
@@ -58,7 +72,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
     } else if (search_task->topk() > milvus::server::GPU_QUERY_MAX_TOPK) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: topk > gpu_max_topk_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
-    } else if (search_task->ExtraParam()[knowhere::IndexParams::nprobe].get<int64_t>() > server::GPU_QUERY_MAX_NPROBE) {
+    } else if (SpecifyToCPU(std::move(search_task->ExtraParam()))) {
         LOG_SERVER_DEBUG_ << LogOut("FaissIVFSQ8HPass: nprobe > gpu_max_nprobe_threshold, specify cpu to search!");
         res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
     } else if (search_task->nq() < (uint64_t)threshold_) {
@@ -71,8 +85,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
         res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, search_gpus_[idx_]);
         idx_ = (idx_ + 1) % search_gpus_.size();
     }
-    auto label = std::make_shared<SpecResLabel>(res_ptr, hybrid);
-    task->label() = label;
+    task->resource() = res_ptr;
     return true;
 }
 
