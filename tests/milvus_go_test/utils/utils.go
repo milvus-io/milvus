@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
-	"strings"
 	"time"
 	"unicode"
 
@@ -14,69 +13,6 @@ import (
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
-}
-
-var defaultNlist = 32
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-type Index struct {
-	IndexType  milvus.IndexType
-	MetricType milvus.MetricType
-	Params     map[string]interface{}
-}
-
-var allIndexTypes = []milvus.IndexType{
-	milvus.FLAT,
-	milvus.IVFFLAT,
-	milvus.IVFSQ8,
-	milvus.IVFSQ8H,
-	milvus.IVFPQ,
-	milvus.HNSW,
-	// milvus.RNSG,
-	milvus.ANNOY,
-}
-
-var floatIndexParams = []map[string]interface{}{
-	{"nlist": defaultNlist},
-	{"nlist": defaultNlist},
-	{"nlist": defaultNlist},
-	{"nlist": defaultNlist},
-	{"nlist": defaultNlist, "m": 16},
-	{"M": 48, "efConstruction": 500},
-	// {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
-	{"n_trees": 50},
-}
-
-var binaryIndexParams = []map[string]interface{}{
-	{"nlist": defaultNlist},
-	{"nlist": defaultNlist},
-}
-
-var floatIndexTypes = []milvus.IndexType{
-	milvus.FLAT,
-	milvus.IVFFLAT,
-	milvus.IVFSQ8,
-	milvus.IVFSQ8H,
-	milvus.IVFPQ,
-	milvus.HNSW,
-	// milvus.RNSG,
-	milvus.ANNOY,
-}
-
-var binaryIndexTypes = []milvus.IndexType{
-	milvus.BINFLAT,
-	milvus.BINIVFFLAT,
-}
-
-var floatMetricTypes = []milvus.MetricType{
-	milvus.L2,
-	milvus.IP,
-}
-
-var binaryMetricTypes = []milvus.MetricType{
-	milvus.HAMMING,
-	milvus.JACCARD,
 }
 
 func RandString(n int) string {
@@ -114,16 +50,6 @@ func Camel2Case(name string) string {
 func Struct2Map(obj interface{}) map[string]interface{} {
 	t := reflect.TypeOf(obj)
 	v := reflect.ValueOf(obj)
-	var data = make(map[string]interface{})
-	for i := 0; i < t.NumField(); i++ {
-		data[strings.ToLower(t.Field(i).Name)] = v.Field(i).Interface()
-	}
-	return data
-}
-
-func Index2Map(index Index) map[string]interface{} {
-	t := reflect.TypeOf(index)
-	v := reflect.ValueOf(index)
 	var data = make(map[string]interface{})
 	for i := 0; i < t.NumField(); i++ {
 		data[Camel2Case(t.Field(i).Name)] = v.Field(i).Interface()
@@ -207,6 +133,46 @@ func GenIndexes(metricType milvus.MetricType) []Index {
 		}
 	}
 	return indexes
+}
+
+func GenVectorQuery(metricType milvus.MetricType, indexType milvus.IndexType) map[string]interface{} {
+	if In(metricType, floatMetricTypes) {
+		for i, _indexType := range floatIndexTypes {
+			if _indexType == indexType {
+				var query FloatQuery
+				query.Topk = DefaultTopk
+				query.MetricType = metricType
+				query.Query = GenFloatVectors(DefaultDimension, DefaultNb, false)
+				query.Params = floatQueryParams[i]
+				return Struct2Map(query)
+			}
+		}
+	} else if In(metricType, binaryMetricTypes) {
+		for i, _indexType := range binaryIndexTypes {
+			if _indexType == indexType {
+				var query BinaryQuery
+				query.Topk = DefaultTopk
+				query.MetricType = metricType
+				query.Query = GenBinaryVectors(DefaultDimension, DefaultNb)
+				query.Params = binaryQueryParams[i]
+				return Struct2Map(query)
+			}
+		}
+	}
+	return nil
+}
+
+func GenDSL(name string, metricType milvus.MetricType, indexType milvus.IndexType) map[string]interface{} {
+	var dsl = map[string]interface{}{
+		"bool": map[string]interface{}{
+			"must": map[string]interface{}{
+				"vector": map[string]interface{}{
+					name: GenVectorQuery(metricType, indexType),
+				},
+			},
+		},
+	}
+	return dsl
 }
 
 func GenInvalidStrs() []string {

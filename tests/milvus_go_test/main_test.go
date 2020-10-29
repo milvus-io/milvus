@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"testing"
 
 	//"github.com/stretchr/testify/suite"
@@ -15,25 +14,7 @@ import (
 )
 
 var ip string
-var port int
-var fieldFloatName string = "float"
-var fieldIntName string = "int64"
-var fieldFloatVectorName string = "float_vector"
-var fieldBinaryVectorName string = "binary_vector"
-var autoId bool = false
-var dimension int = 128
-var segmentRowLimit int = 5000
-var defaultNb = 6000
-var defaultIntValues = utils.GenDefaultIntValues(defaultNb)
-var defaultFloatValues = utils.GenDefaultFloatValues(defaultNb)
-var defaultFloatVector = utils.GenFloatVectors(dimension, 1, false)
-var defaultFloatVectors = utils.GenFloatVectors(dimension, defaultNb, false)
-
-var defaultBinaryVector = utils.GenBinaryVectors(dimension, 1)
-var defaultBinaryVectors = utils.GenBinaryVectors(dimension, defaultNb)
-
-var l2Indexes = utils.GenIndexes(milvus.L2)
-var ipIndexes = utils.GenIndexes(milvus.IP)
+var port int64
 
 // type _Suite struct {
 // 	suite.Suite
@@ -43,19 +24,19 @@ var Server ArgsServer
 
 type ArgsServer struct {
 	ip     string
-	port   int
+	port   int64
 	client milvus.MilvusClient
 }
 
 func init() {
 	flag.StringVar(&ip, "ip", "127.0.0.1", "server host ip")
-	flag.IntVar(&port, "port", 19530, "server host port")
+	flag.Int64Var(&port, "port", 19530, "server host port")
 }
 
 func GetClient() milvus.MilvusClient {
 	var grpcClient milvus.Milvusclient
 	client := milvus.NewMilvusClient(grpcClient.Instance)
-	connectParam := milvus.ConnectParam{ip, strconv.Itoa(port)}
+	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
 	err := client.Connect(connectParam)
 	if err != nil {
 		fmt.Println("Connect failed")
@@ -78,26 +59,26 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 	var field milvus.Field
 	fields := []milvus.Field{
 		{
-			fieldFloatName,
+			utils.DefaultFieldFloatName,
 			milvus.FLOAT,
 			"",
 			"",
 		},
 	}
 	params := map[string]interface{}{
-		"dim": dimension,
+		"dim": utils.DefaultDimension,
 	}
 	paramsStr, _ := json.Marshal(params)
 	if fieldType == milvus.VECTORFLOAT {
 		field = milvus.Field{
-			fieldFloatVectorName,
+			utils.DefaultFieldFloatVectorName,
 			milvus.VECTORFLOAT,
 			"",
 			string(paramsStr),
 		}
 	} else {
 		field = milvus.Field{
-			fieldBinaryVectorName,
+			utils.DefaultFieldBinaryVectorName,
 			milvus.VECTORBINARY,
 			"",
 			string(paramsStr),
@@ -109,20 +90,20 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 func GenDefaultFieldValues(fieldType milvus.DataType) []milvus.FieldValue {
 	fieldValues := []milvus.FieldValue{
 		{
-			fieldFloatName,
-			defaultFloatValues,
+			utils.DefaultFieldFloatName,
+			utils.DefaultFloatValues,
 		},
 	}
 	var fieldValue milvus.FieldValue
 	if fieldType == milvus.VECTORFLOAT {
 		fieldValue = milvus.FieldValue{
-			fieldFloatVectorName,
-			defaultFloatVectors,
+			utils.DefaultFieldFloatVectorName,
+			utils.DefaultFloatVectors,
 		}
 	} else {
 		fieldValue = milvus.FieldValue{
-			Name:    fieldBinaryVectorName,
-			RawData: defaultBinaryVectors,
+			utils.DefaultFieldBinaryVectorName,
+			utils.DefaultBinaryVectors,
 		}
 	}
 	return append(fieldValues, fieldValue)
@@ -136,7 +117,7 @@ func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 		fmt.Printf(name)
 		params := map[string]interface{}{
 			"auto_id":           autoId,
-			"segment_row_limit": segmentRowLimit,
+			"segment_row_count": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
 		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: string(paramsStr)}
@@ -157,7 +138,7 @@ func GenCollectionParams(name string, autoId bool, segmentRowLimit int) milvus.M
 	//if client != nil {
 		params := map[string]interface{}{
 			"auto_id":           autoId,
-			"segment_row_limit": segmentRowLimit,
+			"segment_row_count": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
 		mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: string(paramsStr)}

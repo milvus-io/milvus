@@ -11,6 +11,11 @@ import (
 	"github.com/milvus-io/milvus-sdk-go/milvus"
 	"github.com/stretchr/testify/assert"
 )
+var autoId bool = false
+var segmentRowLimit int = utils.DefaultSegmentRowLimit
+var fieldFloatName string = utils.DefaultFieldFloatName
+var fieldFloatVectorName string = utils.DefaultFieldFloatVectorName
+
 
 // TODO issue: failed sometimes
 func TestCreateCollection(t *testing.T) {
@@ -92,7 +97,6 @@ func TestShowCollections(t *testing.T)  {
 
 func TestDropCollections(t *testing.T)  {
 	client, name := Collection(false, milvus.VECTORFLOAT)
-	client.HasCollection(name)
 	status, _ := client.DropCollection(name)
 	assert.True(t, status.Ok())
 	isHas, _, _ := client.HasCollection(name)
@@ -101,12 +105,14 @@ func TestDropCollections(t *testing.T)  {
 	assert.Nil(t, listCollections)
 }
 
+// #4131
 func TestDropCollectionNotExisted(t *testing.T)  {
 	client := GetClient()
 	name := utils.RandString(8)
 	status, error := client.DropCollection( name)
 	assert.False(t, status.Ok())
 	fmt.Println(error)
+	t.Log(error)
 }
 
 func TestDropCollectionWithoutConnect(t *testing.T)  {
@@ -133,11 +139,31 @@ func TestHasCollection(t *testing.T)  {
 	assert.True(t, isHas)
 }
 
+func TestDescribeCollectionNotExisted(t *testing.T)  {
+	client := GetClient()
+	name := utils.RandString(8)
+	mapping, status, error := client.GetCollectionInfo(name)
+	assert.False(t, status.Ok())
+	fmt.Println(mapping)
+	fmt.Println(error)
+	t.Log(error)
+}
+
+// TODO // #4130
 func TestDescribeCollection(t *testing.T)  {
 	client, name := Collection(false, milvus.VECTORFLOAT)
 	mapping, status, _ := client.GetCollectionInfo(name)
 	assert.True(t, status.Ok())
 	assert.Equal(t, mapping.CollectionName, name)
+	for i :=0; i<len(mapping.Fields); i++ {
+		if mapping.Fields[i].Type == milvus.VECTORFLOAT {
+			var extraParams string = mapping.Fields[i].ExtraParams
+			var fieldss milvus.Field
+			json.Unmarshal([]byte(extraParams), &fieldss)
+			fmt.Println(fieldss)
+		}
+	}
 	//assert.Equal(t, mapping.ExtraParams[segment_row_limit], segmentRowLimit)
-	//fmt.Println(mapping)
+	fmt.Println(mapping)
+	fmt.Println(mapping.Fields[0])
 }
