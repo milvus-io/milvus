@@ -146,7 +146,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
 
         NGT::ObjectDistances res;
         sc.setResults(&res);
-        sc.setSize((size_t)sp.size);
+        sc.setSize(static_cast<size_t>(sp.size));
         sc.setRadius(sp.radius);
 
         if (sp.accuracy > 0.0) {
@@ -168,8 +168,9 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
 
         int64_t res_num = res.size();
         float dis_coefficient = 1.0;
-        if (index_->getObjectSpace().getDistanceType() == NGT::ObjectSpace::DistanceType::DistanceTypeIP)
+        if (index_->getObjectSpace().getDistanceType() == NGT::ObjectSpace::DistanceType::DistanceTypeIP) {
             dis_coefficient = -1.0;
+        }
         for (int64_t idx = 0; idx < res_num; ++idx) {
             *(local_id + idx) = res[idx].id - 1;
             *(local_dist + idx) = res[idx].distance * dis_coefficient;
