@@ -27,7 +27,6 @@ class IndexNGTONNG : public IndexNGT {
 
     void
     UpdateIndexSize() override;
-
 };
 
 }  // namespace knowhere

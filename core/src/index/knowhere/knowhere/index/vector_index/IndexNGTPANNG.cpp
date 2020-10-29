@@ -50,7 +50,8 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto selectively_pruned_edge_size = config[IndexParams::selectively_pruned_edge_size].get<int64_t>();
 
     if (!forcedly_pruned_edge_size && !selectively_pruned_edge_size) {
-        KNOWHERE_THROW_MSG("a lack of parameters forcedly_pruned_edge_size and selectively_pruned_edge_size 4 index NGTPANNG");
+        KNOWHERE_THROW_MSG(
+            "a lack of parameters forcedly_pruned_edge_size and selectively_pruned_edge_size 4 index NGTPANNG");
         return;
     }
 
@@ -76,7 +77,7 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
                             if (t1 >= selectively_pruned_edge_size) {
                                 break;
                             }
-                            if (rank == t1) { // can't reach here
+                            if (rank == t1) {  // can't reach here
                                 continue;
                             }
                             NGT::GraphNode& node2 = *graph.getNode(node[t1].id);

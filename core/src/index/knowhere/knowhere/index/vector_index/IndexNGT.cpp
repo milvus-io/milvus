@@ -142,7 +142,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         NGT::Object* object = index_->allocateObject(single_query, Dim());
         NGT::SearchContainer sc(*object);
 
-//        double epsilon = sp.beginOfEpsilon;
+        //        double epsilon = sp.beginOfEpsilon;
 
         NGT::ObjectDistances res;
         sc.setResults(&res);
@@ -154,7 +154,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         } else {
             sc.setEpsilon(epsilon);
         }
-//        sc.setEdgeSize(sp.edgeSize);
+        //        sc.setEdgeSize(sp.edgeSize);
         sc.setEdgeSize(edge_size);
 
         try {
@@ -205,8 +205,7 @@ IndexNGT::Dim() {
 
 void
 IndexNGT::UpdateIndexSize() {
-    KNOWHERE_THROW_MSG(
-        "IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
+    KNOWHERE_THROW_MSG("IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
 }
 
 }  // namespace knowhere
