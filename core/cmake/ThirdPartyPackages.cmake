@@ -15,7 +15,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         MySQLPP
         Prometheus
         SQLite
-        SQLite_ORM
         yaml-cpp
         libunwind
         gperftools
@@ -45,8 +44,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_prometheus()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite_ORM")
-        build_sqlite_orm()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "yaml-cpp")
         build_yamlcpp()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "libunwind")
@@ -609,64 +606,6 @@ if (MILVUS_WITH_SQLITE)
     resolve_dependency(SQLite)
     include_directories(SYSTEM "${SQLITE_INCLUDE_DIR}")
     link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
-endif ()
-
-# ----------------------------------------------------------------------
-# SQLite_ORM
-
-macro(build_sqlite_orm)
-    message(STATUS "Building SQLITE_ORM-${SQLITE_ORM_VERSION} from source")
-
-    set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix")
-    set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")
-    set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
-
-    if (NOT EXISTS ${SQLITE_ORM_INCLUDE_DIR})
-        file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
-
-        set(IS_EXIST_FILE FALSE)
-        foreach(url ${SQLITE_ORM_SOURCE_URLS})
-            file(DOWNLOAD ${url}
-                    ${SQLITE_ORM_TAR_NAME}
-                    TIMEOUT 60
-                    STATUS status
-                    LOG log)
-            list(GET status 0 status_code)
-            list(GET status 1 status_string)
-
-            if(status_code EQUAL 0)
-                message(STATUS "Downloading SQLITE_ORM ... done")
-                set(IS_EXIST_FILE TRUE)
-                break()
-            else()
-                string(APPEND logFailedURLs "error: downloading '${url}' failed
-                   status_code: ${status_code}
-                   status_string: ${status_string}
-                   log:
-                   --- LOG BEGIN ---
-                   ${log}
-                   --- LOG END ---
-                   "
-                  )
-            endif()
-        endforeach()
-
-        if(IS_EXIST_FILE STREQUAL "FALSE")
-            message(FATAL_ERROR "Each download failed!
-              ${logFailedURLs}
-              "
-            )
-        endif()
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${SQLITE_ORM_TAR_NAME}
-                WORKING_DIRECTORY ${SQLITE_ORM_PREFIX})
-
-    endif ()
-
-endmacro()
-
-if (MILVUS_WITH_SQLITE_ORM)
-    resolve_dependency(SQLite_ORM)
-    include_directories(SYSTEM "${SQLITE_ORM_INCLUDE_DIR}")
 endif ()
 
 # ----------------------------------------------------------------------
