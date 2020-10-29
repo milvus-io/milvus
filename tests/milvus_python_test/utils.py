@@ -675,6 +675,9 @@ def gen_invalid_index():
     for nlist in gen_invalid_params():
         index_param = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
+    for nbits in gen_invalid_params() + [0, 17]:
+        index_param = {"index_type": "IVF_PQ", "params": {"nlist": 1024, "m": 16, "nbits": nbits}}
+        index_params.append(index_param)
     for M in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
         index_param = {"index_type": "RHNSW_PQ", "params": {"M": M, "efConstruction": 100}}
@@ -716,6 +719,7 @@ def gen_invalid_index():
 def gen_index():
     nlists = [1, 1024, 16384]
     pq_ms = [128, 64, 32, 16, 8, 4]
+    pq_nbits = [1, 2, 4, 8, 9]
     Ms = [5, 24, 48]
     efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
@@ -732,9 +736,10 @@ def gen_index():
                           for nlist in nlists]
             index_params.extend(ivf_params)
         elif index_type == "IVF_PQ":
-            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
+            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m, "nbits": nbits}} \
                             for nlist in nlists \
-                            for m in pq_ms]
+                            for m in pq_ms \
+                            for nbits in pq_nbits]
             index_params.extend(IVFPQ_params)
         elif index_type in ["HNSW", "RHNSW_SQ", "RHNSW_PQ"]:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
