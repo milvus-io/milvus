@@ -372,7 +372,6 @@ ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexM
 
 bool
 NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
@@ -396,7 +395,6 @@ NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const Ind
 
 bool
 NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckStrByValues(knowhere::Metric::TYPE, METRICS);
