@@ -16,19 +16,19 @@ package master
 import (
 	"context"
 	"fmt"
+	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/master/controller"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/master/controller"
-	"github.com/apache/pulsar-client-go/pulsar"
 	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"net"
 	"strconv"
-	"github.com/golang/protobuf/proto"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,7 +36,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"go.etcd.io/etcd/clientv3"
 )
-
 
 // Server is the pd server.
 type Master struct {
@@ -52,7 +51,7 @@ type Master struct {
 	serverLoopWg     sync.WaitGroup
 
 	//grpc server
-	grpcServer * grpc.Server
+	grpcServer *grpc.Server
 
 	// for tso.
 	tsoAllocator tso.Allocator
@@ -63,9 +62,9 @@ type Master struct {
 	// chans
 	ssChan chan internalpb.SegmentStatistics
 
-	kvBase        kv.Base
-	scheduler     *ddRequestScheduler
-	mt            metaTable
+	kvBase    kv.Base
+	scheduler *ddRequestScheduler
+	mt        metaTable
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -90,9 +89,9 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
-		kvBase: newKvBase(),
-		ssChan: make(chan internalpb.SegmentStatistics, 10),
-		pc : informer.NewPulsarClient(),
+		kvBase:         newKvBase(),
+		ssChan:         make(chan internalpb.SegmentStatistics, 10),
+		pc:             informer.NewPulsarClient(),
 	}
 
 	m.grpcServer = grpc.NewServer()
@@ -117,12 +116,10 @@ func (s *Master) startServer(ctx context.Context) error {
 	return nil
 }
 
-
 // AddCloseCallback adds a callback in the Close phase.
 func (s *Master) AddCloseCallback(callbacks ...func()) {
 	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
-
 
 // Close closes the server.
 func (s *Master) Close() {
@@ -151,7 +148,6 @@ func (s *Master) Close() {
 func (s *Master) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
-
 
 // Run runs the pd server.
 func (s *Master) Run() error {
@@ -189,12 +185,10 @@ func (s *Master) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-
 // StartTimestamp returns the start timestamp of this server
 func (s *Master) StartTimestamp() int64 {
 	return s.startTimestamp
 }
-
 
 func (s *Master) grpcLoop() {
 	defer s.serverLoopWg.Done()
@@ -236,7 +230,7 @@ func (s *Master) pulsarLoop() {
 		log.Fatal(err)
 		return
 	}
-	defer func (){
+	defer func() {
 		if err := consumer.Unsubscribe(); err != nil {
 			log.Fatal(err)
 		}
@@ -259,23 +253,49 @@ func (s *Master) pulsarLoop() {
 			return
 		}
 	}
+}
 
+func (s *Master) tasksExecutionLoop() {
+	defer s.serverLoopWg.Done()
+	ctx, _ := context.WithCancel(s.serverLoopCtx)
+
+	for {
+		select {
+		case task := <-s.scheduler.reqQueue:
+			timeStamp, err := (*task).Ts()
+			if err != nil {
+				log.Println(err)
+			} else {
+				if timeStamp < s.scheduler.scheduleTimeStamp {
+					_ = (*task).NotifyTimeout()
+				} else {
+					s.scheduler.scheduleTimeStamp = timeStamp
+					err := (*task).Execute()
+					if err != nil {
+						log.Println("request execution failed caused by error:", err)
+					}
+				}
+			}
+		case <-ctx.Done():
+			log.Print("server is closed, exit task execution loop")
+			return
+		}
+	}
 }
 
 func (s *Master) segmentStatisticsLoop() {
-		defer s.serverLoopWg.Done()
+	defer s.serverLoopWg.Done()
 
-		ctx, cancel := context.WithCancel(s.serverLoopCtx)
-		defer cancel()
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
 
-		for {
-			select {
-			case ss := <-s.ssChan:
-				controller.ComputeCloseTime(ss, s.kvBase)
-			case <-ctx.Done():
-				log.Print("server is closed, exit etcd leader loop")
-				return
-			}
+	for {
+		select {
+		case ss := <-s.ssChan:
+			controller.ComputeCloseTime(ss, s.kvBase)
+		case <-ctx.Done():
+			log.Print("server is closed, exit etcd leader loop")
+			return
 		}
+	}
 }
-

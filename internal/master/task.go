@@ -2,8 +2,8 @@ package master
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -19,30 +19,29 @@ type baseTask struct {
 type task interface {
 	Type() internalpb.ReqType
 	Ts() (Timestamp, error)
-	Execute() commonpb.Status
-	WaitToFinish(ctx context.Context) commonpb.Status
-	Notify() commonpb.Status
+	Execute() error
+	WaitToFinish(ctx context.Context) error
+	Notify() error
+	NotifyTimeout() error
 }
 
-func (bt *baseTask) Notify() commonpb.Status {
+func (bt *baseTask) Notify() error {
 	bt.cv <- 0
-	return commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}
+	return nil
 }
 
-func (bt *baseTask) WaitToFinish(ctx context.Context) commonpb.Status {
+func (bt *baseTask) NotifyTimeout() error {
+	bt.cv <- 0
+	return errors.New("request timeout")
+}
+
+func (bt *baseTask) WaitToFinish(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return commonpb.Status{
-				// TODO: if to return unexpected error
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			}
+			return nil
 		case <-bt.cv:
-			return commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_SUCCESS,
-			}
+			return nil
 		}
 	}
 }
