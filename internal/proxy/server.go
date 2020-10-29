@@ -18,6 +18,7 @@ import (
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	etcd "go.etcd.io/etcd/clientv3"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
@@ -195,7 +196,7 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 
 	for i := 0; i < len(req.HashValues); i++ {
 		key := int64(req.HashValues[i])
-		hash, err := Hash32_Int64(key)
+		hash, err := typeutil.Hash32Int64(key)
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, "hash failed on %d", key)
 		}

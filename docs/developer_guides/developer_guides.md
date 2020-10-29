@@ -224,12 +224,11 @@ func (tso *timestampOracle) loadTimestamp() error
 #### 4.2 Timestamp Allocator
 
 ```go
-type TimestampAllocator struct {
-  Alloc(count uint32) ([]Timestamp, error)
-}
+type TimestampAllocator struct {}
 
 func (allocator *TimestampAllocator) Start() error
 func (allocator *TimestampAllocator) Close() error
+func (allocator *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error)
 
 func NewTimestampAllocator() *TimestampAllocator
 ```
@@ -303,8 +302,15 @@ func (gparams *GlobalParamsTable) Remove(key string) error
 ``` go
 type MsgType uint32
 const {
-  USER_REQUEST MsgType = 1
-  TIME_TICK = 2
+  kInsert MsgType = 400
+  kDelete MsgType = 401
+  kSearch MsgType = 500
+  KSearchResult MsgType = 1000
+  
+  kSegStatistics MsgType = 1100
+  
+  kTimeTick MsgType = 1200
+  kTimeSync MsgType = 1201
 }
 
 type TsMsg interface {
@@ -370,24 +376,105 @@ func (ms *PulsarMsgStream) Consume() *MsgPack //return messages in one time tick
 
 
 
-#### 5.4 ID Allocator
+#### 5.4 Time Ticked Flow Graph
+
+###### 5.4.1 Flow Graph States
 
 ```go
-type IdAllocator struct {
-  Alloc(count uint32) ([]int64, error)
+type flowGraphStates struct {
+  startTick Timestamp
+  numActiveTasks map[string]int32
+  numCompletedTasks map[string]int64
 }
+```
 
-func (allocator *IdAllocator) Start() error
-func (allocator *IdAllocator) Close() error
+###### 5.4.2 Message
 
-func NewIdAllocator() *IdAllocator
+```go
+type Msg interface {
+  TimeTick() Timestamp
+  DownStreamNodeIdx() int32
+}
+```
+
+###### 5.4.3 Node
+
+```go
+type Node interface {
+  Name() string
+  MaxQueueLength() int32
+  MaxParallelism() int32
+  SetPipelineStates(states *flowGraphStates)
+  Operate([]*Msg) []*Msg
+}
 ```
 
 
 
-#### 5.4 KV
+```go
+type baseNode struct {
+  Name string
+  maxQueueLength int32
+  maxParallelism int32
+  graphStates *flowGraphStates
+}
+func (node *baseNode) MaxQueueLength() int32
+func (node *baseNode) MaxParallelism() int32
+func (node *baseNode) SetMaxQueueLength(n int32)
+func (node *baseNode) SetMaxParallelism(n int32)
+func (node *baseNode) SetPipelineStates(states *flowGraphStates)
+```
 
-###### 5.4.1 KV Base
+###### 5.4.4 Flow Graph
+
+```go
+type nodeCtx struct {
+  node *Node
+  inputChans [](*chan *Msg)
+  outputChans [](*chan *Msg)
+  inputMsgs [](*Msg List)
+  downstreams []*nodeCtx
+}
+
+func (nodeCtx *nodeCtx) Start(ctx context.Context) error
+```
+
+*Start()* will enter a loop. In each iteration, it tries to collect input messges from *inputChan*, then prepare node's input. When input is ready, it will trigger *node.Operate*. When *node.Operate* returns, it sends the returned *Msg* to *outputChans*, which connects to the downstreams' *inputChans*.
+
+```go
+type TimeTickedFlowGraph struct {
+  states *flowGraphStates
+  nodeCtx map[string]*nodeCtx
+}
+
+func (*pipeline TimeTickedFlowGraph) AddNode(node *Node)
+func (*pipeline TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []string)
+func (*pipeline TimeTickedFlowGraph) Start() error
+func (*pipeline TimeTickedFlowGraph) Close() error
+
+func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph
+```
+
+
+
+#### 5.5 ID Allocator
+
+```go
+type IdAllocator struct {
+}
+
+func (allocator *IdAllocator) Start() error
+func (allocator *IdAllocator) Close() error
+func (allocator *IdAllocator) Alloc(count uint32) ([]int64, error)
+
+func NewIdAllocator(ctx context.Context) *IdAllocator
+```
+
+
+
+#### 5.6 KV
+
+###### 5.6.1 KV Base
 
 ```go
 type KVBase interface {
@@ -409,7 +496,7 @@ type KVBase interface {
 
 
 
-###### 5.4.2 Etcd KV
+###### 5.6.2 Etcd KV
 
 ```go
 type EtcdKV struct {
@@ -853,6 +940,8 @@ type task interface {
   Notify() error
 }
 ```
+
+
 
 A task example is as follows. In this example, we wrap a CreateCollectionRequest (a proto) as a createCollectionTask. The wrapper need to contain task interfaces. 
 
