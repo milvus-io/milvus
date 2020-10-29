@@ -142,7 +142,7 @@ func GenVectorQuery(metricType milvus.MetricType, indexType milvus.IndexType) ma
 				var query FloatQuery
 				query.Topk = DefaultTopk
 				query.MetricType = metricType
-				query.Query = GenFloatVectors(DefaultDimension, DefaultNb, false)
+				query.Query = GenFloatVectors(DefaultDimension, DefaultNq, false)
 				query.Params = floatQueryParams[i]
 				return Struct2Map(query)
 			}
@@ -153,7 +153,7 @@ func GenVectorQuery(metricType milvus.MetricType, indexType milvus.IndexType) ma
 				var query BinaryQuery
 				query.Topk = DefaultTopk
 				query.MetricType = metricType
-				query.Query = GenBinaryVectors(DefaultDimension, DefaultNb)
+				query.Query = GenBinaryVectors(DefaultDimension, DefaultNq)
 				query.Params = binaryQueryParams[i]
 				return Struct2Map(query)
 			}
@@ -163,11 +163,13 @@ func GenVectorQuery(metricType milvus.MetricType, indexType milvus.IndexType) ma
 }
 
 func GenDSL(name string, metricType milvus.MetricType, indexType milvus.IndexType) map[string]interface{} {
-	var dsl = map[string]interface{}{
+	dsl := map[string]interface{}{
 		"bool": map[string]interface{}{
-			"must": map[string]interface{}{
-				"vector": map[string]interface{}{
-					name: GenVectorQuery(metricType, indexType),
+			"must": []map[string]interface{}{
+				{
+					"vector": map[string]interface{}{
+						name: GenVectorQuery(metricType, indexType),
+					},
 				},
 			},
 		},

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"testing"
 
 	//"github.com/stretchr/testify/suite"
@@ -15,7 +14,7 @@ import (
 )
 
 var ip string
-var port int
+var port int64
 
 // type _Suite struct {
 // 	suite.Suite
@@ -25,19 +24,19 @@ var Server ArgsServer
 
 type ArgsServer struct {
 	ip     string
-	port   int
+	port   int64
 	client milvus.MilvusClient
 }
 
 func init() {
 	flag.StringVar(&ip, "ip", "127.0.0.1", "server host ip")
-	flag.IntVar(&port, "port", 19530, "server host port")
+	flag.Int64Var(&port, "port", 19530, "server host port")
 }
 
 func GetClient() milvus.MilvusClient {
 	var grpcClient milvus.Milvusclient
 	client := milvus.NewMilvusClient(grpcClient.Instance)
-	connectParam := milvus.ConnectParam{ip, strconv.Itoa(port)}
+	connectParam := milvus.ConnectParam{ip, port}
 	err := client.Connect(connectParam)
 	if err != nil {
 		fmt.Println("Connect failed")

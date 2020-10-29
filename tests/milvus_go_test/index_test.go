@@ -23,6 +23,7 @@ func TestIndex(t *testing.T) {
 		var index = utils.Struct2Map(_index)
 		indexParam := milvus.IndexParam{name, utils.DefaultFieldFloatVectorName, index}
 		status, _ = client.CreateIndex(&indexParam)
+		t.Log(status)
 		assert.Equal(t, status.Ok(), true)
 	}
 }
