@@ -28,10 +28,27 @@ func TestCreateCollectionWithInvalidName(t *testing.T) {
 	}
 }
 
-func TestCreateCollectionInvalidParams(t *testing.T) {
+func TestCreateCollectionInvalidDimension(t *testing.T) {
 	client := GetClient()
 	var dimension int = 0
-	fields := GenDefaultFields(milvus.VECTORFLOAT, dimension)
+	dimParams := map[string]interface{}{
+		"dim": dimension,
+	}
+	extraParams, _ := json.Marshal(dimParams)
+	fields := []milvus.Field{
+		{
+			fieldFloatName,
+			milvus.FLOAT,
+			"",
+			"",
+		},
+		{
+			fieldFloatVectorName,
+			milvus.VECTORFLOAT,
+			"",
+			string(extraParams),
+		},
+	}
 	name := utils.RandString(8)
 	params := map[string]interface{}{
 		"auto_id":           autoId,
@@ -80,6 +97,6 @@ func TestDropCollectionNotExisted(t *testing.T)  {
 	assert.False(t, status.Ok())
 }
 
-func ()  {
+func TestDropCollectionWithoutConnect(t *testing.T)  {
 	
 }

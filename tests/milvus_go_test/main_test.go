@@ -63,7 +63,17 @@ func GetClient() milvus.MilvusClient {
 	return client
 }
 
-func GenDefaultFields(fieldType milvus.DataType, dimension int) []milvus.Field {
+func GetDisconnectClient() milvus.MilvusClient {
+	client := GetClient()
+	error := client.Disconnect()
+	if error != nil && client.IsConnected(){
+		fmt.Println("Disconnect failed")
+		return nil
+	}
+	return client
+}
+
+func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 	var field milvus.Field
 	fields := []milvus.Field{
 		{
@@ -128,7 +138,7 @@ func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 			"segment_row_limit": segmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
-		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType, dimension), ExtraParams: string(paramsStr)}
+		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: string(paramsStr)}
 		status, _ := client.CreateCollection(mapping)
 		if !status.Ok() {
 			os.Exit(-1)
@@ -148,7 +158,7 @@ func GenCollectionParams(name string, autoId bool, segmentRowLimit int, dim int)
 			"segment_row_limit": segmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
-		mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT, dim), ExtraParams: string(paramsStr)}
+		mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: string(paramsStr)}
 	} else {
 		os.Exit(-2)
 	}
