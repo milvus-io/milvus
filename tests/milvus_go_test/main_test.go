@@ -32,7 +32,8 @@ var defaultFloatVectors = utils.GenFloatVectors(dimension, defaultNb, false)
 var defaultBinaryVector = utils.GenBinaryVectors(dimension, 1)
 var defaultBinaryVectors = utils.GenBinaryVectors(dimension, defaultNb)
 
-// var defaultFloatEntities = GenDefaultFieldValues()
+var l2Indexes = utils.GenIndexes(milvus.L2)
+var ipIndexes = utils.GenIndexes(milvus.IP)
 
 // type _Suite struct {
 // 	suite.Suite
@@ -141,6 +142,7 @@ func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: string(paramsStr)}
 		status, _ := client.CreateCollection(mapping)
 		if !status.Ok() {
+			fmt.Println("Create collection failed")
 			os.Exit(-1)
 		}
 	} else {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"milvus_go_test/utils"
 	"testing"
 
 	"github.com/milvus-io/milvus-sdk-go/milvus"
@@ -34,4 +35,20 @@ func TestInsertWithCustomIds(t *testing.T) {
 	t.Log(status)
 	assert.Equal(t, status.Ok(), true)
 	assert.Equal(t, len(ids), defaultNb)
+	assert.Equal(t, ids, customIds)
+}
+
+func TestInsertWithCustomIdsNotMatch(t *testing.T) {
+	client, name := Collection(false, milvus.VECTORFLOAT)
+	var customIds []int64 = utils.GenDefaultIntValues(defaultNb - 1)
+	insertParam := milvus.InsertParam{
+		name,
+		GenDefaultFieldValues(milvus.VECTORFLOAT),
+		customIds,
+		""}
+	ids, status, _ := client.Insert(insertParam)
+	// t.Log(ids)
+	t.Log(status)
+	assert.Equal(t, status.Ok(), false)
+	assert.Equal(t, len(ids), 0)
 }
