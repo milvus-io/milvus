@@ -677,6 +677,10 @@ SqliteMetaImpl::GetCollectionFiles(const std::string& collection_id, const std::
                                 " row_count, date, created_on FROM " + std::string(META_TABLEFILES)
                                 + " WHERE table_id = " + Quote(collection_id) + " AND (" + idStr + ")"
                                 + " AND file_type <> " + std::to_string(SegmentSchema::TO_DELETE) + ";";
+
+        // to ensure UpdateCollectionFiles to be a atomic operation
+        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
+
         AttrsMapList res;
         auto status = SqlQuery(statement, &res);
         if (!status.ok()) {
@@ -991,6 +995,9 @@ SqliteMetaImpl::UpdateCollectionFilesRowCount(SegmentsSchema& files) {
 
             std::string statement = "UPDATE " + std::string(META_TABLEFILES) + " SET row_count = " + row_count
                                     + " , updated_time = " + updated_time + " WHERE file_id = " + file.file_id_ + ";";
+
+            // to ensure UpdateCollectionFiles to be a atomic operation
+            std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
             auto status = SqlTransaction({statement});
             if (!status.ok()) {
@@ -2222,9 +2229,6 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
 
             statements.emplace_back(statement);
         }
-
-        // to ensure UpdateCollectionFiles to be a atomic operation
-        std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         auto status = SqlTransaction(statements);
         fiu_do_on("SqliteMetaImpl.CleanUpFilesWithTTL.RemoveFile_FailCommited", status = Status(DB_ERROR, ""));
