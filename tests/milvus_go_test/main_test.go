@@ -20,6 +20,7 @@ var fieldFloatName string = "float"
 var fieldIntName string = "int64"
 var fieldFloatVectorName string = "float_vector"
 var fieldBinaryVectorName string = "binary_vector"
+var autoId bool = false
 var dimension int = 128
 var segmentRowLimit int = 5000
 var defaultNb = 6000
@@ -62,7 +63,7 @@ func GetClient() milvus.MilvusClient {
 	return client
 }
 
-func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
+func GenDefaultFields(fieldType milvus.DataType, dimension int) []milvus.Field {
 	var field milvus.Field
 	fields := []milvus.Field{
 		{
@@ -109,25 +110,25 @@ func GenDefaultFieldValues(fieldType milvus.DataType) []milvus.FieldValue {
 		}
 	} else {
 		fieldValue = milvus.FieldValue{
-			fieldBinaryVectorName,
-			defaultBinaryVectors,
+			Name:    fieldBinaryVectorName,
+			RawData: defaultBinaryVectors,
 		}
 	}
 	return append(fieldValues, fieldValue)
 }
 
-func Collection(autoid bool, vectorType milvus.DataType) (milvus.MilvusClient, string) {
+func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, string) {
 	client := GetClient()
 	name := ""
 	if client != nil {
 		name = utils.RandString(8)
 		fmt.Printf(name)
 		params := map[string]interface{}{
-			"auto_id":           autoid,
-			"segment_row_count": segmentRowLimit,
+			"auto_id":           autoId,
+			"segment_row_limit": segmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
-		mapping := milvus.Mapping{name, GenDefaultFields(vectorType), string(paramsStr)}
+		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType, dimension), ExtraParams: string(paramsStr)}
 		status, _ := client.CreateCollection(mapping)
 		if !status.Ok() {
 			os.Exit(-1)
@@ -138,20 +139,29 @@ func Collection(autoid bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 	return client, name
 }
 
-func GenCollectionParams(name string) (milvus.MilvusClient, milvus.Mapping) {
+func GenCollectionParams(name string, autoId bool, segmentRowLimit int, dim int) (milvus.MilvusClient, milvus.Mapping) {
 	client := GetClient()
 	var mapping milvus.Mapping
 	if client != nil {
 		params := map[string]interface{}{
-			"auto_id":           false,
-			"segment_row_count": segmentRowLimit,
+			"auto_id":           autoId,
+			"segment_row_limit": segmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
-		mapping = milvus.Mapping{name, GenDefaultFields(milvus.VECTORFLOAT), string(paramsStr)}
+		mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT, dim), ExtraParams: string(paramsStr)}
 	} else {
 		os.Exit(-2)
 	}
 	return client, mapping
+}
+
+func teardown()  {
+	client := GetClient()
+	listCollections, _, _ := client.ListCollections()
+	println(len(listCollections))
+	for i :=0; i<len(listCollections); i++ {
+		client.DropCollection(listCollections[i])
+	}
 }
 
 func TestMain(m *testing.M) {
@@ -161,6 +171,8 @@ func TestMain(m *testing.M) {
 	Server.port = port
 	Server.client = GetClient()
 	fmt.Println(Server.ip)
-	os.Exit(m.Run())
+	code := m.Run()
+	teardown()
+	os.Exit(code)
 	//suite.Run(t, new(_Suite))
 }
