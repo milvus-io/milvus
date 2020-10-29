@@ -550,7 +550,7 @@ def gen_invalid_strs():
         [1],
         None,
         "12-s",
-        " ",
+        # " ",
         # "",
         # None,
         "12 s",
