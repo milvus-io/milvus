@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"milvus_go_test/utils"
 	"testing"
 
-	"milvus_go_test/utils"
+
 
 	"github.com/milvus-io/milvus-sdk-go/milvus"
 	"github.com/stretchr/testify/assert"
@@ -20,11 +22,21 @@ func TestCreateCollection(t *testing.T) {
 	assert.Equal(t, value, true)
 }
 
+func TestCreateCollectionWithoutConnect(t *testing.T) {
+	client := GenDisconnectClient()
+	name := utils.RandString(8)
+	mapping := GenCollectionParams(name, false, segmentRowLimit)
+	assert.Panics(t, func() {
+		client.CreateCollection(mapping)
+	})
+}
+
 func TestCreateCollectionWithInvalidName(t *testing.T) {
+	client := GetClient()
 	for _, name := range utils.GenInvalidStrs() {
-		client, mapping := GenCollectionParams(name, autoId, segmentRowLimit, dimension)
+		mapping := GenCollectionParams(name, autoId, segmentRowLimit)
 		status, _ := client.CreateCollection(mapping)
-		assert.Equal(t, status.Ok(), false)
+		assert.False(t, status.Ok())
 	}
 }
 
@@ -65,7 +77,7 @@ func TestShowCollections(t *testing.T)  {
 	originCollections := make([]string, 10)
 	for i := 0; i< 10; i++ {
 		name := utils.RandString(8)
-		_, mapping := GenCollectionParams(name, autoId, segmentRowLimit, dimension)
+		mapping := GenCollectionParams(name, autoId, segmentRowLimit)
 		status, _ := client.CreateCollection(mapping)
 		assert.Equal(t, status.Ok(), true)
 		originCollections[i] = name
@@ -87,16 +99,45 @@ func TestDropCollections(t *testing.T)  {
 	assert.False(t, isHas)
 	listCollections, _, _ := client.ListCollections()
 	assert.Nil(t, listCollections)
-	//assert.NotContains(t, listCollections, name)
 }
 
 func TestDropCollectionNotExisted(t *testing.T)  {
 	client := GetClient()
 	name := utils.RandString(8)
-	status, _ := client.DropCollection( name);
+	status, error := client.DropCollection( name)
 	assert.False(t, status.Ok())
+	fmt.Println(error)
 }
 
 func TestDropCollectionWithoutConnect(t *testing.T)  {
-	
+	client, name := Collection(false, milvus.VECTORFLOAT)
+	isHas, _, _ := client.HasCollection(name)
+	assert.True(t, isHas)
+	client.Disconnect()
+	assert.Panics(t, func() {
+		client.DropCollection(name)
+	})
+}
+
+func TestHasCollectionNotExisted(t *testing.T)  {
+	client := GetClient()
+	name := utils.RandString(8)
+	isHas, _, _ := client.HasCollection(name)
+	assert.False(t, isHas)
+}
+
+func TestHasCollection(t *testing.T)  {
+	client, name := Collection(false, milvus.VECTORFLOAT)
+	isHas, status, _ := client.HasCollection(name)
+	assert.True(t, status.Ok())
+	assert.True(t, isHas)
+}
+
+func TestDescribeCollection(t *testing.T)  {
+	client, name := Collection(false, milvus.VECTORFLOAT)
+	mapping, status, _ := client.GetCollectionInfo(name)
+	assert.True(t, status.Ok())
+	assert.Equal(t, mapping.CollectionName, name)
+	//assert.Equal(t, mapping.ExtraParams[segment_row_limit], segmentRowLimit)
+	//fmt.Println(mapping)
 }

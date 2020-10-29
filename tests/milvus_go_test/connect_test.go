@@ -58,3 +58,11 @@ func TestConnectInvalidConnectArgs(t *testing.T)  {
 		fmt.Println(err)
 	}
 }
+
+func TestDisconnectRepeat(t *testing.T)  {
+	client := GetClient()
+	client.Disconnect()
+	assert.False(t, client.IsConnected())
+	error := client.Disconnect()
+	assert.Nil(t, error)
+}
