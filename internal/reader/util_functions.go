@@ -34,7 +34,7 @@ func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
 	return &entityIDs, &timestamps, &segmentIDs
 }
 
-func (node *QueryNode) GetCollectionByID(collectionID uint64) *Collection {
+func (node *QueryNode) GetCollectionByID(collectionID int64) *Collection {
 	for _, collection := range node.Collections {
 		if collection.CollectionID == collectionID {
 			return collection

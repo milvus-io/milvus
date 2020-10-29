@@ -16,7 +16,7 @@ import "C"
 type Collection struct {
 	CollectionPtr  C.CCollection
 	CollectionName string
-	CollectionID   uint64
+	CollectionID   int64
 	Partitions     []*Partition
 }
 

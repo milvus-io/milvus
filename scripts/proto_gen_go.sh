@@ -31,5 +31,6 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal_msg.
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service_msg.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./message message.proto
 
 popd

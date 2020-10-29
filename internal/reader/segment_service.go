@@ -56,7 +56,7 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 
 		stat := internalpb.SegmentStatistics{
 			// TODO: set master pb's segment id type from uint64 to int64
-			SegmentId:  uint64(segmentID),
+			SegmentId:  segmentID,
 			MemorySize: currentMemSize,
 			NumRows: segmentNumOfRows,
 		}

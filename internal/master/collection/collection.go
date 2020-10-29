@@ -12,12 +12,12 @@ import (
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Collection struct {
-	ID         uint64      `json:"id"`
+	ID         int64      `json:"id"`
 	Name       string      `json:"name"`
 	CreateTime uint64      `json:"creat_time"`
 	Schema     []FieldMeta `json:"schema"`
 	//	ExtraSchema       []FieldMeta `json:"extra_schema"`
-	SegmentIDs        []uint64                `json:"segment_ids"`
+	SegmentIDs        []int64                `json:"segment_ids"`
 	PartitionTags     []string                `json:"partition_tags"`
 	GrpcMarshalString string                  `json:"grpc_marshal_string"`
 }
@@ -56,10 +56,10 @@ func GrpcMarshal(c *Collection) *Collection {
 	return c
 }
 
-func NewCollection(id uint64, name string, createTime time.Time,
-	schema []*schemapb.FieldSchema, sIds []uint64, ptags []string) Collection {
+func NewCollection(id int64, name string, createTime time.Time,
+	schema []*schemapb.FieldSchema, sIds []int64, ptags []string) Collection {
 
-	segementIDs := []uint64{}
+	segementIDs := []int64{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
 		newSchema = append(newSchema, FieldMeta{FieldName: v.Name, Type: v.DataType, DIM: 16})

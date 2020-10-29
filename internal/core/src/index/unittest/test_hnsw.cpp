@@ -10,11 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-#include <src/index/knowhere/knowhere/common/Config.h>
-#include <src/index/knowhere/knowhere/index/vector_index/IndexHNSW.h>
-#include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
+
 #include <iostream>
 #include <random>
+#include  "knowhere/common/Config.h"
+#include  "knowhere/index/vector_index/IndexHNSW.h"
+#include  "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Exception.h"
 #include "unittest/utils.h"
 

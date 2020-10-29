@@ -72,7 +72,7 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	// TODO: allocate collection id
-	var collectionId uint64 = 0
+	var collectionId int64 = 0
 	// TODO: allocate timestamp
 	var collectionCreateTime uint64 = 0
 
@@ -81,7 +81,7 @@ func (t *createCollectionTask) Execute() error {
 		Schema:     &schema,
 		CreateTime: collectionCreateTime,
 		// TODO: initial segment?
-		SegmentIds: make([]uint64, 0),
+		SegmentIds: make([]int64, 0),
 		// TODO: initial partition?
 		PartitionTags: make([]string, 0),
 	}
@@ -92,7 +92,7 @@ func (t *createCollectionTask) Execute() error {
 		return errors.New("marshal collection failed")
 	}
 
-	err = (*t.kvBase).Save(collectionMetaPrefix+strconv.FormatUint(collectionId, 10), string(collectionJson))
+	err = (*t.kvBase).Save(collectionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
 	if err != nil {
 		_ = t.Notify()
 		return errors.New("save collection failed")
@@ -135,7 +135,7 @@ func (t *dropCollectionTask) Execute() error {
 
 	collectionId := collectionMeta.Id
 
-	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatUint(collectionId, 10))
+	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatInt(collectionId, 10))
 	if err != nil {
 		_ = t.Notify()
 		return errors.New("save collection failed")

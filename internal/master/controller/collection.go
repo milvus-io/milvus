@@ -15,15 +15,15 @@ import (
 
 func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, errch chan error) {
 	for collectionMeta := range ch {
-		sID := id.New().Uint64()
-		cID := id.New().Uint64()
-		s2ID := id.New().Uint64()
+		sID := id.New().Int64()
+		cID := id.New().Int64()
+		s2ID := id.New().Int64()
 		fieldMetas := []*schemapb.FieldSchema{}
 		if collectionMeta.Fields != nil {
 			fieldMetas = collectionMeta.Fields
 		}
 		c := collection.NewCollection(cID, collectionMeta.Name,
-			time.Now(), fieldMetas, []uint64{sID, s2ID},
+			time.Now(), fieldMetas, []int64{sID, s2ID},
 			[]string{"default"})
 		cm := collection.GrpcMarshal(&c)
 		s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, 511, time.Now(), time.Unix(1<<36-1, 0))
@@ -37,15 +37,15 @@ func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, er
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save("collection/"+strconv.FormatUint(cID, 10), collectionData)
+		err = kvbase.Save("collection/"+strconv.FormatInt(cID, 10), collectionData)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save("segment/"+strconv.FormatUint(sID, 10), segmentData)
+		err = kvbase.Save("segment/"+strconv.FormatInt(sID, 10), segmentData)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = kvbase.Save("segment/"+strconv.FormatUint(s2ID, 10), s2Data)
+		err = kvbase.Save("segment/"+strconv.FormatInt(s2ID, 10), s2Data)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -53,14 +53,14 @@ func CollectionController(ch chan *schemapb.CollectionSchema, kvbase kv.Base, er
 }
 
 func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase kv.Base) error {
-	sID := id.New().Uint64()
-	cID := id.New().Uint64()
+	sID := id.New().Int64()
+	cID := id.New().Int64()
 	fieldMetas := []*schemapb.FieldSchema{}
 	if collectionMeta.Fields != nil {
 		fieldMetas = collectionMeta.Fields
 	}
 	c := collection.NewCollection(cID, collectionMeta.Name,
-		time.Now(), fieldMetas, []uint64{sID},
+		time.Now(), fieldMetas, []int64{sID},
 		[]string{"default"})
 	cm := collection.GrpcMarshal(&c)
 	s := segment.NewSegment(sID, cID, collectionMeta.Name, "default", 0, conf.Config.Pulsar.TopicNum, time.Now(), time.Unix(1<<46-1, 0))
@@ -74,12 +74,12 @@ func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase
 		log.Fatal(err)
 		return err
 	}
-	err = kvbase.Save("collection/"+strconv.FormatUint(cID, 10), collectionData)
+	err = kvbase.Save("collection/"+strconv.FormatInt(cID, 10), collectionData)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-	err = kvbase.Save("segment/"+strconv.FormatUint(sID, 10), segmentData)
+	err = kvbase.Save("segment/"+strconv.FormatInt(sID, 10), segmentData)
 	if err != nil {
 		log.Fatal(err)
 		return err

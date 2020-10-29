@@ -210,7 +210,7 @@ message QueryResult {
     repeated float scores = 4;
     repeated float distances = 5;
     repeated KeyValuePair extra_params = 6;
-    uint64 query_id = 7;
+    int64 query_id = 7;
     int64 proxy_id = 8;
 }
 
@@ -367,7 +367,7 @@ message FieldType {
  * @brief Field parameters
  */
 message FieldParam {
-    uint64 id = 1;
+    int64 id = 1;
     string name = 2;
     DataType type = 3;
     repeated KeyValuePair index_params = 4;
@@ -722,18 +722,18 @@ message QueryReqMsg {
     repeated KeyValuePair extra_params = 5;
     uint64 timestamp =6;
     int64 proxy_id = 7;
-    uint64 query_id = 8;
+    int64 query_id = 8;
     ReqType req_type = 9;
 }
 
 message ManipulationReqMsg {
     string collection_name = 1;
     string partition_tag = 2;
-    repeated uint64 primary_keys = 3;
+    repeated int64 primary_keys = 3;
     repeated RowData rows_data = 4;
     uint64 timestamp =5;
-    uint64 segment_id = 6;
-    uint64 channel_id = 7;
+    int64 segment_id = 6;
+    int64 channel_id = 7;
     ReqType req_type = 8;
     int64 proxy_id = 9;
     repeated KeyValuePair extra_params = 10;

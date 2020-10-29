@@ -232,15 +232,15 @@ class TenantMeta :
   std::string* release_query_channel_id();
   void set_allocated_query_channel_id(std::string* query_channel_id);
 
-  // uint64 id = 1;
+  // int64 id = 1;
   void clear_id();
-  ::PROTOBUF_NAMESPACE_ID::uint64 id() const;
-  void set_id(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
+  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // uint64 num_query_nodes = 2;
+  // int64 num_query_nodes = 2;
   void clear_num_query_nodes();
-  ::PROTOBUF_NAMESPACE_ID::uint64 num_query_nodes() const;
-  void set_num_query_nodes(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 num_query_nodes() const;
+  void set_num_query_nodes(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.TenantMeta)
  private:
@@ -249,8 +249,8 @@ class TenantMeta :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> insert_channel_ids_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr query_channel_id_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 id_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 num_query_nodes_;
+  ::PROTOBUF_NAMESPACE_ID::int64 id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 num_query_nodes_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -398,10 +398,10 @@ class ProxyMeta :
   ::milvus::proto::common::Address* mutable_address();
   void set_allocated_address(::milvus::proto::common::Address* address);
 
-  // uint64 id = 1;
+  // int64 id = 1;
   void clear_id();
-  ::PROTOBUF_NAMESPACE_ID::uint64 id() const;
-  void set_id(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
+  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.ProxyMeta)
  private:
@@ -410,7 +410,7 @@ class ProxyMeta :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> result_channel_ids_;
   ::milvus::proto::common::Address* address_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 id_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -535,15 +535,15 @@ class CollectionMeta :
     kIdFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
   };
-  // repeated uint64 segment_ids = 4;
+  // repeated int64 segment_ids = 4;
   int segment_ids_size() const;
   void clear_segment_ids();
-  ::PROTOBUF_NAMESPACE_ID::uint64 segment_ids(int index) const;
-  void set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::uint64 value);
-  void add_segment_ids(::PROTOBUF_NAMESPACE_ID::uint64 value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >&
+  ::PROTOBUF_NAMESPACE_ID::int64 segment_ids(int index) const;
+  void set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_segment_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
       segment_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
       mutable_segment_ids();
 
   // repeated string partition_tags = 5;
@@ -571,10 +571,10 @@ class CollectionMeta :
   ::milvus::proto::schema::CollectionSchema* mutable_schema();
   void set_allocated_schema(::milvus::proto::schema::CollectionSchema* schema);
 
-  // uint64 id = 1;
+  // int64 id = 1;
   void clear_id();
-  ::PROTOBUF_NAMESPACE_ID::uint64 id() const;
-  void set_id(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
+  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // uint64 create_time = 3;
   void clear_create_time();
@@ -586,11 +586,11 @@ class CollectionMeta :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > segment_ids_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > segment_ids_;
   mutable std::atomic<int> _segment_ids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_tags_;
   ::milvus::proto::schema::CollectionSchema* schema_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
@@ -730,15 +730,15 @@ class SegmentMeta :
   std::string* release_partition_tag();
   void set_allocated_partition_tag(std::string* partition_tag);
 
-  // uint64 segment_id = 1;
+  // int64 segment_id = 1;
   void clear_segment_id();
-  ::PROTOBUF_NAMESPACE_ID::uint64 segment_id() const;
-  void set_segment_id(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 segment_id() const;
+  void set_segment_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // uint64 collection_id = 2;
+  // int64 collection_id = 2;
   void clear_collection_id();
-  ::PROTOBUF_NAMESPACE_ID::uint64 collection_id() const;
-  void set_collection_id(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  ::PROTOBUF_NAMESPACE_ID::int64 collection_id() const;
+  void set_collection_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // int32 channel_start = 4;
   void clear_channel_start();
@@ -771,8 +771,8 @@ class SegmentMeta :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_tag_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 segment_id_;
-  ::PROTOBUF_NAMESPACE_ID::uint64 collection_id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 segment_id_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collection_id_;
   ::PROTOBUF_NAMESPACE_ID::int32 channel_start_;
   ::PROTOBUF_NAMESPACE_ID::int32 channel_end_;
   ::PROTOBUF_NAMESPACE_ID::uint64 open_time_;
@@ -792,29 +792,29 @@ class SegmentMeta :
 #endif  // __GNUC__
 // TenantMeta
 
-// uint64 id = 1;
+// int64 id = 1;
 inline void TenantMeta::clear_id() {
-  id_ = PROTOBUF_ULONGLONG(0);
+  id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 TenantMeta::id() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 TenantMeta::id() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.id)
   return id_;
 }
-inline void TenantMeta::set_id(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void TenantMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.id)
 }
 
-// uint64 num_query_nodes = 2;
+// int64 num_query_nodes = 2;
 inline void TenantMeta::clear_num_query_nodes() {
-  num_query_nodes_ = PROTOBUF_ULONGLONG(0);
+  num_query_nodes_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 TenantMeta::num_query_nodes() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 TenantMeta::num_query_nodes() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.TenantMeta.num_query_nodes)
   return num_query_nodes_;
 }
-inline void TenantMeta::set_num_query_nodes(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void TenantMeta::set_num_query_nodes(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   num_query_nodes_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.TenantMeta.num_query_nodes)
@@ -940,15 +940,15 @@ inline void TenantMeta::set_allocated_query_channel_id(std::string* query_channe
 
 // ProxyMeta
 
-// uint64 id = 1;
+// int64 id = 1;
 inline void ProxyMeta::clear_id() {
-  id_ = PROTOBUF_ULONGLONG(0);
+  id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 ProxyMeta::id() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 ProxyMeta::id() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.ProxyMeta.id)
   return id_;
 }
-inline void ProxyMeta::set_id(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void ProxyMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.ProxyMeta.id)
@@ -1068,15 +1068,15 @@ ProxyMeta::mutable_result_channel_ids() {
 
 // CollectionMeta
 
-// uint64 id = 1;
+// int64 id = 1;
 inline void CollectionMeta::clear_id() {
-  id_ = PROTOBUF_ULONGLONG(0);
+  id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 CollectionMeta::id() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::id() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.id)
   return id_;
 }
-inline void CollectionMeta::set_id(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void CollectionMeta::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.id)
@@ -1141,31 +1141,31 @@ inline void CollectionMeta::set_create_time(::PROTOBUF_NAMESPACE_ID::uint64 valu
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.create_time)
 }
 
-// repeated uint64 segment_ids = 4;
+// repeated int64 segment_ids = 4;
 inline int CollectionMeta::segment_ids_size() const {
   return segment_ids_.size();
 }
 inline void CollectionMeta::clear_segment_ids() {
   segment_ids_.Clear();
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 CollectionMeta::segment_ids(int index) const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 CollectionMeta::segment_ids(int index) const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionMeta.segment_ids)
   return segment_ids_.Get(index);
 }
-inline void CollectionMeta::set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void CollectionMeta::set_segment_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
   segment_ids_.Set(index, value);
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionMeta.segment_ids)
 }
-inline void CollectionMeta::add_segment_ids(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void CollectionMeta::add_segment_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
   segment_ids_.Add(value);
   // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionMeta.segment_ids)
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >&
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
 CollectionMeta::segment_ids() const {
   // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionMeta.segment_ids)
   return segment_ids_;
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
 CollectionMeta::mutable_segment_ids() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionMeta.segment_ids)
   return &segment_ids_;
@@ -1240,29 +1240,29 @@ CollectionMeta::mutable_partition_tags() {
 
 // SegmentMeta
 
-// uint64 segment_id = 1;
+// int64 segment_id = 1;
 inline void SegmentMeta::clear_segment_id() {
-  segment_id_ = PROTOBUF_ULONGLONG(0);
+  segment_id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 SegmentMeta::segment_id() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::segment_id() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.segment_id)
   return segment_id_;
 }
-inline void SegmentMeta::set_segment_id(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void SegmentMeta::set_segment_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   segment_id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.segment_id)
 }
 
-// uint64 collection_id = 2;
+// int64 collection_id = 2;
 inline void SegmentMeta::clear_collection_id() {
-  collection_id_ = PROTOBUF_ULONGLONG(0);
+  collection_id_ = PROTOBUF_LONGLONG(0);
 }
-inline ::PROTOBUF_NAMESPACE_ID::uint64 SegmentMeta::collection_id() const {
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentMeta::collection_id() const {
   // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentMeta.collection_id)
   return collection_id_;
 }
-inline void SegmentMeta::set_collection_id(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+inline void SegmentMeta::set_collection_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   collection_id_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentMeta.collection_id)

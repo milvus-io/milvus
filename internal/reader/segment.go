@@ -33,7 +33,7 @@ type Segment struct {
 	SegmentPtr       C.CSegmentBase
 	SegmentId        int64
 	SegmentCloseTime uint64
-	LastMemSize      uint64
+	LastMemSize      int64
 	SegmentStatus    int
 }
 
@@ -96,14 +96,14 @@ func (s *Segment) GetDeletedCount() int64 {
 //	return nil
 //}
 
-func (s *Segment) GetMemSize() uint64 {
+func (s *Segment) GetMemSize() int64 {
 	/*
 		long int
 		GetMemoryUsageInBytes(CSegmentBase c_segment);
 	*/
 	var memoryUsageInBytes = C.GetMemoryUsageInBytes(s.SegmentPtr)
 
-	return uint64(memoryUsageInBytes)
+	return int64(memoryUsageInBytes)
 }
 
 ////////////////////////////////////////////////////////////////////////////

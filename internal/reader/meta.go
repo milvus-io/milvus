@@ -219,7 +219,7 @@ func (node *QueryNode) processCollectionDelete(id string) {
 		log.Println("Cannot parse collection id:" + id)
 	}
 
-	targetCollection := node.GetCollectionByID(uint64(collectionId))
+	targetCollection := node.GetCollectionByID(collectionId)
 	node.DeleteCollection(targetCollection)
 }
 

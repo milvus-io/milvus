@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	cid        = uint64(10011111234)
+	cid        = int64(10011111234)
 	name       = "test-segment"
 	createTime = time.Now()
 	schema     = []*schemapb.FieldSchema{}
-	sIds       = []uint64{111111, 222222}
+	sIds       = []int64{111111, 222222}
 	ptags      = []string{"default", "test"}
 )
 
