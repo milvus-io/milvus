@@ -9,8 +9,7 @@ import (
 	"github.com/milvus-io/milvus-sdk-go/milvus"
 	"github.com/stretchr/testify/assert"
 )
-
-var autoId bool = false
+var autoId bool = true
 var segmentRowLimit int = utils.DefaultSegmentRowLimit
 var fieldFloatName string = utils.DefaultFieldFloatName
 var fieldFloatVectorName string = utils.DefaultFieldFloatVectorName
@@ -165,15 +164,15 @@ func TestDescribeCollection(t *testing.T) {
 	mapping, status, _ := client.GetCollectionInfo(name)
 	assert.True(t, status.Ok())
 	assert.Equal(t, mapping.CollectionName, name)
-	for i := 0; i < len(mapping.Fields); i++ {
+	t.Log(mapping)
+	//assert.Equal(t, utils.DefaultSegmentRowLimit, mapping.)
+	for i :=0; i<len(mapping.Fields); i++ {
 		if mapping.Fields[i].Type == milvus.VECTORFLOAT {
-			var extraParams string = mapping.Fields[i].ExtraParams
-			var fieldss milvus.Field
-			json.Unmarshal([]byte(extraParams), &fieldss)
-			fmt.Println(fieldss)
+			var dat map[string]interface{}
+			json.Unmarshal([]byte(mapping.Fields[i].ExtraParams), &dat)
+			var dim map[string]interface{}
+			json.Unmarshal([]byte(dat["params"].(string)), &dim)
+			assert.Equal(t, utils.DefaultDimension, int(dim["dim"].(float64)))
 		}
 	}
-	//assert.Equal(t, mapping.ExtraParams[segment_row_limit], segmentRowLimit)
-	fmt.Println(mapping)
-	fmt.Println(mapping.Fields[0])
 }
