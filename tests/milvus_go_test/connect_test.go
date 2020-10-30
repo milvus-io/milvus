@@ -37,7 +37,6 @@ func GenInvalidConnectArgs() map[string]int64{
 	var port int64 = 19530
 	args := map[string]int64{
 		"1.1.1.1": port,
-		"中文": port,
 		"www.baidu.com": 100000,
 	}
 	return args
