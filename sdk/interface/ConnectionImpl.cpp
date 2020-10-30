@@ -52,8 +52,8 @@ ConnectionImpl::Disconnect() {
 }
 
 Status
-ConnectionImpl::CreateCollection(const Mapping& mapping, const std::string& extra_params) {
-    return client_proxy_->CreateCollection(mapping, extra_params);
+ConnectionImpl::CreateCollection(const Mapping& mapping) {
+    return client_proxy_->CreateCollection(mapping);
 }
 
 Status
@@ -124,12 +124,7 @@ ConnectionImpl::Insert(const std::string& collection_name, const std::string& pa
 
 Status
 ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                              std::string& entities) {
-    return client_proxy_->GetEntityByID(collection_name, id_array, entities);
-}
-
-Status
-ConnectionImpl::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, Entities& entities) {
+                              Entities& entities) {
     return client_proxy_->GetEntityByID(collection_name, id_array, entities);
 }
 

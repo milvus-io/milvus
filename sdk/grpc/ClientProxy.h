@@ -36,7 +36,7 @@ class ClientProxy : public Connection {
     Disconnect() override;
 
     Status
-    CreateCollection(const Mapping& mapping, const std::string& extra_params) override;
+    CreateCollection(const Mapping& mapping) override;
 
     Status
     DropCollection(const std::string& collection_name) override;
@@ -78,10 +78,6 @@ class ClientProxy : public Connection {
     Status
     Insert(const std::string& collection_name, const std::string& partition_tag, const FieldValue& entity_array,
            std::vector<int64_t>& id_array) override;
-
-    Status
-    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
-                  std::string& entities) override;
 
     Status
     GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array,
