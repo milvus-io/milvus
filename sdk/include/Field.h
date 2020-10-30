@@ -16,7 +16,6 @@
 #include <vector>
 #include "Status.h"
 
-
 namespace milvus {
 
 enum class DataType {
@@ -40,11 +39,16 @@ enum class DataType {
 
 // Base struct of all fields
 struct Field {
-    uint64_t field_id;              ///< read-only
-    std::string field_name;
-    DataType field_type;
-    std::string index_params;
-    std::string extra_params;
+    std::string name;
+    DataType type;
+    std::string index_params = "{}";
+    std::string params;
+
+    Field(const std::string& _name, const DataType _type, const std::string& _params)
+        : name(_name), type(_type), params(_params) {
+    }
+
+    Field() = default;
 };
 using FieldPtr = std::shared_ptr<Field>;
 
@@ -63,4 +67,4 @@ struct VectorField : Field {
 };
 using VectorFieldPtr = std::shared_ptr<VectorField>;
 
-} // namespace milvus
+}  // namespace milvus
