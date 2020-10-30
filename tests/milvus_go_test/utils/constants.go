@@ -30,7 +30,7 @@ var DefaultBinaryVectors = GenBinaryVectors(DefaultDimension, DefaultNb)
 var L2Indexes = GenIndexes(milvus.L2)
 var IpIndexes = GenIndexes(milvus.IP)
 var DefaultL2Index = Struct2Map(GenIndexes(milvus.L2)[2])
-
+var DefaultBinaryIndex = Struct2Map(GenIndexes(milvus.JACCARD)[1])
 var DefaultQueries = GenVectorQuery(DefaultMetricType, DefaultIndexType)
 var DefaultBinaryQueries = GenVectorQuery(DefaultBinaryMetricType, DefaultBinaryIndexType)
 var DefaultDsl = GenDSL(DefaultFieldFloatVectorName, DefaultMetricType, DefaultIndexType)
