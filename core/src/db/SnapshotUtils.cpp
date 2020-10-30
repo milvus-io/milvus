@@ -134,6 +134,12 @@ DeleteSnapshotIndex(const std::string& collection_name, const std::string& field
 
     snapshot::OperationContext context;
     for (auto& name : field_names) {
+        // return error if the field doesn't exist
+        auto field = ss->GetField(name);
+        if (field == nullptr) {
+            return Status(SS_NOT_FOUND_ERROR, "Field " + name + " not found.");
+        }
+
         std::vector<snapshot::FieldElementPtr> elements = ss->GetFieldElementsByField(name);
         for (auto& element : elements) {
             if (element->GetFEtype() == engine::FieldElementType::FET_INDEX ||
