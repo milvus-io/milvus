@@ -11,8 +11,10 @@
 
 #pragma once
 
+#include <exception>
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -26,22 +28,86 @@ using configEnum = const std::unordered_map<std::string, int64_t>;
 std::vector<std::string>
 OptionValue(const configEnum& ce);
 
-enum SetReturn {
-    SUCCESS = 1,
-    IMMUTABLE,
-    ENUM_VALUE_NOTFOUND,
-    INVALID,
-    OUT_OF_RANGE,
-    UPDATE_FAILURE,
-    EXCEPTION,
-    UNEXPECTED,
+struct ConfigError : public std::exception {
+    explicit ConfigError(const std::string& name, const std::string& value) : name_(name), value_(value) {
+    }
+
+    virtual std::string
+    message() = 0;
+
+ protected:
+    const std::string name_;
+    const std::string value_;
 };
 
-struct ConfigStatus {
-    ConfigStatus(SetReturn sr, std::string msg) : set_return(sr), message(std::move(msg)) {
+struct Immutable : public ConfigError {
+    explicit Immutable(const std::string& name, const std::string& value) : ConfigError(name, value) {
     }
-    SetReturn set_return;
-    std::string message;
+
+    std::string
+    message() override {
+        return "Config " + name_ + " is immutable.";
+    }
+};
+
+struct EnumValueNotFound : public ConfigError {
+    EnumValueNotFound(const std::string& name, const std::string& value, std::vector<std::string> option_values)
+        : ConfigError(name, value), option_values_(std::move(option_values)) {
+    }
+
+    std::string
+    message() override {
+        std::stringstream ss;
+        ss << "Config " << name_ << "(" << value_ << ") must be one of following: ";
+        for (size_t i = 0; i < option_values_.size() - 1; ++i) {
+            ss << option_values_[i] << ", ";
+        }
+        return ss.str();
+    }
+
+ private:
+    std::vector<std::string> option_values_;
+};
+
+struct Invalid : public ConfigError {
+    Invalid(const std::string& name, const std::string& value, const std::string& reason)
+        : ConfigError(name, value), reason_(reason) {
+    }
+
+    std::string
+    message() override {
+        return value_ + " is invalid for config " + name_ + ": " + reason_;
+    }
+
+ private:
+    const std::string reason_;
+};
+
+template <typename T>
+struct OutOfRange : public ConfigError {
+    OutOfRange(const std::string& name, const std::string& value, T lower_bound, T upper_bound)
+        : ConfigError(name, value), lower_bound_(lower_bound), upper_bound_(upper_bound) {
+    }
+
+    std::string
+    message() override {
+        return "Config " + name_ + "(" + value_ + ") must in range [" + std::to_string(lower_bound_) + ", " +
+               std::to_string(upper_bound_) + "].";
+    }
+
+ private:
+    T lower_bound_;
+    T upper_bound_;
+};
+
+struct Unexpected : public ConfigError {
+    Unexpected(const std::string& name, const std::string& value) : ConfigError(name, value) {
+    }
+
+    std::string
+    message() override {
+        return "An unknown error occurred while setting " + name_ + " as " + value_;
+    }
 };
 
 class BaseConfig {
@@ -59,7 +125,7 @@ class BaseConfig {
     virtual void
     Init();
 
-    virtual ConfigStatus
+    virtual void
     Set(const std::string& value, bool update) = 0;
 
     virtual std::string
@@ -81,7 +147,7 @@ class BoolConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string
@@ -103,7 +169,7 @@ class StringConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string
@@ -125,7 +191,7 @@ class EnumConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string
@@ -149,7 +215,7 @@ class IntegerConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string
@@ -173,7 +239,7 @@ class FloatingConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string
@@ -197,7 +263,7 @@ class SizeConfig : public BaseConfig {
     void
     Init() override;
 
-    ConfigStatus
+    void
     Set(const std::string& value, bool update) override;
 
     std::string

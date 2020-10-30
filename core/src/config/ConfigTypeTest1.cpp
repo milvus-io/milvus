@@ -53,10 +53,8 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
         // now `bool_value` is `false`, calling Set(update=false) to set it to `true`
         validate_value = false;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = bool_config->Set("true", false);
+        EXPECT_NO_THROW(bool_config->Set("true", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(bool_value(), true);
         EXPECT_EQ(bool_config->Get(), "true");
 
@@ -68,10 +66,8 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
         // now `bool_value` is `true`, calling Set(update=true) to set it to `false`
         validate_value = true;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = bool_config->Set("false", true);
+        EXPECT_NO_THROW(bool_config->Set("false", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(bool_value(), false);
         EXPECT_EQ(bool_config->Get(), "false");
 
@@ -100,10 +96,8 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
         // now `string_value` is `Magic`, calling Set(update=false) to set it to `cigaM`
         validate_value = "";
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = string_config->Set("cigaM", false);
+        EXPECT_NO_THROW(string_config->Set("cigaM", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(string_value(), "cigaM");
         EXPECT_EQ(string_config->Get(), "cigaM");
 
@@ -115,10 +109,8 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
         // now `string_value` is `cigaM`, calling Set(update=true) to set it to `Check`
         validate_value = "";
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = string_config->Set("Check", true);
+        EXPECT_NO_THROW(string_config->Set("Check", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(string_value(), "Check");
         EXPECT_EQ(string_config->Get(), "Check");
 
@@ -147,10 +139,8 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
         // now `integer_value` is `42`, calling Set(update=false) to set it to `24`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = integer_config->Set("24", false);
+        EXPECT_NO_THROW(integer_config->Set("24", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(integer_value(), 24);
         EXPECT_EQ(integer_config->Get(), "24");
 
@@ -162,10 +152,8 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
         // now `integer_value` is `24`, calling Set(update=true) to set it to `36`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = integer_config->Set("36", true);
+        EXPECT_NO_THROW(integer_config->Set("36", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(integer_value(), 36);
         EXPECT_EQ(integer_config->Get(), "36");
 
@@ -195,10 +183,8 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
         // now `floating_value` is `3.14`, calling Set(update=false) to set it to `6.22`
         validate_value = 0.0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = floating_config->Set("6.22", false);
+        EXPECT_NO_THROW(floating_config->Set("6.22", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         ASSERT_FLOAT_EQ(floating_value(), 6.22);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 6.22);
 
@@ -210,10 +196,8 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
         // now `integer_value` is `6.22`, calling Set(update=true) to set it to `-3.14`
         validate_value = 0.0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = floating_config->Set("-3.14", true);
+        EXPECT_NO_THROW(floating_config->Set("-3.14", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         ASSERT_FLOAT_EQ(floating_value(), -3.14);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), -3.14);
 
@@ -254,10 +238,8 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
         // now `enum_value` is `a`, calling Set(update=false) to set it to `b`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = enum_config->Set("b", false);
+        EXPECT_NO_THROW(enum_config->Set("b", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         ASSERT_EQ(enum_value(), 2);
         ASSERT_EQ(enum_config->Get(), "b");
 
@@ -269,10 +251,8 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
         // now `enum_value` is `b`, calling Set(update=true) to set it to `c`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = enum_config->Set("c", true);
+        EXPECT_NO_THROW(enum_config->Set("c", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         ASSERT_EQ(enum_value(), 3);
         ASSERT_EQ(enum_config->Get(), "c");
 
@@ -308,10 +288,8 @@ TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
         // now `size_value` is `1024`, calling Set(update=false) to set it to `4096`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = size_config->Set("4096", false);
+        EXPECT_NO_THROW(size_config->Set("4096", false));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(size_value(), 4096);
         EXPECT_EQ(size_config->Get(), "4KB");
 
@@ -323,10 +301,8 @@ TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
         // now `size_value` is `4096`, calling Set(update=true) to set it to `256kb`
         validate_value = 0;
 
-        ConfigStatus status(SetReturn::SUCCESS, "");
-        status = size_config->Set("256kb", true);
+        EXPECT_NO_THROW(size_config->Set("256kb", true));
 
-        EXPECT_EQ(status.set_return, SetReturn::SUCCESS);
         EXPECT_EQ(size_value(), 256 * 1024);
         EXPECT_EQ(size_config->Get(), "256KB");
 
