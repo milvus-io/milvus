@@ -36,6 +36,9 @@ sdk/cmake-build-release
 sdk/cmake_build_release
 
 # Compiled source
+reader
+master
+proxy
 *.a
 *.so
 *.so.*
