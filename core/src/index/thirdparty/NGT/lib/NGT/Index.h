@@ -140,6 +140,9 @@ public:
                 case DistanceType::DistanceTypeL2:
                     p.set("DistanceType", "L2");
                     break;
+                case DistanceType::DistanceTypeIP:
+                    p.set("DistanceType", "IP");
+                    break;
                 case DistanceType::DistanceTypeHamming:
                     p.set("DistanceType", "Hamming");
                     break;
@@ -254,6 +257,10 @@ public:
                 else if (it->second == "L2")
                 {
                     distanceType = DistanceType::DistanceTypeL2;
+                }
+                else if (it->second == "IP")
+                {
+                    distanceType = DistanceType::DistanceTypeIP;
                 }
                 else if (it->second == "Hamming")
                 {

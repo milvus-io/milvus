@@ -73,6 +73,27 @@ namespace NGT {
 #endif
     };
 
+    class ComparatorIP : public Comparator {
+     public:
+#ifdef NGT_SHARED_MEMORY_ALLOCATOR
+        ComparatorIP(size_t d, SharedMemoryAllocator &a) : Comparator(d, a) {}
+	double operator()(Object &objecta, Object &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
+	}
+	double operator()(Object &objecta, PersistentObject &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb.at(0, allocator), dimension);
+	}
+	double operator()(PersistentObject &objecta, PersistentObject &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta.at(0, allocator), (OBJECT_TYPE*)&objectb.at(0, allocator), dimension);
+	}
+#else
+        ComparatorIP(size_t d) : Comparator(d) {}
+        double operator()(Object &objecta, Object &objectb) {
+                return PrimitiveComparator::compareInnerProduct((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
+            }
+#endif
+    };
+
     class ComparatorHammingDistance : public Comparator {
       public:
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
@@ -281,6 +302,8 @@ namespace NGT {
       objecta.copy(objectb, getByteSizeOfObject());
     }
 
+    DistanceType getDistanceType() { return distanceType; }
+
     void setDistanceType(DistanceType t) {
       if (comparator != 0) {
 	delete comparator;
@@ -325,6 +348,9 @@ namespace NGT {
 	break;
       case DistanceTypeL2:
 	comparator = new ObjectSpaceRepository::ComparatorL2(ObjectSpace::getPaddedDimension());
+	break;
+	case DistanceTypeIP:
+	    comparator = new ObjectSpaceRepository::ComparatorIP(ObjectSpace::getPaddedDimension());
 	break;
       case DistanceTypeHamming:
 	comparator = new ObjectSpaceRepository::ComparatorHammingDistance(ObjectSpace::getPaddedDimension());

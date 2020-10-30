@@ -25,6 +25,7 @@ namespace {
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
 
 constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_INDEX_FILE_SIZE = 1024;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
 constexpr int64_t BATCH_ENTITY_COUNT = 10000;
 constexpr int64_t NQ = 5;
@@ -37,6 +38,9 @@ const char* PARTITION_TAG = "part";
 const char* DIMENSION = "dim";
 const char* METRICTYPE = "metric_type";
 const char* INDEXTYPE = "index_type";
+constexpr int64_t ADD_ENTITY_LOOP = 5;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVF_FLAT;
+constexpr int32_t NLIST = 16384;
 
 void
 PrintEntity(const std::string& tag, const milvus::VectorData& entity) {

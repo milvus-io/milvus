@@ -210,7 +210,7 @@ class GraphReconstructor {
 	node.clear();
 #endif
       } catch(NGT::Exception &err) {
-	std::cerr << "GraphReconstructor: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+//	std::cerr << "GraphReconstructor: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
 #if defined(NGT_SHARED_MEMORY_ALLOCATOR)
 	tmpGraph.push_back(NGT::GraphNode(outGraph.repository.allocator));
 #else
@@ -224,7 +224,7 @@ class GraphReconstructor {
       NGTThrowException(msg);
     }
     timer.stop();
-    std::cerr << "GraphReconstructor::adjustPaths: graph preparing time=" << timer << std::endl;
+//    std::cerr << "GraphReconstructor::adjustPaths: graph preparing time=" << timer << std::endl;
     timer.reset();
     timer.start();
 
@@ -287,12 +287,12 @@ class GraphReconstructor {
 	  removeCandidates[id - 1].push_back(candidates[i].second);
 	}
       } catch(NGT::Exception &err) {
-	std::cerr << "GraphReconstructor: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+//	std::cerr << "GraphReconstructor: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
 	continue;
       }
     }
     timer.stop();
-    std::cerr << "GraphReconstructor::adjustPaths: extracting removed edge candidates time=" << timer << std::endl;
+//    std::cerr << "GraphReconstructor::adjustPaths: extracting removed edge candidates time=" << timer << std::endl;
     timer.reset();
     timer.start();
 

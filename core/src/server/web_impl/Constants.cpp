@@ -26,8 +26,8 @@ const char* NAME_ENGINE_TYPE_ANNOY = "ANNOY";
 const char* NAME_ENGINE_TYPE_RHNSWFLAT = "RHNSW_FLAT";
 const char* NAME_ENGINE_TYPE_RHNSWPQ = "RHNSW_PQ";
 const char* NAME_ENGINE_TYPE_RHNSWSQ8 = "RHNSW_SQ8";
-const char* NAME_ENGINE_TYPE_NGTPANNG = "NGTPANNG";
-const char* NAME_ENGINE_TYPE_NGTONNG = "NGTONNG";
+const char* NAME_ENGINE_TYPE_NGTPANNG = "NGT_PANNG";
+const char* NAME_ENGINE_TYPE_NGTONNG = "NGT_ONNG";
 
 const char* NAME_METRIC_TYPE_L2 = "L2";
 const char* NAME_METRIC_TYPE_IP = "IP";
@@ -50,8 +50,6 @@ const int64_t VALUE_CONFIG_CPU_CACHE_CAPACITY_DEFAULT = 4;
 const bool VALUE_CONFIG_CACHE_INSERT_DATA_DEFAULT = false;
 
 const char* NAME_ID = "__id";
-
-/////////////////////////////////////////////////////
 
 }  // namespace web
 }  // namespace server

@@ -35,6 +35,8 @@ class NGTPANNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
             {milvus::knowhere::IndexParams::edge_size, 10},
+            {milvus::knowhere::IndexParams::epsilon, 0.1},
+            {milvus::knowhere::IndexParams::max_search_edges, 50},
             {milvus::knowhere::IndexParams::forcedly_pruned_edge_size, 60},
             {milvus::knowhere::IndexParams::selectively_pruned_edge_size, 30},
         };
