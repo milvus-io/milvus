@@ -122,22 +122,23 @@ SearchReq::OnExecute() {
         if (json_params_.contains("fields")) {
             if (json_params_["fields"].is_array()) {
                 for (auto& name : json_params_["fields"]) {
-                    status = ValidateFieldName(name.get<std::string>());
+                    std::string valid_name = name.get<std::string>();
+                    status = ValidateFieldName(valid_name);
                     if (!status.ok()) {
                         return status;
                     }
                     bool find_field_name = false;
                     for (const auto& schema : fields_schema) {
-                        if (name.get<std::string>() == schema.first->GetName()) {
+                        if (valid_name == schema.first->GetName()) {
                             find_field_name = true;
                             field_mappings_.insert(schema);
                             break;
                         }
                     }
                     if (not find_field_name) {
-                        return Status{SERVER_INVALID_FIELD_NAME, "Field: " + name.get<std::string>() + " not exist"};
+                        return Status{SERVER_INVALID_FIELD_NAME, "Field: " + valid_name + " not exist"};
                     }
-                    query_ptr_->field_names.emplace_back(name.get<std::string>());
+                    query_ptr_->field_names.emplace_back(valid_name);
                 }
             }
         }

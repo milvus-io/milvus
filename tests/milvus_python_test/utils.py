@@ -550,11 +550,10 @@ def gen_invalid_strs():
         [1],
         None,
         "12-s",
-        " ",
+        # " ",
         # "",
         # None,
         "12 s",
-        " siede ",
         "(mn)",
         "中文",
         "a".join("a" for i in range(256))

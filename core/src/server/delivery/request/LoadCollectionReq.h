@@ -31,7 +31,7 @@ class LoadCollectionReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
 };
 
 }  // namespace server
