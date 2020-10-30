@@ -43,6 +43,8 @@ CompactReq::OnExecute() {
         std::string hdr = "CompactReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         auto status = ValidateCompactThreshold(compact_threshold_);
         if (!status.ok()) {
             return status;

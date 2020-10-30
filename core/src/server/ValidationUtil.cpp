@@ -89,22 +89,21 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
 }  // namespace
 
 Status
-ValidateCollectionName(const std::string& collection_name) {
+ValidateCollectionName(std::string& collection_name) {
     // trim side-blank of tag, only compare valid characters
     // for example: " ab cd " is treated as "ab cd"
-    std::string valid_name = collection_name;
-    StringHelpFunctions::TrimStringBlank(valid_name);
+    StringHelpFunctions::TrimStringBlank(collection_name);
 
     // Collection name shouldn't be empty.
-    if (valid_name.empty()) {
+    if (collection_name.empty()) {
         std::string msg = "Collection name should not be empty.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 
-    std::string invalid_msg = "Invalid collection name: " + valid_name + ". ";
+    std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed engine::MAX_NAME_LENGTH.
-    if (valid_name.size() > engine::MAX_NAME_LENGTH) {
+    if (collection_name.size() > engine::MAX_NAME_LENGTH) {
         std::string msg = invalid_msg + "The length of a collection name must be less than " +
                           std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
         LOG_SERVER_ERROR_ << msg;
@@ -112,16 +111,16 @@ ValidateCollectionName(const std::string& collection_name) {
     }
 
     // Collection name first character should be underscore or character.
-    char first_char = valid_name[0];
+    char first_char = collection_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
         std::string msg = invalid_msg + "The first character of a collection name must be an underscore or letter.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 
-    int64_t table_name_size = valid_name.size();
+    int64_t table_name_size = collection_name.size();
     for (int64_t i = 1; i < table_name_size; ++i) {
-        char name_char = valid_name[i];
+        char name_char = collection_name[i];
         if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
             std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
@@ -133,7 +132,11 @@ ValidateCollectionName(const std::string& collection_name) {
 }
 
 Status
-ValidateFieldName(const std::string& field_name) {
+ValidateFieldName(std::string& field_name) {
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    StringHelpFunctions::TrimStringBlank(field_name);
+
     // Field name shouldn't be empty.
     if (field_name.empty()) {
         std::string msg = "Field name should not be empty.";
@@ -459,51 +462,62 @@ ValidateSearchTopk(int64_t top_k) {
 }
 
 Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags, bool for_create) {
-    for (const std::string& tag : partition_tags) {
-        // trim side-blank of tag, only compare valid characters
-        // for example: " ab cd " is treated as "ab cd"
-        std::string valid_tag = tag;
-        StringHelpFunctions::TrimStringBlank(valid_tag);
+ValidatePartitionTag(std::string& partition_tag, bool strict_check) {
+    // trim side-blank of tag, only compare valid characters
+    // for example: " ab cd " is treated as "ab cd"
+    StringHelpFunctions::TrimStringBlank(partition_tag);
 
-        std::string invalid_msg = "Invalid partition tag: " + tag + ". ";
-        if (valid_tag.empty()) {
-            std::string msg = invalid_msg + "Partition tag should not be empty.";
+    std::string invalid_msg = "Invalid partition tag: " + partition_tag + ". ";
+    if (partition_tag.empty()) {
+        std::string msg = invalid_msg + "Partition tag should not be empty.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_PARTITION_TAG, msg);
+    }
+
+    // max length of partition tag
+    if (partition_tag.length() > engine::MAX_NAME_LENGTH) {
+        std::string msg = invalid_msg + "The length of a partition tag must be less than " +
+                          std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_PARTITION_TAG, msg);
+    }
+
+    // for CreatePartition, a partition tag must be numbers, letters, and underscores
+    // but for Search/HasPartition, user can check partition by regex pattern, such as p_(.*) match p_1, p_50...
+    if (strict_check) {
+        // Partition tag first character should be underscore or character.
+        char first_char = partition_tag[0];
+        if (first_char != '_' && std::isalnum(first_char) == 0) {
+            std::string msg = invalid_msg + "The first character of a partition tag must be an underscore or letter.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
 
-        // max length of partition tag
-        if (valid_tag.length() > engine::MAX_NAME_LENGTH) {
-            std::string msg = invalid_msg + "The length of a partition tag must be less than " +
-                              std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
-            LOG_SERVER_ERROR_ << msg;
-            return Status(SERVER_INVALID_PARTITION_TAG, msg);
-        }
-
-        // for CreatePartition, a partition tag must be numbers, letters, and underscores
-        // but for Search/HasPartition, user can check partition by regex pattern, such as p_(.*) match p_1, p_50...
-        if (for_create) {
-            // Partition tag first character should be underscore or character.
-            char first_char = tag[0];
-            if (first_char != '_' && std::isalnum(first_char) == 0) {
-                std::string msg =
-                    invalid_msg + "The first character of a partition tag must be an underscore or letter.";
+        int64_t tag_size = partition_tag.size();
+        for (int64_t i = 1; i < tag_size; ++i) {
+            char name_char = partition_tag[i];
+            if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
+                std::string msg = invalid_msg + "Partition tag can only contain numbers, letters, and underscores.";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_PARTITION_TAG, msg);
             }
-
-            int64_t tag_size = tag.size();
-            for (int64_t i = 1; i < tag_size; ++i) {
-                char name_char = tag[i];
-                if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
-                    std::string msg = invalid_msg + "Partition tag can only contain numbers, letters, and underscores.";
-                    LOG_SERVER_ERROR_ << msg;
-                    return Status(SERVER_INVALID_PARTITION_TAG, msg);
-                }
-            }
         }
     }
+
+    return Status::OK();
+}
+
+Status
+ValidatePartitionTags(std::vector<std::string>& partition_tags, bool strict_check) {
+    std::vector<std::string> valid_tags;
+    for (std::string& tag : partition_tags) {
+        auto status = ValidatePartitionTag(tag, strict_check);
+        if (!status.ok()) {
+            return status;
+        }
+        valid_tags.emplace_back(tag);
+    }
+    partition_tags.swap(valid_tags);
 
     return Status::OK();
 }

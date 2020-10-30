@@ -37,7 +37,7 @@ class CompactReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     double compact_threshold_ = 0.0;
 };
 

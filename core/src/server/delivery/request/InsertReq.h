@@ -35,8 +35,8 @@ class InsertReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const std::string partition_name_;
+    std::string collection_name_;
+    std::string partition_name_;
     InsertParam& insert_param_;
 };
 
