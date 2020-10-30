@@ -48,7 +48,7 @@ func GetClient() milvus.MilvusClient {
 func GenDisconnectClient() milvus.MilvusClient {
 	client := GetClient()
 	error := client.Disconnect()
-	if error != nil && client.IsConnected(){
+	if error != nil && client.IsConnected() {
 		fmt.Println("Disconnect failed")
 		return nil
 	}
@@ -136,23 +136,23 @@ func GenCollectionParams(name string, autoId bool, segmentRowLimit int) milvus.M
 	//client := GetClient()
 	var mapping milvus.Mapping
 	//if client != nil {
-		params := map[string]interface{}{
-			"auto_id":           autoId,
-			"segment_row_count": utils.DefaultSegmentRowLimit,
-		}
-		paramsStr, _ := json.Marshal(params)
-		mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: string(paramsStr)}
+	params := map[string]interface{}{
+		"auto_id":           autoId,
+		"segment_row_count": utils.DefaultSegmentRowLimit,
+	}
+	paramsStr, _ := json.Marshal(params)
+	mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: string(paramsStr)}
 	//} else {
 	//	os.Exit(-2)
 	//}
 	return mapping
 }
 
-func teardown()  {
+func teardown() {
 	client := GetClient()
 	listCollections, _, _ := client.ListCollections()
 	println(len(listCollections))
-	for i :=0; i<len(listCollections); i++ {
+	for i := 0; i < len(listCollections); i++ {
 		client.DropCollection(listCollections[i])
 	}
 }
