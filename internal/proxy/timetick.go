@@ -2,36 +2,36 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"log"
 	"time"
 )
 
 type timeTick struct {
-	lastTick             Timestamp
-	currentTick          Timestamp
+	lastTick             typeutil.Timestamp
+	currentTick          typeutil.Timestamp
 	interval             uint64
 	pulsarProducer       pulsar.Producer
 	peer_id              int64
 	ctx                  context.Context
-	areRequestsDelivered func(ts Timestamp) bool
-	getTimestamp         func() (Timestamp, commonpb.Status)
+	areRequestsDelivered func(ts typeutil.Timestamp) bool
+	getTimestamp         func() (typeutil.Timestamp, error)
 }
 
-func (tt *timeTick) tick() commonpb.Status {
+func (tt *timeTick) tick() error {
 	if tt.lastTick == tt.currentTick {
-		ts, s := tt.getTimestamp()
-		if s.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return s
+		ts, err := tt.getTimestamp()
+		if err != nil {
+			return err
 		}
 		tt.currentTick = ts
 	}
 	if tt.areRequestsDelivered(tt.currentTick) == false {
-		return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+		return errors.New("Failed")
 	}
 	tsm := pb.TimeSyncMsg{
 		Timestamp: uint64(tt.currentTick),
@@ -40,21 +40,22 @@ func (tt *timeTick) tick() commonpb.Status {
 	}
 	payload, err := proto.Marshal(&tsm)
 	if err != nil {
-		return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("marshal TimeSync failed, error = %v", err)}
+		return err
 	}
 	if _, err := tt.pulsarProducer.Send(tt.ctx, &pulsar.ProducerMessage{Payload: payload}); err != nil {
-		return commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: fmt.Sprintf("send into pulsar failed, error = %v", err)}
+		return err
 	}
 	tt.lastTick = tt.currentTick
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+	return nil
 }
 
-func (tt *timeTick) Restart() commonpb.Status {
+func (tt *timeTick) Restart() error{
 	tt.lastTick = 0
-	ts, s := tt.getTimestamp()
-	if s.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return s
+	ts, err := tt.getTimestamp()
+	if err != nil{
+		return err
 	}
+
 	tt.currentTick = ts
 	tick := time.Tick(time.Millisecond * time.Duration(tt.interval))
 
@@ -62,8 +63,8 @@ func (tt *timeTick) Restart() commonpb.Status {
 		for {
 			select {
 			case <-tick:
-				if s := tt.tick(); s.ErrorCode != commonpb.ErrorCode_SUCCESS {
-					log.Printf("timeTick error ,status = %d", int(s.ErrorCode))
+				if err := tt.tick(); err != nil {
+					log.Printf("timeTick error")
 				}
 			case <-tt.ctx.Done():
 				tt.pulsarProducer.Close()
@@ -71,5 +72,5 @@ func (tt *timeTick) Restart() commonpb.Status {
 			}
 		}
 	}()
-	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
+	return nil
 }

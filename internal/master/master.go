@@ -93,7 +93,10 @@ func CreateServer(ctx context.Context) (*Master, error) {
 		ssChan:         make(chan internalpb.SegmentStatistics, 10),
 		pc:             informer.NewPulsarClient(),
 	}
-
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+	m.tsoAllocator = tso.NewGlobalTSOAllocator("timestamp")
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
 	return m, nil

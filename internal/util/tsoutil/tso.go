@@ -15,14 +15,16 @@ package tsoutil
 
 import (
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 const (
 	physicalShiftBits = 18
 	logicalBits       = (1 << physicalShiftBits) - 1
 )
+
+func ComposeTS(physical, logical int64) uint64{
+	return uint64((physical << physicalShiftBits) + logical)
+}
 
 // ParseTS parses the ts to (physical,logical).
 func ParseTS(ts uint64) (time.Time, uint64) {
@@ -32,10 +34,3 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 	return physicalTime, logical
 }
 
-// ParseTimestamp parses pdpb.Timestamp to time.Time
-func ParseTimestamp(ts internalpb.TimestampMsg) (time.Time, uint64) {
-	logical := uint64(ts.Logical)
-	physical := ts.Physical
-	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
-	return physicalTime, logical
-}

@@ -49,6 +49,7 @@ type atomicObject struct {
 type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
+	key string
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
 	maxResetTSGap func() time.Duration
@@ -58,7 +59,7 @@ type timestampOracle struct {
 }
 
 func (t *timestampOracle) getTimestampPath() string {
-	return path.Join(t.rootPath, "timestamp")
+	return path.Join(t.rootPath, t.key)
 }
 
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {

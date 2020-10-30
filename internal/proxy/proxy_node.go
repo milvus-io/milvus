@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	etcd "go.etcd.io/etcd/clientv3"
 	"strconv"
 )
@@ -46,7 +48,7 @@ type ProxyOptions struct {
 
 	// inner member
 	proxyServer *proxyServer
-	tso         *timestampOracle
+	tso         *allocator.TimestampAllocator
 	timeTick    *timeTick
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -87,17 +89,18 @@ func StartProxy(opt *ProxyOptions) error {
 	opt.ctx, opt.cancel = context.WithCancel(context.Background())
 
 	///////////////////// timestamporacle //////////////////////////
-	etcdTso, err := etcd.New(etcd.Config{Endpoints: opt.etcdEndpoints})
-	if err != nil {
-		return err
-	}
-	tso := &timestampOracle{
-		client:       etcdTso,
-		ctx:          opt.ctx,
-		rootPath:     opt.tsoRootPath,
-		saveInterval: opt.tsoSaveInterval,
-	}
-	tso.Restart(opt.proxyId)
+	//etcdTso, err := etcd.New(etcd.Config{Endpoints: opt.etcdEndpoints})
+	//if err != nil {
+	//	return err
+	//}
+	//tso := &timestampOracle{
+	//	client:       etcdTso,
+	//	ctx:          opt.ctx,
+	//	rootPath:     opt.tsoRootPath,
+	//	saveInterval: opt.tsoSaveInterval,
+	//}
+	//tso.Restart(opt.proxyId)
+	tso := allocator.NewTimestampAllocator()
 
 	/////////////////// proxy server ///////////////////////////////
 	//readerTopics, send insert and delete message into these topics
@@ -122,7 +125,7 @@ func StartProxy(opt *ProxyOptions) error {
 		resultGroup:   opt.resultTopic,
 		numReaderNode: opt.numReaderNode,
 		proxyId:       opt.proxyId,
-		getTimestamp:  tso.GetTimestamp,
+		getTimestamp:  tso.Alloc,
 		client:        etcdProxy,
 		ctx:           opt.ctx,
 	}
@@ -147,15 +150,15 @@ func StartProxy(opt *ProxyOptions) error {
 		pulsarProducer:       ttProducer,
 		peer_id:              opt.timeTickPeerId,
 		ctx:                  opt.ctx,
-		areRequestsDelivered: func(ts Timestamp) bool { return srv.reqSch.AreRequestsDelivered(ts, 2) },
-		getTimestamp: func() (Timestamp, commonpb.Status) {
-			ts, st := tso.GetTimestamp(1)
-			return ts[0], st
+		areRequestsDelivered: func(ts typeutil.Timestamp) bool { return srv.reqSch.AreRequestsDelivered(ts, 2) },
+		getTimestamp: func() (typeutil.Timestamp, error) {
+			ts, st := tso.AllocOne()
+			return ts, st
 		},
 	}
-	s := tt.Restart()
-	if s.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return fmt.Errorf(s.Reason)
+	err = tt.Restart()
+	if err != nil {
+		return fmt.Errorf("timeTick Restart Failed")
 	}
 
 	opt.proxyServer = srv

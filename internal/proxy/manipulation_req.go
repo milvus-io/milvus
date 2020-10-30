@@ -7,6 +7,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"log"
 	"sync"
 )
@@ -19,13 +20,13 @@ type manipulationReq struct {
 }
 
 // TsMsg interfaces
-func (req *manipulationReq) Ts() (Timestamp, error) {
+func (req *manipulationReq) Ts() (typeutil.Timestamp, error) {
 	if req.msgs == nil {
 		return 0, errors.New("No typed manipulation request message in ")
 	}
-	return Timestamp(req.msgs[0].Timestamp), nil
+	return typeutil.Timestamp(req.msgs[0].Timestamp), nil
 }
-func (req *manipulationReq) SetTs(ts Timestamp) {
+func (req *manipulationReq) SetTs(ts typeutil.Timestamp) {
 	for _, msg := range req.msgs {
 		msg.Timestamp = uint64(ts)
 	}
@@ -111,10 +112,10 @@ func (s *proxyServer) restartManipulationRoutine(bufSize int) error {
 				pulsarClient.Close()
 				return
 			case ip := <-s.reqSch.manipulationsChan:
-				ts, st := s.getTimestamp(1)
-				if st.ErrorCode != commonpb.ErrorCode_SUCCESS {
-					log.Printf("get time stamp failed, error code = %d, msg = %s", st.ErrorCode, st.Reason)
-					ip.stats[0] = st
+				ts, err := s.getTimestamp(1)
+				if err != nil {
+					log.Printf("get time stamp failed")
+					ip.stats[0] = commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR}
 					ip.wg.Done()
 					break
 				}

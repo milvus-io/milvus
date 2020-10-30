@@ -67,7 +67,7 @@ func TestUtilFunctions_GetCollectionByID(t *testing.T) {
 	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
-	c := node.GetCollectionByID(uint64(0))
+	c := node.GetCollectionByID(int64(0))
 	assert.Equal(t, c.CollectionName, "collection0")
 
 	partition.DeleteSegment(node, segment)

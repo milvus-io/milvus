@@ -54,7 +54,7 @@ func TestIndex_BuildIndex(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Build index
-	segment.BuildIndex(collection)
+	//segment.BuildIndex(collection)
 	//assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
 
 	// 7. Do search
@@ -122,7 +122,7 @@ func TestIndex_DropIndex(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 6. Build index
-	var status = segment.BuildIndex(collection)
+	//var status = segment.BuildIndex(collection)
 	//assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
 
 	// 7. Do search
@@ -141,8 +141,8 @@ func TestIndex_DropIndex(t *testing.T) {
 	fmt.Println(searchRes)
 
 	// 8. Drop index
-	status = segment.DropIndex("fakevec")
-	assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
+	//status = segment.DropIndex("fakevec")
+	//assert.Equal(t, status.ErrorCode, msgPb.ErrorCode_SUCCESS)
 
 	// 9. Destruct node, collection, and segment
 	partition.DeleteSegment(node, segment)
@@ -193,9 +193,9 @@ func TestIndex_UpdateIndex(t *testing.T) {
 	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
-	// 6. Build index
-	segment.BuildIndex(collection)
-	assert.NoError(t, err)
+	//// 6. Build index
+	//segment.BuildIndex(collection)
+	//assert.NoError(t, err)
 
 	// 7. Do search
 	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	etcd "go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 	"sort"
@@ -16,6 +18,13 @@ import (
 	"testing"
 	"time"
 )
+
+
+const (
+	tsoKeyPath string = "/timestampOracle"
+)
+
+var timeAllocator *allocator.TimestampAllocator = allocator.NewTimestampAllocator()
 
 func TestProxyNode(t *testing.T) {
 	startTestMaster("localhost:11000", t)
@@ -65,12 +74,13 @@ func TestProxyNode(t *testing.T) {
 			value, err := strconv.ParseUint(string(ts.Kvs[0].Value), 10, 64)
 			assert.Nil(t, err)
 
-			curValue, st := testOpt.tso.GetTimestamp(1)
-			assert.Equalf(t, st.ErrorCode, pb.ErrorCode_SUCCESS, "%s", st.Reason)
+			curValue, err := testOpt.tso.AllocOne()
+			curTS, err  := timeAllocator.AllocOne()
+			assert.Equalf(t, err, nil, "%s", "allocator failed")
 
-			curTime := ToPhysicalTime(uint64(curValue[0]))
+			curTime, _:= tsoutil.ParseTS(curTS)
 			t.Logf("current time stamp = %d, saved time stamp = %d", curTime, value)
-			assert.GreaterOrEqual(t, uint64(curValue[0]), value)
+			assert.GreaterOrEqual(t, curValue, value)
 			assert.GreaterOrEqual(t, value, startTime)
 			time.Sleep(time.Duration(testOpt.tsoSaveInterval) * time.Millisecond)
 		}
@@ -144,7 +154,7 @@ func TestProxyNode(t *testing.T) {
 		}
 	}()
 	go func() {
-		lastT := startTime
+		lastT, _ := tsoutil.ParseTS(startTime)
 		for {
 			cm, ok := <-tickComsumer.Chan()
 			assert.Truef(t, ok, "time tick consumer topic has closed")
@@ -153,7 +163,7 @@ func TestProxyNode(t *testing.T) {
 			if err := proto.Unmarshal(cm.Payload(), &tsm); err != nil {
 				t.Fatal(err)
 			}
-			curT := ToPhysicalTime(tsm.Timestamp)
+			curT, _:= tsoutil.ParseTS(tsm.Timestamp)
 			t.Logf("time tick = %d", curT)
 			assert.Greater(t, curT, lastT)
 			lastT = curT
@@ -240,8 +250,9 @@ func TestProxyNode(t *testing.T) {
 		assert.Equal(t, qm.ProxyId, testOpt.proxyId)
 		assert.Equal(t, qm.CollectionName, "cm100")
 
-		t.Logf("query time stamp = %d", ToPhysicalTime(qm.Timestamp))
-		assert.Greater(t, ToPhysicalTime(qm.Timestamp), startTime)
+		physicalTime, _ := tsoutil.ParseTS(qm.Timestamp)
+		t.Logf("query time stamp = %d", physicalTime)
+		assert.Greater(t,physicalTime, startTime)
 
 		r1 := pb.QueryResult{
 			Status: &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},
@@ -319,8 +330,9 @@ func TestProxyNode(t *testing.T) {
 	assert.Equal(t, m1.CollectionName, "cm100")
 	assert.Equal(t, len(m1.PrimaryKeys), len(m1.RowsData))
 
-	t.Logf("reader time stamp = %d", ToPhysicalTime(m1.Timestamp))
-	assert.GreaterOrEqual(t, ToPhysicalTime(m1.Timestamp), startTime)
+	physicalTime, _ := tsoutil.ParseTS(m1.Timestamp)
+	t.Logf("reader time stamp = %d", physicalTime)
+	assert.GreaterOrEqual(t, physicalTime, startTime)
 
 	for i, k := range m1.PrimaryKeys {
 		insertPrimaryKey = append(insertPrimaryKey, k)
@@ -340,8 +352,10 @@ func TestProxyNode(t *testing.T) {
 	assert.Equal(t, m2.CollectionName, "cm100")
 	assert.Equal(t, len(m2.PrimaryKeys), len(m2.RowsData))
 
-	t.Logf("read time stamp = %d", ToPhysicalTime(m2.Timestamp))
-	assert.GreaterOrEqual(t, ToPhysicalTime(m2.Timestamp), startTime)
+	physicalTime, _ = tsoutil.ParseTS(m2.Timestamp)
+	t.Logf("reader time stamp = %d", physicalTime)
+	t.Logf("read time stamp = %d", physicalTime)
+	assert.GreaterOrEqual(t, physicalTime, startTime)
 
 	for i, k := range m2.PrimaryKeys {
 		insertPrimaryKey = append(insertPrimaryKey, k)
@@ -373,8 +387,10 @@ func TestProxyNode(t *testing.T) {
 	assert.Equal(t, dm.CollectionName, "cm100")
 	assert.Equal(t, len(dm.PrimaryKeys), 2)
 
-	t.Logf("delete time stamp = %d", ToPhysicalTime(dm.Timestamp))
-	assert.GreaterOrEqual(t, ToPhysicalTime(dm.Timestamp), startTime)
+	physicalTime, _ = tsoutil.ParseTS(m1.Timestamp)
+	t.Logf("reader time stamp = %d", physicalTime)
+	t.Logf("delete time stamp = %d", physicalTime)
+	assert.GreaterOrEqual(t, physicalTime, startTime)
 
 	for i := 0; i < len(dm.PrimaryKeys); i++ {
 		assert.Equal(t, dm.PrimaryKeys[i], uint64(i+20))
