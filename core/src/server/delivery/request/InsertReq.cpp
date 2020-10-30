@@ -16,6 +16,7 @@
 #include "server/ValidationUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu/fiu-local.h>
@@ -86,6 +87,9 @@ InsertReq::OnExecute() {
         if (insert_param_.row_count_ == 0 || insert_param_.fields_data_.empty()) {
             return Status{SERVER_INVALID_ARGUMENT, "The field is empty, make sure you have entered entities"};
         }
+
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+        StringHelpFunctions::TrimStringBlank(partition_name_);
 
         // step 1: check collection existence
         bool exist = false;

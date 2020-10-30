@@ -44,15 +44,16 @@ CreatePartitionReq::OnExecute() {
         TimeRecorderAuto rc(hdr);
 
         // step 1: check arguments
-        if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
-            return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
-        }
-
-        auto status = ValidatePartitionTags({tag_}, true);
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+        auto status = ValidatePartitionTag(tag_, true);
         fiu_do_on("CreatePartitionReq.OnExecute.invalid_partition_tags",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         if (!status.ok()) {
             return status;
+        }
+
+        if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
+            return Status(SERVER_INVALID_PARTITION_TAG, "'_default' is built-in partition tag");
         }
 
         bool exist = false;

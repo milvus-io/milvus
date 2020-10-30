@@ -31,7 +31,7 @@ class CountEntitiesReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     int64_t& row_count_;
 };
 

@@ -13,6 +13,7 @@
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
 #include <fiu/fiu-local.h>
@@ -43,6 +44,9 @@ DropIndexReq::OnExecute() {
         fiu_do_on("DropIndexReq.OnExecute.throw_std_exception", throw std::exception());
         std::string hdr = "DropIndexReq(collection=" + collection_name_ + " filed=" + field_name_ + ")";
         TimeRecorderAuto rc(hdr);
+
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+        StringHelpFunctions::TrimStringBlank(field_name_);
 
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
