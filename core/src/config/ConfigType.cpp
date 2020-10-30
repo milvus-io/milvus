@@ -160,32 +160,33 @@ BoolConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 BoolConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Parse from string */
         std::string err;
         bool value = parse_bool(val, err);
         if (not err.empty()) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Validate */
         if (is_valid_fn_ && not is_valid_fn_(value, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(value);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 
@@ -210,27 +211,27 @@ StringConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 StringConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Validate */
         std::string err;
         if (is_valid_fn_ && not is_valid_fn_(val, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(val);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 
@@ -257,39 +258,35 @@ EnumConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 EnumConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Check if value exist */
         if (enum_value_->find(val) == enum_value_->end()) {
             auto option_values = OptionValue(*enum_value_);
-            std::stringstream ss;
-            ss << "Config " << name_ << "(" << val << ") must be one of following: ";
-            for (size_t i = 0; i < option_values.size() - 1; ++i) {
-                ss << option_values[i] << ", ";
-            }
-            ss << option_values.back() << ".";
-            return ConfigStatus(SetReturn::ENUM_VALUE_NOTFOUND, ss.str());
+            throw EnumValueNotFound(name_, val, std::move(option_values));
         }
 
         int64_t value = enum_value_->at(val);
+
+        /* Validate */
         std::string err;
         if (is_valid_fn_ && not is_valid_fn_(value, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(value);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 
@@ -322,41 +319,40 @@ IntegerConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 IntegerConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Check if it is an integer */
         if (not is_integer(val)) {
-            std::stringstream ss;
-            ss << "Config " << name_ << "(" << val << ") must be a integer.";
-            return ConfigStatus(SetReturn::INVALID, ss.str());
+            throw Invalid(name_, val, "Not an integer.");
         }
 
+        /* Parse from string */
         int64_t value = std::stoll(val);
+
+        /* Boundary check */
         if (not boundary_check<int64_t>(value, lower_bound_, upper_bound_)) {
-            std::stringstream ss;
-            ss << "Config " << name_ << "(" << val << ") must in range [" << lower_bound_ << ", " << upper_bound_
-               << "].";
-            return ConfigStatus(SetReturn::OUT_OF_RANGE, ss.str());
+            throw OutOfRange<int64_t>(name_, val, lower_bound_, upper_bound_);
         }
 
+        /* Validate */
         std::string err;
         if (is_valid_fn_ && not is_valid_fn_(value, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(value);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 
@@ -383,35 +379,35 @@ FloatingConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 FloatingConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Parse from string */
         double value = std::stod(val);
+
+        /* Boundary check */
         if (not boundary_check<double>(value, lower_bound_, upper_bound_)) {
-            std::stringstream ss;
-            ss << "Config " << name_ << "(" << val << ") must in range [" << lower_bound_ << ", " << upper_bound_
-               << "].";
-            return ConfigStatus(SetReturn::OUT_OF_RANGE, ss.str());
+            throw OutOfRange<double>(name_, val, lower_bound_, upper_bound_);
         }
 
+        /* Validate */
         std::string err;
         if (is_valid_fn_ && not is_valid_fn_(value, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(value);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 
@@ -438,39 +434,38 @@ SizeConfig::Init() {
     config_.set(default_value_);
 }
 
-ConfigStatus
+void
 SizeConfig::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
+        /* Check modifiable */
         if (update and not modifiable_) {
-            std::stringstream ss;
-            ss << "Config " << name_ << " is immutable.";
-            return ConfigStatus(SetReturn::IMMUTABLE, ss.str());
+            throw Immutable(name_, val);
         }
 
+        /* Parse from string */
         std::string err;
         int64_t value = parse_bytes(val, err);
         if (not err.empty()) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Boundary check */
         if (not boundary_check<int64_t>(value, lower_bound_, upper_bound_)) {
-            std::stringstream ss;
-            ss << "Config " << name_ << "(" << val << ") must in range [" << lower_bound_ << " Byte, " << upper_bound_
-               << " Byte].";
-            return ConfigStatus(SetReturn::OUT_OF_RANGE, ss.str());
+            throw OutOfRange<int64_t>(name_, val, lower_bound_, upper_bound_);
         }
 
+        /* Validate */
         if (is_valid_fn_ && not is_valid_fn_(value, err)) {
-            return ConfigStatus(SetReturn::INVALID, err);
+            throw Invalid(name_, val, err);
         }
 
+        /* Set value */
         config_.set(value);
-        return ConfigStatus(SetReturn::SUCCESS, "");
-    } catch (std::exception& e) {
-        return ConfigStatus(SetReturn::EXCEPTION, e.what());
+    } catch (ConfigError& e) {
+        throw;
     } catch (...) {
-        return ConfigStatus(SetReturn::UNEXPECTED, "unexpected");
+        throw Unexpected(name_, val);
     }
 }
 

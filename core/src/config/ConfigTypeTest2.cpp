@@ -64,9 +64,7 @@ TEST_F(BoolConfigTest, immutable_update_test) {
     bool_config->Init();
     ASSERT_EQ(bool_value(), true);
 
-    ConfigStatus status(SUCCESS, "");
-    status = bool_config->Set("false", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(bool_config->Set("false", true), Immutable);
     ASSERT_EQ(bool_value(), true);
 }
 
@@ -75,33 +73,25 @@ TEST_F(BoolConfigTest, set_invalid_value_test) {
     auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, nullptr);
     bool_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = bool_config->Set(" false", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set(" false", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("false ", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("false ", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("afalse", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("afalse", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("falsee", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("falsee", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("abcdefg", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("abcdefg", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("123456", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("123456", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 
-    status = bool_config->Set("", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 }
 
@@ -110,9 +100,7 @@ TEST_F(BoolConfigTest, valid_check_fail_test) {
     auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_failure);
     bool_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = bool_config->Set("123456", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(bool_config->Set("123456", true), Invalid);
     ASSERT_EQ(bool_config->Get(), "true");
 }
 
@@ -121,9 +109,7 @@ TEST_F(BoolConfigTest, string_exception_test) {
     auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_raise_string);
     bool_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = bool_config->Set("false", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(bool_config->Set("false", true), Unexpected);
     ASSERT_EQ(bool_config->Get(), "true");
 }
 
@@ -132,9 +118,7 @@ TEST_F(BoolConfigTest, standard_exception_test) {
     auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, true, valid_check_raise_exception);
     bool_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = bool_config->Set("false", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(bool_config->Set("false", true), Unexpected);
     ASSERT_EQ(bool_config->Get(), "true");
 }
 
@@ -165,9 +149,7 @@ TEST_F(StringConfigTest, immutable_update_test) {
     string_config->Init();
     ASSERT_EQ(string_value(), "Magic");
 
-    ConfigStatus status(SUCCESS, "");
-    status = string_config->Set("cigaM", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(string_config->Set("cigaM", true), Immutable);
     ASSERT_EQ(string_value(), "Magic");
 }
 
@@ -176,9 +158,7 @@ TEST_F(StringConfigTest, valid_check_fail_test) {
     auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_failure);
     string_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = string_config->Set("123456", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(string_config->Set("123456", true), Invalid);
     ASSERT_EQ(string_config->Get(), "Magic");
 }
 
@@ -187,9 +167,7 @@ TEST_F(StringConfigTest, string_exception_test) {
     auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_raise_string);
     string_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = string_config->Set("any", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(string_config->Set("any", true), Unexpected);
     ASSERT_EQ(string_config->Get(), "Magic");
 }
 
@@ -198,9 +176,7 @@ TEST_F(StringConfigTest, standard_exception_test) {
     auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", valid_check_raise_exception);
     string_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = string_config->Set("any", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(string_config->Set("any", true), Unexpected);
     ASSERT_EQ(string_config->Get(), "Magic");
 }
 
@@ -231,9 +207,7 @@ TEST_F(IntegerConfigTest, immutable_update_test) {
     integer_config->Init();
     ASSERT_EQ(integer_value(), 19530);
 
-    ConfigStatus status(SUCCESS, "");
-    status = integer_config->Set("2048", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(integer_config->Set("2048", true), Immutable);
     ASSERT_EQ(integer_value(), 19530);
 }
 
@@ -244,9 +218,7 @@ TEST_F(IntegerConfigTest, valid_check_fail_test) {
     Value<int64_t> integer_value;
     auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_failure);
     integer_config->Init();
-    ConfigStatus status(SUCCESS, "");
-    status = integer_config->Set("2048", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(integer_config->Set("2048", true), Invalid);
     ASSERT_EQ(integer_config->Get(), "19530");
 }
 
@@ -255,9 +227,7 @@ TEST_F(IntegerConfigTest, string_exception_test) {
     auto integer_config = CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_string);
     integer_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = integer_config->Set("2048", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(integer_config->Set("2048", true), Unexpected);
     ASSERT_EQ(integer_config->Get(), "19530");
 }
 
@@ -267,9 +237,7 @@ TEST_F(IntegerConfigTest, standard_exception_test) {
         CreateIntegerConfig("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_exception);
     integer_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = integer_config->Set("2048", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(integer_config->Set("2048", true), Unexpected);
     ASSERT_EQ(integer_config->Get(), "19530");
 }
 
@@ -279,16 +247,12 @@ TEST_F(IntegerConfigTest, out_of_range_test) {
     integer_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("1023", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(integer_config->Set("1023", true), OutOfRange<int64_t>);
         ASSERT_EQ(integer_config->Get(), "19530");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("65536", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(integer_config->Set("65536", true), OutOfRange<int64_t>);
         ASSERT_EQ(integer_config->Get(), "19530");
     }
 }
@@ -298,9 +262,7 @@ TEST_F(IntegerConfigTest, invalid_bound_test) {
     auto integer_config = CreateIntegerConfig("i", true, 100, 0, integer_value, 50, nullptr);
     integer_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = integer_config->Set("30", true);
-    ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+    EXPECT_THROW(integer_config->Set("30", true), OutOfRange<int64_t>);
     ASSERT_EQ(integer_config->Get(), "50");
 }
 
@@ -310,44 +272,32 @@ TEST_F(IntegerConfigTest, invalid_format_test) {
     integer_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("3-0", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("3-0", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("30-", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("30-", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("+30", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("+30", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("a30", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("a30", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("30a", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("30a", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = integer_config->Set("3a0", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(integer_config->Set("3a0", true), Invalid);
         ASSERT_EQ(integer_config->Get(), "50");
     }
 }
@@ -379,9 +329,7 @@ TEST_F(FloatingConfigTest, immutable_update_test) {
     floating_config->Init();
     ASSERT_FLOAT_EQ(floating_value(), 4.5);
 
-    ConfigStatus status(SUCCESS, "");
-    status = floating_config->Set("1.23", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(floating_config->Set("1.23", true), Immutable);
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
 }
 
@@ -393,9 +341,7 @@ TEST_F(FloatingConfigTest, valid_check_fail_test) {
     auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_failure);
     floating_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = floating_config->Set("1.23", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(floating_config->Set("1.23", true), Invalid);
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
 }
 
@@ -404,9 +350,7 @@ TEST_F(FloatingConfigTest, string_exception_test) {
     auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_raise_string);
     floating_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = floating_config->Set("1.23", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(floating_config->Set("1.23", true), Unexpected);
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
 }
 
@@ -415,9 +359,7 @@ TEST_F(FloatingConfigTest, standard_exception_test) {
     auto floating_config = CreateFloatingConfig("f", true, 1.0, 9.9, floating_value, 4.5, valid_check_raise_exception);
     floating_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = floating_config->Set("1.23", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(floating_config->Set("1.23", true), Unexpected);
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
 }
 
@@ -427,16 +369,12 @@ TEST_F(FloatingConfigTest, out_of_range_test) {
     floating_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = floating_config->Set("0.99", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(floating_config->Set("0.99", true), OutOfRange<double>);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = floating_config->Set("10.00", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(floating_config->Set("10.00", true), OutOfRange<double>);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
     }
 }
@@ -446,9 +384,7 @@ TEST_F(FloatingConfigTest, invalid_bound_test) {
     auto floating_config = CreateFloatingConfig("f", true, 9.9, 1.0, floating_value, 4.5, valid_check_raise_exception);
     floating_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = floating_config->Set("6.0", true);
-    ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+    EXPECT_THROW(floating_config->Set("6.0", true), OutOfRange<double>);
     ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
 }
 
@@ -458,16 +394,12 @@ TEST_F(FloatingConfigTest, DISABLED_invalid_format_test) {
     floating_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = floating_config->Set("6.0.1", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(floating_config->Set("6.0.1", true), Invalid);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = floating_config->Set("6a0", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(floating_config->Set("6a0", true), Invalid);
         ASSERT_FLOAT_EQ(std::stof(floating_config->Get()), 4.5);
     }
 }
@@ -510,9 +442,7 @@ TEST_F(EnumConfigTest, immutable_update_test) {
     enum_config->Init();
     ASSERT_EQ(enum_value(), 1);
 
-    ConfigStatus status(SUCCESS, "");
-    status = enum_config->Set("b", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(enum_config->Set("b", true), Immutable);
     ASSERT_EQ(enum_value(), 1);
 }
 
@@ -524,9 +454,7 @@ TEST_F(EnumConfigTest, set_invalid_value_check) {
     auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, nullptr);
     enum_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = enum_config->Set("b", true);
-    ASSERT_EQ(status.set_return, SetReturn::ENUM_VALUE_NOTFOUND);
+    EXPECT_THROW(enum_config->Set("b", true), EnumValueNotFound);
     ASSERT_EQ(enum_config->Get(), "a");
 }
 
@@ -547,9 +475,7 @@ TEST_F(EnumConfigTest, valid_check_fail_test) {
     auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_failure);
     enum_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = enum_config->Set("b", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(enum_config->Set("b", true), Invalid);
     ASSERT_EQ(enum_config->Get(), "a");
 }
 
@@ -563,9 +489,7 @@ TEST_F(EnumConfigTest, string_exception_test) {
     auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_raise_string);
     enum_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = enum_config->Set("b", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(enum_config->Set("b", true), Unexpected);
     ASSERT_EQ(enum_config->Get(), "a");
 }
 
@@ -579,9 +503,7 @@ TEST_F(EnumConfigTest, standard_exception_test) {
     auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, valid_check_raise_exception);
     enum_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = enum_config->Set("b", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(enum_config->Set("b", true), Unexpected);
     ASSERT_EQ(enum_config->Get(), "a");
 }
 
@@ -612,9 +534,7 @@ TEST_F(SizeConfigTest, immutable_update_test) {
     size_config->Init();
     ASSERT_EQ(size_value(), 2048);
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("3000", true);
-    ASSERT_EQ(status.set_return, SetReturn::IMMUTABLE);
+    EXPECT_THROW(size_config->Set("3000", true), Immutable);
     ASSERT_EQ(size_value(), 2048);
 }
 
@@ -626,9 +546,7 @@ TEST_F(SizeConfigTest, valid_check_fail_test) {
     auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_failure);
     size_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("3000", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(size_config->Set("3000", true), Invalid);
     ASSERT_EQ(size_config->Get(), "2KB");
 }
 
@@ -637,9 +555,7 @@ TEST_F(SizeConfigTest, string_exception_test) {
     auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_raise_string);
     size_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("3000", true);
-    ASSERT_EQ(status.set_return, SetReturn::UNEXPECTED);
+    EXPECT_THROW(size_config->Set("3000", true), Unexpected);
     ASSERT_EQ(size_config->Get(), "2KB");
 }
 
@@ -648,9 +564,7 @@ TEST_F(SizeConfigTest, standard_exception_test) {
     auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, valid_check_raise_exception);
     size_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("3000", true);
-    ASSERT_EQ(status.set_return, SetReturn::EXCEPTION);
+    EXPECT_THROW(size_config->Set("3000", true), Unexpected);
     ASSERT_EQ(size_config->Get(), "2KB");
 }
 
@@ -660,16 +574,12 @@ TEST_F(SizeConfigTest, out_of_range_test) {
     size_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = size_config->Set("1023", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(size_config->Set("1023", true), OutOfRange<int64_t>);
         ASSERT_EQ(size_config->Get(), "2KB");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = size_config->Set("4097", true);
-        ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+        EXPECT_THROW(size_config->Set("4097", true), OutOfRange<int64_t>);
         ASSERT_EQ(size_config->Get(), "2KB");
     }
 }
@@ -678,9 +588,7 @@ TEST_F(SizeConfigTest, negative_integer_test) {
     Value<int64_t> size_value;
     auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("-3KB", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(size_config->Set("-3KB", true), Invalid);
     ASSERT_EQ(size_config->Get(), "2KB");
 }
 
@@ -689,9 +597,7 @@ TEST_F(SizeConfigTest, invalid_bound_test) {
     auto size_config = CreateSizeConfig("i", true, 100, 0, size_value, 50, nullptr);
     size_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("30", true);
-    ASSERT_EQ(status.set_return, SetReturn::OUT_OF_RANGE);
+    EXPECT_THROW(size_config->Set("30", true), OutOfRange<int64_t>);
     ASSERT_EQ(size_config->Get(), "50");
 }
 
@@ -700,9 +606,7 @@ TEST_F(SizeConfigTest, invalid_unit_test) {
     auto size_config = CreateSizeConfig("i", true, 1024, 4096, size_value, 2048, nullptr);
     size_config->Init();
 
-    ConfigStatus status(SUCCESS, "");
-    status = size_config->Set("1 TB", true);
-    ASSERT_EQ(status.set_return, SetReturn::INVALID);
+    EXPECT_THROW(size_config->Set("1 TB", true), Invalid);
     ASSERT_EQ(size_config->Get(), "2KB");
 }
 
@@ -712,23 +616,17 @@ TEST_F(SizeConfigTest, invalid_format_test) {
     size_config->Init();
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = size_config->Set("a10GB", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(size_config->Set("a10GB", true), Invalid);
         ASSERT_EQ(size_config->Get(), "2KB");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = size_config->Set("200*0", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(size_config->Set("200*0", true), Invalid);
         ASSERT_EQ(size_config->Get(), "2KB");
     }
 
     {
-        ConfigStatus status(SUCCESS, "");
-        status = size_config->Set("10AB", true);
-        ASSERT_EQ(status.set_return, SetReturn::INVALID);
+        EXPECT_THROW(size_config->Set("10AB", true), Invalid);
         ASSERT_EQ(size_config->Get(), "2KB");
     }
 }
