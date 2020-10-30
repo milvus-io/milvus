@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/milvus-io/milvus-sdk-go/milvus"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
-func TestConnect(t *testing.T)  {
+func TestConnect(t *testing.T) {
 	var grpcClient milvus.Milvusclient
 	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
@@ -15,7 +16,7 @@ func TestConnect(t *testing.T)  {
 	assert.Nil(t, err)
 }
 
-func TestConnectRepeat(t *testing.T)  {
+func TestConnectRepeat(t *testing.T) {
 	var grpcClient milvus.Milvusclient
 	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
@@ -23,25 +24,25 @@ func TestConnectRepeat(t *testing.T)  {
 	assert.Nil(t, err)
 	err1 := client.Connect(connectParam)
 	assert.Nil(t, err1)
-	
 }
 
-func TestDisconnect(t *testing.T)  {
+func TestDisconnect(t *testing.T) {
 	client := GetClient()
 	error := client.Disconnect()
 	assert.Nil(t, error)
 	assert.False(t, client.IsConnected())
 }
 
-func GenInvalidConnectArgs() map[string]int64{
+func GenInvalidConnectArgs() map[string]int64 {
 	var port int64 = 19530
 	args := map[string]int64{
-		"1.1.1.1": port,
+		"1.1.1.1":       port,
 		"www.baidu.com": 100000,
 	}
 	return args
 }
-func TestConnectInvalidConnectArgs(t *testing.T)  {
+
+func TestConnectInvalidConnectArgs(t *testing.T) {
 	var grpcClient milvus.Milvusclient
 	client := milvus.NewMilvusClient(grpcClient.Instance)
 	args := GenInvalidConnectArgs()
@@ -53,7 +54,7 @@ func TestConnectInvalidConnectArgs(t *testing.T)  {
 	}
 }
 
-func TestDisconnectRepeat(t *testing.T)  {
+func TestDisconnectRepeat(t *testing.T) {
 	client := GetClient()
 	client.Disconnect()
 	assert.False(t, client.IsConnected())
