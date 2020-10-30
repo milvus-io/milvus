@@ -186,6 +186,6 @@ func GenInvalidStrs() []string {
 	return strs
 }
 
-func GenDefaultMapping()  {
+func GenDefaultMapping() {
 
 }

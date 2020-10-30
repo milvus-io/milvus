@@ -52,3 +52,17 @@ func TestInsertWithCustomIdsNotMatch(t *testing.T) {
 	assert.Equal(t, status.Ok(), false)
 	assert.Equal(t, len(ids), 0)
 }
+
+func TestInsertCollectionNotExisted(t *testing.T) {
+	client, _ := Collection(true, milvus.VECTORFLOAT)
+	_name := utils.RandString(8)
+	insertParam := milvus.InsertParam{
+		_name,
+		GenDefaultFieldValues(milvus.VECTORFLOAT),
+		nil,
+		""}
+	ids, status, _ := client.Insert(insertParam)
+	t.Log(ids)
+	t.Log(status)
+	assert.Equal(t, status.Ok(), false)
+}
