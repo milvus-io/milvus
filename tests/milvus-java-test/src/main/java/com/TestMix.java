@@ -1,18 +1,18 @@
-package com;//package com;
+package com; // package com;
 //
-//import io.milvus.client.*;
-//import org.apache.commons.lang3.RandomStringUtils;
-//import org.testng.Assert;
-//import org.testng.annotations.Test;
+// import io.milvus.client.*;
+// import org.apache.commons.lang3.RandomStringUtils;
+// import org.testng.Assert;
+// import org.testng.annotations.Test;
 //
-//import java.util.ArrayList;
-//import java.util.List;
-//import java.util.Random;
-//import java.util.concurrent.ForkJoinPool;
-//import java.util.concurrent.TimeUnit;
-//import java.util.stream.Collectors;
+// import java.util.ArrayList;
+// import java.util.List;
+// import java.util.Random;
+// import java.util.concurrent.ForkJoinPool;
+// import java.util.concurrent.TimeUnit;
+// import java.util.stream.Collectors;
 //
-//public class TestMix {
+// public class TestMix {
 //    private int dimension = 128;
 //    private int nb = 100000;
 //    int nq = 10;
@@ -27,10 +27,12 @@ package com;//package com;
 //    List<List<Float>> queryVectors = vectors.subList(0,nq);
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_search_vectors_threads(MilvusClient client, String collectionName) throws InterruptedException {
+//    public void test_search_vectors_threads(MilvusClient client, String collectionName) throws
+// InterruptedException {
 //        int thread_num = 10;
 //        int nq = 5;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        client.insert(insertParam);
 //        Index index = new Index.Builder(collectionName, IndexType.IVF_SQ8)
 //                .withParamsInJson(indexParam)
@@ -83,9 +85,11 @@ package com;//package com;
 //    }
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_add_vectors_threads(MilvusClient client, String collectionName) throws InterruptedException {
+//    public void test_add_vectors_threads(MilvusClient client, String collectionName) throws
+// InterruptedException {
 //        int thread_num = 10;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        ForkJoinPool executor = new ForkJoinPool();
 //        for (int i = 0; i < thread_num; i++) {
 //            executor.execute(
@@ -103,11 +107,13 @@ package com;//package com;
 //    }
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_add_vectors_partition_threads(MilvusClient client, String collectionName) throws InterruptedException {
+//    public void test_add_vectors_partition_threads(MilvusClient client, String collectionName)
+// throws InterruptedException {
 //        int thread_num = 10;
 //        String tag = RandomStringUtils.randomAlphabetic(10);
 //        client.createPartition(collectionName, tag);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
 //        ForkJoinPool executor = new ForkJoinPool();
 //        for (int i = 0; i < thread_num; i++) {
 //            executor.execute(
@@ -125,9 +131,11 @@ package com;//package com;
 //    }
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_add_index_vectors_threads(MilvusClient client, String collectionName) throws InterruptedException {
+//    public void test_add_index_vectors_threads(MilvusClient client, String collectionName) throws
+// InterruptedException {
 //        int thread_num = 50;
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        ForkJoinPool executor = new ForkJoinPool();
 //        for (int i = 0; i < thread_num; i++) {
 //            executor.execute(
@@ -148,11 +156,13 @@ package com;//package com;
 //    }
 //
 //    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
-//    public void test_add_search_vectors_threads(MilvusClient client, String collectionName) throws InterruptedException {
+//    public void test_add_search_vectors_threads(MilvusClient client, String collectionName) throws
+// InterruptedException {
 //        int thread_num = 50;
 //        int nq = 5;
 //        List<List<Float>> queryVectors = vectors.subList(0,nq);
-//        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //        ForkJoinPool executor = new ForkJoinPool();
 //        for (int i = 0; i < thread_num; i++) {
 //            executor.execute(
@@ -170,7 +180,8 @@ package com;//package com;
 //                                .withTopK(top_k).build();
 //                        SearchResponse res_search = client.search(searchParam);
 //                        assert (res_search.getResponse().ok());
-//                        List<List<SearchResponse.QueryResult>> res = client.search(searchParam).getQueryResultsList();
+//                        List<List<SearchResponse.QueryResult>> res =
+// client.search(searchParam).getQueryResultsList();
 //                        double distance = res.get(0).get(0).getDistance();
 //                        if (collectionName.startsWith("L2")) {
 //                            Assert.assertEquals(distance, 0.0, epsilon);
@@ -205,12 +216,15 @@ package com;//package com;
 //                        }
 //                        assert(client.isConnected());
 //                        String collectionName = RandomStringUtils.randomAlphabetic(10);
-//                        CollectionMapping tableSchema = new CollectionMapping.Builder(collectionName, dimension)
-//                                                                 .withIndexFileSize(index_file_size)
+//                        CollectionMapping tableSchema = new
+// CollectionMapping.Builder(collectionName, dimension)
+//
+// .withIndexFileSize(index_file_size)
 //                                                                 .withMetricType(MetricType.IP)
 //                                                                 .build();
 //                        client.createCollection(tableSchema);
-//                        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
+//                        InsertParam insertParam = new
+// InsertParam.Builder(collectionName).withFloatVectors(vectors).build();
 //                        client.insert(insertParam);
 //                        Response response = client.dropCollection(collectionName);
 //                        Assert.assertTrue(response.ok());
@@ -225,4 +239,4 @@ package com;//package com;
 //        executor.shutdown();
 //    }
 //
-//}
+// }
