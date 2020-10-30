@@ -66,3 +66,37 @@ func TestInsertCollectionNotExisted(t *testing.T) {
 	t.Log(status)
 	assert.Equal(t, status.Ok(), false)
 }
+
+func TestInsertWithPartition(t *testing.T)  {
+	client, name := Collection(true, milvus.VECTORFLOAT)
+	tag := utils.RandString(8)
+	pp := milvus.PartitionParam{CollectionName: name, PartitionTag: tag}
+	client.CreatePartition(pp)
+	insertParam := milvus.InsertParam{
+		CollectionName: name,
+		Fields:         GenDefaultFieldValues(milvus.VECTORFLOAT),
+		PartitionTag: tag}
+	ids, status, _ := client.Insert(insertParam)
+	t.Log(status)
+	assert.True(t, status.Ok())
+	assert.Equal(t, len(ids), nb)
+	client.Flush([]string{name})
+	count, _, _ := client.CountEntities(name)
+	assert.Equal(t, nb, int(count))
+}
+
+func TestInsertIdCollectionWithoutIds(t *testing.T)  {
+	client, name := Collection(false, milvus.VECTORFLOAT)
+	tag := utils.RandString(8)
+	pp := milvus.PartitionParam{CollectionName: name, PartitionTag: tag}
+	client.CreatePartition(pp)
+	insertParam := milvus.InsertParam{
+		CollectionName: name,
+		Fields:         GenDefaultFieldValues(milvus.VECTORFLOAT),
+		IDArray: nil,
+		PartitionTag: tag}
+	ids, status, _ := client.Insert(insertParam)
+	t.Log(len(ids))
+	t.Log(status)
+	assert.False(t, status.Ok())
+}
