@@ -293,6 +293,26 @@ func (gparams *GlobalParamsTable) Save(key, value string) error
 func (gparams *GlobalParamsTable) Load(key string) (string, error)
 func (gparams *GlobalParamsTable) LoadRange(key, endKey string, limit int) ([]string, []string, error)
 func (gparams *GlobalParamsTable) Remove(key string) error
+func (gparams *GlobalParamsTable) LoadYaml(filePath string) error
+```
+
+
+
+* *LoadYaml(filePath string)* turns a YAML file into multiple key-value pairs. For example, given the following YAML
+
+```yaml
+etcd:
+  address: localhost
+  port: 12379
+  rootpath: milvus/etcd
+```
+
+*GlobalParamsTable.LoadYaml* will insert three key-value pairs into *params*
+
+```go
+"etcd.address" -> "localhost"
+"etcd.port" -> "12379"
+"etcd.rootpath" -> "milvus/etcd"
 ```
 
 
@@ -393,9 +413,16 @@ type flowGraphStates struct {
 ```go
 type Msg interface {
   TimeTick() Timestamp
+  SkipThisTick() bool
   DownStreamNodeIdx() int32
 }
 ```
+
+```go
+type SkipTickMsg struct {}
+func (msg *SkipTickMsg) SkipThisTick() bool // always return true
+```
+
 
 ###### 5.4.3 Node
 
@@ -434,6 +461,7 @@ type nodeCtx struct {
   outputChans [](*chan *Msg)
   inputMsgs [](*Msg List)
   downstreams []*nodeCtx
+  skippedTick Timestamp
 }
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context) error
