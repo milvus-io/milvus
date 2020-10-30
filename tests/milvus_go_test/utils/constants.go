@@ -14,9 +14,9 @@ var DefaultFieldFloatName string = "float"
 var DefaultFieldIntName string = "int64"
 var DefaultFieldFloatVectorName string = "float_vector"
 var DefaultFieldBinaryVectorName string = "binary_vector"
-var DefaultDimension int = 128
+var DefaultDimension int = 16
 var DefaultSegmentRowLimit int = 5000
-var DefaultNb int = 6000
+var DefaultNb int = 10
 var DefaultIndexType = milvus.IVFSQ8
 var DefaultBinaryIndexType = milvus.BINIVFFLAT
 var DefaultIntValues = GenDefaultIntValues(DefaultNb)
@@ -30,7 +30,7 @@ var DefaultBinaryVectors = GenBinaryVectors(DefaultDimension, DefaultNb)
 var L2Indexes = GenIndexes(milvus.L2)
 var IpIndexes = GenIndexes(milvus.IP)
 var DefaultL2Index = Struct2Map(GenIndexes(milvus.L2)[2])
-
+var DefaultBinaryIndex = Struct2Map(GenIndexes(milvus.JACCARD)[1])
 var DefaultQueries = GenVectorQuery(DefaultMetricType, DefaultIndexType)
 var DefaultBinaryQueries = GenVectorQuery(DefaultBinaryMetricType, DefaultBinaryIndexType)
 var DefaultDsl = GenDSL(DefaultFieldFloatVectorName, DefaultMetricType, DefaultIndexType)
@@ -54,7 +54,7 @@ type FloatQuery struct {
 type BinaryQuery struct {
 	Topk       int
 	MetricType milvus.MetricType
-	Query      [][]uint8
+	Query      [][]byte
 	Params     map[string]interface{}
 }
 

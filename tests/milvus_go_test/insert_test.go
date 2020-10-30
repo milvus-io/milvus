@@ -22,6 +22,21 @@ func TestInsert(t *testing.T) {
 	assert.Equal(t, len(ids), utils.DefaultNb)
 }
 
+func TestInsertBinary(t *testing.T) {
+	client, name := Collection(true, milvus.VECTORBINARY)
+	insertParam := milvus.InsertParam{
+		name,
+		GenDefaultFieldValues(milvus.VECTORBINARY),
+		nil,
+		""}
+	t.Log(insertParam)
+	ids, status, _ := client.Insert(insertParam)
+	// t.Log(ids)
+	t.Log(status)
+	assert.Equal(t, status.Ok(), true)
+	assert.Equal(t, len(ids), utils.DefaultNb)
+}
+
 func TestInsertWithCustomIds(t *testing.T) {
 	client, name := Collection(false, milvus.VECTORFLOAT)
 	var customIds []int64 = utils.DefaultIntValues
