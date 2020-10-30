@@ -36,12 +36,16 @@ func TestCreateCollectionWithoutConnect(t *testing.T) {
 	})
 }
 
+// TODO
 func TestCreateCollectionWithInvalidName(t *testing.T) {
 	client := GetClient()
 	for _, name := range utils.GenInvalidStrs() {
 		mapping := GenCollectionParams(name, autoId, segmentRowLimit)
+		t.Log(mapping)
 		status, _ := client.CreateCollection(mapping)
 		assert.False(t, status.Ok())
+		isHas, _, _ := client.HasCollection(name)
+		assert.False(t, isHas)
 	}
 }
 
@@ -89,7 +93,6 @@ func TestShowCollections(t *testing.T)  {
 	}
 	listCollections, listStatus, _ := client.ListCollections()
 	assert.True(t, listStatus.Ok(), true)
-	assert.Equal(t, len(originCollections), len(listCollections))
 	for i :=0; i<len(originCollections); i++ {
 		assert.Contains(t, listCollections, originCollections[i])
 	}
@@ -102,7 +105,7 @@ func TestDropCollections(t *testing.T)  {
 	isHas, _, _ := client.HasCollection(name)
 	assert.False(t, isHas)
 	listCollections, _, _ := client.ListCollections()
-	assert.Nil(t, listCollections)
+	assert.NotContains(t, listCollections, name)
 }
 
 // #4131
