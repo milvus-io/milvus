@@ -817,16 +817,16 @@ class Clustering {
         size_t clusterSize = std::numeric_limits<size_t>::max();
         assign(vectors, clusters, clusterSize);
 
-        std::cout << "The number of vectors=" << vectors.size() << std::endl;
-        std::cout << "The number of centroids=" << clusters.size() << std::endl;
+//        std::cout << "The number of vectors=" << vectors.size() << std::endl;
+//        std::cout << "The number of centroids=" << clusters.size() << std::endl;
         if (centroidIds.size() == 0) {
             switch (mode) {
                 case 'e':
-                    std::cout << "MSE=" << calculateMSE(vectors, clusters) << std::endl;
+//                    std::cout << "MSE=" << calculateMSE(vectors, clusters) << std::endl;
                     break;
                 case '2':
                 default:
-                    std::cout << "ML2=" << calculateML2(vectors, clusters) << std::endl;
+//                    std::cout << "ML2=" << calculateML2(vectors, clusters) << std::endl;
                     break;
             }
         } else {
@@ -835,8 +835,8 @@ class Clustering {
                     break;
                 case '2':
                 default:
-                    std::cout << "ML2=" << calculateML2FromSpecifiedCentroids(vectors, clusters, centroidIds)
-                              << std::endl;
+//                    std::cout << "ML2=" << calculateML2FromSpecifiedCentroids(vectors, clusters, centroidIds)
+//                              << std::endl;
                     break;
             }
         }

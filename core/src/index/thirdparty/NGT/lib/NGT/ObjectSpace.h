@@ -180,7 +180,8 @@ namespace NGT {
       DistanceTypeNormalizedAngle	= 5,
       DistanceTypeNormalizedCosine	= 6,
       DistanceTypeJaccard		= 7,
-      DistanceTypeSparseJaccard		= 8
+      DistanceTypeSparseJaccard		= 8,
+      DistanceTypeIP		    = 9
     };
 
     enum ObjectType {
@@ -248,6 +249,7 @@ namespace NGT {
     virtual ObjectRepository &getRepository() = 0;
 
     virtual void setDistanceType(DistanceType t) = 0;
+    virtual DistanceType getDistanceType() = 0;
 
     virtual void *getObject(size_t idx) = 0;
     virtual void getObject(size_t idx, std::vector<float> &v) = 0;
