@@ -195,20 +195,54 @@ SqliteMetaImpl::ValidateMetaSchema() {
         throw Exception(DB_ERROR, "Connector is null pointer");
     }
 
-//    // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
-//    auto ret = ConnectorPtr->sync_schema_simulate();
-//    if (ret.find(META_TABLES) != ret.end() &&
-//        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
-//        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
-//    }
-//    if (ret.find(META_FIELDS) != ret.end() &&
-//        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_FIELDS]) {
-//        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
-//    }
-//    if (ret.find(META_TABLEFILES) != ret.end() &&
-//        sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
-//        throw Exception(DB_INCOMPATIB_META, "Meta TableFiles schema is created by Milvus old version");
-//    }
+    auto validate_schema = [&](const MetaSchema& schema) -> bool {
+        auto& fields = schema.Fields();
+        for (auto& field : fields) {
+            const char *data_type = nullptr;
+            const char *collseq = nullptr;
+            int not_null = 0, primary_key = 0, autoinc = 0;
+            int ret = sqlite3_table_column_metadata(db_, nullptr, schema.name().c_str(), field.name().c_str(),
+                &data_type, &collseq, &not_null, &primary_key, &autoinc);
+            if (ret == SQLITE_OK) {
+                std::string str_type(data_type);
+                if (str_type != field.type()) {
+                    return false;
+                }
+                std::string settings = field.setting();
+                if (primary_key) {
+                    auto poz = settings.find("PRIMARY KEY");
+                    if (poz == std::string::npos) {
+                        return false;
+                    }
+                }
+                if (not_null) {
+                    auto poz = settings.find("NOT NULL");
+                    if (poz == std::string::npos) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    };
+
+    // old meta could be recreated since schema changed, throw exception if meta schema is not compatible
+    if (!validate_schema(TABLES_SCHEMA)) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
+    }
+
+    if (!validate_schema(TABLEFILES_SCHEMA)) {
+        throw Exception(DB_INCOMPATIB_META, "Meta TableFiles schema is created by Milvus old version");
+    }
+
+    if (!validate_schema(FIELDS_SCHEMA)) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Fields schema is created by Milvus old version");
+    }
+
+    if (!validate_schema(ENVIRONMENT_SCHEMA)) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Environment schema is created by Milvus old version");
+    }
 }
 
 Status

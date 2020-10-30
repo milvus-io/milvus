@@ -69,8 +69,6 @@ define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
 define_option(MILVUS_WITH_SQLITE "Build with SQLite library" ON)
 
-define_option(MILVUS_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
-
 define_option(MILVUS_WITH_MYSQLPP "Build with MySQL++" ON)
 
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)

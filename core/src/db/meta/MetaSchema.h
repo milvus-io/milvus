@@ -29,6 +29,16 @@ class MetaField {
         return name_;
     }
 
+    const std::string&
+    type() const {
+        return type_;
+    }
+
+    const std::string&
+    setting() const {
+        return setting_;
+    }
+
     std::string
     ToString() const {
         return name_ + " " + type_ + " " + setting_;
@@ -60,6 +70,11 @@ class MetaSchema {
 
     bool
     IsEqual(const MetaFields& fields) const;
+
+    const MetaFields&
+    Fields() const {
+        return fields_;
+    }
 
  private:
     std::string name_;
