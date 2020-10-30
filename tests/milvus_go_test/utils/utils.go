@@ -185,3 +185,7 @@ func GenInvalidStrs() []string {
 	}
 	return strs
 }
+
+func GenDefaultMapping()  {
+
+}
