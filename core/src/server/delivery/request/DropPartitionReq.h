@@ -30,8 +30,8 @@ class DropPartitionReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const std::string tag_;
+    std::string collection_name_;
+    std::string tag_;
 };
 
 }  // namespace server

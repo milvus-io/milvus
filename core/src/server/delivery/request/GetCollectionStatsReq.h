@@ -37,7 +37,7 @@ class GetCollectionStatsReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     std::string& collection_stats_;
 };
 

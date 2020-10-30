@@ -34,7 +34,7 @@ class CreateCollectionReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     std::unordered_map<std::string, FieldSchema> fields_;
     milvus::json extra_params_;
 };
