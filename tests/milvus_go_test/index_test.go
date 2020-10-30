@@ -28,6 +28,24 @@ func TestIndex(t *testing.T) {
 	}
 }
 
+// TODO: assert index type
+func TestIndexBinary(t *testing.T) {
+	client, name := Collection(true, milvus.VECTORBINARY)
+	insertParam := milvus.InsertParam{
+		name,
+		GenDefaultFieldValues(milvus.VECTORBINARY),
+		nil,
+		""}
+	_, status, _ := client.Insert(insertParam)
+	assert.Equal(t, status.Ok(), true)
+	client.Flush([]string{name})
+	var index = utils.DefaultBinaryIndex
+	indexParam := milvus.IndexParam{name, utils.DefaultFieldBinaryVectorName, index}
+	status, _ = client.CreateIndex(&indexParam)
+	t.Log(status)
+	assert.Equal(t, status.Ok(), true)
+}
+
 func TestIndexCollectionNotExisted(t *testing.T) {
 	client, name := Collection(true, milvus.VECTORFLOAT)
 	insertParam := milvus.InsertParam{

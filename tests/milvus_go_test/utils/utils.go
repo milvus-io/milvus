@@ -104,9 +104,9 @@ func GenBinaryVectors(dim int, nb int) [][]byte {
 	rand.Seed(time.Now().UnixNano())
 	vectors := make([][]byte, nb)
 	for i := 0; i < nb; i++ {
-		vector := make([]uint8, dim)
-		for j := 0; j < dim; j++ {
-			vector[j] = uint8(rand.Intn(2))
+		vector := make([]byte, dim/8)
+		for j := 0; j < dim/8; j++ {
+			vector[j] = byte(rand.Intn(255))
 		}
 		vectors[i] = vector
 	}

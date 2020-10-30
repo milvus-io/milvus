@@ -23,6 +23,21 @@ func TestCount(t *testing.T) {
 	assert.Equal(t, int(count), utils.DefaultNb)
 }
 
+func TestCountBinary(t *testing.T) {
+	client, name := Collection(true, milvus.VECTORBINARY)
+	insertParam := milvus.InsertParam{
+		name,
+		GenDefaultFieldValues(milvus.VECTORBINARY),
+		nil,
+		""}
+	ids, _, _ := client.Insert(insertParam)
+	assert.Equal(t, len(ids), utils.DefaultNb)
+	client.Flush([]string{name})
+	count, status, _ := client.CountEntities(name)
+	assert.Equal(t, status.Ok(), true)
+	assert.Equal(t, int(count), utils.DefaultNb)
+}
+
 func TestCountCustomIds(t *testing.T) {
 	client, name := Collection(false, milvus.VECTORFLOAT)
 	var customIds []int64 = utils.DefaultIntValues
