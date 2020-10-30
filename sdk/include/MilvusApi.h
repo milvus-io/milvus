@@ -76,6 +76,13 @@ struct AttrRecord {
 /**
  * @brief field value
  */
+struct Entity {
+    int64_t entity_id;
+    std::unordered_map<std::string, std::any> scalar_data;
+    std::unordered_map<std::string, VectorData> vector_data;
+};
+using Entities = std::vector<Entity>;
+
 struct FieldValue {
     int64_t row_num;
     std::unordered_map<std::string, std::vector<int32_t>> int32_value;
@@ -99,6 +106,7 @@ struct VectorParam {
 struct QueryResult {
     std::vector<int64_t> ids;      ///< Query entity ids result
     std::vector<float> distances;  ///< Query distances result
+    Entities entities;
     FieldValue field_value;
 };
 using TopKQueryResult = std::vector<QueryResult>;  ///< Topk hybrid query result
@@ -229,7 +237,7 @@ class Connection {
      * @return Indicate if collection is created successfully
      */
     virtual Status
-    CreateCollection(const Mapping& mapping, const std::string& extra_params) = 0;
+    CreateCollection(const Mapping& mapping) = 0;
 
     /**
      * @brief Drop collection method
@@ -416,7 +424,7 @@ class Connection {
      * @return Indicate if the operation is succeed.
      */
     virtual Status
-    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, std::string& entities) = 0;
+    GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array, Entities& entities) = 0;
 
     /**
      * @brief Delete entity by id

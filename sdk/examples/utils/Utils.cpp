@@ -137,10 +137,10 @@ Utils::PrintCollectionParam(const milvus::Mapping& mapping) {
     BLOCK_SPLITER
     std::cout << "Collection name: " << mapping.collection_name << std::endl;
     for (const auto& field : mapping.fields) {
-        std::cout << "field_name: " << field->field_name;
-        std::cout << "\tfield_type: " << std::to_string((int)field->field_type);
+        std::cout << "field_name: " << field->name;
+        std::cout << "\tfield_type: " << std::to_string((int)field->type);
         std::cout << "\tindex_param: " << field->index_params;
-        std::cout << "\textra_param:" << field->extra_params << std::endl;
+        std::cout << "\textra_param:" << field->params << std::endl;
     }
     BLOCK_SPLITER
 }
@@ -167,12 +167,25 @@ Utils::PrintMapping(const milvus::Mapping& mapping) {
     BLOCK_SPLITER
     std::cout << "Collection name: " << mapping.collection_name << std::endl;
     for (const auto& field : mapping.fields) {
-        std::cout << "field name: " << field->field_name << "\t field type: " << (int32_t)field->field_type
-                  << "\t field index params:" << field->index_params << "\t field extra params: " << field->extra_params
+        std::cout << "field name: " << field->name << "\t field type: " << (int32_t)field->type
+                  << "\t field index params:" << field->index_params << "\t field extra params: " << field->params
                   << std::endl;
     }
     std::cout << "Collection extra params: " << mapping.extra_params << std::endl;
     BLOCK_SPLITER
+}
+
+void
+Utils::BuildVectors(int64_t dim, int64_t nb, std::vector<milvus::VectorData>& vectors) {
+    std::default_random_engine e;
+    std::uniform_real_distribution<float> u(0, 1);
+    vectors.resize(nb);
+    for (int64_t i = 0; i < nb; i++) {
+        vectors[i].float_data.resize(dim);
+        for (int64_t j = 0; j < dim; j++) {
+            vectors[i].float_data[j] = u(e);
+        }
+    }
 }
 
 void
@@ -336,39 +349,23 @@ Utils::GenLeafQuery() {
 }
 
 void
-Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
-    uint64_t row_num = 10000;
-    std::vector<int64_t> term_value;
-    term_value.resize(row_num);
-    for (uint64_t i = 0; i < row_num; ++i) {
-        term_value[i] = i;
-    }
+Utils::GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, int64_t topk,
+                  const std::string& metric_type) {
+    std::vector<int64_t> term_vale = {2002, 2003};
+    std::vector<std::vector<float>> embedding;
+    //    dsl_json = {{"bool",
+    //                 {"must",
+    //                  {{"term", {"release_year", {2002, 2003}}},
+    //                   {{"range", {{"duration", {"GT", 250}}}}},
+    //                   {{"vector", "placeholder_1"}}}}}};
+    JSON must_query, term_query, range_query, vector_query;
+    term_query["term"]["release_year"] = {2002, 2003};
+    range_query["range"]["duration"] = {{"GT", 250}};
+    vector_query["vector"] = "placeholder_1";
+    must_query["must"] = {term_query, range_query, vector_query};
+    dsl_json["bool"] = must_query;
 
-    nlohmann::json bool_json, term_json, range_json, vector_json;
-    nlohmann::json term_value_json;
-    term_value_json["values"] = term_value;
-    term_json["term"]["field_1"] = term_value_json;
-    bool_json["must"].push_back(term_json);
-
-    nlohmann::json comp_json;
-    comp_json["GT"] = 0;
-    comp_json["LT"] = 100000;
-    range_json["range"]["field_1"] = comp_json;
-    bool_json["must"].push_back(range_json);
-
-    std::string placeholder = "placeholder_1";
-    vector_json["vector"] = placeholder;
-    bool_json["must"].push_back(vector_json);
-
-    dsl_json["bool"] = bool_json;
-
-    nlohmann::json query_vector_json, vector_extra_params;
-    int64_t topk = 10;
-    query_vector_json["topk"] = topk;
-    query_vector_json["metric_type"] = metric_type;
-    vector_extra_params["nprobe"] = 64;
-    query_vector_json["params"] = vector_extra_params;
-    vector_param_json[placeholder]["field_vec"] = query_vector_json;
+    vector_param_json = {{"placeholder_1", {{"embedding", {{"topk", topk}, {"metric_type", metric_type}}}}}};
 }
 
 void
@@ -392,39 +389,27 @@ Utils::GenPureVecDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_
 void
 Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
     for (size_t i = 0; i < topk_query_result.size(); i++) {
-        auto field_value = topk_query_result[i].field_value;
-        for (auto& int32_it : field_value.int32_value) {
-            std::cout << int32_it.first << ":";
-            for (auto& data : int32_it.second) {
-                std::cout << " " << data;
-            }
-            std::cout << std::endl;
-        }
-        for (auto& int64_it : field_value.int64_value) {
-            std::cout << int64_it.first << ":";
-            for (auto& data : int64_it.second) {
-                std::cout << " " << data;
-            }
-            std::cout << std::endl;
-        }
-        for (auto& float_it : field_value.float_value) {
-            std::cout << float_it.first << ":";
-            for (auto& data : float_it.second) {
-                std::cout << " " << data;
-            }
-            std::cout << std::endl;
-        }
-        for (auto& double_it : field_value.double_value) {
-            std::cout << double_it.first << ":";
-            for (auto& data : double_it.second) {
-                std::cout << " " << data;
-            }
-            std::cout << std::endl;
-        }
+        auto entities = topk_query_result[i].entities;
         for (size_t j = 0; j < topk_query_result[i].ids.size(); j++) {
-            std::cout << topk_query_result[i].ids[j] << "  ---------  " << topk_query_result[i].distances[j]
-                      << std::endl;
+            std::cout << "- id: " << topk_query_result[i].ids[j] << std::endl;
+            std::cout << "- distance: " << topk_query_result[i].distances[j] << std::endl;
+
+            for (const auto& data : entities[j].scalar_data) {
+                if (data.first == "duration" || data.first == "release_year") {
+                    std::cout << "- " << data.first << ": " << std::any_cast<int32_t>(data.second) << std::endl;
+                }
+            }
+            for (const auto& data : entities[j].vector_data) {
+                if (data.first == "embedding") {
+                    std::cout << "- " << data.first << ": ";
+                    for (const auto& v : data.second.float_data) {
+                        std::cout << v << " ";
+                    }
+                    std::cout << std::endl;
+                }
+            }
         }
+
         std::cout << std::endl;
     }
 }

@@ -23,17 +23,17 @@
 namespace {
 
 const char* COLLECTION_NAME = milvus_sdk::Utils::GenCollectionName().c_str();
+const char* PARTITION_TAG = "American";
 
-constexpr int64_t COLLECTION_DIMENSION = 512;
+constexpr int64_t COLLECTION_DIMENSION = 8;
 constexpr milvus::MetricType COLLECTION_METRIC_TYPE = milvus::MetricType::L2;
-constexpr int64_t BATCH_ENTITY_COUNT = 10000;
-constexpr int64_t NQ = 5;
-constexpr int64_t TOP_K = 10;
+constexpr int64_t BATCH_ENTITY_COUNT = 3;
+constexpr int64_t NQ = 1;
+constexpr int64_t TOP_K = 3;
 constexpr int64_t NPROBE = 16;
 constexpr int64_t SEARCH_TARGET = BATCH_ENTITY_COUNT / 2;  // change this value, result is different
-constexpr int64_t ADD_ENTITY_LOOP = 10;
+constexpr int64_t ADD_ENTITY_LOOP = 1;
 constexpr int32_t NLIST = 1024;
-const char* PARTITION_TAG = "part";
 const char* DIMENSION = "dim";
 const char* METRICTYPE = "metric_type";
 const char* INDEXTYPE = "index_type";
@@ -77,87 +77,85 @@ ClientTest::ListCollections(std::vector<std::string>& collection_array) {
 }
 
 void
-ClientTest::CreateCollection(const std::string& collection_name) {
-    milvus::FieldPtr field_ptr1 = std::make_shared<milvus::Field>();
-    milvus::FieldPtr field_ptr2 = std::make_shared<milvus::Field>();
-    milvus::FieldPtr field_ptr4 = std::make_shared<milvus::Field>();
+ClientTest::CreateCollection() {
+    milvus::FieldPtr field1 = std::make_shared<milvus::Field>("release_year", milvus::DataType::INT32, "");
+    milvus::FieldPtr field2 = std::make_shared<milvus::Field>("duration", milvus::DataType::INT32, "");
+    nlohmann::json vector_param = {{"dim", COLLECTION_DIMENSION}};
+    milvus::FieldPtr field3 =
+        std::make_shared<milvus::Field>("embedding", milvus::DataType::VECTOR_FLOAT, vector_param.dump());
 
-    field_ptr1->field_name = "field_1";
-    field_ptr1->field_type = milvus::DataType::INT64;
-    JSON index_param_1;
-    index_param_1["name"] = "index_1";
-    field_ptr1->index_params = index_param_1.dump();
+    nlohmann::json json_param;
+    json_param = {{"auto_id", false}, {"segment_row_limit", 4096}};
+    milvus::Mapping mapping = {COLLECTION_NAME, {field1, field2, field3}, json_param.dump()};
 
-    field_ptr2->field_name = "field_2";
-    field_ptr2->field_type = milvus::DataType::FLOAT;
-    JSON index_param_2;
-    index_param_2["name"] = "index_2";
-    field_ptr2->index_params = index_param_2.dump();
-
-    field_ptr4->field_name = "field_vec";
-    field_ptr4->field_type = milvus::DataType::VECTOR_FLOAT;
-    JSON index_param_4;
-    index_param_4["name"] = "index_vec";
-    field_ptr4->index_params = index_param_4.dump();
-    JSON extra_params_4;
-    extra_params_4[DIMENSION] = COLLECTION_DIMENSION;
-    field_ptr4->extra_params = extra_params_4.dump();
-
-    JSON extra_params;
-    extra_params["segment_row_limit"] = 10000;
-    extra_params["auto_id"] = false;
-    milvus::Mapping mapping = {collection_name, {field_ptr1, field_ptr2, field_ptr4}};
-
-    milvus::Status stat = conn_->CreateCollection(mapping, extra_params.dump());
-    std::cout << "CreateCollection function call status: " << stat.message() << std::endl;
+    milvus::Status status = conn_->CreateCollection(mapping);
+    std::cout << "CreateCollection function call status: " << status.message() << std::endl;
 }
 
 void
-ClientTest::GetCollectionInfo(const std::string& collection_name) {
+ClientTest::CreatePartition() {
+    milvus::PartitionParam param = milvus::PartitionParam{COLLECTION_NAME, PARTITION_TAG};
+    auto status = conn_->CreatePartition(param);
+    std::cout << "CreatePartition function call status: " << status.message() << std::endl;
+}
+
+void
+ClientTest::GetCollectionInfo() {
     milvus::Mapping mapping;
-    milvus::Status stat = conn_->GetCollectionInfo(collection_name, mapping);
+    milvus::Status status = conn_->GetCollectionInfo(COLLECTION_NAME, mapping);
     milvus_sdk::Utils::PrintMapping(mapping);
-    std::cout << "GetCollectionInfo function call status: " << stat.message() << std::endl;
+    std::cout << "GetCollectionInfo function call status: " << status.message() << std::endl;
 }
 
 void
-ClientTest::InsertEntities(const std::string& collection_name) {
-    for (int64_t i = 0; i < ADD_ENTITY_LOOP; i++) {
-        milvus::FieldValue field_value;
-        std::vector<int64_t> entity_ids;
-
-        int64_t begin_index = i * BATCH_ENTITY_COUNT;
-        {
-            milvus_sdk::TimeRecorder rc("Build entities No." + std::to_string(i));
-            milvus_sdk::Utils::BuildEntities(begin_index, begin_index + BATCH_ENTITY_COUNT, field_value, entity_ids,
-                                             COLLECTION_DIMENSION);
-        }
-        milvus::Status status = conn_->Insert(collection_name, "", field_value, entity_ids);
-        search_id_array_.emplace_back(entity_ids[10]);
-        std::cout << "InsertEntities function call status: " << status.message() << std::endl;
-        std::cout << "Returned id array count: " << entity_ids.size() << std::endl;
+ClientTest::ListPartitions() {
+    milvus::PartitionTagList partition_list;
+    auto status = conn_->ListPartitions(COLLECTION_NAME, partition_list);
+    std::cout << "Partitions: ";
+    for (const auto& part : partition_list) {
+        std::cout << part << std::endl;
     }
+    std::cout << "ListPartitions function call status: " << status.message() << std::endl;
 }
 
 void
-ClientTest::CountEntities(const std::string& collection_name) {
-    int64_t entity_count = 0;
-    auto status = conn_->CountEntities(collection_name, entity_count);
-    std::cout << "Collection " << collection_name << " entity count: " << entity_count << std::endl;
+ClientTest::InsertEntities() {
+    std::vector<int32_t> duration{208, 226, 252};
+    std::vector<int32_t> release_year{2001, 2002, 2003};
+    std::vector<milvus::VectorData> embedding;
+    milvus_sdk::Utils::BuildVectors(COLLECTION_DIMENSION, 3, embedding);
+
+    milvus::FieldValue field_value;
+    std::unordered_map<std::string, std::vector<int32_t>> int32_value = {{"duration", duration},
+                                                                         {"release_year", release_year}};
+
+    std::unordered_map<std::string, std::vector<milvus::VectorData>> vector_value = {{"embedding", embedding}};
+    field_value.int32_value = int32_value;
+    field_value.vector_value = vector_value;
+
+    std::vector<int64_t> id_array = {1, 2, 3};
+    auto status = conn_->Insert(COLLECTION_NAME, PARTITION_TAG, field_value, id_array);
+    std::cout << "InsertEntities function call status: " << status.message() << std::endl;
 }
 
 void
-ClientTest::Flush(const std::string& collection_name) {
+ClientTest::CountEntities(int64_t& entity_count) {
+    auto status = conn_->CountEntities(COLLECTION_NAME, entity_count);
+    std::cout << "Collection " << COLLECTION_NAME << " entity count: " << entity_count << std::endl;
+}
+
+void
+ClientTest::Flush() {
     milvus_sdk::TimeRecorder rc("Flush");
-    std::vector<std::string> collections = {collection_name};
+    std::vector<std::string> collections = {COLLECTION_NAME};
     milvus::Status stat = conn_->Flush(collections);
     std::cout << "Flush function call status: " << stat.message() << std::endl;
 }
 
 void
-ClientTest::GetCollectionStats(const std::string& collection_name) {
+ClientTest::GetCollectionStats() {
     std::string collection_stats;
-    milvus::Status stat = conn_->GetCollectionStats(collection_name, collection_stats);
+    milvus::Status stat = conn_->GetCollectionStats(COLLECTION_NAME, collection_stats);
     std::cout << "Collection stats: " << collection_stats << std::endl;
     std::cout << "GetCollectionStats function call status: " << stat.message() << std::endl;
 }
@@ -178,76 +176,53 @@ ClientTest::BuildVectors(int64_t nq, int64_t dimension) {
 }
 
 void
-ClientTest::GetEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    std::string result;
+ClientTest::GetEntityByID(const std::vector<int64_t>& id_array) {
+    milvus::Entities entities;
     {
         milvus_sdk::TimeRecorder rc("GetEntityByID");
-        milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, result);
+        milvus::Status stat = conn_->GetEntityByID(COLLECTION_NAME, id_array, entities);
         std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
-    }
+    };
+
     std::cout << "GetEntityByID function result: " << std::endl;
-    JSON result_json = JSON::parse(result);
-    for (const auto& one_result : result_json) {
-        std::cout << one_result << std::endl;
+    for (const auto& entity : entities) {
+        std::cout << "Entity id: " << entity.entity_id << std::endl;
+        for (const auto& data : entity.scalar_data) {
+            if (data.first == "duration" || data.first == "release_year") {
+                std::cout << data.first << ": " << std::any_cast<int32_t>(data.second) << std::endl;
+            }
+        }
+        for (const auto& data : entity.vector_data) {
+            auto embedding = data.second.float_data;
+            std::cout << data.first << ":";
+            for (const auto& v : embedding) {
+                std::cout << v << " ";
+            }
+            std::cout << std::endl;
+        }
     }
 }
 
 void
-ClientTest::SearchEntities(const std::string& collection_name, int64_t topk, int64_t nprobe,
-                           const std::string metric_type) {
+ClientTest::SearchEntities() {
     nlohmann::json dsl_json, vector_param_json;
-    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, metric_type);
+    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, TOP_K, "L2");
 
-    std::vector<int64_t> record_ids;
-    std::vector<milvus::VectorData> temp_entity_array;
-    for (auto& pair : search_entity_array_) {
-        temp_entity_array.push_back(pair.second);
-    }
+    std::vector<milvus::VectorData> query_embedding;
+    milvus_sdk::Utils::BuildVectors(COLLECTION_DIMENSION, 1, query_embedding);
 
-    milvus::VectorParam vector_param = {vector_param_json.dump(), temp_entity_array};
+    milvus::VectorParam vector_param = {vector_param_json.dump(), query_embedding};
+
+    std::vector<std::string> get_fields{"duration", "release_year", "embedding"};
+    nlohmann::json json_params = {{"fields", get_fields}};
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    auto status = conn_->Search(collection_name, partition_tags, dsl_json.dump(), vector_param, "", topk_query_result);
+    auto status = conn_->Search(COLLECTION_NAME, partition_tags, dsl_json.dump(), vector_param, json_params.dump(),
+                                topk_query_result);
 
-    std::cout << metric_type << " Search function call result: " << std::endl;
+    std::cout << " Search function call result: " << std::endl;
     milvus_sdk::Utils::PrintTopKQueryResult(topk_query_result);
-    std::cout << metric_type << " Search function call status: " << status.message() << std::endl;
-}
-
-void
-ClientTest::SearchEntitiesByID(const std::string& collection_name, int64_t topk, int64_t nprobe) {
-    //    std::vector<std::string> partition_tags;
-    //    milvus::TopKQueryResult topk_query_result;
-    //
-    //    topk_query_result.clear();
-    //
-    //    std::vector<int64_t> id_array;
-    //    for (auto& pair : search_entity_array_) {
-    //        id_array.push_back(pair.first);
-    //    }
-    //
-    //    std::vector<milvus::Entity> entities;
-    //    milvus::Status stat = conn_->GetEntityByID(collection_name, id_array, entities);
-    //    std::cout << "GetEntityByID function call status: " << stat.message() << std::endl;
-    //
-    //    JSON json_params = {{"nprobe", nprobe}};
-    //    milvus_sdk::TimeRecorder rc("Search");
-    //    stat = conn_->Search(collection_name, partition_tags, entities, topk, json_params.dump(), topk_query_result);
-    //    std::cout << "Search function call status: " << stat.message() << std::endl;
-    //
-    //    if (topk_query_result.size() != id_array.size()) {
-    //        std::cout << "ERROR! wrong result for query by id" << std::endl;
-    //        return;
-    //    }
-    //
-    //    for (size_t i = 0; i < id_array.size(); i++) {
-    //        std::cout << "Entity " << id_array[i] << " top " << topk << " search result:" << std::endl;
-    //        const milvus::QueryResult& one_result = topk_query_result[i];
-    //        for (size_t j = 0; j < one_result.ids.size(); j++) {
-    //            std::cout << "\t" << one_result.ids[j] << "\t" << one_result.distances[j] << std::endl;
-    //        }
-    //    }
 }
 
 void
@@ -278,17 +253,16 @@ ClientTest::CompactCollection(const std::string& collection_name) {
 }
 
 void
-ClientTest::DeleteByIds(const std::string& collection_name, const std::vector<int64_t>& id_array) {
-    std::cout << "Delete entity: ";
-    for (auto id : id_array) {
-        std::cout << "\t" << id;
-    }
-    std::cout << std::endl;
+ClientTest::DeleteByIds(const std::vector<int64_t>& id_array) {
+    auto status = conn_->DeleteEntityByID(COLLECTION_NAME, id_array);
+    std::cout << "DeleteByID function call status: " << status.message() << std::endl;
+}
 
-    milvus::Status stat = conn_->DeleteEntityByID(collection_name, id_array);
-    std::cout << "DeleteByID function call status: " << stat.message() << std::endl;
-
-    Flush(collection_name);
+void
+ClientTest::DropPartition() {
+    milvus::PartitionParam param = {COLLECTION_NAME, PARTITION_TAG};
+    auto status = conn_->DropPartition(param);
+    std::cout << "DropPartition function call status: " << status.message() << std::endl;
 }
 
 void
@@ -310,43 +284,53 @@ ClientTest::DropCollection(const std::string& collection_name) {
 
 void
 ClientTest::Test() {
-    std::string collection_name = COLLECTION_NAME;
-    int64_t dim = COLLECTION_DIMENSION;
-    milvus::MetricType metric_type = COLLECTION_METRIC_TYPE;
+    std::vector<std::string> collection_array;
+    ListCollections(collection_array);
+    for (const auto& collection : collection_array) {
+        DropCollection(collection);
+    }
 
-    std::vector<std::string> table_array;
-    ListCollections(table_array);
+    CreateCollection();
+    CreatePartition();
 
-    CreateCollection(collection_name);
-//    GetCollectionInfo(collection_name);
-    GetCollectionStats(collection_name);
+    std::cout << "--------get collection info--------" << std::endl;
+    GetCollectionInfo();
+    std::cout << "\n----------list partitions----------" << std::endl;
+    ListPartitions();
 
-    ListCollections(table_array);
-    CountEntities(collection_name);
+    std::cout << "\n----------insert----------" << std::endl;
+    InsertEntities();
 
-    InsertEntities(collection_name);
-    Flush(collection_name);
-    CountEntities(collection_name);
-    CreateIndex(collection_name, NLIST);
-    GetCollectionInfo(collection_name);
-    //    GetCollectionStats(collection_name);
-    //
-    LoadCollection(COLLECTION_NAME);
-    BuildVectors(NQ, COLLECTION_DIMENSION);
-    //    GetEntityByID(collection_name, search_id_array_);
-    SearchEntities(collection_name, TOP_K, NPROBE, "L2");
-    SearchEntities(collection_name, TOP_K, NPROBE, "IP");
-    //    GetCollectionStats(collection_name);
-    //
-    //    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-    //    DeleteByIds(collection_name, delete_ids);
-    //    GetEntityByID(collection_name, search_id_array_);
-    //    CompactCollection(collection_name);
-    //
-    //    LoadCollection(collection_name);
-    //    SearchEntities(collection_name, TOP_K, NPROBE);  // this line get two search error since we delete two
-    //    entities
-    //
-    //    DropIndex(collection_name, "field_vec", "index_3");
-    DropCollection(collection_name);
+    int64_t before_flush_counts = 0;
+    int64_t after_flush_counts = 0;
+    CountEntities(before_flush_counts);
+    Flush();
+    CountEntities(after_flush_counts);
+    std::cout << "\n----------flush----------" << std::endl;
+    std::cout << "There are " << before_flush_counts << " films in collection " << COLLECTION_NAME << " before flush"
+              << std::endl;
+    std::cout << "There are " << after_flush_counts << " films in collection " << COLLECTION_NAME << " after flush"
+              << std::endl;
+
+    std::cout << "\n----------get collection stats----------\n";
+    GetCollectionStats();
+
+    std::cout << "\n----------get entity by id = 1, id = 200----------\n";
+    std::vector<int64_t> id_array = {1, 200};
+    GetEntityByID(id_array);
+
+    std::cout << "\n----------search----------\n";
+    SearchEntities();
+
+    std::vector<int64_t> delete_id_array = {1, 2};
+    std::cout << "\n----------delete id = 1, id = 2----------\n";
+    DeleteByIds(delete_id_array);
+    Flush();
+    GetEntityByID(delete_id_array);
+
+    int64_t counts_in_collection;
+    CountEntities(counts_in_collection);
+    std::cout << "There are " << counts_in_collection << " entities after delete films with 1, 2\n";
+
+    DropCollection(COLLECTION_NAME);
 }
