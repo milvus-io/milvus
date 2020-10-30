@@ -117,6 +117,8 @@ const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
 const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ = "search_combine_nq";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT = "64";
+const char* CONFIG_ENGINE_MAX_PARTITION_NUM = "max_partition_num";
+const char* CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT = "4096";
 /* fpga resource config */
 const char* CONFIG_FPGA_RESOURCE = "fpga";
 const char* CONFIG_FPGA_RESOURCE_ENABLE = "enable";
@@ -224,6 +226,9 @@ Config::Config() {
 
     std::string node_search_combine = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ;
     config_callback_[node_search_combine] = empty_map;
+
+    std::string node_max_partition = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_MAX_PARTITION_NUM;
+    config_callback_[node_max_partition] = empty_map;
 
     // gpu resources config
     std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
@@ -386,6 +391,9 @@ Config::ValidateConfig() {
     std::string engine_simd_type;
     STATUS_CHECK(GetEngineConfigSimdType(engine_simd_type));
 
+    int64_t max_partition_num;
+    STATUS_CHECK(GetEngineConfigMaxPartitionNum(max_partition_num));
+
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
@@ -506,6 +514,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
     STATUS_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
     STATUS_CHECK(SetEngineSearchCombineMaxNq(CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT));
+    STATUS_CHECK(SetEngineConfigMaxPartitionNum(CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT));
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
@@ -645,6 +654,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigSimdType(value);
         } else if (child_key == CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ) {
             status = SetEngineSearchCombineMaxNq(value);
+        } else if (child_key == CONFIG_ENGINE_MAX_PARTITION_NUM) {
+            status = SetEngineConfigMaxPartitionNum(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1339,6 +1350,7 @@ Config::CheckMetricConfigPort(const std::string& value) {
     }
     return Status::OK();
 }
+
 #ifdef MILVUS_FPGA_VERSION
 Status
 Config::CheckFpgaResourceConfigEnable(const std::string& value) {
@@ -1352,6 +1364,7 @@ Config::CheckFpgaResourceConfigEnable(const std::string& value) {
 }
 
 #endif
+
 /* cache config */
 Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
@@ -1614,6 +1627,16 @@ Config::CheckEngineSearchCombineMaxNq(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckEngineConfigMaxPartitionNum(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid max partition number: " + value +
+                          ". Possible reason: engine_config.max_partition_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2078,6 +2101,7 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
     value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, CONFIG_GENERAL_METAURI_DEFAULT);
     return CheckGeneralConfigMetaURI(value);
 }
+
 #ifdef MILVUS_FPGA_VERSION
 Status
 Config::GetFpgaResourceConfigEnable(bool& value) {
@@ -2143,6 +2167,7 @@ Config::CheckFpgaResourceConfigCacheThreshold(const std::string& value) {
     return Status::OK();
 }
 #endif
+
 /* network config */
 Status
 Config::GetNetworkConfigBindAddress(std::string& value) {
@@ -2393,6 +2418,15 @@ Config::GetEngineSearchCombineMaxNq(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT);
     //    STATUS_CHECK(CheckEngineSearchCombineMaxNq(str));
+    value = std::stoll(str);
+    return Status::OK();
+}
+
+Status
+Config::GetEngineConfigMaxPartitionNum(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_MAX_PARTITION_NUM, CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT);
+    STATUS_CHECK(CheckEngineConfigMaxPartitionNum(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -2852,8 +2886,15 @@ Config::SetEngineSearchCombineMaxNq(const std::string& value) {
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, value);
 }
 
+Status
+Config::SetEngineConfigMaxPartitionNum(const std::string& value) {
+    STATUS_CHECK(CheckEngineConfigMaxPartitionNum(value));
+    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_MAX_PARTITION_NUM, value);
+}
+
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     STATUS_CHECK(CheckGpuResourceConfigEnable(value));
