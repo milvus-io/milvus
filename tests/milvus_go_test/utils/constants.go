@@ -16,9 +16,9 @@ var DefaultFieldFloatVectorName string = "float_vector"
 var DefaultFieldBinaryVectorName string = "binary_vector"
 var DefaultDimension int = 128
 var DefaultSegmentRowLimit int = 5000
-var DefaultNb = 6000
+var DefaultNb int = 6000
 var DefaultIndexType = milvus.IVFSQ8
-var DefaulltBinaryIndexType = milvus.BINIVFFLAT
+var DefaultBinaryIndexType = milvus.BINIVFFLAT
 var DefaultIntValues = GenDefaultIntValues(DefaultNb)
 var DefaultFloatValues = GenDefaultFloatValues(DefaultNb)
 var DefaultFloatVector = GenFloatVectors(DefaultDimension, 1, false)
@@ -32,9 +32,9 @@ var IpIndexes = GenIndexes(milvus.IP)
 var DefaultL2Index = Struct2Map(GenIndexes(milvus.L2)[2])
 
 var DefaultQueries = GenVectorQuery(DefaultMetricType, DefaultIndexType)
-var DefaultBinaryQueries = GenVectorQuery(DefaultBinaryMetricType, DefaulltBinaryIndexType)
+var DefaultBinaryQueries = GenVectorQuery(DefaultBinaryMetricType, DefaultBinaryIndexType)
 var DefaultDsl = GenDSL(DefaultFieldFloatVectorName, DefaultMetricType, DefaultIndexType)
-var DefaultBinaryDsl = GenDSL(DefaultFieldBinaryVectorName, DefaultBinaryMetricType, DefaulltBinaryIndexType)
+var DefaultBinaryDsl = GenDSL(DefaultFieldBinaryVectorName, DefaultBinaryMetricType, DefaultBinaryIndexType)
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
