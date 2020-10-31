@@ -14,6 +14,7 @@ Please mark all changes in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#4096 Improve performance for create large amount of partitions
 
 ## Task
 
