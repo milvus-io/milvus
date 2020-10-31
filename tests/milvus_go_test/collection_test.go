@@ -159,7 +159,7 @@ func TestDescribeCollectionNotExisted(t *testing.T) {
 	t.Log(error)
 }
 
-// TODO // #4130
+ // #4130
 func TestDescribeCollection(t *testing.T) {
 	client, name := Collection(false, milvus.VECTORFLOAT)
 	mapping, status, _ := client.GetCollectionInfo(name)
