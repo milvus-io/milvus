@@ -1,4 +1,4 @@
-#include <dog_segment/SegmentSmallIndex.h>
+#include <segcore/SegmentSmallIndex.h>
 #include <random>
 #include <algorithm>
 #include <numeric>
@@ -9,19 +9,7 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
 
-namespace milvus::dog_segment {
-
-SegmentSmallIndex::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
-    for (auto& field : schema) {
-        if (field.is_vector()) {
-            Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(field.get_dim()));
-        } else {
-            Assert(field.get_data_type() == DataType::INT32);
-            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, true>>());
-        }
-    }
-}
+namespace milvus::segcore {
 
 int64_t
 SegmentSmallIndex::PreInsert(int64_t size) {
@@ -112,17 +100,17 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
                           int64_t size,
                           const int64_t* uids_raw,
                           const Timestamp* timestamps_raw,
-                          const DogDataChunk& entities_raw) {
+                          const RowBasedRawData& entities_raw) {
     Assert(entities_raw.count == size);
+    // step 1: check schema if valid
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
         std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
                           ", schema length = " + std::to_string(schema_->get_total_sizeof());
         throw std::runtime_error(msg);
     }
 
+    // step 2: sort timestamp
     auto raw_data = reinterpret_cast<const char*>(entities_raw.raw_data);
-    //    std::vector<char> entities(raw_data, raw_data + size * len_per_row);
-
     auto len_per_row = entities_raw.sizeof_per_row;
     std::vector<std::tuple<Timestamp, idx_t, int64_t>> ordering;
     ordering.resize(size);
@@ -131,6 +119,8 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
         ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i], i);
     }
     std::sort(ordering.begin(), ordering.end());
+
+    // step 3: and convert row-base data to column base accordingly
     auto sizeof_infos = schema_->get_sizeof_infos();
     std::vector<int> offset_infos(schema_->size() + 1, 0);
     std::partial_sum(sizeof_infos.begin(), sizeof_infos.end(), offset_infos.begin() + 1);
@@ -157,6 +147,7 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
         }
     }
 
+    // step 4: fill into Segment.ConcurrentVector
     record_.timestamps_.set_data(reserved_begin, timestamps.data(), size);
     record_.uids_.set_data(reserved_begin, uids.data(), size);
     for (int fid = 0; fid < schema_->size(); ++fid) {
@@ -170,37 +161,8 @@ SegmentSmallIndex::Insert(int64_t reserved_begin,
     }
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
+    // indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / DefaultElementPerChunk);
     return Status::OK();
-
-    //    std::thread go(executor, std::move(uids), std::move(timestamps), std::move(entities));
-    //    go.detach();
-    //    const auto& schema = *schema_;
-    //    auto record_ptr = GetMutableRecord();
-    //    Assert(record_ptr);
-    //    auto& record = *record_ptr;
-    //    auto data_chunk = ColumnBasedDataChunk::from(row_values, schema);
-    //
-    //    // TODO: use shared_lock for better concurrency
-    //    std::lock_guard lck(mutex_);
-    //    Assert(state_ == SegmentState::Open);
-    //    auto ack_id = ack_count_.load();
-    //    record.uids_.grow_by(primary_keys, primary_keys + size);
-    //    for (int64_t i = 0; i < size; ++i) {
-    //        auto key = primary_keys[i];
-    //        auto internal_index = i + ack_id;
-    //        internal_indexes_[key] = internal_index;
-    //    }
-    //    record.timestamps_.grow_by(timestamps, timestamps + size);
-    //    for (int fid = 0; fid < schema.size(); ++fid) {
-    //        auto field = schema[fid];
-    //        auto total_len = field.get_sizeof() * size / sizeof(float);
-    //        auto source_vec = data_chunk.entity_vecs[fid];
-    //        record.entity_vecs_[fid].grow_by(source_vec.data(), source_vec.data() + total_len);
-    //    }
-    //
-    //    // finish insert
-    //    ack_count_ += size;
-    //    return Status::OK();
 }
 
 Status
@@ -228,7 +190,7 @@ SegmentSmallIndex::Delete(int64_t reserved_begin,
     deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     return Status::OK();
     //    for (int i = 0; i < size; ++i) {
-    //        auto key = primary_keys[i];
+    //        auto key = row_ids[i];
     //        auto time = timestamps[i];
     //        delete_logs_.insert(std::make_pair(key, time));
     //    }
@@ -250,66 +212,6 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
         }
     }
     return beg;
-}
-
-Status
-SegmentSmallIndex::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
-    auto ins_barrier = get_barrier(record_, timestamp);
-    auto del_barrier = get_barrier(deleted_record_, timestamp);
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier, true);
-    Assert(bitmap_holder);
-    Assert(bitmap_holder->bitmap_ptr->count() == ins_barrier);
-
-    auto field_offset = schema_->get_offset(query_info->field_name);
-    auto& field = schema_->operator[](query_info->field_name);
-
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-    auto dim = field.get_dim();
-    auto bitmap = bitmap_holder->bitmap_ptr;
-    auto topK = query_info->topK;
-    auto num_queries = query_info->num_queries;
-    auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    Assert(the_offset_opt.has_value());
-    Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
-    auto index_entry = index_meta_->lookup_by_field(query_info->field_name);
-    auto conf = index_entry.config;
-
-    conf[milvus::knowhere::meta::TOPK] = query_info->topK;
-    {
-        auto count = 0;
-        for (int i = 0; i < bitmap->count(); ++i) {
-            if (bitmap->test(i)) {
-                ++count;
-            }
-        }
-        std::cout << "fuck " << count << std::endl;
-    }
-
-    auto indexing = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_entry.index_name]);
-    indexing->SetBlacklist(bitmap);
-    auto ds = knowhere::GenDataset(query_info->num_queries, dim, query_info->query_raw_data.data());
-    auto final = indexing->Query(ds, conf, bitmap);
-
-    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
-    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
-
-    auto total_num = num_queries * topK;
-    result.result_ids_.resize(total_num);
-    result.result_distances_.resize(total_num);
-
-    result.row_num_ = total_num;
-    result.num_queries_ = num_queries;
-    result.topK_ = topK;
-
-    std::copy_n(ids, total_num, result.result_ids_.data());
-    std::copy_n(distances, total_num, result.result_distances_.data());
-
-    for (auto& id : result.result_ids_) {
-        id = record_.uids_[id];
-    }
-
-    return Status::OK();
 }
 
 static void
@@ -351,30 +253,53 @@ merge_into(int64_t queries,
 
 Status
 SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) {
+    // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record_, timestamp);
     auto del_barrier = get_barrier(deleted_record_, timestamp);
+#if 0
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
     Assert(bitmap_holder);
+    auto bitmap = bitmap_holder->bitmap_ptr;
+#endif
 
+    // step 2.1: get meta
     auto& field = schema_->operator[](query_info->field_name);
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
-    auto bitmap = bitmap_holder->bitmap_ptr;
     auto topK = query_info->topK;
     auto num_queries = query_info->num_queries;
     auto total_count = topK * num_queries;
     // TODO: optimize
 
-    auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    Assert(the_offset_opt.has_value());
-    Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
+    // step 2.2: get which vector field to search
+    auto vecfield_offset_opt = schema_->get_offset(query_info->field_name);
+    Assert(vecfield_offset_opt.has_value());
+    auto vecfield_offset = vecfield_offset_opt.value();
+    Assert(vecfield_offset < record_.entity_vec_.size());
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(vecfield_offset));
 
-    std::vector<int64_t> final_uids(total_count);
+    // step 3: small indexing search
+    std::vector<int64_t> final_uids(total_count, -1);
     std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
     auto max_chunk = (ins_barrier + DefaultElementPerChunk - 1) / DefaultElementPerChunk;
-    for (int chunk_id = 0; chunk_id < max_chunk; ++chunk_id) {
+
+    auto max_indexed_id = indexing_record_.get_finished_ack();
+    const auto& indexing_entry = indexing_record_.get_indexing(vecfield_offset);
+    auto search_conf = indexing_entry.get_search_conf(topK);
+
+    for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
+        auto indexing = indexing_entry.get_indexing(chunk_id);
+        auto src_data = vec_ptr->get_chunk(chunk_id).data();
+        auto dataset = knowhere::GenDataset(num_queries, dim, src_data);
+        auto ans = indexing->Query(dataset, search_conf, nullptr);
+        auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
+        auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
+    }
+
+    // step 4: brute force search where small indexing is unavailable
+    for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);
         std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
@@ -383,17 +308,11 @@ SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp tim
         auto src_data = vec_ptr->get_chunk(chunk_id).data();
         auto nsize =
             chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
-        auto offset = chunk_id * DefaultElementPerChunk;
-
-        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf, bitmap, offset);
-        if (chunk_id == 0) {
-            final_uids = buf_uids;
-            final_dis = buf_dis;
-        } else {
-            merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
-        }
+        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf);
+        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 
+    // step 5: convert offset to uids
     for (auto& id : final_uids) {
         id = record_.uids_[id];
     }
@@ -402,78 +321,8 @@ SegmentSmallIndex::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp tim
     results.result_distances_ = std::move(final_dis);
     results.topK_ = topK;
     results.num_queries_ = num_queries;
-    results.row_num_ = total_count;
 
     //    throw std::runtime_error("unimplemented");
-    return Status::OK();
-}
-
-Status
-SegmentSmallIndex::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
-    auto ins_barrier = get_barrier(record_, timestamp);
-    auto del_barrier = get_barrier(deleted_record_, timestamp);
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    Assert(bitmap_holder);
-
-    auto& field = schema_->operator[](query_info->field_name);
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-    auto dim = field.get_dim();
-    auto bitmap = bitmap_holder->bitmap_ptr;
-    auto topK = query_info->topK;
-    auto num_queries = query_info->num_queries;
-    // TODO: optimize
-    auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    Assert(the_offset_opt.has_value());
-    Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
-    std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
-
-    auto get_L2_distance = [dim](const float* a, const float* b) {
-        float L2_distance = 0;
-        for (auto i = 0; i < dim; ++i) {
-            auto d = a[i] - b[i];
-            L2_distance += d * d;
-        }
-        return L2_distance;
-    };
-
-    for (int64_t i = 0; i < ins_barrier; ++i) {
-        if (i < bitmap->count() && bitmap->test(i)) {
-            continue;
-        }
-        auto element = vec_ptr->get_element(i);
-        for (auto query_id = 0; query_id < num_queries; ++query_id) {
-            auto query_blob = query_info->query_raw_data.data() + query_id * dim;
-            auto dis = get_L2_distance(query_blob, element);
-            auto& record = records[query_id];
-            if (record.size() < topK) {
-                record.emplace(dis, i);
-            } else if (record.top().first > dis) {
-                record.emplace(dis, i);
-                record.pop();
-            }
-        }
-    }
-
-    result.num_queries_ = num_queries;
-    result.topK_ = topK;
-    auto row_num = topK * num_queries;
-    result.row_num_ = topK * num_queries;
-
-    result.result_ids_.resize(row_num);
-    result.result_distances_.resize(row_num);
-
-    for (int q_id = 0; q_id < num_queries; ++q_id) {
-        // reverse
-        for (int i = 0; i < topK; ++i) {
-            auto dst_id = topK - 1 - i + q_id * topK;
-            auto [dis, offset] = records[q_id].top();
-            records[q_id].pop();
-            result.result_ids_[dst_id] = record_.uids_[offset];
-            result.result_distances_[dst_id] = dis;
-        }
-    }
-
     return Status::OK();
 }
 
@@ -497,11 +346,8 @@ SegmentSmallIndex::Query(query::QueryPtr query_info, Timestamp timestamp, QueryR
         }
     }
 
-    if (index_ready_) {
-        return QueryImpl(query_info, timestamp, result);
-    } else {
-        return QueryBruteForceImpl(query_info, timestamp, result);
-    }
+    // TODO
+    return QueryBruteForceImpl(query_info, timestamp, result);
 }
 
 Status
@@ -582,7 +428,9 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     if (record_.ack_responder_.GetAck() < 1024 * 4) {
         return Status(SERVER_BUILD_INDEX_ERROR, "too few elements");
     }
-
+    // AssertInfo(false, "unimplemented");
+    return Status::OK();
+#if 0
     index_meta_ = remote_index_meta;
     for (auto& [index_name, entry] : index_meta_->get_entries()) {
         Assert(entry.index_name == index_name);
@@ -598,12 +446,14 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
     }
 
     index_ready_ = true;
+#endif
     return Status::OK();
 }
 
 int64_t
 SegmentSmallIndex::GetMemoryUsageInBytes() {
     int64_t total_bytes = 0;
+#if 0
     if (index_ready_) {
         auto& index_entries = index_meta_->get_entries();
         for (auto [index_name, entry] : index_entries) {
@@ -612,6 +462,7 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
             total_bytes += vec_ptr->IndexSize();
         }
     }
+#endif
     int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
     int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
@@ -619,4 +470,4 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
     return total_bytes;
 }
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

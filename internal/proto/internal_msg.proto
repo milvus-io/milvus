@@ -155,7 +155,7 @@ message InsertRequest {
     int64 segment_id = 5;
     int64 channel_id = 6;
     int64 proxy_id = 7;
-    uint64 timestamp = 8;
+    repeated uint64 timestamps = 8;
     repeated int64 row_ids = 9;
     repeated common.Blob row_data = 10;
 }
@@ -167,7 +167,7 @@ message DeleteRequest {
     string collection_name = 3;
     int64 channel_id = 4;
     int64 proxy_id = 5;
-    uint64 timestamp = 6;
+    repeated uint64 timestamp = 6;
     repeated int64 primary_keys = 7;
 }
 

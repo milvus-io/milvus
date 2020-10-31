@@ -3,18 +3,16 @@
 
 #include "IndexMeta.h"
 #include "utils/Types.h"
-#include "dog_segment/SegmentDefs.h"
+#include "segcore/SegmentDefs.h"
 // #include "knowhere/index/Index.h"
 // #include "knowhere/index/IndexType.h"
 #include "query/GeneralQuery.h"
 
 namespace milvus {
-namespace dog_segment {
+namespace segcore {
 // using engine::DataChunk;
 // using engine::DataChunkPtr;
 using engine::QueryResult;
-
-// using DogDataChunkPtr = std::shared_ptr<DataChunk>;
 
 int
 TestABI();
@@ -38,16 +36,16 @@ class SegmentBase {
     virtual Status
     Insert(int64_t reserved_offset,
            int64_t size,
-           const int64_t* primary_keys,
+           const int64_t* row_ids,
            const Timestamp* timestamps,
-           const DogDataChunk& values) = 0;
+           const RowBasedRawData& values) = 0;
 
     virtual int64_t
     PreDelete(int64_t size) = 0;
     // TODO: add id into delete log, possibly bitmap
 
     virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) = 0;
+    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
     // query contains metadata of
     virtual Status
@@ -97,5 +95,5 @@ using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 SegmentBasePtr
 CreateSegment(SchemaPtr schema);
 
-}  // namespace dog_segment
+}  // namespace segcore
 }  // namespace milvus

@@ -3,14 +3,13 @@
 //#include <shared_mutex>
 //
 //#include "SegmentDefs.h"
-// #include "dog_segment/SegmentBase.h"
-#include "dog_segment/SegmentDefs.h"
+// #include "segcore/SegmentBase.h"
+#include "segcore/SegmentDefs.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/common/Config.h"
 #include <map>
 #include <memory>
-class IndexMeta;
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 // TODO: this is
 class IndexMeta {
  public:
@@ -62,4 +61,4 @@ class IndexMeta {
 };
 
 using IndexMetaPtr = std::shared_ptr<IndexMeta>;
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

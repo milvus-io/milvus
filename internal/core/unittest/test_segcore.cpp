@@ -17,8 +17,9 @@
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 // #include "segment/SegmentReader.h"
 // #include "segment/SegmentWriter.h"
-#include "dog_segment/SegmentBase.h"
+#include "segcore/SegmentBase.h"
 // #include "utils/Json.h"
+#include "test_utils/DataGen.h"
 #include <random>
 using std::cin;
 using std::cout;
@@ -50,15 +51,15 @@ generate_data(int N) {
 }
 }  // namespace
 
-TEST(DogSegmentTest, TestABI) {
+TEST(SegmentCoreTest, TestABI) {
     using namespace milvus::engine;
-    using namespace milvus::dog_segment;
+    using namespace milvus::segcore;
     ASSERT_EQ(TestABI(), 42);
     assert(true);
 }
 
-TEST(DogSegmentTest, NormalDistributionTest) {
-    using namespace milvus::dog_segment;
+TEST(SegmentCoreTest, NormalDistributionTest) {
+    using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
@@ -70,8 +71,8 @@ TEST(DogSegmentTest, NormalDistributionTest) {
     segment->PreDelete(N);
 }
 
-TEST(DogSegmentTest, MockTest) {
-    using namespace milvus::dog_segment;
+TEST(SegmentCoreTest, MockTest) {
+    using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
@@ -99,7 +100,7 @@ TEST(DogSegmentTest, MockTest) {
     // auto index_meta = std::make_shared<IndexMeta>(schema);
     auto segment = CreateSegment(schema);
 
-    DogDataChunk data_chunk{raw_data.data(), (int)line_sizeof, N};
+    RowBasedRawData data_chunk{raw_data.data(), (int)line_sizeof, N};
     auto offset = segment->PreInsert(N);
     segment->Insert(offset, N, uids.data(), timestamps.data(), data_chunk);
     QueryResult query_result;
@@ -108,4 +109,14 @@ TEST(DogSegmentTest, MockTest) {
     //    segment->BuildIndex();
     int i = 0;
     i++;
+}
+
+TEST(SegmentCoreTest, SmallIndex) {
+    using namespace milvus::segcore;
+    using namespace milvus::engine;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::INT32);
+    int N = 1024 * 1024;
+    auto data = DataGen(schema, N);
 }

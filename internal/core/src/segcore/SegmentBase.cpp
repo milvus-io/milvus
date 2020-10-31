@@ -1,14 +1,14 @@
 #include "SegmentNaive.h"
 #include "SegmentSmallIndex.h"
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 // seems to be deprecated
 struct ColumnBasedDataChunk {
     std::vector<std::vector<float>> entity_vecs;
 
     static ColumnBasedDataChunk
-    from(const DogDataChunk& source, const Schema& schema) {
+    from(const RowBasedRawData& source, const Schema& schema) {
         ColumnBasedDataChunk dest;
         auto count = source.count;
         auto raw_data = reinterpret_cast<const char*>(source.raw_data);
@@ -38,4 +38,4 @@ CreateSegment(SchemaPtr schema) {
     auto segment = std::make_unique<SegmentSmallIndex>(schema);
     return segment;
 }
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

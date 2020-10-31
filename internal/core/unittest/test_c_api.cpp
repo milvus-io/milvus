@@ -3,8 +3,8 @@
 #include <random>
 #include <gtest/gtest.h>
 
-#include "dog_segment/collection_c.h"
-#include "dog_segment/segment_c.h"
+#include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
 
 #include <chrono>
 namespace chrono = std::chrono;
@@ -85,12 +85,12 @@ TEST(CApiTest, DeleteTest) {
     auto partition = NewPartition(collection, partition_name);
     auto segment = NewSegment(partition, 0);
 
-    long delete_primary_keys[] = {100000, 100001, 100002};
+    long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
     assert(del_res == 0);
 
     DeleteCollection(collection);
@@ -444,15 +444,15 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto partition = NewPartition(collection, partition_name);
     auto segment = NewSegment(partition, 0);
 
-    long delete_primary_keys[] = {100000, 100001, 100002};
+    long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_primary_keys, delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
     assert(del_res == 0);
 
-    // TODO: assert(deleted_count == len(delete_primary_keys))
+    // TODO: assert(deleted_count == len(delete_row_ids))
     auto deleted_count = GetDeletedCount(segment);
     assert(deleted_count == 0);
 

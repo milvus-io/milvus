@@ -1,5 +1,5 @@
 
-set(DOG_SEGMENT_FILES
+set(SEGCORE_FILES
         SegmentNaive.cpp
         SegmentSmallIndex.cpp
         IndexMeta.cpp
@@ -11,12 +11,14 @@ set(DOG_SEGMENT_FILES
         segment_c.cpp
         EasyAssert.cpp
         SegmentBase.cpp
+        IndexingEntry.cpp
+        InsertRecord.cpp
         )
-add_library(milvus_dog_segment SHARED
-        ${DOG_SEGMENT_FILES}
+add_library(milvus_segcore SHARED
+        ${SEGCORE_FILES}
         )
 
-target_link_libraries(milvus_dog_segment
+target_link_libraries(milvus_segcore
         tbb utils pthread knowhere log milvus_proto
         dl backtrace
         milvus_query

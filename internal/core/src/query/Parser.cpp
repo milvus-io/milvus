@@ -3,7 +3,7 @@
 #include "query/BooleanQuery.h"
 #include "query/BinaryQuery.h"
 #include "query/GeneralQuery.h"
-#include "dog_segment/SegmentBase.h"
+#include "segcore/SegmentBase.h"
 #include <random>
 
 namespace milvus::wtf {

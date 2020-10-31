@@ -1,4 +1,4 @@
-#include <dog_segment/SegmentNaive.h>
+#include <segcore/SegmentNaive.h>
 #include <random>
 #include <algorithm>
 #include <numeric>
@@ -9,18 +9,7 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
 
-namespace milvus::dog_segment {
-SegmentNaive::Record::Record(const Schema& schema) : uids_(1), timestamps_(1) {
-    for (auto& field : schema) {
-        if (field.is_vector()) {
-            Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<float>>(field.get_dim()));
-        } else {
-            Assert(field.get_data_type() == DataType::INT32);
-            entity_vec_.emplace_back(std::make_shared<ConcurrentVector<int32_t, true>>());
-        }
-    }
-}
+namespace milvus::segcore {
 
 int64_t
 SegmentNaive::PreInsert(int64_t size) {
@@ -109,7 +98,7 @@ SegmentNaive::Insert(int64_t reserved_begin,
                      int64_t size,
                      const int64_t* uids_raw,
                      const Timestamp* timestamps_raw,
-                     const DogDataChunk& entities_raw) {
+                     const RowBasedRawData& entities_raw) {
     Assert(entities_raw.count == size);
     if (entities_raw.sizeof_per_row != schema_->get_total_sizeof()) {
         std::string msg = "entity length = " + std::to_string(entities_raw.sizeof_per_row) +
@@ -181,9 +170,9 @@ SegmentNaive::Insert(int64_t reserved_begin,
     //    std::lock_guard lck(mutex_);
     //    Assert(state_ == SegmentState::Open);
     //    auto ack_id = ack_count_.load();
-    //    record.uids_.grow_by(primary_keys, primary_keys + size);
+    //    record.uids_.grow_by(row_ids, row_ids + size);
     //    for (int64_t i = 0; i < size; ++i) {
-    //        auto key = primary_keys[i];
+    //        auto key = row_ids[i];
     //        auto internal_index = i + ack_id;
     //        internal_indexes_[key] = internal_index;
     //    }
@@ -222,7 +211,7 @@ SegmentNaive::Delete(int64_t reserved_begin, int64_t size, const int64_t* uids_r
     deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     return Status::OK();
     //    for (int i = 0; i < size; ++i) {
-    //        auto key = primary_keys[i];
+    //        auto key = row_ids[i];
     //        auto time = timestamps[i];
     //        delete_logs_.insert(std::make_pair(key, time));
     //    }
@@ -292,7 +281,6 @@ SegmentNaive::QueryImpl(query::QueryPtr query_info, Timestamp timestamp, QueryRe
     result.result_ids_.resize(total_num);
     result.result_distances_.resize(total_num);
 
-    result.row_num_ = total_num;
     result.num_queries_ = num_queries;
     result.topK_ = topK;
 
@@ -396,7 +384,6 @@ SegmentNaive::QueryBruteForceImpl(query::QueryPtr query_info, Timestamp timestam
     results.result_distances_ = std::move(final_dis);
     results.topK_ = topK;
     results.num_queries_ = num_queries;
-    results.row_num_ = total_count;
 
     //    throw std::runtime_error("unimplemented");
     return Status::OK();
@@ -452,7 +439,6 @@ SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, Que
     result.num_queries_ = num_queries;
     result.topK_ = topK;
     auto row_num = topK * num_queries;
-    result.row_num_ = topK * num_queries;
 
     result.result_ids_.resize(row_num);
     result.result_distances_.resize(row_num);
@@ -613,4 +599,4 @@ SegmentNaive::GetMemoryUsageInBytes() {
     return total_bytes;
 }
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

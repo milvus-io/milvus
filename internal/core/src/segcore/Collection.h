@@ -1,10 +1,10 @@
 #pragma once
 
 #include <pb/message.pb.h>
-#include "dog_segment/Partition.h"
+#include "segcore/Partition.h"
 #include "SegmentDefs.h"
 
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 
 class Collection {
  public:
@@ -44,4 +44,4 @@ class Collection {
 
 using CollectionPtr = std::unique_ptr<Collection>;
 
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

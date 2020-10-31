@@ -138,9 +138,21 @@ struct AttrsData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
-    uint64_t row_num_;  // row_num_ = topK * num_queries_
+    QueryResult() = default;
+    QueryResult(uint64_t num_queries, uint64_t topK) : topK_(topK), num_queries_(num_queries) {
+        auto count = get_row_count();
+        result_ids_.resize(count);
+        result_distances_.resize(count);
+    }
+
+    [[nodiscard]] uint64_t
+    get_row_count() const {
+        return topK_ * num_queries_;
+    }
+
+    uint64_t num_queries_;
     uint64_t topK_;
-    uint64_t num_queries_;          // currently must be 1
+    //    uint64_t total_row_count_;  // total_row_count_ = topK * num_queries_
     engine::ResultIds result_ids_;  // top1, top2, ..;
     engine::ResultDistances result_distances_;
     // engine::DataChunkPtr data_chunk_;

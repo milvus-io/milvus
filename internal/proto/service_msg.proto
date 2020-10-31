@@ -30,7 +30,7 @@ message RowBatch {
     string collection_name = 1;
     string partition_tag = 2;
     repeated common.Blob row_data = 3;
-    repeated int32 hash_values = 4;
+    repeated int32 hash_keys = 4;
 }
 
 
@@ -95,8 +95,8 @@ message IntegerListResponse {
  */
 message IntegerRangeResponse {
     common.Status status = 1;
-    repeated int64 begin = 2;
-    repeated int64 end = 3;
+    int64 begin = 2;
+    int64 end = 3;
 }
 
 

@@ -30,7 +30,7 @@ Transaction is currently not supported by Milvus. Only batch requests such as ba
 
 
 
-<img src="./figs/data_organization.pdf" width=550>
+<img src="./figs/data_organization.png" width=550>
 
 In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When use parition, users should clearly know how a collection should be partitioned. In most cases, parition leads to more flexible data management and more efficient quering. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
 
@@ -44,7 +44,7 @@ Each collection or parition contains a set of 'segment groups'. Segment group is
 
 
 
-<img src="./figs/system_framework.pdf" width=800>
+<img src="./figs/system_framework.png" width=800>
 
 The main components, proxy, WAL, query node and write node can scale to multiple instances. These components scale seperately for better tradeoff between availability and cost.
 
@@ -62,7 +62,7 @@ Note that not all the components are necessarily replicated. The system provides
 
 #### 1.4 State Synchronization
 
-<img src="./figs/state_sync.pdf" width=800>
+<img src="./figs/state_sync.png" width=800>
 
 Data in Milvus have three different forms, namely WAL, binlog, and index. As mentioned in the previous section, WAL can be viewed as a determined operation stream. Other two data forms keep themselves up to date by performing the operation stream in time order.
 
@@ -170,7 +170,7 @@ In this section, we introduce the RPCs of milvus service. A brief description of
 
 Before we discuss timestamp, let's take a brief review of Hybrid Logical Clock (HLC). HLC uses 64bits timestamps which are composed of a 46-bits physical component (thought of as and always close to local wall time) and a 18-bits logical component (used to distinguish between events with the same physical component).
 
-<img src="./figs/hlc.pdf" width=450>
+<img src="./figs/hlc.png" width=400>
 
 HLC's logical part is advanced on each request. The phsical part can be increased in two cases: 
 
@@ -335,7 +335,8 @@ const {
 
 type TsMsg interface {
   SetTs(ts Timestamp)
-  Ts() Timestamp
+  BeginTs() Timestamp
+  EndTs() Timestamp
   Type() MsgType
 }
 
@@ -356,11 +357,11 @@ type MsgStream interface {
   Consume() *MsgPack // message can be consumed exactly once
 }
 
-type HashFunc func(*MsgPack) map[int32]*MsgPack
+type RepackFunc(msgs []* TsMsg, hashKeys [][]int32) map[int32] *MsgPack
 
 type PulsarMsgStream struct {
   client *pulsar.Client
-  msgHashFunc HashFunc // return a map from produceChannel idx to *MsgPack
+  repackFunc RepackFunc 
   producers []*pulsar.Producer
   consumers []*pulsar.Consumer
   msgMarshaler *TsMsgMarshaler
@@ -370,7 +371,7 @@ type PulsarMsgStream struct {
 func (ms *PulsarMsgStream) SetProducerChannels(channels []string)
 func (ms *PulsarMsgStream) SetConsumerChannels(channels []string)
 func (ms *PulsarMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
-func (ms *PulsarMsgStream) SetMsgHashFunc(hashFunc *HashFunc)
+func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func (ms *PulsarMsgStream) Produce(msgs *MsgPack) error
 func (ms *PulsarMsgStream) Consume() (*MsgPack, error) //return messages in one time tick
 

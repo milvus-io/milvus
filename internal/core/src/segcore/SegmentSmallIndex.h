@@ -9,17 +9,43 @@
 
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
-#include "dog_segment/SegmentBase.h"
+#include "segcore/SegmentBase.h"
 // #include "knowhere/index/structured_index/StructuredIndex.h"
 #include "query/GeneralQuery.h"
 #include "utils/Status.h"
-#include "dog_segment/DeletedRecord.h"
+#include "segcore/DeletedRecord.h"
 #include "EasyAssert.h"
+#include "IndexingEntry.h"
+#include "InsertRecord.h"
 
-namespace milvus::dog_segment {
-class SegmentNaive : public SegmentBase {
+namespace milvus::segcore {
+// struct ColumnBasedDataChunk {
+//    std::vector<std::vector<float>> entity_vecs;
+//
+//    static ColumnBasedDataChunk
+//    from(const RowBasedRawData& source, const Schema& schema) {
+//        ColumnBasedDataChunk dest;
+//        auto count = source.count;
+//        auto raw_data = reinterpret_cast<const char*>(source.raw_data);
+//        auto align = source.sizeof_per_row;
+//        for (auto& field : schema) {
+//            auto len = field.get_sizeof();
+//            Assert(len % sizeof(float) == 0);
+//            std::vector<float> new_col(len * count / sizeof(float));
+//            for (int64_t i = 0; i < count; ++i) {
+//                memcpy(new_col.data() + i * len / sizeof(float), raw_data + i * align, len);
+//            }
+//            dest.entity_vecs.push_back(std::move(new_col));
+//            // offset the raw_data
+//            raw_data += len / sizeof(float);
+//        }
+//        return dest;
+//    }
+//};
+
+class SegmentSmallIndex : public SegmentBase {
  public:
-    virtual ~SegmentNaive() = default;
+    virtual ~SegmentSmallIndex() = default;
 
     // SegmentBase(std::shared_ptr<FieldsInfo> collection);
 
@@ -31,16 +57,16 @@ class SegmentNaive : public SegmentBase {
     Status
     Insert(int64_t reserverd_offset,
            int64_t size,
-           const int64_t* primary_keys,
+           const int64_t* row_ids,
            const Timestamp* timestamps,
-           const DogDataChunk& values) override;
+           const RowBasedRawData& values) override;
 
     int64_t
     PreDelete(int64_t size) override;
 
     // TODO: add id into delete log, possibly bitmap
     Status
-    Delete(int64_t reserverd_offset, int64_t size, const int64_t* primary_keys, const Timestamp* timestamps) override;
+    Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
     // query contains metadata of
     Status
@@ -96,7 +122,7 @@ class SegmentNaive : public SegmentBase {
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
 
-    explicit SegmentNaive(SchemaPtr schema) : schema_(schema), record_(*schema) {
+    explicit SegmentSmallIndex(SchemaPtr schema) : schema_(schema), record_(*schema_), indexing_record_(*schema_) {
     }
 
  private:
@@ -109,30 +135,8 @@ class SegmentNaive : public SegmentBase {
     //        }
     //    };
 
-    struct Record {
-        std::atomic<int64_t> reserved = 0;
-        AckResponder ack_responder_;
-        ConcurrentVector<Timestamp, true> timestamps_;
-        ConcurrentVector<idx_t, true> uids_;
-        std::vector<std::shared_ptr<VectorBase>> entity_vec_;
-
-        Record(const Schema& schema);
-
-        template <typename Type>
-        auto
-        get_vec_entity(int offset) {
-            return std::static_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
-        }
-    };
-
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
-
-    Status
-    QueryImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
-
-    Status
-    QuerySlowImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
 
     Status
     QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
@@ -144,12 +148,14 @@ class SegmentNaive : public SegmentBase {
  private:
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
-    Record record_;
-    DeletedRecord deleted_record_;
-
-    std::atomic<bool> index_ready_ = false;
     IndexMetaPtr index_meta_;
-    std::unordered_map<std::string, knowhere::IndexPtr> indexings_;  // index_name => indexing
+
+    InsertRecord record_;
+    DeletedRecord deleted_record_;
+    IndexingRecord indexing_record_;
+
+    // std::atomic<bool> index_ready_ = false;
+    // std::unordered_map<std::string, knowhere::IndexPtr> indexings_;  // index_name => indexing
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

@@ -3,7 +3,7 @@
 #include <mutex>
 #include <set>
 #include <atomic>
-namespace milvus::dog_segment {
+namespace milvus::segcore {
 class AckResponder {
  public:
     void
@@ -12,13 +12,13 @@ class AckResponder {
         fetch_and_flip(seg_end);
         auto old_begin = fetch_and_flip(seg_begin);
         if (old_begin) {
-            minimal = *acks_.begin();
+            minimum_ = *acks_.begin();
         }
     }
 
     int64_t
     GetAck() const {
-        return minimal;
+        return minimum_;
     }
 
  private:
@@ -36,6 +36,7 @@ class AckResponder {
  private:
     std::shared_mutex mutex_;
     std::set<int64_t> acks_ = {0};
-    std::atomic<int64_t> minimal = 0;
+    std::atomic<int64_t> minimum_ = 0;
+    // std::atomic<int64_t> maximum_ = 0;
 };
-}  // namespace milvus::dog_segment
+}  // namespace milvus::segcore

@@ -7,12 +7,12 @@
 #include <vector>
 
 #include <faiss/utils/distances.h>
-#include "dog_segment/ConcurrentVector.h"
-#include "dog_segment/SegmentBase.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/SegmentBase.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-#include "dog_segment/SegmentBase.h"
-#include "dog_segment/AckResponder.h"
+#include "segcore/SegmentBase.h"
+#include "segcore/AckResponder.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
@@ -25,7 +25,7 @@ using std::cin;
 using std::cout;
 using std::endl;
 using namespace milvus::engine;
-using namespace milvus::dog_segment;
+using namespace milvus::segcore;
 using std::vector;
 using namespace milvus;
 
@@ -146,8 +146,8 @@ TEST(Indexing, SmartBruteForce) {
     }
 }
 
-TEST(Indexing, Naive) {
-    constexpr int N = 100000;
+TEST(Indexing, DISABLED_Naive) {
+    constexpr int N = 10000;
     constexpr int DIM = 16;
     constexpr int TOPK = 10;
 
@@ -228,7 +228,7 @@ TEST(Indexing, IVFFlatNM) {
     constexpr auto K = 10;
 
     auto N = 1024 * 1024 * 10;
-    auto num_query = 1000;
+    auto num_query = 100;
     Timer timer;
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << endl;

@@ -25,7 +25,7 @@ int
 Insert(CSegmentBase c_segment,
        long int reserved_offset,
        signed long int size,
-       const long* primary_keys,
+       const long* row_ids,
        const unsigned long* timestamps,
        void* raw_data,
        int sizeof_per_row,
@@ -35,11 +35,8 @@ long int
 PreInsert(CSegmentBase c_segment, long int size);
 
 int
-Delete(CSegmentBase c_segment,
-       long int reserved_offset,
-       long size,
-       const long* primary_keys,
-       const unsigned long* timestamps);
+Delete(
+    CSegmentBase c_segment, long int reserved_offset, long size, const long* row_ids, const unsigned long* timestamps);
 
 long int
 PreDelete(CSegmentBase c_segment, long int size);

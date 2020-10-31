@@ -4,7 +4,7 @@ include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/index/knowhere)
 set(MILVUS_TEST_FILES
         test_naive.cpp
-        test_dog_segment.cpp
+        test_segcore.cpp
         test_concurrent_vector.cpp
         test_c_api.cpp
         test_indexing.cpp
@@ -16,7 +16,7 @@ add_executable(all_tests
 target_link_libraries(all_tests
         gtest
         gtest_main
-        milvus_dog_segment
+        milvus_segcore
         knowhere
         log
         pthread
