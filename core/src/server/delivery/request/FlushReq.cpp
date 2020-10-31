@@ -22,6 +22,7 @@
 
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 #include "utils/TimeRecorder.h"
 
 namespace milvus {
@@ -54,6 +55,7 @@ FlushReq::OnExecute() {
 
     // flush specified collections
     for (auto& name : collection_names_) {
+        StringHelpFunctions::TrimStringBlank(name);
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(name, exist));
         if (!exist) {

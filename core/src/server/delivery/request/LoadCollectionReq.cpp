@@ -37,6 +37,8 @@ LoadCollectionReq::OnExecute() {
         std::string hdr = "LoadCollectionReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         engine::snapshot::CollectionPtr collection;
         engine::snapshot::FieldElementMappings fields_schema;
         auto status = DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, fields_schema);

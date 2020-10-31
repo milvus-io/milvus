@@ -31,34 +31,37 @@ class ClientTest {
     ListCollections(std::vector<std::string>&);
 
     void
-    CreateCollection(const std::string&);
+    CreateCollection();
 
     void
-    GetCollectionInfo(const std::string&);
+    CreatePartition();
 
     void
-    InsertEntities(const std::string&);
+    GetCollectionInfo();
 
     void
-    CountEntities(const std::string&);
+    ListPartitions();
 
     void
-    Flush(const std::string&);
+    InsertEntities();
 
     void
-    GetCollectionStats(const std::string&);
+    CountEntities(int64_t& count);
+
+    void
+    Flush();
+
+    void
+    GetCollectionStats();
 
     void
     BuildVectors(int64_t nq, int64_t dimension);
 
     void
-    GetEntityByID(const std::string&, const std::vector<int64_t>&);
+    GetEntityByID(const std::vector<int64_t>& id_array);
 
     void
-    SearchEntities(const std::string&, int64_t, int64_t, const std::string metric_type);
-
-    void
-    SearchEntitiesByID(const std::string&, int64_t, int64_t);
+    SearchEntities();
 
     void
     CreateIndex(const std::string&, int64_t);
@@ -70,7 +73,10 @@ class ClientTest {
     CompactCollection(const std::string&);
 
     void
-    DeleteByIds(const std::string&, const std::vector<int64_t>& id_array);
+    DeleteByIds(const std::vector<int64_t>& id_array);
+
+    void
+    DropPartition();
 
     void
     DropIndex(const std::string& collection_name, const std::string& field_name, const std::string& index_name);

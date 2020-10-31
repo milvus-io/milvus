@@ -48,6 +48,8 @@ ListIDInSegmentReq::OnExecute() {
             "ListIDInSegmentReq(collection=" + collection_name_ + " segment=" + std::to_string(segment_id_) + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {
