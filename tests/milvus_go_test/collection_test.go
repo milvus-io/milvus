@@ -49,6 +49,7 @@ func TestCreateCollectionWithInvalidName(t *testing.T) {
 		mapping := GenCollectionParams(name, autoId, segmentRowLimit)
 		t.Log(mapping)
 		status, _ := client.CreateCollection(mapping)
+		t.Log(status)
 		assert.False(t, status.Ok())
 		isHas, _, _ := client.HasCollection(name)
 		assert.False(t, isHas)
@@ -174,5 +175,10 @@ func TestDescribeCollection(t *testing.T) {
 			json.Unmarshal([]byte(dat["params"].(string)), &dim)
 			assert.Equal(t, utils.DefaultDimension, int(dim["dim"].(float64)))
 		}
+		var datMapping map[string]interface{}
+		json.Unmarshal([]byte(mapping.ExtraParams), &datMapping)
+		var params map[string]interface{}
+		json.Unmarshal([]byte(datMapping["params"].(string)), &params)
+		assert.Equal(t, utils.DefaultSegmentRowLimit, int(params["segment_row_limit"].(float64)))
 	}
 }
