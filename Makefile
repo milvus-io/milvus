@@ -16,7 +16,7 @@ GOPATH 	:= $(shell $(GO) env GOPATH)
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 
-all: build-go build-cpp
+all: build-cpp build-go 
 
 #TODO: Use ruleguard to check code specifications
 get-check-deps:
@@ -38,13 +38,16 @@ lint:
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 #	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml
 
-verifiers: get-check-deps get-build-deps fmt lint
+verifiers: get-check-deps fmt lint
 
 # Builds various components locally.
 build-go: verifiers
 	@echo "Building each component's binary to './'"
+	@echo "Building reader ..."
 	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/reader $(PWD)/cmd/reader/reader.go 1>/dev/null
+	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
+	@echo "Building proxy ..."
 	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxy $(PWD)/cmd/proxy/proxy.go 1>/dev/null
 
 build-cpp:
@@ -54,7 +57,7 @@ build-cpp-with-unittest:
 	@(env bash $(PWD)/scripts/core_build.sh -u)
 
 # Runs the tests.
-unittest: test-go test-cpp
+unittest: test-cpp test-go
 
 #TODO: proxy master reader writer's unittest
 test-go: verifiers build-go
