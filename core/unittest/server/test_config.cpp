@@ -343,6 +343,11 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.GetEngineConfigSimdType(str_val).ok());
     ASSERT_TRUE(str_val == engine_simd_type);
 
+    int64_t max_partition = 1;
+    ASSERT_TRUE(config.SetEngineConfigMaxPartitionNum(std::to_string(max_partition)).ok());
+    ASSERT_TRUE(config.GetEngineConfigMaxPartitionNum(int64_val).ok());
+    ASSERT_TRUE(int64_val == max_partition);
+
 #ifdef MILVUS_GPU_VERSION
     int64_t engine_gpu_search_threshold = 800;
     auto status = config.SetGpuResourceConfigGpuSearchThreshold(std::to_string(engine_gpu_search_threshold));

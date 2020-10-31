@@ -2252,16 +2252,22 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
         // delete file from meta
         std::vector<std::string> statements;
         if (!delete_ids.empty()) {
-            std::stringstream idsToDeleteSS;
-            for (auto& id : delete_ids) {
-                idsToDeleteSS << "id = " << id << " OR ";
+            // distribute id array to batches
+            // sqlite could not parse long sql statement
+            std::vector<std::vector<std::string>> id_groups;
+            DistributeBatch(delete_ids, id_groups);
+
+            for (auto& group : id_groups) {
+                std::stringstream idsToDeleteSS;
+                for (auto& id : group) {
+                    idsToDeleteSS << "id = " << id << " OR ";
+                }
+
+                std::string idsToDeleteStr = idsToDeleteSS.str();
+                idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
+                statement = "DELETE FROM " + std::string(META_TABLEFILES) + " WHERE " + idsToDeleteStr + ";";
+                statements.emplace_back(statement);
             }
-
-            std::string idsToDeleteStr = idsToDeleteSS.str();
-            idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-            statement = "DELETE FROM " + std::string(META_TABLEFILES) + " WHERE " + idsToDeleteStr + ";";
-
-            statements.emplace_back(statement);
         }
 
         auto status = SqlTransaction(statements);
@@ -2289,23 +2295,18 @@ SqliteMetaImpl::CleanUpFilesWithTTL(uint64_t seconds /*, CleanUpFilter* filter*/
 
         int64_t remove_collections = 0;
         if (!res.empty()) {
-            std::stringstream idsToDeleteSS;
             for (auto& resRow : res) {
-                size_t id = std::stoul(resRow["id"]);
                 std::string collection_id;
                 collection_id = resRow["table_id"];
 
                 utils::DeleteCollectionPath(options_, collection_id, false);  // only delete empty folder
                 ++remove_collections;
-                idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
-            }
-            std::string idsToDeleteStr = idsToDeleteSS.str();
-            idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4);  // remove the last " OR "
-            statement = "DELETE FROM " + std::string(META_TABLES) + " WHERE " + idsToDeleteStr + ";";
 
-            status = SqlTransaction({statement});
-            if (!status.ok()) {
-                return HandleException("Failed to clean up with ttl", status.message().c_str());
+                statement = "DELETE FROM " + std::string(META_TABLES) + " WHERE id = " + resRow["id"] + ";";
+                status = SqlTransaction({statement});
+                if (!status.ok()) {
+                    return HandleException("Failed to clean up with ttl", status.message().c_str());
+                }
             }
         }
 

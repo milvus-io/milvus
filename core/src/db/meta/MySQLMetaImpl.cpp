@@ -1394,7 +1394,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
     // not allow create partition under partition
     if (!collection_schema.owner_collection_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allowed");
+        return Status(DB_NOT_FOUND, "Nested partition is not allowed");
     }
 
     // trim side-blank of tag, only compare valid characters
