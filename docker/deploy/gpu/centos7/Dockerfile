@@ -14,7 +14,7 @@ FROM nvidia/cuda:10.1-devel-centos7
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
 RUN yum --disablerepo=cuda install -y epel-release && \
-    yum --disablerepo=cuda install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
+    yum --disablerepo=cuda install -y wget libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
     rm -rf /var/cache/yum/*
 
 COPY ./milvus /var/lib/milvus
