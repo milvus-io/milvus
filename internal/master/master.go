@@ -1,16 +1,3 @@
-// Copyright 2016 TiKV Project Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package master
 
 import (
@@ -19,9 +6,9 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"google.golang.org/grpc"
@@ -200,7 +187,7 @@ func (s *Master) grpcLoop() {
 	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
 	lis, err := net.Listen("tcp", defaultGRPCPort)
 	if err != nil {
-		log.Println("failed to listen: %v", err)
+		log.Printf("failed to listen: %v", err)
 		return
 	}
 
@@ -247,7 +234,7 @@ func (s *Master) pulsarLoop() {
 		case msg := <-consumerChan:
 			var m internalpb.SegmentStatistics
 			proto.Unmarshal(msg.Payload(), &m)
-			fmt.Printf("Received message msgId: %#v -- content: '%s'\n",
+			fmt.Printf("Received message msgId: %#v -- content: '%d'\n",
 				msg.ID(), m.SegmentId)
 			s.ssChan <- m
 			consumer.Ack(msg)

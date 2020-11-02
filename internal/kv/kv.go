@@ -8,6 +8,6 @@ type Base interface {
 	Remove(key string) error
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
-	LoadWithPrefix(key string) ( []string, []string)
+	LoadWithPrefix(key string) ([]string, []string, error)
 	Close()
 }

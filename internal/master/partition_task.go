@@ -231,7 +231,7 @@ func (t *showPartitionTask) Execute() error {
 	}
 
 	partitions := make([]string, 0)
-	for _, collection := range t.mt.collMeta {
+	for _, collection := range t.mt.collId2Meta {
 		for _, partition := range collection.PartitionTags {
 			partitions = append(partitions, partition)
 		}

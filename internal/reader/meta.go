@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -263,7 +263,10 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 }
 
 func (node *QueryNode) loadCollections() error {
-	keys, values := node.kvBase.LoadWithPrefix(CollectionPrefix)
+	keys, values, err := node.kvBase.LoadWithPrefix(CollectionPrefix)
+	if err != nil {
+		return err
+	}
 	for i := range keys {
 		objID := GetCollectionObjId(keys[i])
 		node.processCollectionCreate(objID, values[i])
@@ -271,7 +274,10 @@ func (node *QueryNode) loadCollections() error {
 	return nil
 }
 func (node *QueryNode) loadSegments() error {
-	keys, values := node.kvBase.LoadWithPrefix(SegmentPrefix)
+	keys, values, err := node.kvBase.LoadWithPrefix(SegmentPrefix)
+	if err != nil {
+		return err
+	}
 	for i := range keys {
 		objID := GetSegmentObjId(keys[i])
 		node.processSegmentCreate(objID, values[i])

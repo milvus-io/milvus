@@ -515,7 +515,7 @@ type KVBase interface {
   MultiRemove(keys []string)
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
-	LoadWithPrefix(key string) ( []string, []string)
+	LoadWithPrefix(key string) ( []string, []string, error)
 }
 ```
 
@@ -1076,7 +1076,7 @@ Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings 
 
 ```go
 type metaTable struct {
-  kv *kv.EtcdKV // client of a reliable kv service, i.e. etcd client
+  kv kv.Base // client of a reliable kv service, i.e. etcd client
   tenantId2Meta map[int64]TenantMeta // tenant id to tenant meta
   proxyId2Meta map[int64]ProxyMeta // proxy id to proxy meta
   collId2Meta map[int64]CollectionMeta // collection id to collection meta
@@ -1104,10 +1104,11 @@ func (meta *metaTable) HasPartition(collId int64, tag string) bool
 func (meta *metaTable) DeletePartition(collId int64, tag string) error
 
 func (meta *metaTable) AddSegment(seg *SegmentMeta) error
+func (meta *metaTable) GetSegmentById(segId int64)(*SegmentMeta, error)
 func (meta *metaTable) DeleteSegment(segId int64) error
 func (meta *metaTable) CloseSegment(segId int64, closeTs Timestamp, num_rows int64) error
 
-func NewMetaTable(kv *kv.EtcdKV) *metaTable
+func NewMetaTable(kv kv.Base) (*metaTable,error)
 ```
 
 *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
