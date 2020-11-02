@@ -114,6 +114,12 @@ class ConfigMgr : public BaseConfigMgr {
     JsonDump() const;
 
  private:
+    struct SaveConfigError : public std::exception {
+        explicit SaveConfigError(const std::string& msg) : message(msg) {
+        }
+        const std::string message;
+    };
+
     void
     Save(const std::string& path);
 

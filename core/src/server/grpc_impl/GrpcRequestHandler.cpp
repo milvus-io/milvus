@@ -1752,10 +1752,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
             JSON_NULL_CHECK(boolean_query_json);
-            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
-            if (!status.ok()) {
-                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
-            }
+            STATUS_CHECK(ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr));
         } else {
             return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
         }

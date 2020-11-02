@@ -50,7 +50,6 @@ CreateIndexReq::OnExecute() {
 
         // step 1: check arguments
         STATUS_CHECK(ValidateCollectionName(collection_name_));
-
         STATUS_CHECK(ValidateFieldName(field_name_));
 
         // only process root collection, ignore partition collection

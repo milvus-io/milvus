@@ -30,8 +30,8 @@ class CreatePartitionReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
-    const std::string tag_;
+    std::string collection_name_;
+    std::string tag_;
     const int64_t max_partition_num_ = 0;
 };
 

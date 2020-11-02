@@ -8,6 +8,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3793 Frequent timeout when running test cases in parallel
 -   \#4030 The configurations name is not effective after update config file and restart docker
 -   \#4059 milvus raise exception when passing a complex dsl during searching
+-   \#4099 When execute a multiple vectors request, if the result of somerow is not enough, the query data field will be disorder.
+-   \#4113 After milvus 0.11.0 version vector data is misaligned
 
 ## Feature
 

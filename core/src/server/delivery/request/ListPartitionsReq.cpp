@@ -38,6 +38,8 @@ ListPartitionsReq::OnExecute() {
     std::string hdr = "ListPartitionsReq(collection=" + collection_name_ + ")";
     TimeRecorderAuto rc(hdr);
 
+    STATUS_CHECK(ValidateCollectionName(collection_name_));
+
     /* check collection existence */
     bool exist = false;
     STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));

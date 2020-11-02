@@ -50,14 +50,6 @@ Flatten(const YAML::Node& node, std::unordered_map<std::string, std::string>& ta
         }
     }
 }
-
-void
-ThrowIfNotSuccess(const milvus::ConfigStatus& cs) {
-    if (cs.set_return != milvus::SetReturn::SUCCESS) {
-        throw cs;
-    }
-}
-
 };  // namespace
 
 namespace milvus {
@@ -156,41 +148,39 @@ ConfigMgr::LoadMemory(const std::string& yaml_string) {
 
 void
 ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
-    try {
-        auto& config = config_list_.at(name);
-        if (not update) {
-            /* update=false when loading from config file */
-            ThrowIfNotSuccess(config->Set(value, update));
-        } else if (config->modifiable_) {
-            /* set manually */
-
-            /* If save failure, rollback. */
-            auto old_value = config->Get();
-            ThrowIfNotSuccess(config->Set(value, update));
-            try {
-                Save(FilePath());
-                Notify(name);
-                /* if not found in effective immediately list, need restart */
-                if (effective_immediately_.find(name) == effective_immediately_.end()) {
-                    require_restart_ |= true;
-                }
-            } catch (...) {
-                /* rollback */
-                ThrowIfNotSuccess(config->Set(old_value, false));
-                throw;
-            }
-        } else {
-            /* try to set a read-only value */
-            throw ConfigStatus(SetReturn::IMMUTABLE, "Config " + name + " is immutable");
-        }
-    } catch (ConfigStatus& cs) {
-        throw std::runtime_error(cs.message);
-    } catch (std::out_of_range& ex) {
+    /* Check if existed */
+    if (config_list_.find(name) == config_list_.end()) {
         throw std::runtime_error("Config " + name + " not found.");
-    } catch (std::exception& ex) {
-        throw;
+    }
+
+    auto old_value = config_list_.at(name)->Get();
+
+    try {
+        /* Set value, throws ConfigError only. */
+        config_list_.at(name)->Set(value, update);
+
+        if (update) {
+            /* Save file */
+            Save(FilePath());
+
+            /* Notify who observe this value */
+            Notify(name);
+
+            /* Update flag */
+            if (effective_immediately_.find(name) == effective_immediately_.end()) {
+                require_restart_ |= true;
+            }
+        }
+    } catch (ConfigError& e) {
+        /* Convert to std::runtime_error. */
+        throw std::runtime_error(e.message());
+    } catch (SaveConfigError& e) {
+        /* Save config failed, rollback and convert to std::runtime_error. */
+        config_list_.at(name)->Set(old_value, false);
+        throw std::runtime_error(e.message);
     } catch (...) {
-        throw std::runtime_error("Unexpected exception happened when setting config " + name + ".");
+        /* Unexpected exception, output config and value. */
+        throw std::runtime_error("Unexpected exception happened when setting " + value + " to " + name + ".");
     }
 }
 
@@ -229,7 +219,7 @@ ConfigMgr::JsonDump() const {
 void
 ConfigMgr::Save(const std::string& path) {
     if (path.empty()) {
-        throw std::runtime_error("Cannot save config into empty path.");
+        throw SaveConfigError("Cannot save config into empty path.");
     }
 
     std::string file_content(config_file_template);
@@ -237,12 +227,13 @@ ConfigMgr::Save(const std::string& path) {
         auto placeholder = "@" + config_pair.first + "@";
         file_content = std::regex_replace(file_content, std::regex(placeholder), config_pair.second->Get());
     }
+
     std::ofstream config_file(path);
     config_file << file_content;
     config_file.close();
 
     if (config_file.fail()) {
-        throw std::runtime_error("Cannot save config into file: " + path + ".");
+        throw SaveConfigError("Cannot save config into file: " + path + ".");
     }
 }
 

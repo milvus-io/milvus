@@ -33,7 +33,7 @@ class ListPartitionsReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     std::vector<std::string>& partition_list_;
 };
 

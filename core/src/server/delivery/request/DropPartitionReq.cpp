@@ -38,6 +38,9 @@ DropPartitionReq::OnExecute() {
         std::string hdr = "DropPartitionReq(collection=" + collection_name_ + ", partition=" + tag_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+        STATUS_CHECK(ValidatePartitionTag(tag_, true));
+
         /* check partition tag */
         if (tag_ == milvus::engine::DEFAULT_PARTITON_TAG) {
             std::string msg = "Default partition cannot be dropped.";

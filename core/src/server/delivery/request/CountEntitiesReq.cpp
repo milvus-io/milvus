@@ -39,6 +39,8 @@ CountEntitiesReq::OnExecute() {
         std::string hdr = "CountEntitiesReq(collection=" + collection_name_ + ")";
         TimeRecorderAuto rc(hdr);
 
+        STATUS_CHECK(ValidateCollectionName(collection_name_));
+
         bool exist = false;
         STATUS_CHECK(DBWrapper::DB()->HasCollection(collection_name_, exist));
         if (!exist) {

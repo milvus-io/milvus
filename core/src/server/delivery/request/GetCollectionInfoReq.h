@@ -32,7 +32,7 @@ class GetCollectionInfoReq : public BaseReq {
     OnExecute() override;
 
  private:
-    const std::string collection_name_;
+    std::string collection_name_;
     CollectionSchema& collection_schema_;
 };
 
