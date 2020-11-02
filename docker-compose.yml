@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
-        - ${REPO}:${ARCH}-ubuntu${UBUNTU}
+        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${SHOW_DATE}
     shm_size: 2G
     environment:
       <<: *ccache
