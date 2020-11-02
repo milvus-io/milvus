@@ -20,8 +20,8 @@ namespace snapshot {
 Status
 CollectionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
-    auto row_cnt = 0;
-    auto size = 0;
+    int64_t row_cnt = 0;
+    int64_t size = 0;
     if (!prev_resource) {
         std::stringstream emsg;
         emsg << GetRepr() << ". Cannot find prev collection commit resource";
@@ -111,8 +111,8 @@ PartitionCommitOperation::GetPrevResource() const {
 Status
 PartitionCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
-    auto row_cnt = 0;
-    auto size = 0;
+    int64_t row_cnt = 0;
+    int64_t size = 0;
     PartitionPtr partition = nullptr;
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
@@ -237,7 +237,7 @@ SegmentCommitOperation::GetPrevResource() const {
 Status
 SegmentCommitOperation::DoExecute(StorePtr store) {
     auto prev_resource = GetPrevResource();
-    auto size = 0;
+    int64_t size = 0;
     if (prev_resource) {
         resource_ = std::make_shared<SegmentCommit>(*prev_resource);
         resource_->SetID(0);
