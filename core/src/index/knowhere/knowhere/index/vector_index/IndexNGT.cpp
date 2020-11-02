@@ -127,6 +127,9 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
     int k = config[meta::TOPK].get<int>();
     auto epsilon = config[IndexParams::epsilon].get<float>();
     auto edge_size = config[IndexParams::max_search_edges].get<int>();
+    if (edge_size == -1) { // pass -1
+        edge_size --;
+    }
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
