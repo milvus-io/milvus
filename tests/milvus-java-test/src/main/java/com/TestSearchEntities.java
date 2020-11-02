@@ -247,6 +247,31 @@ public class TestSearchEntities {
   }
 
   @Test(
+          dataProvider = "Collection",
+          dataProviderClass = MainClass.class)
+  public void testSearch(MilvusClient client, String collectionName) {
+    String dsl =
+            String.format(
+                    "{\"bool\": {"
+                            + "\"must\": [{"
+                            + " \"should\":[{"
+                            + "    \"range\": {"
+                            + "        \"int64\": {\"GT\": -10, \"LT\": 1000}"
+                            + "    }}]},"
+                            + " {"
+                            +   "\"must\":[{"
+                            + "    \"vector\": {"
+                            + "        \"float_vector\": {"
+                            + "            \"topk\": %d, \"metric_type\": \"L2\", \"type\": \"float\", \"query\": %s, \"params\": {\"nprobe\": 20}"
+                            + "    }}}]"
+                            + "}]}}",
+                    top_k, queryVectors, top_k);
+
+    SearchParam searchParam = SearchParam.create(collectionName).setDsl(dsl);
+    client.search(searchParam);
+  }
+
+  @Test(
       dataProvider = "Collection",
       dataProviderClass = MainClass.class,
       expectedExceptions = InvalidDsl.class)
