@@ -16,7 +16,7 @@ type Node interface {
 	Operate(in []*Msg) []*Msg
 }
 
-type baseNode struct {
+type BaseNode struct {
 	maxQueueLength int32
 	maxParallelism int32
 	graphStates    *flowGraphStates
@@ -97,22 +97,22 @@ func (nodeCtx *nodeCtx) getMessagesFromChannel() {
 	}
 }
 
-func (node *baseNode) MaxQueueLength() int32 {
+func (node *BaseNode) MaxQueueLength() int32 {
 	return node.maxQueueLength
 }
 
-func (node *baseNode) MaxParallelism() int32 {
+func (node *BaseNode) MaxParallelism() int32 {
 	return node.maxParallelism
 }
 
-func (node *baseNode) SetMaxQueueLength(n int32) {
+func (node *BaseNode) SetMaxQueueLength(n int32) {
 	node.maxQueueLength = n
 }
 
-func (node *baseNode) SetMaxParallelism(n int32) {
+func (node *BaseNode) SetMaxParallelism(n int32) {
 	node.maxParallelism = n
 }
 
-func (node *baseNode) SetPipelineStates(states *flowGraphStates) {
+func (node *BaseNode) SetPipelineStates(states *flowGraphStates) {
 	node.graphStates = states
 }
