@@ -167,7 +167,7 @@ message DeleteRequest {
     string collection_name = 3;
     int64 channel_id = 4;
     int64 proxy_id = 5;
-    repeated uint64 timestamp = 6;
+    repeated uint64 timestamps = 6;
     repeated int64 primary_keys = 7;
 }
 

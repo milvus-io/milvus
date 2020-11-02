@@ -33,13 +33,29 @@ message RowBatch {
     repeated int32 hash_keys = 4;
 }
 
+/**
+* @brief Placeholder value types
+*/
+enum PlaceholderType {
+    NONE = 0;
+    VECTOR_BINARY = 100;
+    VECTOR_FLOAT = 101;
+}
+
+
+message VectorValues {
+    repeated common.Blob value = 1;
+}
+
 
 /**
- * @brief Placeholder value in DSL
- */
+* @brief Placeholder value in DSL
+*/
 message PlaceholderValue {
     string tag = 1;
-    common.Blob value = 2;
+    PlaceholderType type = 2;
+    // value contains the serialized VectorValues
+    common.Blob value = 3;
 }
 
 
