@@ -4,27 +4,35 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	etcd "go.etcd.io/etcd/clientv3"
-	"google.golang.org/grpc"
+	"os"
 	"sort"
 	"strconv"
 	"testing"
 	"time"
-)
 
+	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	etcd "go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc"
+)
 
 const (
 	tsoKeyPath string = "/timestampOracle"
 )
 
-var timeAllocator *allocator.TimestampAllocator = allocator.NewTimestampAllocator()
+var timeAllocator *allocator.TimestampAllocator
+
+func TestMain(m *testing.M) {
+	timeAllocator, _ = allocator.NewTimestampAllocator(context.Background())
+	exitCode := m.Run()
+	timeAllocator.Close()
+	os.Exit(exitCode)
+}
 
 func TestProxyNode(t *testing.T) {
 	startTestMaster("localhost:11000", t)
@@ -75,10 +83,10 @@ func TestProxyNode(t *testing.T) {
 			assert.Nil(t, err)
 
 			curValue, err := testOpt.tso.AllocOne()
-			curTS, err  := timeAllocator.AllocOne()
+			curTS, err := timeAllocator.AllocOne()
 			assert.Equalf(t, err, nil, "%s", "allocator failed")
 
-			curTime, _:= tsoutil.ParseTS(curTS)
+			curTime, _ := tsoutil.ParseTS(curTS)
 			t.Logf("current time stamp = %d, saved time stamp = %d", curTime, value)
 			assert.GreaterOrEqual(t, curValue, value)
 			assert.GreaterOrEqual(t, value, startTime)
@@ -163,7 +171,7 @@ func TestProxyNode(t *testing.T) {
 			if err := proto.Unmarshal(cm.Payload(), &tsm); err != nil {
 				t.Fatal(err)
 			}
-			curT, _:= tsoutil.ParseTS(tsm.Timestamp)
+			curT, _ := tsoutil.ParseTS(tsm.Timestamp)
 			t.Logf("time tick = %d", curT)
 			assert.Greater(t, curT, lastT)
 			lastT = curT
@@ -252,7 +260,7 @@ func TestProxyNode(t *testing.T) {
 
 		physicalTime, _ := tsoutil.ParseTS(qm.Timestamp)
 		t.Logf("query time stamp = %d", physicalTime)
-		assert.Greater(t,physicalTime, startTime)
+		assert.Greater(t, physicalTime, startTime)
 
 		r1 := pb.QueryResult{
 			Status: &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},

@@ -4,6 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"net"
+	"sort"
+	"testing"
+	"time"
+	"unsafe"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -13,11 +19,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
-	"net"
-	"sort"
-	"testing"
-	"time"
-	"unsafe"
 )
 
 type testMasterServer struct {
@@ -129,11 +130,11 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 	}
 	seg2 := etcdpb.SegmentMeta{
 		SegmentId: 2,
-		NumRows:      10,
+		NumRows:   10,
 	}
 	seg3 := etcdpb.SegmentMeta{
 		SegmentId: 3,
-		NumRows:      10,
+		NumRows:   10,
 	}
 	if cb1, err := json.Marshal(&col1); err != nil {
 		t.Fatal(err)
@@ -178,7 +179,7 @@ func TestProxyServer_WatchEtcd(t *testing.T) {
 	}
 	seg5 := etcdpb.SegmentMeta{
 		SegmentId: 5,
-		NumRows:      10,
+		NumRows:   10,
 	}
 	if cb4, err := json.Marshal(&col4); err != nil {
 		t.Fatal(err)

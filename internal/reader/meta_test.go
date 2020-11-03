@@ -2,17 +2,18 @@ package reader
 
 import (
 	"context"
+	"log"
+	"math"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"log"
-	"math"
-	"sync"
-	"testing"
-	"time"
 )
 
 func TestMeta_GetCollectionObjId(t *testing.T) {

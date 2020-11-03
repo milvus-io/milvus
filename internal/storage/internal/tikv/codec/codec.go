@@ -3,6 +3,7 @@ package codec
 import (
 	"encoding/binary"
 	"errors"
+
 	"github.com/tikv/client-go/codec"
 )
 

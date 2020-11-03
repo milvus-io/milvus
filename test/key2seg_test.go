@@ -2,12 +2,13 @@ package test
 
 import (
 	"context"
-	"github.com/apache/pulsar-client-go/pulsar"
-	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/gogo/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 	"log"
 	"testing"
+
+	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/gogo/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 func TestKey2Seg(t *testing.T) {

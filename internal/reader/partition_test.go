@@ -2,8 +2,9 @@ package reader
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPartition_NewSegment(t *testing.T) {

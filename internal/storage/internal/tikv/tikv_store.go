@@ -3,13 +3,14 @@ package tikv_driver
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
+
+	"github.com/tikv/client-go/config"
+	"github.com/tikv/client-go/rawkv"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv/codec"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"github.com/tikv/client-go/config"
-	"github.com/tikv/client-go/rawkv"
-	"strconv"
-	"strings"
 )
 
 func keyAddOne(key Key) Key {
@@ -366,7 +367,7 @@ func (s *TikvStore) GetSegments(ctx context.Context, key Key, timestamp Timestam
 		if err != nil {
 			panic("must no error")
 		}
-		if ts <= timestamp && segment != string(DeleteMark){
+		if ts <= timestamp && segment != string(DeleteMark) {
 			segmentsSet[segment] = true
 		}
 	}

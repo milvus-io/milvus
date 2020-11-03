@@ -2,12 +2,13 @@ package timesync
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"log"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
@@ -29,7 +30,7 @@ type TimeTickReader struct {
 	ctx               context.Context
 }
 
-func (r *TimeTickReader) Start(){
+func (r *TimeTickReader) Start() {
 	go r.readTimeTick()
 	go r.timeSync()
 }
@@ -112,7 +113,6 @@ func (r *TimeTickReader) sendEOFMsg(ctx context.Context, msg *pulsar.ProducerMes
 	}
 	wg.Done()
 }
-
 
 func TimeTickService() {
 	timeTickTopic := "timeTick"

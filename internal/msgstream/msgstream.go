@@ -2,17 +2,17 @@ package msgstream
 
 import (
 	"context"
-	"github.com/apache/pulsar-client-go/pulsar"
-	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"sync"
+
+	"github.com/apache/pulsar-client-go/pulsar"
+	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
-type Timestamp uint64
-
 type MsgPack struct {
-	BeginTs Timestamp
-	EndTs   Timestamp
+	BeginTs typeutil.Timestamp
+	EndTs   typeutil.Timestamp
 	Msgs    []*TsMsg
 }
 
@@ -29,12 +29,12 @@ type MsgStream interface {
 }
 
 type PulsarMsgStream struct {
-	client         *pulsar.Client
-	producers      []*pulsar.Producer
-	consumers      []*pulsar.Consumer
-	repackFunc     RepackFunc // return a map from produceChannel idx to *MsgPack
+	client     *pulsar.Client
+	producers  []*pulsar.Producer
+	consumers  []*pulsar.Consumer
+	repackFunc RepackFunc // return a map from produceChannel idx to *MsgPack
 
-	receiveBuf     chan *MsgPack
+	receiveBuf chan *MsgPack
 
 	msgMarshaler   *TsMsgMarshaler
 	msgUnmarshaler *TsMsgMarshaler
@@ -86,7 +86,7 @@ func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 	ms.repackFunc = repackFunc
 }
 
-func (ms *PulsarMsgStream) Start(){
+func (ms *PulsarMsgStream) Start() {
 	go ms.bufMsgPackToChannel()
 }
 
@@ -110,10 +110,9 @@ func (ms *PulsarMsgStream) InitMsgPackBuf(msgPackBufSize int64) {
 	ms.receiveBuf = make(chan *MsgPack, msgPackBufSize)
 }
 
-
 func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) commonPb.Status {
 	tsMsgs := msgPack.Msgs
-	if len(tsMsgs) <=0 {
+	if len(tsMsgs) <= 0 {
 		log.Println("receive empty msgPack")
 		return commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 	}
@@ -215,17 +214,17 @@ type PulsarTtMsgStream struct {
 	inputBuf      []*TsMsg
 	unsolvedBuf   []*TsMsg
 	msgPacks      []*MsgPack
-	lastTimeStamp Timestamp
+	lastTimeStamp typeutil.Timestamp
 }
 
-func (ms *PulsarTtMsgStream) Start(){
+func (ms *PulsarTtMsgStream) Start() {
 	go ms.bufMsgPackToChannel()
 }
 
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(ms.consumers))
-	eofMsgTimeStamp := make(map[int]Timestamp)
+	eofMsgTimeStamp := make(map[int]typeutil.Timestamp)
 	mu := sync.Mutex{}
 	for i := 0; i < len(ms.consumers); i++ {
 		go ms.findTimeTick(context.Background(), i, eofMsgTimeStamp, &wg, &mu)
@@ -259,7 +258,7 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 
 func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 	channelIndex int,
-	eofMsgMap map[int]Timestamp,
+	eofMsgMap map[int]typeutil.Timestamp,
 	wg *sync.WaitGroup,
 	mu *sync.Mutex) {
 	for {
@@ -289,8 +288,8 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 	}
 }
 
-func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
-	checkMap := make(map[Timestamp]int)
+func checkTimeTickMsg(msg map[int]typeutil.Timestamp) (typeutil.Timestamp, bool) {
+	checkMap := make(map[typeutil.Timestamp]int)
 	for _, v := range msg {
 		checkMap[v] += 1
 	}

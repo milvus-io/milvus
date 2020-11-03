@@ -3,10 +3,11 @@ package reader
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 	"log"
 	"sync"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/msgclient"
 )
 
 func StartQueryNode(ctx context.Context, pulsarURL string) {

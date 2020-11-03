@@ -5,13 +5,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
-)
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/collection"
+	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+)
 
 func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
@@ -38,7 +39,7 @@ func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 		}
 		kvbase.Save("segment/"+strconv.Itoa(int(ss.SegmentId)), updateData)
 		//create new segment
-		newSegID := IdAllocator.AllocOne()
+		newSegID, _ := id.AllocOne()
 		newSeg := segment.NewSegment(newSegID, seg.CollectionID, seg.CollectionName, "default", seg.ChannelStart, seg.ChannelEnd, currentTime, time.Unix(1<<36-1, 0))
 		newSegData, err := segment.Segment2JSON(*&newSeg)
 		if err != nil {
@@ -63,4 +64,3 @@ func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase kv.Base) error {
 	}
 	return nil
 }
-

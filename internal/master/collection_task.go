@@ -3,13 +3,14 @@ package master
 import (
 	"encoding/json"
 	"errors"
+	"log"
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"log"
-	"strconv"
 )
 
 const collectionMetaPrefix = "collection/"

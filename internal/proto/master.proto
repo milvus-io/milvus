@@ -89,5 +89,6 @@ service Master {
     rpc ShowPartitions(internal.ShowPartitionRequest) returns (service.StringListResponse) {}
 
 
-    rpc Tso(stream internal.TsoRequest) returns (stream internal.TsoResponse) {}
+    rpc AllocTimestamp(internal.TsoRequest) returns (internal.TsoResponse) {}
+    rpc AllocId(internal.IdRequest) returns (internal.IdResponse) {}
 }

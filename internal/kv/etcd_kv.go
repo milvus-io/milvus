@@ -2,11 +2,12 @@ package kv
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"go.etcd.io/etcd/clientv3"
 	"log"
 	"path"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"go.etcd.io/etcd/clientv3"
 )
 
 const (

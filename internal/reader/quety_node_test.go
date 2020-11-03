@@ -2,9 +2,10 @@ package reader
 
 import (
 	"context"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"testing"
 )
 
 func TestQueryNode_CreateQueryNode(t *testing.T) {

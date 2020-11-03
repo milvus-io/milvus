@@ -3,12 +3,13 @@ package S3_driver
 import (
 	"bytes"
 	"context"
+	"io"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"io"
 )
 
 var bucketName = conf.Config.Writer.Bucket
@@ -49,7 +50,7 @@ func (s *S3Store) Put(ctx context.Context, key Key, value Value) error {
 func (s *S3Store) Get(ctx context.Context, key Key) (Value, error) {
 	object, err := s.client.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
-		Key: aws.String(string(key)),
+		Key:    aws.String(string(key)),
 	})
 	if err != nil {
 		return nil, err
@@ -85,7 +86,7 @@ func (s *S3Store) GetByPrefix(ctx context.Context, prefix Key, keyOnly bool) ([]
 				objectsValues = append(objectsValues, value)
 			}
 		}
-	}else {
+	} else {
 		return nil, nil, err
 	}
 
@@ -102,7 +103,7 @@ func (s *S3Store) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit int,
 		Prefix: aws.String(string(keyStart)),
 	})
 	if err == nil && objects != nil {
-		for _, object := range objects.Contents{
+		for _, object := range objects.Contents {
 			if *object.Key >= string(keyEnd) {
 				keys = append(keys, []byte(*object.Key))
 				if !keyOnly {
@@ -126,7 +127,7 @@ func (s *S3Store) Scan(ctx context.Context, keyStart Key, keyEnd Key, limit int,
 func (s *S3Store) Delete(ctx context.Context, key Key) error {
 	_, err := s.client.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(bucketName),
-		Key: aws.String(string(key)),
+		Key:    aws.String(string(key)),
 	})
 	return err
 }
@@ -142,7 +143,7 @@ func (s *S3Store) DeleteByPrefix(ctx context.Context, prefix Key) error {
 		for _, object := range objects.Contents {
 			_, err := s.client.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
 				Bucket: aws.String(bucketName),
-				Key: object.Key,
+				Key:    object.Key,
 			})
 			return err
 		}
@@ -160,10 +161,10 @@ func (s *S3Store) DeleteRange(ctx context.Context, keyStart Key, keyEnd Key) err
 
 	if objects != nil && err == nil {
 		for _, object := range objects.Contents {
-			if *object.Key > string(keyEnd){
+			if *object.Key > string(keyEnd) {
 				_, err := s.client.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
 					Bucket: aws.String(bucketName),
-					Key: object.Key,
+					Key:    object.Key,
 				})
 				return err
 			}

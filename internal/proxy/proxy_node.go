@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strconv"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -10,7 +12,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	etcd "go.etcd.io/etcd/clientv3"
-	"strconv"
 )
 
 type BaseRequest interface {
@@ -100,7 +101,7 @@ func StartProxy(opt *ProxyOptions) error {
 	//	saveInterval: opt.tsoSaveInterval,
 	//}
 	//tso.Restart(opt.proxyId)
-	tso := allocator.NewTimestampAllocator()
+	tso, _ := allocator.NewTimestampAllocator(opt.ctx)
 
 	/////////////////// proxy server ///////////////////////////////
 	//readerTopics, send insert and delete message into these topics

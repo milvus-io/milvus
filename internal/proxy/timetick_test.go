@@ -2,21 +2,22 @@ package proxy
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"testing"
-	"time"
 )
 
 func TestTimeTick(t *testing.T) {
 	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: "pulsar://localhost:6650"})
-	assert.Nil(t,err)
+	assert.Nil(t, err)
 
 	producer, err := client.CreateProducer(pulsar.ProducerOptions{Topic: "timesync"})
-	assert.Nil(t,err)
+	assert.Nil(t, err)
 
 	consumer, err := client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "timesync",
@@ -24,7 +25,7 @@ func TestTimeTick(t *testing.T) {
 		Type:                        pulsar.KeyShared,
 		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
 	})
-	assert.Nil(t,err)
+	assert.Nil(t, err)
 
 	ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
 

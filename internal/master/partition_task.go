@@ -3,11 +3,12 @@ package master
 import (
 	"encoding/json"
 	"errors"
+	"log"
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"log"
-	"strconv"
 )
 
 const partitionMetaPrefix = "partition/"
@@ -195,7 +196,7 @@ func (t *describePartitionTask) Execute() error {
 
 	partitionName := t.req.PartitionName
 
-	description := servicepb.PartitionDescription {
+	description := servicepb.PartitionDescription{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
@@ -237,7 +238,7 @@ func (t *showPartitionTask) Execute() error {
 		}
 	}
 
-	stringListResponse := servicepb.StringListResponse {
+	stringListResponse := servicepb.StringListResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},

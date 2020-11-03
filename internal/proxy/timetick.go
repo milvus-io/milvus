@@ -2,13 +2,14 @@ package proxy
 
 import (
 	"context"
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"log"
 	"time"
+
+	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type timeTick struct {
@@ -49,10 +50,10 @@ func (tt *timeTick) tick() error {
 	return nil
 }
 
-func (tt *timeTick) Restart() error{
+func (tt *timeTick) Restart() error {
 	tt.lastTick = 0
 	ts, err := tt.getTimestamp()
-	if err != nil{
+	if err != nil {
 		return err
 	}
 

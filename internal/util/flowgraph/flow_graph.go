@@ -2,9 +2,10 @@ package flowgraph
 
 import (
 	"context"
+	"sync"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"sync"
 )
 
 type Timestamp = typeutil.Timestamp
@@ -24,8 +25,8 @@ type TimeTickedFlowGraph struct {
 func (fg *TimeTickedFlowGraph) AddNode(node *Node) {
 	nodeName := (*node).Name()
 	nodeCtx := nodeCtx{
-		node: node,
-		inputChannels: make([]chan *Msg, 0),
+		node:                   node,
+		inputChannels:          make([]chan *Msg, 0),
 		downstreamInputChanIdx: make(map[string]int),
 	}
 	fg.nodeCtx[nodeName] = &nodeCtx

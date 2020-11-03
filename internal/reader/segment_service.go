@@ -2,11 +2,12 @@ package reader
 
 import (
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"strconv"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 //func (node *QueryNode) SegmentsManagement() {
@@ -58,7 +59,7 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 			// TODO: set master pb's segment id type from uint64 to int64
 			SegmentId:  segmentID,
 			MemorySize: currentMemSize,
-			NumRows: segmentNumOfRows,
+			NumRows:    segmentNumOfRows,
 		}
 
 		statisticData = append(statisticData, stat)

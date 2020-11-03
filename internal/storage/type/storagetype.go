@@ -14,7 +14,7 @@ type SegmentDL = []byte
 const (
 	MinIODriver DriverType = "MinIO"
 	TIKVDriver  DriverType = "TIKV"
-	S3DRIVER 	DriverType = "S3"
+	S3DRIVER    DriverType = "S3"
 )
 
 /*

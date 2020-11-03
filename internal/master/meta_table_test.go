@@ -1,12 +1,13 @@
 package master
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"go.etcd.io/etcd/clientv3"
-	"testing"
 )
 
 func TestMetaTable_DeletePartition(t *testing.T) {

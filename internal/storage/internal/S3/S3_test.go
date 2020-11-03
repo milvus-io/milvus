@@ -2,14 +2,14 @@ package S3_driver_test
 
 import (
 	"context"
-	s3_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	s3_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
 )
 
 var ctx = context.Background()
 var client, err = s3_driver.NewS3Driver(ctx)
-
 
 func TestS3Driver_PutRowAndGetRow(t *testing.T) {
 	err = client.PutRow(ctx, []byte("bar"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)
@@ -30,7 +30,7 @@ func TestS3Driver_PutRowAndGetRow(t *testing.T) {
 	assert.Equal(t, "testkeybarorbar_1", string(object))
 }
 
-func TestS3Driver_DeleteRow(t *testing.T){
+func TestS3Driver_DeleteRow(t *testing.T) {
 	err = client.DeleteRow(ctx, []byte("bar"), 5)
 	assert.Nil(t, err)
 	object, _ := client.GetRow(ctx, []byte("bar"), 6)
@@ -63,7 +63,7 @@ func TestS3Driver_GetSegments(t *testing.T) {
 	}
 }
 
-func TestS3Driver_PutRowsAndGetRows(t *testing.T){
+func TestS3Driver_PutRowsAndGetRows(t *testing.T) {
 	keys := [][]byte{[]byte("foo"), []byte("bar")}
 	values := [][]byte{[]byte("The key is foo!"), []byte("The key is bar!")}
 	segments := []string{"segmentA", "segmentB"}
@@ -77,7 +77,7 @@ func TestS3Driver_PutRowsAndGetRows(t *testing.T){
 	assert.Equal(t, "The key is bar!", string(objects[1]))
 }
 
-func TestS3Driver_DeleteRows(t *testing.T){
+func TestS3Driver_DeleteRows(t *testing.T) {
 	keys := [][]byte{[]byte("foo"), []byte("bar")}
 	timestamps := []uint64{3, 3}
 	err := client.DeleteRows(ctx, keys, timestamps)
@@ -92,11 +92,11 @@ func TestS3Driver_DeleteRows(t *testing.T){
 func TestS3Driver_PutLogAndGetLog(t *testing.T) {
 	err = client.PutLog(ctx, []byte("insert"), []byte("This is insert log!"), 1, 11)
 	assert.Nil(t, err)
-	err = client.PutLog(ctx, []byte("delete"), []byte("This is delete log!"),  2, 10)
+	err = client.PutLog(ctx, []byte("delete"), []byte("This is delete log!"), 2, 10)
 	assert.Nil(t, err)
-	err = client.PutLog(ctx, []byte("update"), []byte("This is update log!"),  3, 9)
+	err = client.PutLog(ctx, []byte("update"), []byte("This is update log!"), 3, 9)
 	assert.Nil(t, err)
-	err = client.PutLog(ctx, []byte("select"), []byte("This is select log!"),  4, 8)
+	err = client.PutLog(ctx, []byte("select"), []byte("This is select log!"), 4, 8)
 	assert.Nil(t, err)
 
 	channels := []int{5, 8, 9, 10, 11, 12, 13}
@@ -119,7 +119,7 @@ func TestS3Driver_Segment(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestS3Driver_SegmentDL(t *testing.T){
+func TestS3Driver_SegmentDL(t *testing.T) {
 	err := client.PutSegmentDL(ctx, "segmentB", []byte("This is segmentB's delete log!"))
 	assert.Nil(t, err)
 

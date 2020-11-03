@@ -3,29 +3,29 @@ package collection
 import (
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/gogo/protobuf/proto"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Collection struct {
-	ID         int64      `json:"id"`
+	ID         int64       `json:"id"`
 	Name       string      `json:"name"`
 	CreateTime uint64      `json:"creat_time"`
 	Schema     []FieldMeta `json:"schema"`
 	//	ExtraSchema       []FieldMeta `json:"extra_schema"`
-	SegmentIDs        []int64                `json:"segment_ids"`
-	PartitionTags     []string                `json:"partition_tags"`
-	GrpcMarshalString string                  `json:"grpc_marshal_string"`
+	SegmentIDs        []int64  `json:"segment_ids"`
+	PartitionTags     []string `json:"partition_tags"`
+	GrpcMarshalString string   `json:"grpc_marshal_string"`
 }
 
 type FieldMeta struct {
-	FieldName string             `json:"field_name"`
+	FieldName string            `json:"field_name"`
 	Type      schemapb.DataType `json:"type"`
-	DIM       int64              `json:"dimension"`
+	DIM       int64             `json:"dimension"`
 }
 
 func GrpcMarshal(c *Collection) *Collection {
@@ -38,8 +38,8 @@ func GrpcMarshal(c *Collection) *Collection {
 	schemaSlice := []*schemapb.FieldSchema{}
 	for _, v := range c.Schema {
 		newpbMeta := &schemapb.FieldSchema{
-			Name: v.FieldName,
-			DataType:      schemapb.DataType(v.Type), //czs_tag
+			Name:     v.FieldName,
+			DataType: schemapb.DataType(v.Type), //czs_tag
 		}
 		schemaSlice = append(schemaSlice, newpbMeta)
 	}

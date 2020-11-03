@@ -2,9 +2,10 @@ package msgstream
 
 import (
 	"fmt"
+	"testing"
+
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"testing"
 )
 
 func repackFunc(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack {
@@ -38,7 +39,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			Timestamps:     []uint64{1},
 		}
 		insertMsg := InsertTask{
-			HashValues: []int32{hashValue},
+			HashValues:    []int32{hashValue},
 			InsertRequest: insertRequest,
 		}
 		tsMsg = insertMsg
@@ -49,11 +50,11 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			CollectionName: "Collection",
 			ChannelId:      1,
 			ProxyId:        1,
-			Timestamps:      []uint64{1},
+			Timestamps:     []uint64{1},
 			PrimaryKeys:    []int64{1},
 		}
 		deleteMsg := DeleteTask{
-			HashValues: []int32{hashValue},
+			HashValues:    []int32{hashValue},
 			DeleteRequest: deleteRequest,
 		}
 		tsMsg = deleteMsg
@@ -66,7 +67,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			ResultChannelId: 1,
 		}
 		searchMsg := SearchTask{
-			HashValues: []int32{hashValue},
+			HashValues:    []int32{hashValue},
 			SearchRequest: searchRequest,
 		}
 		tsMsg = searchMsg
@@ -80,7 +81,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			ResultChannelId: 1,
 		}
 		searchResultMsg := SearchResultTask{
-			HashValues: []int32{hashValue},
+			HashValues:   []int32{hashValue},
 			SearchResult: searchResult,
 		}
 		tsMsg = searchResultMsg
@@ -90,7 +91,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			Timestamp: 1,
 		}
 		timeSyncMsg := TimeSyncTask{
-			HashValues: []int32{hashValue},
+			HashValues:  []int32{hashValue},
 			TimeSyncMsg: timeSyncResult,
 		}
 		tsMsg = timeSyncMsg
@@ -106,7 +107,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			Timestamps:     []uint64{1},
 		}
 		insertMsg := InsertTask{
-			HashValues: []int32{hashValue},
+			HashValues:    []int32{hashValue},
 			InsertRequest: insertRequest,
 		}
 		tsMsg = insertMsg

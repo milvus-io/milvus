@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv/codec"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"math"
 	"os"
 	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/tikv/codec"
+	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
 //var store TikvStore

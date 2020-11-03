@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -52,15 +52,15 @@ func TestAlignTimeSync(t *testing.T) {
 	}
 	ts := []*internalpb.TimeSyncMsg{
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   3,
+			PeerId:    3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			PeerId:   2,
+			PeerId:    2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -83,15 +83,15 @@ func TestAlignTimeSync2(t *testing.T) {
 	}
 	ts := []*internalpb.TimeSyncMsg{
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   3,
+			PeerId:    3,
 			Timestamp: toTimestamp(150),
 		},
 		{
-			PeerId:   2,
+			PeerId:    2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -112,23 +112,23 @@ func TestAlignTimeSync3(t *testing.T) {
 	}
 	ts := []*internalpb.TimeSyncMsg{
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   3,
+			PeerId:    3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			PeerId:   2,
+			PeerId:    2,
 			Timestamp: toTimestamp(20),
 		},
 	}
@@ -150,15 +150,15 @@ func TestAlignTimeSync4(t *testing.T) {
 	}
 	ts := []*internalpb.TimeSyncMsg{
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(25),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(35),
 		},
 	}
@@ -181,23 +181,23 @@ func TestAlignTimeSync5(t *testing.T) {
 	}
 	ts := []*internalpb.TimeSyncMsg{
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   1,
+			PeerId:    1,
 			Timestamp: toTimestamp(5),
 		},
 		{
-			PeerId:   3,
+			PeerId:    3,
 			Timestamp: toTimestamp(15),
 		},
 		{
-			PeerId:   3,
+			PeerId:    3,
 			Timestamp: toTimestamp(20),
 		},
 	}

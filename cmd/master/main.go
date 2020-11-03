@@ -12,7 +12,6 @@ import (
 	"syscall"
 )
 
-
 func main() {
 
 	var yamlFile string

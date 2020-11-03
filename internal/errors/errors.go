@@ -1,4 +1,3 @@
-
 package errors
 
 import (

@@ -2,8 +2,9 @@ package typeutil
 
 import (
 	"encoding/binary"
-	"github.com/spaolacci/murmur3"
 	"unsafe"
+
+	"github.com/spaolacci/murmur3"
 )
 
 func Hash32Bytes(b []byte) (uint32, error) {
@@ -19,7 +20,6 @@ func Hash32Uint64(v uint64) (uint32, error) {
 	binary.LittleEndian.PutUint64(b, v)
 	return Hash32Bytes(b)
 }
-
 
 func Hash32Int64(v int64) (uint32, error) {
 	return Hash32Uint64(uint64(v))

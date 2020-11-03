@@ -2,10 +2,11 @@ package test
 
 import (
 	"context"
-	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"github.com/zilliztech/milvus-distributed/internal/writer"
 	"sync"
 	"testing"
+
+	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/writer"
 )
 
 func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *msgpb.InsertOrDeleteMsg {
@@ -13,7 +14,7 @@ func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *m
 		CollectionName: collectionName,
 		PartitionTag:   partitionTag,
 		SegmentId:      int64(entityId / 100),
-		Uid:       		int64(entityId),
+		Uid:            int64(entityId),
 		Timestamp:      uint64(entityId),
 		ClientId:       0,
 	}
@@ -22,7 +23,7 @@ func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *m
 func GetDeleteMsg(collectionName string, entityId int64) *msgpb.InsertOrDeleteMsg {
 	return &msgpb.InsertOrDeleteMsg{
 		CollectionName: collectionName,
-		Uid:       		entityId,
+		Uid:            entityId,
 		Timestamp:      uint64(entityId + 100),
 	}
 }

@@ -2,8 +2,9 @@ package msgstream
 
 import (
 	"fmt"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"testing"
+
+	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func TestNewStream_Insert(t *testing.T) {
@@ -216,7 +217,7 @@ func TestNewStream_Insert_TimeTick(t *testing.T) {
 		Timestamps:     []uint64{1},
 	}
 	insertMsg := InsertTask{
-		HashValues: []int32{2},
+		HashValues:    []int32{2},
 		InsertRequest: insertRequest,
 	}
 	var tsMsg TsMsg = insertMsg
@@ -244,7 +245,7 @@ func TestNewStream_Insert_TimeTick(t *testing.T) {
 				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v)
 			}
 		}
-		if receiveCount + 1 >= len(msgPack.Msgs) {
+		if receiveCount+1 >= len(msgPack.Msgs) {
 			break
 		}
 	}

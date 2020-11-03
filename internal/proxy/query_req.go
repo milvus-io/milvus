@@ -1,13 +1,14 @@
 package proxy
 
 import (
+	"log"
+	"sync"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"log"
-	"sync"
 )
 
 type queryReq struct {
@@ -80,7 +81,6 @@ func (s *proxyServer) restartQueryRoutine(buf_size int) error {
 				}
 				qm.Timestamp = uint64(ts[0])
 
-
 				qb, err := proto.Marshal(qm)
 				if err != nil {
 					log.Printf("Marshal QueryReqMsg failed, error = %v", err)
@@ -141,22 +141,22 @@ func (s *proxyServer) reduceResults(query *queryReq) *servicepb.QueryResult {
 		status = *r.Status
 		if status.ErrorCode == commonpb.ErrorCode_SUCCESS {
 			results = append(results, r)
-		}else{
+		} else {
 			break
 		}
 	}
-	if len(results) != s.numReaderNode{
+	if len(results) != s.numReaderNode {
 		status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 	}
-	if status.ErrorCode != commonpb.ErrorCode_SUCCESS{
-		result:= servicepb.QueryResult{
+	if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		result := servicepb.QueryResult{
 			Status: &status,
 		}
 		return &result
 	}
 
 	if s.numReaderNode == 1 {
-		result:= servicepb.QueryResult{
+		result := servicepb.QueryResult{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
 			},

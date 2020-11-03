@@ -12,7 +12,7 @@ import (
 func main() {
 	ctx, _ := context.WithCancel(context.Background())
 
-    var yamlFile string
+	var yamlFile string
 	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
 	flag.Parse()
 	// flag.Usage()
@@ -25,4 +25,3 @@ func main() {
 	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
 	reader.StartQueryNode(ctx, pulsarAddr)
 }
-

@@ -1,8 +1,10 @@
 package typeutil
+
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"unsafe"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUint64(t *testing.T) {
@@ -27,4 +29,3 @@ func TestHash32_Uint64(t *testing.T) {
 	t.Log(h2)
 	assert.Equal(t, h, h2)
 }
-

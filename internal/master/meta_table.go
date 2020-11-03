@@ -1,12 +1,13 @@
 package master
 
 import (
+	"strconv"
+	"sync"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"strconv"
-	"sync"
 )
 
 type metaTable struct {

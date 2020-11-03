@@ -13,11 +13,12 @@ package reader
 */
 import "C"
 import (
+	"strconv"
+	"unsafe"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"strconv"
-	"unsafe"
 )
 
 const SegmentLifetime = 20000
