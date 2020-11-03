@@ -120,8 +120,10 @@ namespace NGT {
 	}
       }
       if (nQueries > ids.size()) {
-	std::cerr << "# of Queries is not enough." << std::endl;
-	return DBL_MAX;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("# of Queries is not enough.");
+//              std::cerr << "# of Queries is not enough." << std::endl;
+          return DBL_MAX;
       }
 
       NGT::Timer timer;
@@ -233,14 +235,18 @@ namespace NGT {
         {
             if (!logDisabled)
             {
-                std::cerr << "GraphOptimizer: adjusting outgoing and incoming edges..." << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("GraphOptimizer: adjusting outgoing and incoming edges...");
+//                    std::cerr << "GraphOptimizer: adjusting outgoing and incoming edges..." << std::endl;
             }
             NGT::Timer timer;
             timer.start();
             std::vector<NGT::ObjectDistances> graph;
             try
             {
-                std::cerr << "Optimizer::execute: Extract the graph data." << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Optimizer::execute: Extract the graph data.");
+//                std::cerr << "Optimizer::execute: Extract the graph data." << std::endl;
                 // extract only edges from the index to reduce the memory usage.
                 NGT::GraphReconstructor::extractGraph(graph, graphIndex);
                 NeighborhoodGraph::Property & prop = graphIndex.getGraphProperty();
@@ -250,7 +256,9 @@ namespace NGT {
                 }
                 NGT::GraphReconstructor::reconstructGraph(graph, graphIndex, numOfOutgoingEdges, numOfIncomingEdges);
                 timer.stop();
-                std::cerr << "Optimizer::execute: Graph reconstruction time=" << timer.time << " (sec) " << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Optimizer::execute: Graph reconstruction time=" + std::to_string(timer.time) + " (sec) ");
+//                std::cerr << "Optimizer::execute: Graph reconstruction time=" << timer.time << " (sec) " << std::endl;
                 prop.graphType = NGT::NeighborhoodGraph::GraphTypeONNG;
             }
             catch (NGT::Exception & err)
@@ -263,7 +271,9 @@ namespace NGT {
         {
             if (!logDisabled)
             {
-                std::cerr << "GraphOptimizer: redusing shortcut edges..." << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("GraphOptimizer: redusing shortcut edges...");
+//                std::cerr << "GraphOptimizer: redusing shortcut edges..." << std::endl;
             }
             try
             {
@@ -271,7 +281,9 @@ namespace NGT {
                 timer.start();
                 NGT::GraphReconstructor::adjustPathsEffectively(graphIndex);
                 timer.stop();
-                std::cerr << "Optimizer::execute: Path adjustment time=" << timer.time << " (sec) " << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Optimizer::execute: Path adjustment time=" + std::to_string(timer.time) + " (sec) ");
+//                std::cerr << "Optimizer::execute: Path adjustment time=" << timer.time << " (sec) " << std::endl;
             }
             catch (NGT::Exception & err)
             {
@@ -286,7 +298,9 @@ namespace NGT {
         {
             if (!logDisabled)
             {
-                std::cerr << "GraphOptimizer: optimizing search parameters..." << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("GraphOptimizer: optimizing search parameters...");
+//                std::cerr << "GraphOptimizer: optimizing search parameters..." << std::endl;
             }
             NGT::GraphIndex & outGraph = static_cast<NGT::GraphIndex &>(outIndex.getIndex());
             NGT::Optimizer optimizer(outIndex);
@@ -321,7 +335,9 @@ namespace NGT {
             {
                 if (!logDisabled)
                 {
-                    std::cerr << "GraphOptimizer: optimizing prefetch parameters..." << std::endl;
+                    if (NGT_LOG_DEBUG_)
+                        (*NGT_LOG_DEBUG_)("GraphOptimizer: optimizing prefetch parameters...");
+//                    std::cerr << "GraphOptimizer: optimizing prefetch parameters..." << std::endl;
                 }
                 try
                 {
@@ -343,7 +359,9 @@ namespace NGT {
             {
                 if (!logDisabled)
                 {
-                    std::cerr << "GraphOptimizer: generating the accuracy table..." << std::endl;
+                    if (NGT_LOG_DEBUG_)
+                        (*NGT_LOG_DEBUG_)("GraphOptimizer: generating the accuracy table...");
+//                    std::cerr << "GraphOptimizer: generating the accuracy table..." << std::endl;
                 }
                 try
                 {
@@ -387,14 +405,18 @@ namespace NGT {
 	NGT::GraphIndex graphIndex(outIndexPath, false);
 	if (numOfOutgoingEdges > 0 || numOfIncomingEdges > 0) {
 	  if (!logDisabled) {
-	    std::cerr << "GraphOptimizer: adjusting outgoing and incoming edges..." << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("GraphOptimizer: adjusting outgoing and incoming edges...");
+//	    std::cerr << "GraphOptimizer: adjusting outgoing and incoming edges..." << std::endl;
 	  }
 	  redirector.begin();
 	  NGT::Timer timer;
 	  timer.start();
 	  std::vector<NGT::ObjectDistances> graph;
 	  try {
-	    std::cerr << "Optimizer::execute: Extract the graph data." << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("Optimizer::execute: Extract the graph data.");
+//	    std::cerr << "Optimizer::execute: Extract the graph data." << std::endl;
 	    // extract only edges from the index to reduce the memory usage.
 	    NGT::GraphReconstructor::extractGraph(graph, graphIndex);
 	    NeighborhoodGraph::Property &prop = graphIndex.getGraphProperty();
@@ -403,7 +425,9 @@ namespace NGT {
 	    }
 	    NGT::GraphReconstructor::reconstructGraph(graph, graphIndex, numOfOutgoingEdges, numOfIncomingEdges);
 	    timer.stop();
-	    std::cerr << "Optimizer::execute: Graph reconstruction time=" << timer.time << " (sec) " << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Optimizer::execute: Graph reconstruction time=" + std::to_string(timer.time) + " (sec) ");
+//	    std::cerr << "Optimizer::execute: Graph reconstruction time=" << timer.time << " (sec) " << std::endl;
 	    graphIndex.saveGraph(outIndexPath);
 	    prop.graphType = NGT::NeighborhoodGraph::GraphTypeONNG;
 	    graphIndex.saveProperty(outIndexPath);
@@ -415,14 +439,18 @@ namespace NGT {
 
 	if (shortcutReduction) {
 	  if (!logDisabled) {
-	    std::cerr << "GraphOptimizer: redusing shortcut edges..." << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("GraphOptimizer: redusing shortcut edges...");
+//	    std::cerr << "GraphOptimizer: redusing shortcut edges..." << std::endl;
 	  }
 	  try {
 	    NGT::Timer timer;
 	    timer.start();
 	    NGT::GraphReconstructor::adjustPathsEffectively(graphIndex);
 	    timer.stop();
-	    std::cerr << "Optimizer::execute: Path adjustment time=" << timer.time << " (sec) " << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("optimizer::execute: path adjustment time=" + std::to_string(timer.time) + " (sec) ");
+//	    std::cerr << "optimizer::execute: path adjustment time=" << timer.time << " (sec) " << std::endl;
 	    graphIndex.saveGraph(outIndexPath);
 	  } catch (NGT::Exception &err) {
 	    redirector.end();
@@ -441,7 +469,9 @@ namespace NGT {
 
       if (searchParameterOptimization) {
 	if (!logDisabled) {
-	  std::cerr << "GraphOptimizer: optimizing search parameters..." << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("GraphOptimizer: optimizing search parameters...");
+//	  std::cerr << "GraphOptimizer: optimizing search parameters..." << std::endl;
 	}
 	NGT::Index	outIndex(outIndexPath);
 	NGT::GraphIndex	&outGraph = static_cast<NGT::GraphIndex&>(outIndex.getIndex());
@@ -472,7 +502,9 @@ namespace NGT {
 	NGT::GraphIndex	&outGraph = static_cast<NGT::GraphIndex&>(outIndex.getIndex());
 	if (prefetchParameterOptimization) {
 	  if (!logDisabled) {
-	    std::cerr << "GraphOptimizer: optimizing prefetch parameters..." << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("GraphOptimizer: optimizing prefetch parameters...");
+//	    std::cerr << "GraphOptimizer: optimizing prefetch parameters..." << std::endl;
 	  }
 	  try {
 	    auto prefetch = adjustPrefetchParameters(outIndex);
@@ -491,7 +523,9 @@ namespace NGT {
 	}
 	if (accuracyTableGeneration) {
 	  if (!logDisabled) {
-	    std::cerr << "GraphOptimizer: generating the accuracy table..." << std::endl;
+	      if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("GraphOptimizer: generating the accuracy table...");
+//	    std::cerr << "GraphOptimizer: generating the accuracy table..." << std::endl;
 	  }
 	  try {
 	    auto table = NGT::Optimizer::generateAccuracyTable(outIndex, numOfResults, numOfQueries);

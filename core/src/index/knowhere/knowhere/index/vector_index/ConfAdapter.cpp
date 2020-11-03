@@ -388,7 +388,7 @@ NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(knowhere::IndexParams::max_search_edges, -2, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
     CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
@@ -407,7 +407,7 @@ NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    CheckIntByRange(knowhere::IndexParams::max_search_edges, -2, NGT_MAX_EDGE_SIZE);
+    CheckIntByRange(knowhere::IndexParams::max_search_edges, -1, NGT_MAX_EDGE_SIZE);
     CheckFloatByRange(knowhere::IndexParams::epsilon, -1.0, 1.0);
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
