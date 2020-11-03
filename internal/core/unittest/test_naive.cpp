@@ -1,5 +1,3 @@
-
-
 #include <gtest/gtest.h>
 
 TEST(TestNaive, Naive) {

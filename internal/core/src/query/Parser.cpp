@@ -1,19 +1,20 @@
 #include <iostream>
-#include "pb/message.pb.h"
-#include "query/BooleanQuery.h"
-#include "query/BinaryQuery.h"
-#include "query/GeneralQuery.h"
-#include "segcore/SegmentBase.h"
 #include <random>
+#include "Parser.h"
 
 namespace milvus::wtf {
-
+using google::protobuf::RepeatedPtrField;
+using google::protobuf::RepeatedField;
+#if 0
+#if 0
 void
-CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
-               const google::protobuf::RepeatedField<google::protobuf::int64>& grpc_id_array,
-               engine::VectorsData& vectors) {
+CopyRowRecords(const RepeatedPtrField<proto::service::PlaceholderValue>& grpc_records,
+               const RepeatedField<int64_t>& grpc_id_array,
+               engine::VectorsData& vectors
+               ) {
     // step 1: copy vector data
     int64_t float_data_size = 0, binary_data_size = 0;
+
     for (auto& record : grpc_records) {
         float_data_size += record.float_data_size();
         binary_data_size += record.binary_data().size();
@@ -47,9 +48,11 @@ CopyRowRecords(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRo
     vectors.binary_data_.swap(binary_array);
     vectors.id_array_.swap(id_array);
 }
+#endif
 
 Status
 ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr& query, std::string& field_name) {
+    #if 0
     if (query_json.contains("term")) {
         auto leaf_query = std::make_shared<query_old::LeafQuery>();
         auto term_query = std::make_shared<query_old::TermQuery>();
@@ -59,7 +62,6 @@ ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr&
         term_query->json_obj = json_obj;
         milvus::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
-
         leaf_query->term_query = term_query;
         query->AddLeafQuery(leaf_query);
     } else if (query_json.contains("range")) {
@@ -84,6 +86,7 @@ ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr&
     } else {
         return Status{SERVER_INVALID_ARGUMENT, "Leaf query get wrong key"};
     }
+    #endif
     return Status::OK();
 }
 
@@ -91,6 +94,7 @@ Status
 ProcessBooleanQueryJson(const milvus::json& query_json,
                         query_old::BooleanQueryPtr& boolean_query,
                         query_old::QueryPtr& query_ptr) {
+                            #if 0
     if (query_json.empty()) {
         return Status{SERVER_INVALID_ARGUMENT, "BoolQuery is null"};
     }
@@ -163,15 +167,16 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         }
     }
-
+    #endif
     return Status::OK();
 }
 
 Status
-test(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
+DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
      const std::string& dsl_string,
      query_old::BooleanQueryPtr& boolean_query,
      query_old::QueryPtr& query_ptr) {
+         #if 0
     try {
         milvus::json dsl_json = json::parse(dsl_string);
 
@@ -231,5 +236,24 @@ test(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vect
     } catch (std::exception& e) {
         return Status(SERVER_INVALID_DSL_PARAMETER, e.what());
     }
+    #endif
+    return Status::OK();
 }
+
+#endif
+query_old::QueryPtr tester(proto::service::Query* request) {
+    query_old::BooleanQueryPtr boolean_query = std::make_shared<query_old::BooleanQuery>();
+    query_old::QueryPtr query_ptr = std::make_shared<query_old::Query>();
+    #if 0
+    query_ptr->collection_id = request->collection_name();
+    auto status = DeserializeJsonToBoolQuery(request->placeholders(), request->dsl(), boolean_query, query_ptr);
+    status = query_old::ValidateBooleanQuery(boolean_query);
+    query_old::GeneralQueryPtr general_query = std::make_shared<query_old::GeneralQuery>();
+    query_old::GenBinaryQuery(boolean_query, general_query->bin);
+    query_ptr->root = general_query;
+    #endif
+    return query_ptr;
+}
+
+
 }  // namespace milvus::wtf
