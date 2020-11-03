@@ -1,6 +1,5 @@
 #pragma once
 
-#include <pb/message.pb.h>
 #include "segcore/Partition.h"
 #include "SegmentDefs.h"
 
@@ -9,12 +8,6 @@ namespace milvus::segcore {
 class Collection {
  public:
     explicit Collection(std::string& collection_name, std::string& schema);
-
-    void
-    AddIndex(const grpc::IndexParam& index_param);
-
-    void
-    CreateIndex(std::string& index_config);
 
     void
     parse();
