@@ -1,8 +1,9 @@
 package reader
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
+
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type msgStreamNode struct {

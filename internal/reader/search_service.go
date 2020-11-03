@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 

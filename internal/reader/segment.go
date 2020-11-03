@@ -30,7 +30,7 @@ const (
 
 type Segment struct {
 	SegmentPtr       C.CSegmentBase
-	SegmentId        int64
+	SegmentID        int64
 	SegmentCloseTime uint64
 	LastMemSize      int64
 	SegmentStatus    int
@@ -72,7 +72,7 @@ func (s *Segment) GetDeletedCount() int64 {
 //	int
 //	Close(CSegmentBase c_segment);
 //	*/
-//	fmt.Println("Closing segment :", s.SegmentId)
+//	fmt.Println("Closing segment :", s.SegmentID)
 //
 //	var status = C.Close(s.SegmentPtr)
 //	s.SegmentStatus = SegmentClosed
@@ -226,9 +226,9 @@ func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord
 	var cQueryRawDataLength C.int
 
 	if vectorRecord.BinaryData != nil {
-		return nil, errors.New("Data of binary type is not supported yet")
+		return nil, errors.New("data of binary type is not supported yet")
 	} else if len(vectorRecord.FloatData) <= 0 {
-		return nil, errors.New("Null query vector data")
+		return nil, errors.New("null query vector data")
 	} else {
 		cQueryRawData = (*C.float)(&vectorRecord.FloatData[0])
 		cQueryRawDataLength = (C.int)(len(vectorRecord.FloatData))

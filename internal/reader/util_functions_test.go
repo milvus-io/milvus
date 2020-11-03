@@ -18,7 +18,8 @@ func TestUtilFunctions_GetKey2Segments(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -65,7 +66,7 @@ func TestUtilFunctions_GetCollectionByID(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	c := node.GetCollectionByID(int64(0))
@@ -112,7 +113,7 @@ func TestUtilFunctions_GetSegmentBySegmentID(t *testing.T) {
 	// 2. Get segment by segment id
 	var s0, err = node.GetSegmentBySegmentID(0)
 	assert.NoError(t, err)
-	assert.Equal(t, s0.SegmentId, int64(0))
+	assert.Equal(t, s0.SegmentID, int64(0))
 
 	node.Close()
 }
@@ -129,7 +130,7 @@ func TestUtilFunctions_FoundSegmentBySegmentID(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentId, int64(0))
+	assert.Equal(t, segment.SegmentID, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	b1 := node.FoundSegmentBySegmentID(int64(0))
@@ -168,7 +169,8 @@ func TestUtilFunctions_GetPartitionByName(t *testing.T) {
 func TestUtilFunctions_PrepareBatchMsg(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -189,8 +191,8 @@ func TestUtilFunctions_QueryJson2Info(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0, 0)
 
-	var queryJson = "{\"field_name\":\"age\",\"num_queries\":1,\"topK\":10}"
-	info := node.QueryJson2Info(&queryJson)
+	var queryJSON = "{\"field_name\":\"age\",\"num_queries\":1,\"topK\":10}"
+	info := node.QueryJSON2Info(&queryJSON)
 
 	assert.Equal(t, info.FieldName, "age")
 	assert.Equal(t, info.NumQueries, int64(1))

@@ -3,11 +3,12 @@ package reader
 import (
 	"context"
 	"fmt"
+	"log"
+	"sync"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
-	"log"
-	"sync"
 )
 
 type manipulationService struct {
@@ -148,7 +149,7 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 				}
 				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
 				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-				// node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+				// node.insertData.insertRecords[msg.SegmentID] = append(node.insertData.insertRecords[msg.SegmentID], msg.RowsData.Blob)
 			} else if msg.Op == msgPb.OpType_DELETE {
 				var r = DeleteRecord{
 					entityID:  msg.Uid,
@@ -202,7 +203,7 @@ func (node *QueryNode) MessagesPreprocess(insertDeleteMessages []*msgPb.InsertOr
 				}
 				node.insertData.insertIDs[msg.SegmentId] = append(node.insertData.insertIDs[msg.SegmentId], msg.Uid)
 				node.insertData.insertTimestamps[msg.SegmentId] = append(node.insertData.insertTimestamps[msg.SegmentId], msg.Timestamp)
-				// node.insertData.insertRecords[msg.SegmentId] = append(node.insertData.insertRecords[msg.SegmentId], msg.RowsData.Blob)
+				// node.insertData.insertRecords[msg.SegmentID] = append(node.insertData.insertRecords[msg.SegmentID], msg.RowsData.Blob)
 			} else if msg.Op == msgPb.OpType_DELETE {
 				var r = DeleteRecord{
 					entityID:  msg.Uid,

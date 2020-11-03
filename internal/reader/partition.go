@@ -19,14 +19,14 @@ type Partition struct {
 	Segments      []*Segment
 }
 
-func (p *Partition) NewSegment(segmentId int64) *Segment {
+func (p *Partition) NewSegment(segmentID int64) *Segment {
 	/*
 		CSegmentBase
 		NewSegment(CPartition partition, unsigned long segment_id);
 	*/
-	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentId))
+	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentID))
 
-	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentId: segmentId}
+	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentID: segmentID}
 	p.Segments = append(p.Segments, newSegment)
 	return newSegment
 }
@@ -42,8 +42,8 @@ func (p *Partition) DeleteSegment(node *QueryNode, segment *Segment) {
 	tmpSegments := make([]*Segment, 0)
 
 	for _, s := range p.Segments {
-		if s.SegmentId == segment.SegmentId {
-			delete(node.SegmentsMap, s.SegmentId)
+		if s.SegmentID == segment.SegmentID {
+			delete(node.SegmentsMap, s.SegmentID)
 		} else {
 			tmpSegments = append(tmpSegments, s)
 		}
