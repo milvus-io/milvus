@@ -510,12 +510,12 @@ func NewIdAllocator(ctx context.Context) *IdAllocator
 ```go
 type KVBase interface {
 	Load(key string) (string, error)
-  MultiLoad(keys []string)
+    MultiLoad(keys []string) ([]string, error)
 	Save(key, value string) error
-  MultiSave(kvs map[string]string)
+    MultiSave(kvs map[string]string) error
 	Remove(key string) error
-  MultiRemove(keys []string)
-  MultiSaveAndRemove(saves map[string]string, removals []string)
+    MultiRemove(keys []string) error
+    MultiSaveAndRemove(saves map[string]string, removals []string) error
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
 	LoadWithPrefix(key string) ( []string, []string, error)
