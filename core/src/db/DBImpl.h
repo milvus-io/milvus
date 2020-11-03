@@ -108,6 +108,9 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
                    std::vector<meta::CollectionSchema>& partition_schema_array) override;
 
     Status
+    CountPartitions(const std::string& collection_id, int64_t& partition_count) override;
+
+    Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) override;
 
     Status

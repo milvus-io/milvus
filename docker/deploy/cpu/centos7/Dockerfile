@@ -12,11 +12,16 @@
 FROM centos:centos7
 
 RUN yum install -y epel-release && \
-    yum install -y libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
+    yum install -y wget libgomp libgfortran4 mysql-devel openblas-devel lapack-devel && \
     rm -rf /var/cache/yum/*
 
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
+
+RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
+    chmod +x /tini
+
+ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /var/lib/milvus
 

@@ -97,6 +97,9 @@ class DB {
     ShowPartitions(const std::string& collection_id, std::vector<meta::CollectionSchema>& partition_schema_array) = 0;
 
     virtual Status
+    CountPartitions(const std::string& collection_id, int64_t& partition_count) = 0;
+
+    virtual Status
     InsertVectors(const std::string& collection_id, const std::string& partition_tag, VectorsData& vectors) = 0;
 
     virtual Status

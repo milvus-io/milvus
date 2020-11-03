@@ -45,6 +45,7 @@ set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
+define_option(MILVUS_FPGA_VERSION "Build FPGA version" OFF)
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
@@ -67,8 +68,6 @@ define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
 define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
 define_option(MILVUS_WITH_SQLITE "Build with SQLite library" ON)
-
-define_option(MILVUS_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
 
 define_option(MILVUS_WITH_MYSQLPP "Build with MySQL++" ON)
 

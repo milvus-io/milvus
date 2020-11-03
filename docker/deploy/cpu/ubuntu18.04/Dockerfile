@@ -12,7 +12,7 @@
 FROM ubuntu:18.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 libopenblas-dev liblapack3 && \
+    wget gfortran libsqlite3-dev libmysqlclient-dev libcurl4-openssl-dev python3 libopenblas-dev liblapack3 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -20,6 +20,11 @@ RUN ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/
 
 COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
+
+RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
+    chmod +x /tini
+
+ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /var/lib/milvus
 

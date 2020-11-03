@@ -104,7 +104,23 @@ extern const char* CONFIG_ENGINE_SIMD_TYPE;
 extern const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT;
 extern const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ;
 extern const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT;
-
+extern const char* CONFIG_ENGINE_MAX_PARTITION_NUM;
+extern const char* CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT;
+/* fpga resource config*/
+extern const char* CONFIG_FPGA_RESOURCE;
+extern const char* CONFIG_FPGA_RESOURCE_ENABLE;
+extern const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY;
+extern const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY_DEFAULT; /* 1 GB */
+extern const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD;
+extern const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD_DEFAULT;
+#ifdef MILVUS_FPGA_VERSION
+extern const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT;
+#else
+extern const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT;
+#endif
+extern const char* CONFIG_FPGA_RESOURCE_DELIMITER;
+extern const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES;
+extern const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES_DEFAULT;
 /* gpu resource config */
 extern const char* CONFIG_GPU_RESOURCE;
 extern const char* CONFIG_GPU_RESOURCE_ENABLE;
@@ -272,7 +288,18 @@ class Config {
     CheckEngineConfigSimdType(const std::string& value);
     Status
     CheckEngineSearchCombineMaxNq(const std::string& value);
-
+    Status
+    CheckEngineConfigMaxPartitionNum(const std::string& value);
+#ifdef MILVUS_FPGA_VERSION
+    Status
+    GetFpgaResourceConfigCacheThreshold(float& value);
+    Status
+    CheckFpgaResourceConfigEnable(const std::string& value);
+    Status
+    GetFpgaResourceConfigCacheCapacity(int64_t& value);
+    Status
+    CheckFpgaResourceConfigCacheThreshold(const std::string& value);
+#endif
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
     Status
@@ -396,7 +423,15 @@ class Config {
     GetEngineConfigSimdType(std::string& value);
     Status
     GetEngineSearchCombineMaxNq(int64_t& value);
+    Status
+    GetEngineConfigMaxPartitionNum(int64_t& value);
+#ifdef MILVUS_FPGA_VERSION
 
+    Status
+    GetFpgaResourceConfigEnable(bool& value);
+    Status
+    GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value);
+#endif
 #ifdef MILVUS_GPU_VERSION
     /* gpu resource config */
     Status
@@ -512,6 +547,8 @@ class Config {
     SetEngineConfigSimdType(const std::string& value);
     Status
     SetEngineSearchCombineMaxNq(const std::string& value);
+    Status
+    SetEngineConfigMaxPartitionNum(const std::string& value);
 #ifdef MILVUS_GPU_VERSION
 
     /* gpu resource config */

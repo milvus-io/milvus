@@ -15,7 +15,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         MySQLPP
         Prometheus
         SQLite
-        SQLite_ORM
         yaml-cpp
         libunwind
         gperftools
@@ -24,7 +23,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Opentracing
         fiu
         AWS
-        oatpp)
+        oatpp
+        armadillo)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -44,8 +44,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_prometheus()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
         build_sqlite()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite_ORM")
-        build_sqlite_orm()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "yaml-cpp")
         build_yamlcpp()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "libunwind")
@@ -64,6 +62,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "armadillo")
+        build_armadillo()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -334,6 +334,12 @@ else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
 endif ()
 
+if (DEFINED ENV{MILVUS_ARMADILLO_URL})
+    set(ARMADILLO_SOURCE_URL "$ENV{MILVUS_ARMADILLO_URL}")
+else ()
+    set(ARMADILLO_SOURCE_URL "https://gitlab.com/conradsnicta/armadillo-code/-/archive/9.900.x/armadillo-code-9.900.x.tar.gz")
+endif ()
+
 # ----------------------------------------------------------------------
 # Google gtest
 
@@ -600,64 +606,6 @@ if (MILVUS_WITH_SQLITE)
     resolve_dependency(SQLite)
     include_directories(SYSTEM "${SQLITE_INCLUDE_DIR}")
     link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
-endif ()
-
-# ----------------------------------------------------------------------
-# SQLite_ORM
-
-macro(build_sqlite_orm)
-    message(STATUS "Building SQLITE_ORM-${SQLITE_ORM_VERSION} from source")
-
-    set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix")
-    set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")
-    set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
-
-    if (NOT EXISTS ${SQLITE_ORM_INCLUDE_DIR})
-        file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
-
-        set(IS_EXIST_FILE FALSE)
-        foreach(url ${SQLITE_ORM_SOURCE_URLS})
-            file(DOWNLOAD ${url}
-                    ${SQLITE_ORM_TAR_NAME}
-                    TIMEOUT 60
-                    STATUS status
-                    LOG log)
-            list(GET status 0 status_code)
-            list(GET status 1 status_string)
-
-            if(status_code EQUAL 0)
-                message(STATUS "Downloading SQLITE_ORM ... done")
-                set(IS_EXIST_FILE TRUE)
-                break()
-            else()
-                string(APPEND logFailedURLs "error: downloading '${url}' failed
-                   status_code: ${status_code}
-                   status_string: ${status_string}
-                   log:
-                   --- LOG BEGIN ---
-                   ${log}
-                   --- LOG END ---
-                   "
-                  )
-            endif()
-        endforeach()
-
-        if(IS_EXIST_FILE STREQUAL "FALSE")
-            message(FATAL_ERROR "Each download failed!
-              ${logFailedURLs}
-              "
-            )
-        endif()
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${SQLITE_ORM_TAR_NAME}
-                WORKING_DIRECTORY ${SQLITE_ORM_PREFIX})
-
-    endif ()
-
-endmacro()
-
-if (MILVUS_WITH_SQLITE_ORM)
-    resolve_dependency(SQLite_ORM)
-    include_directories(SYSTEM "${SQLITE_ORM_INCLUDE_DIR}")
 endif ()
 
 # ----------------------------------------------------------------------
@@ -1157,4 +1105,49 @@ if(MILVUS_WITH_AWS)
     get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
 
+endif()
+
+# ----------------------------------------------------------------------
+# armadillo
+
+macro(build_armadillo)
+    message(STATUS "Building armadillo 9.9.x from source")
+    set(ARMADILLO_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/armadillo_ep-prefix/src/armadillo_ep")
+    set(ARMADILLO_INCLUDE_DIR "${ARMADILLO_PREFIX}/include")
+    set(ARMADILLO_CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${ARMADILLO_PREFIX}")
+
+    externalproject_add(armadillo_ep
+            URL ${ARMADILLO_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            PREFIX ${ARMADILLO_PREFIX}
+            INSTALL_DIR ${ARMADILLO_PREFIX}
+            CMAKE_ARGS  ${ARMADILLO_CMAKE_ARGS}
+            BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND ${MAKE} install
+            BUILD_BYPRODUCTS
+            ${ARMADILLO_SHARED_LIB}
+            )
+
+        file(MAKE_DIRECTORY "${ARMADILLO_INCLUDE_DIR}")
+        add_library(armadillo SHARED IMPORTED)
+        ExTernalProject_Get_Property(armadillo_ep INSTALL_DIR)
+    set_target_properties(armadillo
+        PROPERTIES
+            IMPORTED_GLOBAL    TRUE
+            IMPORTED_LOCATION "${INSTALL_DIR}/lib/libarmadillo.so"
+            INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include")
+
+    add_dependencies(armadillo armadillo_ep)
+endmacro()
+
+if(MILVUS_FPGA_VERSION)
+    resolve_dependency(armadillo)
+
+    get_target_property(ARMADILLO_INCLUDE_DIR armadillo INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
+    install(FILES
+            ${INSTALL_DIR}/lib/libarmadillo.so
+            ${INSTALL_DIR}/lib/libarmadillo.so.9
+            ${INSTALL_DIR}/lib/libarmadillo.so.9.900.4
+            DESTINATION lib)
 endif()

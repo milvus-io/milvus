@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreatePartitionRequest.h"
+#include "config/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -22,8 +23,6 @@
 
 namespace milvus {
 namespace server {
-
-constexpr uint64_t MAX_PARTITION_LIMIT = 4096;
 
 CreatePartitionRequest::CreatePartitionRequest(const std::shared_ptr<milvus::server::Context>& context,
                                                const std::string& collection_name, const std::string& tag)
@@ -61,28 +60,16 @@ CreatePartitionRequest::OnExecute() {
             return status;
         }
 
-        // only process root collection, ignore partition collection
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
-        fiu_do_on("CreatePartitionRequest.OnExecute.invalid_partition_tags",
-                  status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
+        // check partition total count
+        int64_t max_partition_num = 4096;
+        status = Config::GetInstance().GetEngineConfigMaxPartitionNum(max_partition_num);
         if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
-                return status;
-            }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
-            }
+            return status;
         }
 
-        // check partition total count
-        std::vector<engine::meta::CollectionSchema> schema_array;
-        status = DBWrapper::DB()->ShowPartitions(collection_name_, schema_array);
-        if (schema_array.size() >= MAX_PARTITION_LIMIT) {
+        int64_t partition_count = 0;
+        status = DBWrapper::DB()->CountPartitions(collection_name_, partition_count);
+        if (partition_count >= max_partition_num) {
             return Status(SERVER_UNSUPPORTED_ERROR, "The number of partitions exceeds the upper limit(4096)");
         }
 
@@ -95,6 +82,9 @@ CreatePartitionRequest::OnExecute() {
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("CreatePartitionRequest.OnExecute.throw_std_exception", throw std::exception());
         if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+            }
             // partition could exist
             if (status.code() == DB_ALREADY_EXIST) {
                 return Status(SERVER_INVALID_COLLECTION_NAME, status.message());

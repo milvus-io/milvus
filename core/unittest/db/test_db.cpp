@@ -200,7 +200,7 @@ TEST_F(DBTest, DB_TEST) {
 
             std::vector<std::string> tags;
             stat = db_->Query(dummy_context_, COLLECTION_NAME, tags, k, json_params, qxb, result_ids, result_distances);
-            ss << "Search " << j << " With Size " << count / milvus::engine::MB << " MB";
+            ss << "Search " << j << " With Size " << count / milvus::engine::MB << " MB" << stat.message();
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());

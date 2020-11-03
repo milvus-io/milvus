@@ -28,8 +28,11 @@ namespace knowhere {
 #define DEFAULT_MAX_K 16384
 #define DEFAULT_MIN_K 1
 #define DEFAULT_MIN_ROWS 1  // minimum size for build index
+#ifdef MILVUS_FPGA_VERSION
+#define DEFAULT_MAX_ROWS 300000000
+#else
 #define DEFAULT_MAX_ROWS 50000000
-
+#endif
 #define CheckIntByRange(key, min, max)                                                                   \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
         oricfg[key].get<int64_t>() < min) {                                                              \
@@ -169,7 +172,7 @@ IVFPQConfAdapter::GetValidM(int64_t dimension, int64_t m, IndexMode& mode) {
         mode = knowhere::IndexMode::MODE_CPU;
     }
 #endif
-    if (mode == knowhere::IndexMode::MODE_CPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
+    if (mode != knowhere::IndexMode::MODE_GPU && !IVFPQConfAdapter::GetValidCPUM(dimension, m)) {
         return false;
     }
 
@@ -325,38 +328,6 @@ ANNOYConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
 bool
 ANNOYConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-NGTPANNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
-
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
-
-    return true;
-}
-
-bool
-NGTPANNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
-    return ConfAdapter::CheckSearch(oricfg, type, mode);
-}
-
-bool
-NGTONNGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
-    static std::vector<std::string> METRICS{knowhere::Metric::L2, knowhere::Metric::HAMMING, knowhere::Metric::JACCARD};
-
-    CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
-    CheckIntByRange(knowhere::meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
-    CheckStrByValues(knowhere::Metric::TYPE, METRICS);
-
-    return true;
-}
-
-bool
-NGTONNGConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }
 

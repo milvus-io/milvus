@@ -33,6 +33,7 @@
 #include "MetaConsts.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
+#include "db/meta/MetaSchema.h"
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
@@ -77,93 +78,6 @@ HandleException(const std::string& desc, const char* what = nullptr) {
     LOG_ENGINE_ERROR_ << msg;
     return Status(DB_META_TRANSACTION_FAILED, msg);
 }
-
-class MetaField {
- public:
-    MetaField(const std::string& name, const std::string& type, const std::string& setting)
-        : name_(name), type_(type), setting_(setting) {
-    }
-
-    std::string
-    name() const {
-        return name_;
-    }
-
-    std::string
-    ToString() const {
-        return name_ + " " + type_ + " " + setting_;
-    }
-
-    // mysql field type has additional information. for instance, a filed type is defined as 'BIGINT'
-    // we get the type from sql is 'bigint(20)', so we need to ignore the '(20)'
-    bool
-    IsEqual(const MetaField& field) const {
-        size_t name_len_min = field.name_.length() > name_.length() ? name_.length() : field.name_.length();
-        size_t type_len_min = field.type_.length() > type_.length() ? type_.length() : field.type_.length();
-
-        // only check field type, don't check field width, for example: VARCHAR(255) and VARCHAR(100) is equal
-        std::vector<std::string> type_split;
-        milvus::server::StringHelpFunctions::SplitStringByDelimeter(type_, "(", type_split);
-        if (!type_split.empty()) {
-            type_len_min = type_split[0].length() > type_len_min ? type_len_min : type_split[0].length();
-        }
-
-        // field name must be equal, ignore type width
-        return strncasecmp(field.name_.c_str(), name_.c_str(), name_len_min) == 0 &&
-               strncasecmp(field.type_.c_str(), type_.c_str(), type_len_min) == 0;
-    }
-
- private:
-    std::string name_;
-    std::string type_;
-    std::string setting_;
-};
-
-using MetaFields = std::vector<MetaField>;
-
-class MetaSchema {
- public:
-    MetaSchema(const std::string& name, const MetaFields& fields) : name_(name), fields_(fields) {
-    }
-
-    std::string
-    name() const {
-        return name_;
-    }
-
-    std::string
-    ToString() const {
-        std::string result;
-        for (auto& field : fields_) {
-            if (!result.empty()) {
-                result += ",";
-            }
-            result += field.ToString();
-        }
-        return result;
-    }
-
-    // if the outer fields contains all this MetaSchema fields, return true
-    // otherwise return false
-    bool
-    IsEqual(const MetaFields& fields) const {
-        std::vector<std::string> found_field;
-        for (const auto& this_field : fields_) {
-            for (const auto& outer_field : fields) {
-                if (this_field.IsEqual(outer_field)) {
-                    found_field.push_back(this_field.name());
-                    break;
-                }
-            }
-        }
-
-        return found_field.size() == fields_.size();
-    }
-
- private:
-    std::string name_;
-    MetaFields fields_;
-};
 
 // Environment schema
 static const MetaSchema ENVIRONMENT_SCHEMA(META_ENVIRONMENT, {
@@ -1480,7 +1394,7 @@ MySQLMetaImpl::CreatePartition(const std::string& collection_id, const std::stri
 
     // not allow create partition under partition
     if (!collection_schema.owner_collection_.empty()) {
-        return Status(DB_ERROR, "Nested partition is not allowed");
+        return Status(DB_NOT_FOUND, "Nested partition is not allowed");
     }
 
     // trim side-blank of tag, only compare valid characters
@@ -1612,6 +1526,38 @@ MySQLMetaImpl::ShowPartitions(const std::string& collection_id,
         }
     } catch (std::exception& e) {
         return HandleException("Failed to show partitions", e.what());
+    }
+
+    return Status::OK();
+}
+
+Status
+MySQLMetaImpl::CountPartitions(const std::string& collection_id, int64_t& partition_count) {
+    try {
+        server::MetricCollector metric;
+        mysqlpp::StoreQueryResult res;
+        {
+            mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+
+            bool is_null_connection = (connectionPtr == nullptr);
+            if (is_null_connection) {
+                return Status(DB_ERROR, "Failed to connect to meta server(mysql)");
+            }
+
+            mysqlpp::Query statement = connectionPtr->query();
+            statement << "SELECT count(*) FROM " << META_TABLES << " WHERE owner_table = " << mysqlpp::quote
+                      << collection_id << " AND state <> " << std::to_string(CollectionSchema::TO_DELETE) << ";";
+
+            LOG_ENGINE_DEBUG_ << "CountPartitions: " << statement.str();
+
+            res = statement.store();
+        }  // Scoped Connection
+
+        for (auto& resRow : res) {
+            partition_count = resRow["count(*)"];
+        }
+    } catch (std::exception& e) {
+        return HandleException("Failed to count partitions", e.what());
     }
 
     return Status::OK();

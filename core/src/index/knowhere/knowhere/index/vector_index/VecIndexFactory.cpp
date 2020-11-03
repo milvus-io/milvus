@@ -21,11 +21,12 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexNGTONNG.h"
-#include "knowhere/index/vector_index/IndexNGTPANNG.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/index/vector_index/IndexSPTAG.h"
 
+#ifdef MILVUS_FPGA_VERSION
+#include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
+#endif
 #ifdef MILVUS_GPU_VERSION
 #include <cuda.h>
 #include "knowhere/index/vector_index/gpu/IndexGPUIDMAP.h"
@@ -57,6 +58,12 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
             return std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
         }
 #endif
+#ifdef MILVUS_FPGA_VERSION
+        if (mode == IndexMode::MODE_FPGA) {
+            // LOG_ENGINE_DEBUG_ << " fpga enable indexmode::mode_fpga ";
+            return std::make_shared<knowhere::FPGAIVFPQ>();
+        }
+#endif
         return std::make_shared<knowhere::IVFPQ>();
     } else if (type == IndexEnum::INDEX_FAISS_IVFSQ8) {
 #ifdef MILVUS_GPU_VERSION
@@ -83,10 +90,6 @@ VecIndexFactory::CreateVecIndex(const IndexType& type, const IndexMode mode) {
         return std::make_shared<knowhere::IndexHNSW>();
     } else if (type == IndexEnum::INDEX_ANNOY) {
         return std::make_shared<knowhere::IndexAnnoy>();
-    } else if (type == IndexEnum::INDEX_NGTPANNG) {
-        return std::make_shared<knowhere::IndexNGTPANNG>();
-    } else if (type == IndexEnum::INDEX_NGTONNG) {
-        return std::make_shared<knowhere::IndexNGTONNG>();
     } else {
         return nullptr;
     }

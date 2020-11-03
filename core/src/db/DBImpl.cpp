@@ -45,7 +45,6 @@
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/BuildIndexJob.h"
-#include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
@@ -656,12 +655,6 @@ DBImpl::DropPartition(const std::string& partition_name) {
         return status;
     }
 
-    // scheduler will determine when to delete collection files
-    auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
-    scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(partition_name, meta_ptr_, nres);
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitAndDelete();
-
     return Status::OK();
 }
 
@@ -692,6 +685,15 @@ DBImpl::ShowPartitions(const std::string& collection_id, std::vector<meta::Colle
     }
 
     return meta_ptr_->ShowPartitions(collection_id, partition_schema_array);
+}
+
+Status
+DBImpl::CountPartitions(const std::string& collection_id, int64_t& partition_count) {
+    if (!initialized_.load(std::memory_order_acquire)) {
+        return SHUTDOWN_ERROR;
+    }
+
+    return meta_ptr_->CountPartitions(collection_id, partition_count);
 }
 
 Status

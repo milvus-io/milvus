@@ -117,7 +117,23 @@ const char* CONFIG_ENGINE_SIMD_TYPE = "simd_type";
 const char* CONFIG_ENGINE_SIMD_TYPE_DEFAULT = "auto";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ = "search_combine_nq";
 const char* CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT = "64";
-
+const char* CONFIG_ENGINE_MAX_PARTITION_NUM = "max_partition_num";
+const char* CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT = "4096";
+/* fpga resource config */
+const char* CONFIG_FPGA_RESOURCE = "fpga";
+const char* CONFIG_FPGA_RESOURCE_ENABLE = "enable";
+const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY = "cache_size";
+const char* CONFIG_FPGA_RESOURCE_CACHE_CAPACITY_DEFAULT = "1073741824"; /* 1 GB */
+const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD = "cache_threshold";
+const char* CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD_DEFAULT = "0.7";
+#ifdef MILVUS_FPGA_VERSION
+const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT = "true";
+#else
+const char* CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT = "false";
+#endif
+const char* CONFIG_FPGA_RESOURCE_DELIMITER = ",";
+const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES = "search_devices";
+const char* CONFIG_FPGA_RESOURCE_SEARCH_RESOURCES_DEFAULT = "fpga0";
 /* gpu resource config */
 const char* CONFIG_GPU_RESOURCE = "gpu";
 const char* CONFIG_GPU_RESOURCE_ENABLE = "enable";
@@ -187,7 +203,8 @@ static const std::unordered_map<std::string, std::string> milvus_config_version_
                                                                                      {"0.10.0", "0.5"},
                                                                                      {"0.10.1", "0.5"},
                                                                                      {"0.10.2", "0.5"},
-                                                                                     {"0.10.3", "0.5"}});
+                                                                                     {"0.10.3", "0.5"},
+                                                                                     {"0.10.4", "0.5"}});
 
 /////////////////////////////////////////////////////////////
 Config::Config() {
@@ -209,6 +226,9 @@ Config::Config() {
 
     std::string node_search_combine = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ;
     config_callback_[node_search_combine] = empty_map;
+
+    std::string node_max_partition = std::string(CONFIG_ENGINE) + "." + CONFIG_ENGINE_MAX_PARTITION_NUM;
+    config_callback_[node_max_partition] = empty_map;
 
     // gpu resources config
     std::string node_gpu_enable = std::string(CONFIG_GPU_RESOURCE) + "." + CONFIG_GPU_RESOURCE_ENABLE;
@@ -371,6 +391,9 @@ Config::ValidateConfig() {
     std::string engine_simd_type;
     STATUS_CHECK(GetEngineConfigSimdType(engine_simd_type));
 
+    int64_t max_partition_num;
+    STATUS_CHECK(GetEngineConfigMaxPartitionNum(max_partition_num));
+
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
     bool gpu_resource_enable;
@@ -491,6 +514,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
     STATUS_CHECK(SetEngineConfigSimdType(CONFIG_ENGINE_SIMD_TYPE_DEFAULT));
     STATUS_CHECK(SetEngineSearchCombineMaxNq(CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT));
+    STATUS_CHECK(SetEngineConfigMaxPartitionNum(CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT));
 
     /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
@@ -630,6 +654,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetEngineConfigSimdType(value);
         } else if (child_key == CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ) {
             status = SetEngineSearchCombineMaxNq(value);
+        } else if (child_key == CONFIG_ENGINE_MAX_PARTITION_NUM) {
+            status = SetEngineConfigMaxPartitionNum(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1325,6 +1351,20 @@ Config::CheckMetricConfigPort(const std::string& value) {
     return Status::OK();
 }
 
+#ifdef MILVUS_FPGA_VERSION
+Status
+Config::CheckFpgaResourceConfigEnable(const std::string& value) {
+    fiu_return_on("check_config_fpga_resource_enable_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+    /* if (!ValidateStringIsBool(value).ok()) {
+         std::string msg = "Invalid fpga resource config: " + value + ". Possible reason: fpga.enable is not a
+     boolean."; return Status(SERVER_INVALID_ARGUMENT, msg);
+     }*/
+    return Status::OK();
+}
+
+#endif
+
 /* cache config */
 Status
 Config::CheckCacheConfigCpuCacheCapacity(const std::string& value) {
@@ -1587,6 +1627,16 @@ Config::CheckEngineSearchCombineMaxNq(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::string msg = "Invalid omp thread num: " + value +
                           ". Possible reason: engine_config.omp_thread_num is not a positive integer.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckEngineConfigMaxPartitionNum(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
+        std::string msg = "Invalid max partition number: " + value +
+                          ". Possible reason: engine_config.max_partition_num is not a positive integer.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
     return Status::OK();
@@ -2052,6 +2102,72 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
     return CheckGeneralConfigMetaURI(value);
 }
 
+#ifdef MILVUS_FPGA_VERSION
+Status
+Config::GetFpgaResourceConfigEnable(bool& value) {
+    std::string str =
+        GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_ENABLE, CONFIG_FPGA_RESOURCE_ENABLE_DEFAULT);
+
+    STATUS_CHECK(CheckFpgaResourceConfigEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+Status
+Config::GetFpgaResourceConfigSearchResources(std::vector<int64_t>& value) {
+    value.push_back(0);
+    return Status::OK();
+}
+Status
+Config::GetFpgaResourceConfigCacheCapacity(int64_t& value) {
+    bool fpga_resource_enable = false;
+    STATUS_CHECK(GetFpgaResourceConfigEnable(fpga_resource_enable));
+    fiu_do_on("Config.GetFpgaResourceConfigCacheCapacity.diable_fpga_resource", fpga_resource_enable = false);
+    if (!fpga_resource_enable) {
+        std::string msg = "FPGA not supported. Possible reason: fpga.enable is set to false.";
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+    }
+    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_CACHE_CAPACITY,
+                                   CONFIG_FPGA_RESOURCE_CACHE_CAPACITY_DEFAULT);
+    std::string err;
+    value = parse_bytes(str, err);
+    // value = std::stoll(str);
+    return Status::OK();
+}
+Status
+Config::GetFpgaResourceConfigCacheThreshold(float& value) {
+    bool fpga_resource_enable = false;
+    STATUS_CHECK(GetFpgaResourceConfigEnable(fpga_resource_enable));
+    fiu_do_on("Config.GetFpgaResourceConfigCacheThreshold.diable_fpga_resource", fpga_resource_enable = false);
+    if (!fpga_resource_enable) {
+        std::string msg = "FPGA not supported. Possible reason: fpga.enable is set to false.";
+        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+    }
+    std::string str = GetConfigStr(CONFIG_FPGA_RESOURCE, CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD,
+                                   CONFIG_FPGA_RESOURCE_CACHE_THRESHOLD_DEFAULT);
+    STATUS_CHECK(CheckFpgaResourceConfigCacheThreshold(str));
+    value = std::stof(str);
+    return Status::OK();
+}
+Status
+Config::CheckFpgaResourceConfigCacheThreshold(const std::string& value) {
+    fiu_return_on("check_config_fpga_resource_cache_threshold_fail", Status(SERVER_INVALID_ARGUMENT, ""));
+
+    /* if (!ValidateStringIsFloat(value).ok()) {
+         std::string msg = "Invalid fpga cache threshold: " + value +
+                           ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+         return Status(SERVER_INVALID_ARGUMENT, msg);
+     } else {
+         float fpga_cache_threshold = std::stof(value);
+         if (fpga_cache_threshold <= 0.0 || fpga_cache_threshold >= 1.0) {
+             std::string msg = "Invalid fpga cache threshold: " + value +
+                               ". Possible reason: fpga.cache_threshold is not in range (0.0, 1.0].";
+             return Status(SERVER_INVALID_ARGUMENT, msg);
+         }
+     }*/
+    return Status::OK();
+}
+#endif
+
 /* network config */
 Status
 Config::GetNetworkConfigBindAddress(std::string& value) {
@@ -2302,6 +2418,15 @@ Config::GetEngineSearchCombineMaxNq(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ_DEFAULT);
     //    STATUS_CHECK(CheckEngineSearchCombineMaxNq(str));
+    value = std::stoll(str);
+    return Status::OK();
+}
+
+Status
+Config::GetEngineConfigMaxPartitionNum(int64_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_MAX_PARTITION_NUM, CONFIG_ENGINE_MAX_PARTITION_NUM_DEFAULT);
+    STATUS_CHECK(CheckEngineConfigMaxPartitionNum(str));
     value = std::stoll(str);
     return Status::OK();
 }
@@ -2761,8 +2886,15 @@ Config::SetEngineSearchCombineMaxNq(const std::string& value) {
     return ExecCallBacks(CONFIG_ENGINE, CONFIG_ENGINE_SEARCH_COMBINE_MAX_NQ, value);
 }
 
+Status
+Config::SetEngineConfigMaxPartitionNum(const std::string& value) {
+    STATUS_CHECK(CheckEngineConfigMaxPartitionNum(value));
+    return SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_MAX_PARTITION_NUM, value);
+}
+
 /* gpu resource config */
 #ifdef MILVUS_GPU_VERSION
+
 Status
 Config::SetGpuResourceConfigEnable(const std::string& value) {
     STATUS_CHECK(CheckGpuResourceConfigEnable(value));
