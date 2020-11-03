@@ -28,11 +28,11 @@ DiskResource::DiskResource(std::string name, uint64_t device_id, bool enable_exe
 }
 
 void
-DiskResource::LoadFile(TaskPtr task) {
+DiskResource::Load(TaskPtr task) {
 }
 
 void
-DiskResource::Process(TaskPtr task) {
+DiskResource::Execute(TaskPtr task) {
 }
 
 }  // namespace scheduler
