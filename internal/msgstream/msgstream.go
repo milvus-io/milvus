@@ -2,7 +2,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"github.com/apache/pulsar-client-go/pulsar"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
@@ -142,7 +141,27 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) commonPb.Status {
 			); err != nil {
 				log.Printf("post into pulsar filed, error = %v", err)
 			}
-			fmt.Println("send a msg")
+		}
+	}
+
+	return commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
+}
+
+func (ms *PulsarMsgStream) BroadCast(msgPack *MsgPack) commonPb.Status {
+	producerLen := len(ms.producers)
+	for _, v := range msgPack.Msgs {
+		mb, status := (*ms.msgMarshaler).Marshal(v)
+		if status.ErrorCode != commonPb.ErrorCode_SUCCESS {
+			log.Printf("Marshal ManipulationReqMsg failed, error ")
+			continue
+		}
+		for i := 0; i < producerLen; i++ {
+			if _, err := (*ms.producers[i]).Send(
+				context.Background(),
+				&pulsar.ProducerMessage{Payload: mb},
+			); err != nil {
+				log.Printf("post into pulsar filed, error = %v", err)
+			}
 		}
 	}
 
