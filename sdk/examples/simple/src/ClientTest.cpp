@@ -205,20 +205,17 @@ ClientTest::GetEntityByID(const std::vector<int64_t>& id_array) {
 
 void
 ClientTest::SearchEntities() {
-    nlohmann::json dsl_json, vector_param_json;
-    milvus_sdk::Utils::GenDSLJson(dsl_json, vector_param_json, TOP_K, "L2");
-
+    nlohmann::json dsl_json;
     std::vector<milvus::VectorData> query_embedding;
     milvus_sdk::Utils::BuildVectors(COLLECTION_DIMENSION, 1, query_embedding);
-
-    milvus::VectorParam vector_param = {vector_param_json.dump(), query_embedding};
+    milvus_sdk::Utils::GenDSLJson(dsl_json, TOP_K, "L2", query_embedding);
 
     std::vector<std::string> get_fields{"duration", "release_year", "embedding"};
     nlohmann::json json_params = {{"fields", get_fields}};
 
     std::vector<std::string> partition_tags;
     milvus::TopKQueryResult topk_query_result;
-    auto status = conn_->Search(COLLECTION_NAME, partition_tags, dsl_json.dump(), vector_param, json_params.dump(),
+    auto status = conn_->Search(COLLECTION_NAME, partition_tags, dsl_json, json_params.dump(),
                                 topk_query_result);
 
     std::cout << " Search function call result: " << std::endl;

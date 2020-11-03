@@ -85,8 +85,8 @@ class Utils {
     GenLeafQuery();
 
     static void
-    GenDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, int64_t topk,
-               const std::string& metric_type);
+    GenDSLJson(nlohmann::json& dsl_json, int64_t topk, const std::string& metric_type,
+               std::vector<milvus::VectorData>& vectors);
 
     static void
     GenPureVecDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type);

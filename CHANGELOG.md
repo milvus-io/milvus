@@ -12,6 +12,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4113 After milvus 0.11.0 version vector data is misaligned
 
 ## Feature
+-   \#4163 Update C++ sdk search interface
 
 ## Improvement
 -   \#4096 Improve performance for create large amount of partitions
