@@ -407,7 +407,6 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    @pytest.mark.level(2)
     def test_insert_with_field_type_not_match(self, connect, collection):
         '''
         target: test insert entities, with the entity field type updated
@@ -415,6 +414,17 @@ class TestInsertBase:
         expected: error raised
         '''
         tmp_entity = update_field_type(copy.deepcopy(default_entity), "int64", DataType.FLOAT)
+        with pytest.raises(Exception):
+            connect.insert(collection, tmp_entity)
+
+    @pytest.mark.level(2)
+    def test_insert_with_field_type_not_match_B(self, connect, collection):
+        '''
+        target: test insert entities, with the entity field type updated
+        method: update entity field type
+        expected: error raised
+        '''
+        tmp_entity = update_field_type(copy.deepcopy(default_entity), "int64", DataType.DOUBLE)
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
