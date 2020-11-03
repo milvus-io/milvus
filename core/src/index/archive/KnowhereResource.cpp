@@ -16,6 +16,7 @@
 #include <faiss/Clustering.h>
 #include <faiss/utils/distances.h>
 
+#include "NGT/lib/NGT/defines.h"
 #include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
 #include "faiss/utils/utils.h"
@@ -134,6 +135,9 @@ KnowhereResource::Initialize() {
 
     faiss::LOG_ERROR_ = &knowhere::log_error_;
     faiss::LOG_WARNING_ = &knowhere::log_warning_;
+    NGT_LOG_ERROR_ = &knowhere::log_error_;
+    NGT_LOG_WARNING_ = &knowhere::log_warning_;
+    //    NGT_LOG_DEBUG_ = &knowhere::log_debug_;
     if (config.engine.stat_optimizer_enable()) {
         faiss::LOG_DEBUG_ = &knowhere::log_debug_;
     }
