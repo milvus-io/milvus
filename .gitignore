@@ -41,6 +41,7 @@ sdk/cmake_build_release
 # Compiled source
 bin/
 lib/
+cmake_build/
 *.a
 *.so
 *.so.*
