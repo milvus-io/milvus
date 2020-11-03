@@ -8,14 +8,14 @@ import (
 type MsgType uint32
 
 const (
-	kInsert       MsgType = 400
-	kDelete       MsgType = 401
-	kSearch       MsgType = 500
-	kSearchResult MsgType = 1000
+	KInsert       MsgType = 400
+	KDelete       MsgType = 401
+	KSearch       MsgType = 500
+	KSearchResult MsgType = 1000
 
-	kSegmentStatics MsgType = 1100
-	kTimeTick       MsgType = 1200
-	kTimeSync       MsgType = 1201
+	KSegmentStatics MsgType = 1100
+	KTimeTick       MsgType = 1200
+	KTimeSync       MsgType = 1201
 )
 
 type TsMsg interface {
@@ -68,9 +68,9 @@ func (it InsertTask) EndTs() Timestamp {
 
 func (it InsertTask) Type() MsgType {
 	if it.ReqType == internalPb.ReqType_kTimeTick {
-		return kTimeSync
+		return KTimeSync
 	}
-	return kInsert
+	return KInsert
 }
 
 func (it InsertTask) HashKeys() []int32 {
@@ -119,9 +119,9 @@ func (dt DeleteTask) EndTs() Timestamp {
 
 func (dt DeleteTask) Type() MsgType {
 	if dt.ReqType == internalPb.ReqType_kTimeTick {
-		return kTimeSync
+		return KTimeSync
 	}
-	return kDelete
+	return KDelete
 }
 
 func (dt DeleteTask) HashKeys() []int32 {
@@ -148,9 +148,9 @@ func (st SearchTask) EndTs() Timestamp {
 
 func (st SearchTask) Type() MsgType {
 	if st.ReqType == internalPb.ReqType_kTimeTick {
-		return kTimeSync
+		return KTimeSync
 	}
-	return kSearch
+	return KSearch
 }
 
 func (st SearchTask) HashKeys() []int32 {
@@ -176,7 +176,7 @@ func (srt SearchResultTask) EndTs() Timestamp {
 }
 
 func (srt SearchResultTask) Type() MsgType {
-	return kSearchResult
+	return KSearchResult
 }
 
 func (srt SearchResultTask) HashKeys() []int32 {
@@ -202,7 +202,7 @@ func (tst TimeSyncTask) EndTs() Timestamp {
 }
 
 func (tst TimeSyncTask) Type() MsgType {
-	return kTimeSync
+	return KTimeSync
 }
 
 func (tst TimeSyncTask) HashKeys() []int32 {

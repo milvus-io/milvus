@@ -11,7 +11,7 @@ import (
 )
 
 //func (node *QueryNode) SegmentsManagement() {
-//	//node.queryNodeTimeSync.UpdateTSOTimeSync()
+//	//node.queryNodeTimeSync.updateTSOTimeSync()
 //	//var timeNow = node.queryNodeTimeSync.TSOTimeSync
 //
 //	timeNow := node.messageClient.GetTimeNow() >> 18

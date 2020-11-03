@@ -273,7 +273,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 			tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
 			// TODO:: Find the EOF
-			if (*tsMsg).Type() == kTimeSync {
+			if (*tsMsg).Type() == KTimeSync {
 				eofMsgMap[channelIndex] = (*tsMsg).EndTs()
 				wg.Done()
 				return
