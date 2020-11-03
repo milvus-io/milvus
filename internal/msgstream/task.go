@@ -186,7 +186,7 @@ func (srt SearchResultTask) HashKeys() []int32 {
 /////////////////////////////////////////TimeSync//////////////////////////////////////////
 type TimeSyncTask struct {
 	HashValues []int32
-	internalPb.TimeSyncMsg
+	internalPb.TimeTickMsg
 }
 
 func (tst TimeSyncTask) SetTs(ts Timestamp) {

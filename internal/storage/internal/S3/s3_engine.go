@@ -1,4 +1,4 @@
-package S3_driver
+package s3driver
 
 import (
 	"bytes"

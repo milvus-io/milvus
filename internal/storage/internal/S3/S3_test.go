@@ -1,15 +1,14 @@
-package S3_driver_test
+package s3driver
 
 import (
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	s3_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/S3"
 )
 
 var ctx = context.Background()
-var client, err = s3_driver.NewS3Driver(ctx)
+var client, err = NewS3Driver(ctx)
 
 func TestS3Driver_PutRowAndGetRow(t *testing.T) {
 	err = client.PutRow(ctx, []byte("bar"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)

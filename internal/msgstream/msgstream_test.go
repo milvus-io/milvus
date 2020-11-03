@@ -86,13 +86,13 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 		}
 		tsMsg = searchResultMsg
 	case kTimeSync:
-		timeSyncResult := internalPb.TimeSyncMsg{
+		timeSyncResult := internalPb.TimeTickMsg{
 			PeerId:    reqId,
 			Timestamp: 1,
 		}
 		timeSyncMsg := TimeSyncTask{
 			HashValues:  []int32{hashValue},
-			TimeSyncMsg: timeSyncResult,
+			TimeTickMsg: timeSyncResult,
 		}
 		tsMsg = timeSyncMsg
 	case kTimeTick:
