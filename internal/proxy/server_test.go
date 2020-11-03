@@ -10,6 +10,9 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -25,8 +28,12 @@ type testMasterServer struct {
 	mpb.UnimplementedMasterServer
 }
 
-func (*testMasterServer) CreateCollection(ctx context.Context, req *pb.Mapping) (*pb.Status, error) {
-	return &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS, Reason: req.CollectionName}, nil
+func (s *testMasterServer) CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest) (*commonpb.Status, error) {
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}, nil
+
 }
 func (*testMasterServer) CreateIndex(ctx context.Context, req *pb.IndexParam) (*pb.Status, error) {
 	return &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS, Reason: req.IndexName}, nil
