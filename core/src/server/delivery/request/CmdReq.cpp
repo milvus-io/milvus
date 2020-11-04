@@ -15,7 +15,6 @@
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "src/version.h"
-#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <algorithm>
@@ -83,7 +82,7 @@ CmdReq::OnExecute() {
         try {
             auto words = split(cmd_, ' ');
             if (words.size() == 3) {
-                ConfigMgr::GetInstance().Set(words[1], words[2]);
+                ConfigMgr::GetInstance().Set(words[1], words[2], true);
             } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }

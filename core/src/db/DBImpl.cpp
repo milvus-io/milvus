@@ -1189,7 +1189,7 @@ DBImpl::IsBuildingIndex() {
 }
 
 void
-DBImpl::ConfigUpdate(const std::string& name) {
+DBImpl::ValueUpdate(const std::string& name) {
     if (name == "storage.auto_flush_interval") {
         options_.auto_flush_interval_ = config.storage.auto_flush_interval();
     }

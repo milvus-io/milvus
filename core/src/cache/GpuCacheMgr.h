@@ -27,7 +27,7 @@ class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 using MutexPtr = std::shared_ptr<std::mutex>;
 
-class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
+class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ValueObserver {
  public:
     explicit GpuCacheMgr(int64_t gpu_id);
 
@@ -38,7 +38,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
 
  public:
     void
-    ConfigUpdate(const std::string& name) override;
+    ValueUpdate(const std::string& name) override;
 
  private:
     int64_t gpu_id_;

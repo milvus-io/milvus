@@ -41,7 +41,7 @@ CpuCacheMgr::GetInstance() {
 }
 
 void
-CpuCacheMgr::ConfigUpdate(const std::string& name) {
+CpuCacheMgr::ValueUpdate(const std::string& name) {
     SetCapacity(config.cache.cache_size());
 }
 

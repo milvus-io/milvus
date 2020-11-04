@@ -22,7 +22,7 @@
 namespace milvus {
 namespace server {
 
-class SearchReqStrategy : public ReqStrategy, public ConfigObserver {
+class SearchReqStrategy : public ReqStrategy, public ValueObserver {
  public:
     SearchReqStrategy();
 
@@ -33,7 +33,7 @@ class SearchReqStrategy : public ReqStrategy, public ConfigObserver {
 
  public:
     void
-    ConfigUpdate(const std::string& name);
+    ValueUpdate(const std::string& name);
 
  private:
     int64_t search_combine_nq_ = 0;

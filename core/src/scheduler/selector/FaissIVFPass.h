@@ -29,7 +29,7 @@
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFPass : public Pass, public ConfigObserver {
+class FaissIVFPass : public Pass, public ValueObserver {
  public:
     FaissIVFPass();
 
@@ -44,7 +44,7 @@ class FaissIVFPass : public Pass, public ConfigObserver {
 
  public:
     void
-    ConfigUpdate(const std::string& name) override;
+    ValueUpdate(const std::string& name) override;
 
  private:
     int64_t idx_ = 0;

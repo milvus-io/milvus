@@ -50,7 +50,7 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
 }
 
 void
-GpuCacheMgr::ConfigUpdate(const std::string& name) {
+GpuCacheMgr::ValueUpdate(const std::string& name) {
     std::lock_guard<std::mutex> lock(global_mutex_);
     for (auto& it : instance_) {
         it.second->SetCapacity(config.gpu.cache_size());

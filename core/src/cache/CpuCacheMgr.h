@@ -21,7 +21,7 @@
 namespace milvus {
 namespace cache {
 
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
+class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ValueObserver {
  private:
     CpuCacheMgr();
 
@@ -33,7 +33,7 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
 
  public:
     void
-    ConfigUpdate(const std::string& name) override;
+    ValueUpdate(const std::string& name) override;
 };
 
 }  // namespace cache

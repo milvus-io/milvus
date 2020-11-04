@@ -11,12 +11,10 @@
 
 #include <yaml-cpp/yaml.h>
 #include <fstream>
-#include <iostream>
 #include <regex>
 #include <unordered_map>
 
 #include "config/ConfigMgr.h"
-#include "utils/Json.h"
 
 namespace {
 void
@@ -59,37 +57,9 @@ InitConfig();
 
 extern const char* config_file_template;
 
-void
-BaseConfigMgr::Attach(const std::string& name, ConfigObserver* observer) {
-    std::lock_guard<std::mutex> lock(observer_mutex_);
-    observers_[name].push_back(observer);
-}
-
-void
-BaseConfigMgr::Detach(const std::string& name, ConfigObserver* observer) {
-    std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end()) {
-        return;
-    }
-    auto& ob_list = observers_[name];
-    ob_list.remove(observer);
-}
-
-void
-BaseConfigMgr::Notify(const std::string& name) {
-    std::lock_guard<std::mutex> lock(observer_mutex_);
-    if (observers_.find(name) == observers_.end()) {
-        return;
-    }
-    auto& ob_list = observers_[name];
-    for (auto& ob : ob_list) {
-        ob->ConfigUpdate(name);
-    }
-}
-
 ConfigMgr ConfigMgr::instance;
 
-ConfigMgr::ConfigMgr() : config_list_(InitConfig()) {
+ConfigMgr::ConfigMgr() : ValueMgr(InitConfig()) {
     effective_immediately_ = {
         "cache.cache_size",
         "gpu.cache_size",
@@ -100,13 +70,6 @@ ConfigMgr::ConfigMgr() : config_list_(InitConfig()) {
         "engine.use_blas_threshold",
         "engine.omp_thread_num",
     };
-}
-
-void
-ConfigMgr::Init() {
-    for (auto& kv : config_list_) {
-        kv.second->Init();
-    }
 }
 
 void
@@ -121,6 +84,8 @@ ConfigMgr::LoadFile(const std::string& path) {
 
         /* update config */
         for (auto& it : flattened) Set(it.first, it.second, false);
+
+        config_file_ = path;
     } catch (std::exception& ex) {
         throw;
     } catch (...) {
@@ -161,7 +126,7 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
 
         if (update) {
             /* Save file */
-            Save(FilePath());
+            Save();
 
             /* Notify who observe this value */
             Notify(name);
@@ -196,29 +161,9 @@ ConfigMgr::Get(const std::string& name) const {
     }
 }
 
-std::string
-ConfigMgr::Dump() const {
-    std::stringstream ss;
-    for (auto& kv : config_list_) {
-        auto& config = kv.second;
-        ss << config->name_ << ": " << config->Get() << std::endl;
-    }
-    return ss.str();
-}
-
-std::string
-ConfigMgr::JsonDump() const {
-    json config_list;
-    for (auto& kv : config_list_) {
-        auto& config = kv.second;
-        config_list[config->name_] = config->Get();
-    }
-    return config_list.dump();
-}
-
 void
-ConfigMgr::Save(const std::string& path) {
-    if (path.empty()) {
+ConfigMgr::Save() {
+    if (config_file_.empty()) {
         throw SaveConfigError("Cannot save config into empty path.");
     }
 
@@ -228,12 +173,12 @@ ConfigMgr::Save(const std::string& path) {
         file_content = std::regex_replace(file_content, std::regex(placeholder), config_pair.second->Get());
     }
 
-    std::ofstream config_file(path);
+    std::ofstream config_file(config_file_);
     config_file << file_content;
     config_file.close();
 
     if (config_file.fail()) {
-        throw SaveConfigError("Cannot save config into file: " + path + ".");
+        throw SaveConfigError("Cannot save config into file: " + config_file_ + ".");
     }
 }
 

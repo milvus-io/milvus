@@ -69,7 +69,7 @@ FaissFlatPass::Run(const TaskPtr& task) {
 }
 
 void
-FaissFlatPass::ConfigUpdate(const std::string& name) {
+FaissFlatPass::ValueUpdate(const std::string& name) {
     threshold_ = config.gpu.gpu_search_threshold();
 }
 

@@ -20,6 +20,8 @@ set( CONFIG_SRCS    ConfigInit.cpp
                     ServerConfig.h
                     ServerConfig.cpp
                     Value.h
+                    ValueMgr.h
+                    ValueMgr.cpp
                     )
 
 set( CONFIG_LIBS    yaml-cpp

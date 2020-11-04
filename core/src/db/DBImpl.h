@@ -30,7 +30,7 @@
 namespace milvus {
 namespace engine {
 
-class DBImpl : public DB, public ConfigObserver {
+class DBImpl : public DB, public ValueObserver {
  public:
     explicit DBImpl(const DBOptions& options);
 
@@ -122,7 +122,7 @@ class DBImpl : public DB, public ConfigObserver {
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
     void
-    ConfigUpdate(const std::string& name) override;
+    ValueUpdate(const std::string& name) override;
 
     bool
     IsBuildingIndex() override;

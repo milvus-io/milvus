@@ -76,7 +76,7 @@ FaissIVFPass::Run(const TaskPtr& task) {
 }
 
 void
-FaissIVFPass::ConfigUpdate(const std::string& name) {
+FaissIVFPass::ValueUpdate(const std::string& name) {
     threshold_ = config.gpu.gpu_search_threshold();
 }
 
