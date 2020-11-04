@@ -5,11 +5,15 @@ import (
 	"log"
 	"testing"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
+
+type UniqueID = typeutil.UniqueID
 
 func TestKey2Seg(t *testing.T) {
 	// TODO: fix test
@@ -31,11 +35,11 @@ func TestKey2Seg(t *testing.T) {
 	obj := msgpb.Key2SegMsg{}
 	msg, err := consumer.Receive(context.Background())
 	proto.Unmarshal(msg.Payload(), &obj)
-	assert.Equal(t, obj.Uid, int64(0))
+	assert.Equal(t, obj.Uid, UniqueID(0))
 	consumer.Ack(msg)
 	msg, err = consumer.Receive(context.Background())
 	proto.Unmarshal(msg.Payload(), &obj)
-	assert.Equal(t, obj.Uid, int64(0))
+	assert.Equal(t, obj.Uid, UniqueID(0))
 	consumer.Ack(msg)
 	consumer.Close()
 	client.Close()

@@ -24,10 +24,10 @@ func repackFunc(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack {
 	return result
 }
 
-func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
+func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	var tsMsg TsMsg
 	switch msgType {
-	case KInsert:
+	case internalPb.MsgType_kInsert:
 		insertRequest := internalPb.InsertRequest{
 			MsgType:        internalPb.MsgType_kInsert,
 			ReqId:          reqId,
@@ -36,29 +36,29 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			SegmentId:      1,
 			ChannelId:      1,
 			ProxyId:        1,
-			Timestamps:     []uint64{1},
+			Timestamps:     []Timestamp{1},
 		}
 		insertMsg := InsertTask{
 			HashValues:    []int32{hashValue},
 			InsertRequest: insertRequest,
 		}
 		tsMsg = insertMsg
-	case KDelete:
+	case internalPb.MsgType_kDelete:
 		deleteRequest := internalPb.DeleteRequest{
 			MsgType:        internalPb.MsgType_kDelete,
 			ReqId:          reqId,
 			CollectionName: "Collection",
 			ChannelId:      1,
 			ProxyId:        1,
-			Timestamps:     []uint64{1},
-			PrimaryKeys:    []int64{1},
+			Timestamps:     []Timestamp{1},
+			PrimaryKeys:    []IntPrimaryKey{1},
 		}
 		deleteMsg := DeleteTask{
 			HashValues:    []int32{hashValue},
 			DeleteRequest: deleteRequest,
 		}
 		tsMsg = deleteMsg
-	case KSearch:
+	case internalPb.MsgType_kSearch:
 		searchRequest := internalPb.SearchRequest{
 			MsgType:         internalPb.MsgType_kSearch,
 			ReqId:           reqId,
@@ -71,7 +71,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			SearchRequest: searchRequest,
 		}
 		tsMsg = searchMsg
-	case KSearchResult:
+	case internalPb.MsgType_kSearchResult:
 		searchResult := internalPb.SearchResult{
 			Status:          &commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS},
 			ReqId:           reqId,
@@ -85,7 +85,7 @@ func getTsMsg(msgType MsgType, reqId int64, hashValue int32) *TsMsg {
 			SearchResult: searchResult,
 		}
 		tsMsg = searchResultMsg
-	case KTimeTick:
+	case internalPb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
 			PeerId:    reqId,
 			Timestamp: 1,
@@ -131,7 +131,6 @@ func initStream(pulsarAddress string,
 		//outputStream.Start()
 	}
 
-
 	// receive msg
 	receiveCount := 0
 	for {
@@ -144,7 +143,7 @@ func initStream(pulsarAddress string,
 			}
 		}
 		if broadCast {
-			if receiveCount >= len(msgPack.Msgs) * len(producerChannels) {
+			if receiveCount >= len(msgPack.Msgs)*len(producerChannels) {
 				break
 			}
 		} else {
@@ -162,11 +161,11 @@ func TestStream_Insert(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KInsert, KInsert, false)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kInsert, internalPb.MsgType_kInsert, false)
 }
 
 func TestStream_Delete(t *testing.T) {
@@ -176,11 +175,11 @@ func TestStream_Delete(t *testing.T) {
 	consumerSubName := "subDelete"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KDelete, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KDelete, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KDelete, KDelete, false)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kDelete, internalPb.MsgType_kDelete, false)
 }
 
 func TestStream_Search(t *testing.T) {
@@ -190,11 +189,11 @@ func TestStream_Search(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearch, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearch, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KSearch, KSearch, false)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kSearch, internalPb.MsgType_kSearch, false)
 }
 
 func TestStream_SearchResult(t *testing.T) {
@@ -204,11 +203,11 @@ func TestStream_SearchResult(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearchResult, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearchResult, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KSearchResult, KSearchResult, false)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kSearchResult, internalPb.MsgType_kSearchResult, false)
 }
 
 func TestStream_TimeTick(t *testing.T) {
@@ -218,13 +217,12 @@ func TestStream_TimeTick(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KTimeTick, KTimeTick, false)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kTimeTick, internalPb.MsgType_kTimeTick, false)
 }
-
 
 func TestStream_BroadCast(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
@@ -233,9 +231,9 @@ func TestStream_BroadCast(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
 
 	//run stream
-	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, KTimeTick, KTimeTick, true)
+	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kTimeTick, internalPb.MsgType_kTimeTick, true)
 }

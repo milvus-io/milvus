@@ -13,11 +13,15 @@ package reader
 */
 import "C"
 import (
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
-	"strconv"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type IntPrimaryKey = typeutil.IntPrimaryKey
 
 const SegmentLifetime = 20000
 
@@ -30,8 +34,8 @@ const (
 
 type Segment struct {
 	SegmentPtr       C.CSegmentBase
-	SegmentID        int64
-	SegmentCloseTime uint64
+	SegmentID        UniqueID
+	SegmentCloseTime Timestamp
 	LastMemSize      int64
 	SegmentStatus    int
 }
@@ -126,7 +130,7 @@ func (s *Segment) SegmentPreDelete(numOfRecords int) int64 {
 	return int64(offset)
 }
 
-func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]uint64, records *[]*commonpb.Blob) error {
+func (s *Segment) SegmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
 	/*
 		int
 		Insert(CSegmentBase c_segment,
@@ -174,7 +178,7 @@ func (s *Segment) SegmentInsert(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]uint64) error {
+func (s *Segment) SegmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
 	/*
 		int
 		Delete(CSegmentBase c_segment,
@@ -197,7 +201,7 @@ func (s *Segment) SegmentDelete(offset int64, entityIDs *[]int64, timestamps *[]
 	return nil
 }
 
-func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
+func (s *Segment) SegmentSearch(query *QueryInfo, timestamp Timestamp, vectorRecord *msgPb.VectorRowRecord) (*SearchResult, error) {
 	/*
 		int
 		Search(CSegmentBase c_segment,
@@ -216,7 +220,7 @@ func (s *Segment) SegmentSearch(query *QueryInfo, timestamp uint64, vectorRecord
 		field_name:  C.CString(query.FieldName),
 	}
 
-	resultIds := make([]int64, int64(query.TopK)*query.NumQueries)
+	resultIds := make([]IntPrimaryKey, int64(query.TopK)*query.NumQueries)
 	resultDistances := make([]float32, int64(query.TopK)*query.NumQueries)
 
 	var cTimestamp = C.ulong(timestamp)

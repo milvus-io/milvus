@@ -42,7 +42,7 @@ func (req *baseRequest) Notify(err error) {
 
 type idRequest struct {
 	baseRequest
-	id    uint64
+	id    UniqueID
 	count uint32
 }
 
@@ -52,7 +52,7 @@ func (req *idRequest) Wait() {
 
 type tsoRequest struct {
 	baseRequest
-	timestamp uint64
+	timestamp Timestamp
 	count     uint32
 }
 

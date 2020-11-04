@@ -17,23 +17,23 @@ func GetMarshalers(inputMsgType MsgType, outputMsgType MsgType) (*TsMsgMarshaler
 
 func GetMarshaler(MsgType MsgType) *TsMsgMarshaler {
 	switch MsgType {
-	case KInsert:
+	case internalPb.MsgType_kInsert:
 		insertMarshaler := &InsertMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = insertMarshaler
 		return &tsMsgMarshaller
-	case KDelete:
+	case internalPb.MsgType_kDelete:
 		deleteMarshaler := &DeleteMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = deleteMarshaler
 		return &tsMsgMarshaller
-	case KSearch:
+	case internalPb.MsgType_kSearch:
 		searchMarshaler := &SearchMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchMarshaler
 		return &tsMsgMarshaller
-	case KSearchResult:
+	case internalPb.MsgType_kSearchResult:
 		searchResultMarshler := &SearchResultMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchResultMarshler
 		return &tsMsgMarshaller
-	case KTimeTick:
+	case internalPb.MsgType_kTimeTick:
 		timeTickMarshaler := &TimeTickMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = timeTickMarshaler
 		return &tsMsgMarshaller

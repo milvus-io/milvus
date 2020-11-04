@@ -15,7 +15,10 @@ package id
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type UniqueID = typeutil.UniqueID
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalIdAllocator struct {
@@ -35,29 +38,29 @@ func (gia *GlobalIdAllocator) Initialize() error {
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (gia *GlobalIdAllocator) Alloc(count uint32) (int64, int64, error) {
+func (gia *GlobalIdAllocator) Alloc(count uint32) (UniqueID, UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(count)
 	if err != nil {
 		return 0, 0, err
 	}
-	idStart := int64(timestamp)
+	idStart := UniqueID(timestamp)
 	idEnd := idStart + int64(count)
 	return idStart, idEnd, nil
 }
 
-func (gia *GlobalIdAllocator) AllocOne() (int64, error) {
+func (gia *GlobalIdAllocator) AllocOne() (UniqueID, error) {
 	timestamp, err := gia.allocator.GenerateTSO(1)
 	if err != nil {
 		return 0, err
 	}
-	idStart := int64(timestamp)
+	idStart := UniqueID(timestamp)
 	return idStart, nil
 }
 
-func AllocOne() (int64, error) {
+func AllocOne() (UniqueID, error) {
 	return allocator.AllocOne()
 }
 
-func Alloc(count uint32) (int64, int64, error) {
+func Alloc(count uint32) (UniqueID, UniqueID, error) {
 	return allocator.Alloc(count)
 }

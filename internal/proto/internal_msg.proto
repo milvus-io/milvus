@@ -28,10 +28,10 @@ enum MsgType {
 
     /* Query */
     kSearch = 500;
+    kSearchResult = 501;
 
     /* System Control */
     kTimeTick = 1200;
-    kTimeSync = 1201;
 }
 
 enum PeerRole {
@@ -196,18 +196,20 @@ message SearchRequest {
 }
 
 message SearchResult {
-    common.Status status = 1;
-    int64 req_id = 2;
-    int64 proxy_id = 3;
-    int64 query_node_id = 4;
-    uint64 timestamp = 5;
-    int64 result_channel_id = 6;
-    repeated service.Hits hits = 7;
+    MsgType msg_type = 1;
+    common.Status status = 2;
+    int64 req_id = 3;
+    int64 proxy_id = 4;
+    int64 query_node_id = 5;
+    uint64 timestamp = 6;
+    int64 result_channel_id = 7;
+    repeated service.Hits hits = 8;
 }
 
 message TimeTickMsg {
-    int64 peer_id = 1;
-    uint64 timestamp = 2;
+    MsgType msg_type = 1;
+    int64 peer_id = 2;
+    uint64 timestamp = 3;
 }
 
 

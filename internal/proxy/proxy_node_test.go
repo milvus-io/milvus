@@ -230,13 +230,13 @@ func TestProxyNode(t *testing.T) {
 			{Blob: uint64ToBytes(14)},
 			{Blob: uint64ToBytes(15)},
 		},
-		EntityIdArray: []int64{10, 11, 12, 13, 14, 15},
+		EntityIdArray: []UniqueID{10, 11, 12, 13, 14, 15},
 		PartitionTag:  "",
 		ExtraParams:   nil,
 	}
 	deleteParm := pb.DeleteByIDParam{
 		CollectionName: "cm100",
-		IdArray:        []int64{20, 21},
+		IdArray:        []UniqueID{20, 21},
 	}
 
 	searchParm := pb.SearchParam{
@@ -266,7 +266,7 @@ func TestProxyNode(t *testing.T) {
 			Status: &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},
 			Entities: &pb.Entities{
 				Status:   &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},
-				Ids:      []int64{11, 13, 15},
+				Ids:      []UniqueID{11, 13, 15},
 				ValidRow: []bool{true, true, true},
 				RowsData: []*pb.RowData{
 					{Blob: uint64ToBytes(11)},
@@ -286,7 +286,7 @@ func TestProxyNode(t *testing.T) {
 			Status: &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},
 			Entities: &pb.Entities{
 				Status:   &pb.Status{ErrorCode: pb.ErrorCode_SUCCESS},
-				Ids:      []int64{12, 14, 16},
+				Ids:      []UniqueID{12, 14, 16},
 				ValidRow: []bool{true, false, true},
 				RowsData: []*pb.RowData{
 					{Blob: uint64ToBytes(12)},
@@ -326,7 +326,7 @@ func TestProxyNode(t *testing.T) {
 		assert.Equal(t, insertR.EntityIdArray[i], int64(i+10))
 	}
 
-	var insertPrimaryKey []int64
+	var insertPrimaryKey []IntPrimaryKey
 	readerM1, ok := <-reader.Chan()
 	assert.True(t, ok)
 

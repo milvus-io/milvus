@@ -14,14 +14,14 @@ func TestNewStream_Insert(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, false)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KInsert), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kInsert), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KInsert))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kInsert))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -52,14 +52,14 @@ func TestNewStream_Delete(t *testing.T) {
 	consumerSubName := "subDelete"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KDelete, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KDelete, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 1, 1))
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, false)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KDelete), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kDelete), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KDelete))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kDelete))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -90,14 +90,14 @@ func TestNewStream_Search(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearch, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearch, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 1, 1))
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, false)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KSearch), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kSearch), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KSearch))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kSearch))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -128,14 +128,14 @@ func TestNewStream_SearchResult(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearchResult, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KSearchResult, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 1, 1))
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, false)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KSearchResult), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kSearchResult), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KSearchResult))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kSearchResult))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -166,14 +166,14 @@ func TestNewStream_TimeTick(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KTimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, false)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KTimeTick), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kTimeTick), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KTimeTick))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kTimeTick))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -203,8 +203,8 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 0, 0))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 0, 0))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
 
 	insertRequest := internalPb.InsertRequest{
 		MsgType:        internalPb.MsgType_kTimeTick,
@@ -214,7 +214,7 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 		SegmentId:      1,
 		ChannelId:      1,
 		ProxyId:        1,
-		Timestamps:     []uint64{1},
+		Timestamps:     []Timestamp{1},
 	}
 	insertMsg := InsertTask{
 		HashValues:    []int32{2},
@@ -226,9 +226,9 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 	inputStream := NewInputStream(pulsarAddress, producerChannels, false)
 	outputStream := NewOutputStream(pulsarAddress, 100, 100, consumerChannels, consumerSubName, true)
 
-	(*inputStream).SetMsgMarshaler(GetMarshaler(KInsert), nil)
+	(*inputStream).SetMsgMarshaler(GetMarshaler(internalPb.MsgType_kInsert), nil)
 	(*inputStream).SetRepackFunc(repackFunc)
-	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(KInsert))
+	(*outputStream).SetMsgMarshaler(nil, GetMarshaler(internalPb.MsgType_kInsert))
 	(*outputStream).Start()
 
 	//send msgPack
@@ -245,7 +245,7 @@ func TestNewTtStream_Insert_TimeSync(t *testing.T) {
 				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v)
 			}
 		}
-		if receiveCount + 1 >= len(msgPack.Msgs) {
+		if receiveCount+1 >= len(msgPack.Msgs) {
 			break
 		}
 	}

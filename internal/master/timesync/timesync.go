@@ -8,12 +8,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
+
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
 
 const stopReadFlagId int64 = -1
 
@@ -24,9 +29,9 @@ type TimeTickReader struct {
 	readerProducer   []pulsar.Producer
 
 	interval    int64
-	proxyIdList []int64
+	proxyIdList []UniqueID
 
-	timeTickPeerProxy map[int64]uint64
+	timeTickPeerProxy map[UniqueID]Timestamp
 	ctx               context.Context
 }
 
@@ -58,7 +63,7 @@ func (r *TimeTickReader) timeSync() {
 			return
 		default:
 			time.Sleep(time.Millisecond * time.Duration(r.interval))
-			var minTimeStamp uint64
+			var minTimeStamp Timestamp
 			for _, minTimeStamp = range r.timeTickPeerProxy {
 				break
 			}
@@ -134,7 +139,7 @@ func newTimeTickReader(
 	timeTickTopic string,
 	timeTickSubName string,
 	readTopics []string,
-	proxyIdList []int64,
+	proxyIdList []UniqueID,
 ) *TimeTickReader {
 	pulsarAddr := "pulsar://"
 	pulsarAddr += conf.Config.Pulsar.Address
@@ -168,7 +173,7 @@ func newTimeTickReader(
 		readerQueueSize = 1024
 	}
 
-	r.timeTickPeerProxy = make(map[int64]uint64)
+	r.timeTickPeerProxy = make(map[UniqueID]Timestamp)
 	r.ctx = ctx
 
 	var client pulsar.Client

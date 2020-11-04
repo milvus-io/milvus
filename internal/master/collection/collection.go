@@ -3,6 +3,8 @@ package collection
 import (
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/gogo/protobuf/proto"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -11,15 +13,18 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
+
 type Collection struct {
-	ID         int64       `json:"id"`
+	ID         UniqueID    `json:"id"`
 	Name       string      `json:"name"`
-	CreateTime uint64      `json:"creat_time"`
+	CreateTime Timestamp   `json:"creat_time"`
 	Schema     []FieldMeta `json:"schema"`
 	//	ExtraSchema       []FieldMeta `json:"extra_schema"`
-	SegmentIDs        []int64  `json:"segment_ids"`
-	PartitionTags     []string `json:"partition_tags"`
-	GrpcMarshalString string   `json:"grpc_marshal_string"`
+	SegmentIDs        []UniqueID `json:"segment_ids"`
+	PartitionTags     []string   `json:"partition_tags"`
+	GrpcMarshalString string     `json:"grpc_marshal_string"`
 }
 
 type FieldMeta struct {
@@ -56,10 +61,10 @@ func GrpcMarshal(c *Collection) *Collection {
 	return c
 }
 
-func NewCollection(id int64, name string, createTime time.Time,
-	schema []*schemapb.FieldSchema, sIds []int64, ptags []string) Collection {
+func NewCollection(id UniqueID, name string, createTime time.Time,
+	schema []*schemapb.FieldSchema, sIds []UniqueID, ptags []string) Collection {
 
-	segementIDs := []int64{}
+	segementIDs := []UniqueID{}
 	newSchema := []FieldMeta{}
 	for _, v := range schema {
 		newSchema = append(newSchema, FieldMeta{FieldName: v.Name, Type: v.DataType, DIM: 16})
@@ -70,7 +75,7 @@ func NewCollection(id int64, name string, createTime time.Time,
 	return Collection{
 		ID:            id,
 		Name:          name,
-		CreateTime:    uint64(createTime.Unix()),
+		CreateTime:    Timestamp(createTime.Unix()),
 		Schema:        newSchema,
 		SegmentIDs:    segementIDs,
 		PartitionTags: ptags,

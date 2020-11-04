@@ -9,7 +9,6 @@ import (
 )
 
 // TODO: get timestamp from timestampOracle
-type Timestamp uint64
 
 type baseTask struct {
 	kvBase *kv.Base

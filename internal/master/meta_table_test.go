@@ -25,7 +25,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll1",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{},
+		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
 	col_meta_2 := pb.CollectionMeta{
@@ -34,7 +34,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll1",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{},
+		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
 	col_meta_3 := pb.CollectionMeta{
@@ -43,7 +43,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll2",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{},
+		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
 	col_meta_4 := pb.CollectionMeta{
@@ -52,7 +52,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll2",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{1},
+		SegmentIds:    []UniqueID{1},
 		PartitionTags: []string{},
 	}
 	col_meta_5 := pb.CollectionMeta{
@@ -61,7 +61,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll2",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{1},
+		SegmentIds:    []UniqueID{1},
 		PartitionTags: []string{"1"},
 	}
 	seg_id_1 := pb.SegmentMeta{
@@ -143,7 +143,7 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 			Name: "coll1",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{},
+		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
 	seg_id_1 := pb.SegmentMeta{
@@ -226,7 +226,7 @@ func TestMetaTable_Segment(t *testing.T) {
 			Name: "coll1",
 		},
 		CreateTime:    0,
-		SegmentIds:    []int64{},
+		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
 	seg_meta := pb.SegmentMeta{
@@ -258,11 +258,11 @@ func TestMetaTable_Segment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(get_col_meta.SegmentIds))
 
-	meta.tenantId2Meta = make(map[int64]pb.TenantMeta)
-	meta.proxyId2Meta = make(map[int64]pb.ProxyMeta)
-	meta.collId2Meta = make(map[int64]pb.CollectionMeta)
-	meta.collName2Id = make(map[string]int64)
-	meta.segId2Meta = make(map[int64]pb.SegmentMeta)
+	meta.tenantId2Meta = make(map[UniqueID]pb.TenantMeta)
+	meta.proxyId2Meta = make(map[UniqueID]pb.ProxyMeta)
+	meta.collId2Meta = make(map[UniqueID]pb.CollectionMeta)
+	meta.collName2Id = make(map[string]UniqueID)
+	meta.segId2Meta = make(map[UniqueID]pb.SegmentMeta)
 
 	err = meta.reloadFromKV()
 	assert.Nil(t, err)

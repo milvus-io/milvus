@@ -4,19 +4,23 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 )
 
+type UniqueID = typeutil.UniqueID
+
 type metaTable struct {
-	client        kv.Base                     // client of a reliable kv service, i.e. etcd client
-	tenantId2Meta map[int64]pb.TenantMeta     // tenant id to tenant meta
-	proxyId2Meta  map[int64]pb.ProxyMeta      // proxy id to proxy meta
-	collId2Meta   map[int64]pb.CollectionMeta // collection id to collection meta
-	collName2Id   map[string]int64            // collection name to collection id
-	segId2Meta    map[int64]pb.SegmentMeta    // segment id to segment meta
+	client        kv.Base                        // client of a reliable kv service, i.e. etcd client
+	tenantId2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
+	proxyId2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
+	collId2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
+	collName2Id   map[string]UniqueID            // collection name to collection id
+	segId2Meta    map[UniqueID]pb.SegmentMeta    // segment id to segment meta
 
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
@@ -39,11 +43,11 @@ func NewMetaTable(kv kv.Base) (*metaTable, error) {
 
 func (mt *metaTable) reloadFromKV() error {
 
-	mt.tenantId2Meta = make(map[int64]pb.TenantMeta)
-	mt.proxyId2Meta = make(map[int64]pb.ProxyMeta)
-	mt.collId2Meta = make(map[int64]pb.CollectionMeta)
-	mt.collName2Id = make(map[string]int64)
-	mt.segId2Meta = make(map[int64]pb.SegmentMeta)
+	mt.tenantId2Meta = make(map[UniqueID]pb.TenantMeta)
+	mt.proxyId2Meta = make(map[UniqueID]pb.ProxyMeta)
+	mt.collId2Meta = make(map[UniqueID]pb.CollectionMeta)
+	mt.collName2Id = make(map[string]UniqueID)
+	mt.segId2Meta = make(map[UniqueID]pb.SegmentMeta)
 
 	_, values, err := mt.client.LoadWithPrefix("tenant")
 	if err != nil {
@@ -129,7 +133,7 @@ func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) deleteSegmentMeta(segId int64) error {
+func (mt *metaTable) deleteSegmentMeta(segId UniqueID) error {
 	_, ok := mt.segId2Meta[segId]
 
 	if ok {
@@ -140,7 +144,7 @@ func (mt *metaTable) deleteSegmentMeta(segId int64) error {
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIds []int64) error {
+func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIds []UniqueID) error {
 	segIdStrs := make([]string, 0, len(segIds))
 	for _, segId := range segIds {
 		segIdStrs = append(segIdStrs, "/segment/"+strconv.FormatInt(segId, 10))
@@ -191,7 +195,7 @@ func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg
 }
 
 // mt.ddLock.Lock() before call this function
-func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collId int64, segIds []int64) error {
+func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collId UniqueID, segIds []UniqueID) error {
 	collIdStr := "/collection/" + strconv.FormatInt(collId, 10)
 
 	totalIdStrs := make([]string, 0, 1+len(segIds))
@@ -244,7 +248,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	return nil
 }
 
-func (mt *metaTable) DeleteCollection(collId int64) error {
+func (mt *metaTable) DeleteCollection(collId UniqueID) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -261,7 +265,7 @@ func (mt *metaTable) DeleteCollection(collId int64) error {
 	return nil
 }
 
-func (mt *metaTable) HasCollection(collId int64) bool {
+func (mt *metaTable) HasCollection(collId UniqueID) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 	_, ok := mt.collId2Meta[collId]
@@ -286,7 +290,7 @@ func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionM
 	return &col, nil
 }
 
-func (mt *metaTable) AddPartition(collId int64, tag string) error {
+func (mt *metaTable) AddPartition(collId UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collId2Meta[collId]
@@ -309,7 +313,7 @@ func (mt *metaTable) AddPartition(collId int64, tag string) error {
 	return nil
 }
 
-func (mt *metaTable) HasPartition(collId int64, tag string) bool {
+func (mt *metaTable) HasPartition(collId UniqueID, tag string) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 	col, ok := mt.collId2Meta[collId]
@@ -324,7 +328,7 @@ func (mt *metaTable) HasPartition(collId int64, tag string) bool {
 	return false
 }
 
-func (mt *metaTable) DeletePartition(collId int64, tag string) error {
+func (mt *metaTable) DeletePartition(collId UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -343,8 +347,8 @@ func (mt *metaTable) DeletePartition(collId int64, tag string) error {
 		return nil
 	}
 
-	to_delete_seg := make([]int64, 0, len(coll_meta.SegmentIds))
-	seg := make([]int64, 0, len(coll_meta.SegmentIds))
+	to_delete_seg := make([]UniqueID, 0, len(coll_meta.SegmentIds))
+	seg := make([]UniqueID, 0, len(coll_meta.SegmentIds))
 	for _, s := range coll_meta.SegmentIds {
 		sm, ok := mt.segId2Meta[s]
 		if !ok {
@@ -381,7 +385,7 @@ func (mt *metaTable) AddSegment(seg *pb.SegmentMeta) error {
 	return nil
 }
 
-func (mt *metaTable) GetSegmentById(segId int64) (*pb.SegmentMeta, error) {
+func (mt *metaTable) GetSegmentById(segId UniqueID) (*pb.SegmentMeta, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
@@ -392,7 +396,7 @@ func (mt *metaTable) GetSegmentById(segId int64) (*pb.SegmentMeta, error) {
 	return &sm, nil
 }
 
-func (mt *metaTable) DeleteSegment(segId int64) error {
+func (mt *metaTable) DeleteSegment(segId UniqueID) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -412,7 +416,7 @@ func (mt *metaTable) DeleteSegment(segId int64) error {
 		}
 	}
 
-	err := mt.saveCollectionAndDeleteSegmentsMeta(&coll_meta, []int64{segId})
+	err := mt.saveCollectionAndDeleteSegmentsMeta(&coll_meta, []UniqueID{segId})
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -420,7 +424,7 @@ func (mt *metaTable) DeleteSegment(segId int64) error {
 	return nil
 
 }
-func (mt *metaTable) CloseSegment(segId int64, closeTs Timestamp, num_rows int64) error {
+func (mt *metaTable) CloseSegment(segId UniqueID, closeTs Timestamp, num_rows int64) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -429,7 +433,7 @@ func (mt *metaTable) CloseSegment(segId int64, closeTs Timestamp, num_rows int64
 		return errors.Errorf("can't find segment id = " + strconv.FormatInt(segId, 10))
 	}
 
-	seg_meta.CloseTime = uint64(closeTs)
+	seg_meta.CloseTime = closeTs
 	seg_meta.NumRows = num_rows
 
 	err := mt.saveSegmentMeta(&seg_meta)

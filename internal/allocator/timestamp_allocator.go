@@ -6,10 +6,12 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-type Timestamp = uint64
+type Timestamp = typeutil.Timestamp
 
 const (
 	tsCountPerRPC         = 2 << 18 * 10
@@ -18,8 +20,8 @@ const (
 
 type TimestampAllocator struct {
 	Allocator
-	lastTsBegin uint64
-	lastTsEnd   uint64
+	lastTsBegin Timestamp
+	lastTsEnd   Timestamp
 }
 
 func NewTimestampAllocator(ctx context.Context) (*TimestampAllocator, error) {

@@ -5,14 +5,20 @@ import (
 	"log"
 	"sync"
 
+	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
+type UniqueID = typeutil.UniqueID
+type Timestamp = typeutil.Timestamp
+type IntPrimaryKey = typeutil.IntPrimaryKey
+
 type MsgPack struct {
-	BeginTs typeutil.Timestamp
-	EndTs   typeutil.Timestamp
+	BeginTs Timestamp
+	EndTs   Timestamp
 	Msgs    []*TsMsg
 }
 
@@ -230,7 +236,7 @@ type PulsarTtMsgStream struct {
 	inputBuf      []*TsMsg
 	unsolvedBuf   []*TsMsg
 	msgPacks      []*MsgPack
-	lastTimeStamp typeutil.Timestamp
+	lastTimeStamp Timestamp
 }
 
 func (ms *PulsarTtMsgStream) Start() {
@@ -240,7 +246,7 @@ func (ms *PulsarTtMsgStream) Start() {
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(ms.consumers))
-	eofMsgTimeStamp := make(map[int]typeutil.Timestamp)
+	eofMsgTimeStamp := make(map[int]Timestamp)
 	mu := sync.Mutex{}
 	for i := 0; i < len(ms.consumers); i++ {
 		go ms.findTimeTick(context.Background(), i, eofMsgTimeStamp, &wg, &mu)
@@ -274,7 +280,7 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 
 func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 	channelIndex int,
-	eofMsgMap map[int]typeutil.Timestamp,
+	eofMsgMap map[int]Timestamp,
 	wg *sync.WaitGroup,
 	mu *sync.Mutex) {
 	for {
@@ -289,7 +295,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 			tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
 			// TODO:: Find the EOF
-			if (*tsMsg).Type() == KTimeTick {
+			if (*tsMsg).Type() == internalPb.MsgType_kTimeTick {
 				eofMsgMap[channelIndex] = (*tsMsg).EndTs()
 				wg.Done()
 				return
@@ -304,8 +310,8 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 	}
 }
 
-func checkTimeTickMsg(msg map[int]typeutil.Timestamp) (typeutil.Timestamp, bool) {
-	checkMap := make(map[typeutil.Timestamp]int)
+func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
+	checkMap := make(map[Timestamp]int)
 	for _, v := range msg {
 		checkMap[v] += 1
 	}

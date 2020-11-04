@@ -5,26 +5,30 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	msgpb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 	"github.com/zilliztech/milvus-distributed/internal/writer"
 )
 
-func GetInsertMsg(collectionName string, partitionTag string, entityId int64) *msgpb.InsertOrDeleteMsg {
+type Timestamp = typeutil.Timestamp
+
+func GetInsertMsg(collectionName string, partitionTag string, entityId UniqueID) *msgpb.InsertOrDeleteMsg {
 	return &msgpb.InsertOrDeleteMsg{
 		CollectionName: collectionName,
 		PartitionTag:   partitionTag,
-		SegmentId:      int64(entityId / 100),
-		Uid:            int64(entityId),
-		Timestamp:      uint64(entityId),
+		SegmentId:      UniqueID(entityId / 100),
+		Uid:            UniqueID(entityId),
+		Timestamp:      Timestamp(entityId),
 		ClientId:       0,
 	}
 }
 
-func GetDeleteMsg(collectionName string, entityId int64) *msgpb.InsertOrDeleteMsg {
+func GetDeleteMsg(collectionName string, entityId UniqueID) *msgpb.InsertOrDeleteMsg {
 	return &msgpb.InsertOrDeleteMsg{
 		CollectionName: collectionName,
 		Uid:            entityId,
-		Timestamp:      uint64(entityId + 100),
+		Timestamp:      Timestamp(entityId + 100),
 	}
 }
 
@@ -38,7 +42,7 @@ func TestInsert(t *testing.T) {
 	writerNode, _ := writer.NewWriteNode(ctx, "null", topics, 0)
 	var insertMsgs []*msgpb.InsertOrDeleteMsg
 	for i := 0; i < 120; i++ {
-		insertMsgs = append(insertMsgs, GetInsertMsg("collection0", "tag01", int64(i)))
+		insertMsgs = append(insertMsgs, GetInsertMsg("collection0", "tag01", UniqueID(i)))
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(3)
@@ -46,7 +50,7 @@ func TestInsert(t *testing.T) {
 	writerNode.InsertBatchData(ctx, insertMsgs, &wg)
 	var insertMsgs2 []*msgpb.InsertOrDeleteMsg
 	for i := 120; i < 200; i++ {
-		insertMsgs2 = append(insertMsgs2, GetInsertMsg("collection0", "tag02", int64(i)))
+		insertMsgs2 = append(insertMsgs2, GetInsertMsg("collection0", "tag02", UniqueID(i)))
 	}
 	writerNode.InsertBatchData(ctx, insertMsgs2, &wg)
 	var deleteMsgs []*msgpb.InsertOrDeleteMsg
