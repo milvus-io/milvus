@@ -28,6 +28,8 @@ CollectionCommitOperation::DoExecute(StorePtr store) {
         return Status(SS_INVALID_CONTEX_ERROR, emsg.str());
     }
     resource_ = std::make_shared<CollectionCommit>(*prev_resource);
+    resource_->SetCreatedTime(GetMicroSecTimeStamp());
+    resource_->SetUpdatedTime(resource_->GetCreatedTime());
     resource_->ResetStatus();
     row_cnt = resource_->GetRowCount();
     size = resource_->GetSize();
@@ -116,6 +118,8 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
     PartitionPtr partition = nullptr;
     if (prev_resource) {
         resource_ = std::make_shared<PartitionCommit>(*prev_resource);
+        resource_->SetCreatedTime(GetMicroSecTimeStamp());
+        resource_->SetUpdatedTime(resource_->GetCreatedTime());
         resource_->SetID(0);
         resource_->ResetStatus();
         row_cnt = resource_->GetRowCount();
@@ -152,6 +156,8 @@ PartitionCommitOperation::DoExecute(StorePtr store) {
             }
         }
         partition = GetStartedSS()->GetResource<Partition>(prev_resource->GetPartitionId());
+        partition->SetCreatedTime(GetMicroSecTimeStamp());
+        partition->SetUpdatedTime(partition->GetCreatedTime());
     } else {
         if (!context_.new_partition) {
             std::stringstream emsg;
@@ -240,6 +246,8 @@ SegmentCommitOperation::DoExecute(StorePtr store) {
     auto size = 0;
     if (prev_resource) {
         resource_ = std::make_shared<SegmentCommit>(*prev_resource);
+        resource_->SetCreatedTime(GetMicroSecTimeStamp());
+        resource_->SetUpdatedTime(resource_->GetCreatedTime());
         resource_->SetID(0);
         resource_->ResetStatus();
         size = resource_->GetSize();
@@ -303,6 +311,8 @@ FieldCommitOperation::DoExecute(StorePtr store) {
 
     if (prev_resource) {
         resource_ = std::make_shared<FieldCommit>(*prev_resource);
+        resource_->SetCreatedTime(GetMicroSecTimeStamp());
+        resource_->SetUpdatedTime(resource_->GetCreatedTime());
         resource_->SetID(0);
         resource_->ResetStatus();
         for (auto& fe : context_.stale_field_elements) {
@@ -337,6 +347,8 @@ SchemaCommitOperation::DoExecute(StorePtr store) {
     }
 
     resource_ = std::make_shared<SchemaCommit>(*prev_resource);
+    resource_->SetCreatedTime(GetMicroSecTimeStamp());
+    resource_->SetUpdatedTime(resource_->GetCreatedTime());
     resource_->SetID(0);
     resource_->ResetStatus();
     for (auto& fc : context_.stale_field_commits) {

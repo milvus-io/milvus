@@ -120,7 +120,9 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
         emsg << "Snapshots::LoadNoLock: No collection commit is found for collection " << collection_id;
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
+
     auto policy = std::make_shared<SnapshotNumPolicy>(1);
+    /* auto policy = std::make_shared<SnapshotDurationPolicy>(2000); */
     holder = std::make_shared<SnapshotHolder>(collection_id, policy,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {

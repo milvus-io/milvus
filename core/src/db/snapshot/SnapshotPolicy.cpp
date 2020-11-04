@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/SnapshotPolicy.h"
+#include "db/Utils.h"
 
 namespace milvus {
 namespace engine {
@@ -24,6 +25,29 @@ SnapshotNumPolicy::ShouldEject(const MapT& ids) {
     if (ids.size() <= num_) {
         should = false;
     }
+    return should;
+}
+
+SnapshotDurationPolicy::SnapshotDurationPolicy(TS_TYPE us) : us_(us) {
+}
+
+bool
+SnapshotDurationPolicy::ShouldEject(const MapT& ids) {
+    if (ids.size() <= 1) {
+        return false;
+    }
+    bool should = true;
+    auto ss = ids.begin()->second;
+    auto now_us = GetMicroSecTimeStamp();
+    if (now_us - ss->GetCollectionCommit()->GetCreatedTime() < us_) {
+        should = false;
+    }
+
+    /* LOG_ENGINE_DEBUG_ << " now= " << now_us << " should=" << should; */
+    /* LOG_ENGINE_DEBUG_ << "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV " << ids.size() << " xxxxx " << should; */
+    /* for (auto it : ids) { */
+    /*     LOG_ENGINE_DEBUG_ << " id=" << it.first << " ts=" << it.second->GetCollectionCommit()->GetCreatedTime(); */
+    /* } */
     return should;
 }
 

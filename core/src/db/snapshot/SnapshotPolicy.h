@@ -35,11 +35,23 @@ using SnapshotPolicyPtr = std::shared_ptr<SnapshotPolicy>;
 class SnapshotNumPolicy : public SnapshotPolicy {
  public:
     explicit SnapshotNumPolicy(size_t num);
+
     bool
     ShouldEject(const MapT& ids) override;
 
  protected:
     size_t num_;
+};
+
+class SnapshotDurationPolicy : public SnapshotPolicy {
+ public:
+    explicit SnapshotDurationPolicy(TS_TYPE us);
+
+    bool
+    ShouldEject(const MapT& ids) override;
+
+ protected:
+    TS_TYPE us_;
 };
 
 }  // namespace snapshot
