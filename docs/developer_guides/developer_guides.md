@@ -1137,6 +1137,7 @@ type softTimeTickBarrier struct {
   lastTt Timestamp
   outTt chan Timestamp
   ttStream *MsgStream
+  ctx context.Context
 }
 
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() Timestamp
@@ -1156,6 +1157,7 @@ type hardTimeTickBarrier struct {
   peer2Tt map[UniqueId]List
   outTt chan Timestamp
   ttStream *MsgStream
+  ctx context.Context
 }
 
 func (ttBarrier *hardTimeTickBarrier) GetTimeTick() Timestamp
@@ -1180,6 +1182,8 @@ type timeSyncMsgProducer struct {
   insertSyncStream *MsgStream
   deleteSyncStream *MsgStream
   k2sSyncStream *MsgStream
+  
+  ctx context.Context
 }
 
 func (syncMsgProducer* timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
@@ -1189,7 +1193,7 @@ func (syncMsgProducer* timeSyncMsgProducer) SetInsertSyncStream(insertSync *MsgS
 func (syncMsgProducer* timeSyncMsgProducer) SetDeleteSyncStream(deleteSync *MsgStream)
 func (syncMsgProducer* timeSyncMsgProducer) SetK2sSyncStream(k2sSync *MsgStream)
 
-func (syncMsgProducer* timeSyncMsgProducer) Start(ctx context.Context) error
+func (syncMsgProducer* timeSyncMsgProducer) Start() error
 func (syncMsgProducer* timeSyncMsgProducer) Close() error
  ```
 
