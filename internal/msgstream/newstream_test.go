@@ -207,7 +207,7 @@ func TestNewStream_Insert_TimeTick(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(KInsert, 1, 1))
 
 	insertRequest := internalPb.InsertRequest{
-		ReqType:        internalPb.ReqType_kTimeTick,
+		MsgType:        internalPb.MsgType_kTimeTick,
 		ReqId:          2,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",

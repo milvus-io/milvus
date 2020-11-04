@@ -67,7 +67,7 @@ func (it InsertTask) EndTs() Timestamp {
 }
 
 func (it InsertTask) Type() MsgType {
-	if it.ReqType == internalPb.ReqType_kTimeTick {
+	if it.MsgType == internalPb.MsgType_kTimeTick {
 		return KTimeSync
 	}
 	return KInsert
@@ -118,7 +118,7 @@ func (dt DeleteTask) EndTs() Timestamp {
 }
 
 func (dt DeleteTask) Type() MsgType {
-	if dt.ReqType == internalPb.ReqType_kTimeTick {
+	if dt.MsgType == internalPb.MsgType_kTimeTick {
 		return KTimeSync
 	}
 	return KDelete
@@ -147,7 +147,7 @@ func (st SearchTask) EndTs() Timestamp {
 }
 
 func (st SearchTask) Type() MsgType {
-	if st.ReqType == internalPb.ReqType_kTimeTick {
+	if st.MsgType == internalPb.MsgType_kTimeTick {
 		return KTimeSync
 	}
 	return KSearch
