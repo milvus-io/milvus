@@ -10,8 +10,10 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4059 milvus raise exception when passing a complex dsl during searching
 -   \#4099 When execute a multiple vectors request, if the result of somerow is not enough, the query data field will be disorder.
 -   \#4113 After milvus 0.11.0 version vector data is misaligned
+-   \#4170 Must_not query check failed in dsl
 
 ## Feature
+-   \#4163 Update C++ sdk search interface
 
 ## Improvement
 -   \#4096 Improve performance for create large amount of partitions
