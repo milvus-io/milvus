@@ -19,8 +19,8 @@ type queryReq struct {
 }
 
 // BaseRequest interfaces
-func (req *queryReq) Type() internalpb.MsgType {
-	return req.MsgType
+func (req *queryReq) Type() internalpb.ReqType {
+	return req.ReqType
 }
 
 func (req *queryReq) PreExecute() commonpb.Status {

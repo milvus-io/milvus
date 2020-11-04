@@ -1,14 +1,15 @@
-package miniodriver
+package minio_driver_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	minio_driver "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio"
 )
 
 var ctx = context.Background()
-var client, err = NewMinioDriver(ctx)
+var client, err = minio_driver.NewMinioDriver(ctx)
 
 func TestMinioDriver_PutRowAndGetRow(t *testing.T) {
 	err = client.PutRow(ctx, []byte("bar"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)

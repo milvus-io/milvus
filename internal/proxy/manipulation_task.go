@@ -22,7 +22,7 @@ func (it *insertTask) PreExecute() error {
 func (it *insertTask) Execute() error {
 	ts := it.GetTs()
 	insertRequest := internalpb.InsertRequest{
-		MsgType:        internalpb.MsgType_kInsert,
+		ReqType:        internalpb.ReqType_kInsert,
 		ReqId:          it.ReqId,
 		CollectionName: it.rowBatch.CollectionName,
 		PartitionTag:   it.rowBatch.PartitionTag,

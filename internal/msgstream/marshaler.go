@@ -17,24 +17,24 @@ func GetMarshalers(inputMsgType MsgType, outputMsgType MsgType) (*TsMsgMarshaler
 
 func GetMarshaler(MsgType MsgType) *TsMsgMarshaler {
 	switch MsgType {
-	case KInsert:
+	case kInsert:
 		insertMarshaler := &InsertMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = insertMarshaler
 		return &tsMsgMarshaller
-	case KDelete:
+	case kDelete:
 		deleteMarshaler := &DeleteMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = deleteMarshaler
 		return &tsMsgMarshaller
-	case KSearch:
+	case kSearch:
 		searchMarshaler := &SearchMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchMarshaler
 		return &tsMsgMarshaller
-	case KSearchResult:
+	case kSearchResult:
 		searchResultMarshler := &SearchResultMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchResultMarshler
 		return &tsMsgMarshaller
-	case KTimeTick:
-		timeSyncMarshaler := &TimeTickMarshaler{}
+	case kTimeSync:
+		timeSyncMarshaler := &TimeSyncMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = timeSyncMarshaler
 		return &tsMsgMarshaller
 	default:
@@ -145,10 +145,10 @@ func (srm *SearchResultMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Stat
 
 /////////////////////////////////////TimeSync///////////////////////////////////////////////
 
-type TimeTickMarshaler struct{}
+type TimeSyncMarshaler struct{}
 
-func (tm *TimeTickMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	timeSyncTask := (*input).(TimeTickMsg)
+func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
+	timeSyncTask := (*input).(TimeSyncTask)
 	timeSyncMsg := &timeSyncTask.TimeTickMsg
 	mb, err := proto.Marshal(timeSyncMsg)
 	if err != nil {
@@ -157,10 +157,10 @@ func (tm *TimeTickMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 	return mb, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
-func (tm *TimeTickMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
+func (tm *TimeSyncMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	timeSyncMsg := internalPb.TimeTickMsg{}
 	err := proto.Unmarshal(input, &timeSyncMsg)
-	timeSyncTask := TimeTickMsg{TimeTickMsg: timeSyncMsg}
+	timeSyncTask := TimeSyncTask{TimeTickMsg: timeSyncMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}

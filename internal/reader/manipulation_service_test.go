@@ -93,8 +93,7 @@ func TestInsertAndDelete_WriterDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -196,8 +195,7 @@ func TestInsertAndDelete_PreInsertAndDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -329,8 +327,7 @@ func TestInsertAndDelete_DoInsert(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -420,8 +417,7 @@ func TestInsertAndDelete_DoDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -540,8 +536,7 @@ func TestInsertAndDelete_DoInsertAndDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"

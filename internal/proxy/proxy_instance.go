@@ -52,7 +52,7 @@ func (ins *proxyInstance) restartSchedulerRoutine(bufSize int) error {
 			select {
 			case t := <-ins.taskChan:
 				switch (*t).Type() {
-				case internalpb.MsgType_kInsert:
+				case internalpb.ReqType_kInsert:
 					ins.taskSch.DmQueue.Enqueue(t)
 				default:
 					return

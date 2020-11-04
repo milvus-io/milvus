@@ -20,8 +20,7 @@ func TestResult_PublishSearchResult(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -62,8 +61,7 @@ func TestResult_PublishFailedSearchResult(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -91,8 +89,7 @@ func TestResult_PublicStatistic(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), d)
-	defer cancel()
+	ctx, _ := context.WithDeadline(context.Background(), d)
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"

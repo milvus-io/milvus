@@ -1,9 +1,5 @@
 package reader
 
-import (
-	"log"
-)
-
 type dmNode struct {
 	BaseNode
 	dmMsg dmMsg
@@ -14,22 +10,7 @@ func (dmNode *dmNode) Name() string {
 }
 
 func (dmNode *dmNode) Operate(in []*Msg) []*Msg {
-	// TODO: add filtered by schema update
-	// But for now, we think all the messages are valid
-
-	if len(in) != 1 {
-		log.Println("Invalid operate message input in filteredDmNode")
-		// TODO: add error handling
-	}
-
-	dmMsg, ok := (*in[0]).(*dmMsg)
-	if !ok {
-		log.Println("type assertion failed for dmMsg")
-		// TODO: add error handling
-	}
-
-	var res Msg = dmMsg
-	return []*Msg{&res}
+	return in
 }
 
 func newDmNode() *dmNode {

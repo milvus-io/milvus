@@ -23,7 +23,7 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Destruct collection, partition and segment
@@ -49,12 +49,12 @@ func TestSegment_SegmentInsert(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -81,8 +81,8 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Destruct collection, partition and segment
 	partition.DeleteSegment(node, segment)
@@ -107,7 +107,7 @@ func TestSegment_SegmentDelete(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -145,7 +145,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -179,11 +179,11 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Do search
-	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
+	var queryJson = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
 	var queryRawData = make([]float32, 0)
 	for i := 0; i < 16; i++ {
 		queryRawData = append(queryRawData, float32(i))
@@ -191,7 +191,7 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var vectorRecord = msgPb.VectorRowRecord{
 		FloatData: queryRawData,
 	}
-	query := node.QueryJSON2Info(&queryJSON)
+	query := node.QueryJson2Info(&queryJson)
 	var searchRes, searchErr = segment.SegmentSearch(query, timestamps[N/2], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
@@ -219,7 +219,7 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreInsert
@@ -249,7 +249,7 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreDelete
@@ -321,12 +321,12 @@ func TestSegment_GetRowCount(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -353,8 +353,8 @@ func TestSegment_GetRowCount(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Get segment row count
 	var rowCount = segment.GetRowCount()
@@ -383,7 +383,7 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
@@ -426,12 +426,12 @@ func TestSegment_GetMemSize(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -458,8 +458,8 @@ func TestSegment_GetMemSize(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Get memory usage in bytes
 	var memSize = segment.GetMemSize()
@@ -496,12 +496,12 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 
 	assert.Equal(t, collection.CollectionName, "collection0")
 	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
+	assert.Equal(t, segment.SegmentId, int64(0))
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -528,8 +528,8 @@ func TestSegment_RealSchemaTest(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Destruct collection, partition and segment
 	partition.DeleteSegment(node, segment)

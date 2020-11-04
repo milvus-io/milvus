@@ -44,12 +44,12 @@ type showCollectionsTask struct {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *createCollectionTask) Type() internalpb.MsgType {
+func (t *createCollectionTask) Type() internalpb.ReqType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.ReqType
 }
 
 func (t *createCollectionTask) Ts() (Timestamp, error) {
@@ -106,12 +106,12 @@ func (t *createCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *dropCollectionTask) Type() internalpb.MsgType {
+func (t *dropCollectionTask) Type() internalpb.ReqType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.ReqType
 }
 
 func (t *dropCollectionTask) Ts() (Timestamp, error) {
@@ -149,12 +149,12 @@ func (t *dropCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *hasCollectionTask) Type() internalpb.MsgType {
+func (t *hasCollectionTask) Type() internalpb.ReqType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.ReqType
 }
 
 func (t *hasCollectionTask) Ts() (Timestamp, error) {
@@ -181,12 +181,12 @@ func (t *hasCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *describeCollectionTask) Type() internalpb.MsgType {
+func (t *describeCollectionTask) Type() internalpb.ReqType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.ReqType
 }
 
 func (t *describeCollectionTask) Ts() (Timestamp, error) {
@@ -223,12 +223,12 @@ func (t *describeCollectionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *showCollectionsTask) Type() internalpb.MsgType {
+func (t *showCollectionsTask) Type() internalpb.ReqType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
 	}
-	return t.req.MsgType
+	return t.req.ReqType
 }
 
 func (t *showCollectionsTask) Ts() (Timestamp, error) {

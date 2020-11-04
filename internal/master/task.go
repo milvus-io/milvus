@@ -18,7 +18,7 @@ type baseTask struct {
 }
 
 type task interface {
-	Type() internalpb.MsgType
+	Type() internalpb.ReqType
 	Ts() (Timestamp, error)
 	Execute() error
 	WaitToFinish(ctx context.Context) error

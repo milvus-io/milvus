@@ -66,9 +66,13 @@ func (node *QueryNode) GetSegmentBySegmentID(segmentID int64) (*Segment, error) 
 }
 
 func (node *QueryNode) FoundSegmentBySegmentID(segmentID int64) bool {
-	_, ok := node.SegmentsMap[segmentID]
+	targetSegment := node.SegmentsMap[segmentID]
 
-	return ok
+	if targetSegment == nil {
+		return false
+	}
+
+	return true
 }
 
 func (c *Collection) GetPartitionByName(partitionName string) (partition *Partition) {
@@ -107,12 +111,12 @@ func (node *QueryNode) WriteQueryLog() {
 
 	// write logs
 	for _, insertLog := range node.InsertLogs {
-		insertLogJSON, err := json.Marshal(&insertLog)
+		insertLogJson, err := json.Marshal(&insertLog)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		writeString := string(insertLogJSON) + "\n"
+		writeString := string(insertLogJson) + "\n"
 		fmt.Println(writeString)
 
 		_, err2 := f.WriteString(writeString)
@@ -137,9 +141,9 @@ func (node *QueryNode) PrepareBatchMsg() []int {
 	return msgLen
 }
 
-func (node *QueryNode) QueryJSON2Info(queryJSON *string) *QueryInfo {
+func (node *QueryNode) QueryJson2Info(queryJson *string) *QueryInfo {
 	var query QueryInfo
-	var err = json.Unmarshal([]byte(*queryJSON), &query)
+	var err = json.Unmarshal([]byte(*queryJson), &query)
 
 	if err != nil {
 		log.Fatal("Unmarshal query json failed")

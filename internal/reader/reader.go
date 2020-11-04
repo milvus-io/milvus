@@ -59,7 +59,7 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 				}
 
 				if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
-					node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
+					node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 					continue
 				}
 
@@ -71,7 +71,7 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 				//fmt.Println("PreInsertAndDelete Done")
 				node.DoInsertAndDelete()
 				//fmt.Println("DoInsertAndDelete Done")
-				node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
+				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 			}
 		}
 	} else {
@@ -87,7 +87,7 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 				assert.NotEqual(nil, 0, timeRange.timestampMax)
 
 				if msgLen[0] == 0 && len(node.buffer.InsertDeleteBuffer) <= 0 {
-					node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
+					node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 					continue
 				}
 
@@ -99,10 +99,11 @@ func (node *QueryNode) RunInsertDelete(wg *sync.WaitGroup) {
 				//fmt.Println("PreInsertAndDelete Done")
 				node.DoInsertAndDelete()
 				//fmt.Println("DoInsertAndDelete Done")
-				node.queryNodeTimeSync.updateSearchServiceTime(timeRange)
+				node.queryNodeTimeSync.UpdateSearchTimeSync(timeRange)
 			}
 		}
 	}
+	wg.Done()
 }
 
 func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
@@ -128,4 +129,5 @@ func (node *QueryNode) RunSearch(wg *sync.WaitGroup) {
 		default:
 		}
 	}
+	wg.Done()
 }

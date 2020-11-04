@@ -2,7 +2,6 @@ package reader
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -14,10 +13,8 @@ type msgStreamMsg struct {
 }
 
 type dmMsg struct {
-	insertMessages []*msgstream.InsertTask
-	// TODO: add delete message support
-	// deleteMessages []*msgstream.DeleteTask
-	timeRange TimeRange
+	tsMessages []*msgstream.TsMsg
+	timeRange  TimeRange
 }
 
 type key2SegMsg struct {
@@ -30,10 +27,8 @@ type schemaUpdateMsg struct {
 }
 
 type filteredDmMsg struct {
-	insertMessages []*msgstream.InsertTask
-	// TODO: add delete message support
-	// deleteMessages []*msgstream.DeleteTask
-	timeRange TimeRange
+	tsMessages []*msgstream.TsMsg
+	timeRange  TimeRange
 }
 
 type insertMsg struct {
@@ -58,7 +53,7 @@ type serviceTimeMsg struct {
 type InsertData struct {
 	insertIDs        map[int64][]int64
 	insertTimestamps map[int64][]uint64
-	insertRecords    map[int64][]*commonpb.Blob
+	insertRecords    map[int64][][]byte
 	insertOffset     map[int64]int64
 }
 

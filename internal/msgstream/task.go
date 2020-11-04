@@ -8,14 +8,14 @@ import (
 type MsgType uint32
 
 const (
-	KInsert       MsgType = 400
-	KDelete       MsgType = 401
-	KSearch       MsgType = 500
-	KSearchResult MsgType = 1000
+	kInsert       MsgType = 400
+	kDelete       MsgType = 401
+	kSearch       MsgType = 500
+	kSearchResult MsgType = 1000
 
-	KSegmentStatics MsgType = 1100
-	KTimeTick       MsgType = 1200
-	KTimeSync       MsgType = 1201
+	kSegmentStatics MsgType = 1100
+	kTimeTick       MsgType = 1200
+	kTimeSync       MsgType = 1201
 )
 
 type TsMsg interface {
@@ -67,10 +67,10 @@ func (it InsertTask) EndTs() Timestamp {
 }
 
 func (it InsertTask) Type() MsgType {
-	if it.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeSync
+	if it.ReqType == internalPb.ReqType_kTimeTick {
+		return kTimeSync
 	}
-	return KInsert
+	return kInsert
 }
 
 func (it InsertTask) HashKeys() []int32 {
@@ -118,10 +118,10 @@ func (dt DeleteTask) EndTs() Timestamp {
 }
 
 func (dt DeleteTask) Type() MsgType {
-	if dt.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeSync
+	if dt.ReqType == internalPb.ReqType_kTimeTick {
+		return kTimeSync
 	}
-	return KDelete
+	return kDelete
 }
 
 func (dt DeleteTask) HashKeys() []int32 {
@@ -147,10 +147,10 @@ func (st SearchTask) EndTs() Timestamp {
 }
 
 func (st SearchTask) Type() MsgType {
-	if st.MsgType == internalPb.MsgType_kTimeTick {
-		return KTimeSync
+	if st.ReqType == internalPb.ReqType_kTimeTick {
+		return kTimeSync
 	}
-	return KSearch
+	return kSearch
 }
 
 func (st SearchTask) HashKeys() []int32 {
@@ -176,7 +176,7 @@ func (srt SearchResultTask) EndTs() Timestamp {
 }
 
 func (srt SearchResultTask) Type() MsgType {
-	return KSearchResult
+	return kSearchResult
 }
 
 func (srt SearchResultTask) HashKeys() []int32 {
@@ -184,28 +184,28 @@ func (srt SearchResultTask) HashKeys() []int32 {
 }
 
 /////////////////////////////////////////TimeSync//////////////////////////////////////////
-type TimeTickMsg struct {
+type TimeSyncTask struct {
 	HashValues []int32
 	internalPb.TimeTickMsg
 }
 
-func (tst TimeTickMsg) SetTs(ts Timestamp) {
+func (tst TimeSyncTask) SetTs(ts Timestamp) {
 	tst.Timestamp = uint64(ts)
 }
 
-func (tst TimeTickMsg) BeginTs() Timestamp {
+func (tst TimeSyncTask) BeginTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
-func (tst TimeTickMsg) EndTs() Timestamp {
+func (tst TimeSyncTask) EndTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
-func (tst TimeTickMsg) Type() MsgType {
-	return KTimeSync
+func (tst TimeSyncTask) Type() MsgType {
+	return kTimeSync
 }
 
-func (tst TimeTickMsg) HashKeys() []int32 {
+func (tst TimeSyncTask) HashKeys() []int32 {
 	return tst.HashValues
 }
 

@@ -145,6 +145,38 @@ func (s *proxyServer) ShowPartitions(ctx context.Context, req *servicepb.Collect
 	}, nil
 }
 
+func (s *proxyServer) DeleteByID(ctx context.Context, req *pb.DeleteByIDParam) (*commonpb.Status, error) {
+	log.Printf("delete entites, total = %d", len(req.IdArray))
+	mReqMsg := pb.ManipulationReqMsg{
+		CollectionName: req.CollectionName,
+		ReqType:        pb.ReqType_kDeleteEntityByID,
+		ProxyId:        s.proxyId,
+	}
+	for _, id := range req.IdArray {
+		mReqMsg.PrimaryKeys = append(mReqMsg.PrimaryKeys, id)
+	}
+	if len(mReqMsg.PrimaryKeys) > 1 {
+		mReq := &manipulationReq{
+			stats: make([]commonpb.Status, 1),
+			msgs:  append([]*pb.ManipulationReqMsg{}, &mReqMsg),
+			proxy: s,
+		}
+		if st := mReq.PreExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return &st, nil
+		}
+		if st := mReq.Execute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return &st, nil
+		}
+		if st := mReq.PostExecute(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return &st, nil
+		}
+		if st := mReq.WaitToFinish(); st.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return &st, nil
+		}
+	}
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
+}
+
 func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
 	log.Printf("Insert Entities, total =  %d", len(req.RowData))
 	msgMap := make(map[uint32]*pb.ManipulationReqMsg)
@@ -230,7 +262,7 @@ func (s *proxyServer) Insert(ctx context.Context, req *servicepb.RowBatch) (*ser
 func (s *proxyServer) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
 	qm := &queryReq{
 		SearchRequest: internalpb.SearchRequest{
-			MsgType:         internalpb.MsgType_kSearch,
+			ReqType:         internalpb.ReqType_kSearch,
 			ProxyId:         s.proxyId,
 			ReqId:           s.queryId.Add(1),
 			Timestamp:       0,
