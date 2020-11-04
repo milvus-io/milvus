@@ -8,3 +8,7 @@ default_raw_binary_vector, default_binary_entity = utils.gen_binary_entities(1)
 
 default_entities = utils.gen_entities(utils.default_nb)
 default_raw_binary_vectors, default_binary_entities = utils.gen_binary_entities(utils.default_nb)
+
+
+default_entities_new = utils.gen_entities_new(utils.default_nb)
+default_raw_binary_vectors_new, default_binary_entities_new = utils.gen_binary_entities_new(utils.default_nb)

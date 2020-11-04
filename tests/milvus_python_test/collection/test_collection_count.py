@@ -51,7 +51,7 @@ class TestCollectionCount:
         expected: the count is equal to the length of vectors
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        res = connect.bulk_insert(collection, entities)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count
@@ -65,7 +65,7 @@ class TestCollectionCount:
         '''
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
-        res_ids = connect.insert(collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count
@@ -81,7 +81,7 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
-        res_ids = connect.insert(collection, entities)
+        res_ids = connect.bulk_insert(collection, entities)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count
@@ -97,7 +97,7 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
-        res_ids = connect.insert(collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count
@@ -113,8 +113,8 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
-        res_ids = connect.insert(collection, entities)
-        res_ids_2 = connect.insert(collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(collection, entities)
+        res_ids_2 = connect.bulk_insert(collection, entities, partition_tag=tag)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count * 2
@@ -130,8 +130,8 @@ class TestCollectionCount:
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
         connect.create_partition(collection, new_tag)
-        res_ids = connect.insert(collection, entities, partition_tag=tag)
-        res_ids2 = connect.insert(collection, entities, partition_tag=new_tag)
+        res_ids = connect.bulk_insert(collection, entities, partition_tag=tag)
+        res_ids2 = connect.bulk_insert(collection, entities, partition_tag=new_tag)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == insert_count * 2
@@ -143,7 +143,7 @@ class TestCollectionCount:
         expected: count_entities raise exception
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        res = connect.bulk_insert(collection, entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         res = connect.count_entities(collection)
@@ -205,7 +205,7 @@ class TestCollectionCountIP:
         expected: count_entities raise exception
         '''
         entities = gen_entities(insert_count)
-        res = connect.insert(collection, entities)
+        res = connect.bulk_insert(collection, entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         res = connect.count_entities(collection)
@@ -279,7 +279,7 @@ class TestCollectionCountBinary:
         expected: the count is equal to the length of entities
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        res = connect.bulk_insert(binary_collection, entities)
         logging.getLogger().info(len(res))
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
@@ -294,7 +294,7 @@ class TestCollectionCountBinary:
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
-        res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(binary_collection, entities, partition_tag=tag)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == insert_count
@@ -311,7 +311,7 @@ class TestCollectionCountBinary:
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
         connect.create_partition(binary_collection, new_tag)
-        res_ids = connect.insert(binary_collection, entities)
+        res_ids = connect.bulk_insert(binary_collection, entities)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == insert_count
@@ -328,7 +328,7 @@ class TestCollectionCountBinary:
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
         connect.create_partition(binary_collection, new_tag)
-        res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(binary_collection, entities, partition_tag=tag)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == insert_count
@@ -344,8 +344,8 @@ class TestCollectionCountBinary:
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
         connect.create_partition(binary_collection, new_tag)
-        res_ids = connect.insert(binary_collection, entities)
-        res_ids_2 = connect.insert(binary_collection, entities, partition_tag=tag)
+        res_ids = connect.bulk_insert(binary_collection, entities)
+        res_ids_2 = connect.bulk_insert(binary_collection, entities, partition_tag=tag)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == insert_count * 2
@@ -362,8 +362,8 @@ class TestCollectionCountBinary:
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
         connect.create_partition(binary_collection, new_tag)
-        res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
-        res_ids2 = connect.insert(binary_collection, entities, partition_tag=new_tag)
+        res_ids = connect.bulk_insert(binary_collection, entities, partition_tag=tag)
+        res_ids2 = connect.bulk_insert(binary_collection, entities, partition_tag=new_tag)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == insert_count * 2
@@ -375,7 +375,7 @@ class TestCollectionCountBinary:
         expected: count_entities raise exception
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        res = connect.bulk_insert(binary_collection, entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, field_name, get_jaccard_index)
         res = connect.count_entities(binary_collection)
@@ -388,7 +388,7 @@ class TestCollectionCountBinary:
         expected: count_entities raise exception
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        res = connect.bulk_insert(binary_collection, entities)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, field_name, get_hamming_index)
         res = connect.count_entities(binary_collection)
@@ -478,7 +478,7 @@ class TestCollectionMultiCollections:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, entities)
+            res = connect.bulk_insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
@@ -493,14 +493,14 @@ class TestCollectionMultiCollections:
         expected: the count is equal to the length of entities
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
-        res = connect.insert(binary_collection, entities)
+        res = connect.bulk_insert(binary_collection, entities)
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
-            res = connect.insert(collection_name, entities)
+            res = connect.bulk_insert(collection_name, entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
@@ -520,12 +520,12 @@ class TestCollectionMultiCollections:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            res = connect.insert(collection_name, default_entities)
+            res = connect.bulk_insert(collection_name, default_entities)
         for i in range(int(collection_num / 2), collection_num):
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
-            res = connect.insert(collection_name, default_binary_entities)
+            res = connect.bulk_insert(collection_name, default_binary_entities)
         connect.flush(collection_list)
         for i in range(collection_num):
             res = connect.count_entities(collection_list[i])
