@@ -187,11 +187,6 @@ TEST_F(MySqlMetaTest, COLLECTION_FILE_TEST) {
     //    ASSERT_TRUE(status.ok());
     //    ASSERT_EQ(cnt, 0UL);
 
-    FIU_ENABLE_FIU("MySQLMetaImpl.DescribeCollection.throw_exception");
-    status = impl_->Count(collection_id, cnt);
-    ASSERT_FALSE(status.ok());
-    fiu_disable("MySQLMetaImpl.DescribeCollection.throw_exception");
-
     FIU_ENABLE_FIU("MySQLMetaImpl.Count.null_connection");
     status = impl_->Count(collection_id, cnt);
     ASSERT_FALSE(status.ok());
