@@ -11,7 +11,7 @@ import (
 func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 	type SearchResultTmp struct {
-		ResultId       int64
+		ResultID       int64
 		ResultDistance float32
 	}
 
@@ -20,7 +20,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 	// Traverse all messages in the current messageClient.
 	// TODO: Do not receive batched search requests
 	for _, msg := range searchMessages {
-		var clientId = msg.ClientId
+		var clientID = msg.ClientId
 		var searchTimestamp = msg.Timestamp
 
 		// ServiceTimeSync update by TimeSync, which is get from proxy.
@@ -34,7 +34,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 
 		var vector = msg.Records
 		// We now only the first Json is valid.
-		var queryJson = msg.Json[0]
+		var queryJSON = msg.Json[0]
 
 		// 1. Timestamp check
 		// TODO: return or wait? Or adding graceful time
@@ -44,7 +44,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 		}
 
 		// 2. Get query information from query json
-		query := node.QueryJson2Info(&queryJson)
+		query := node.QueryJSON2Info(&queryJSON)
 		// 2d slice for receiving multiple queries's results
 		var resultsTmp = make([][]SearchResultTmp, query.NumQueries)
 		for i := 0; i < int(query.NumQueries); i++ {
@@ -58,7 +58,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 				continue
 			}
 
-			//fmt.Println("Search in segment:", segment.SegmentId, ",segment rows:", segment.GetRowCount())
+			//fmt.Println("Search in segment:", segment.SegmentID, ",segment rows:", segment.GetRowCount())
 			var res, err = segment.SegmentSearch(query, searchTimestamp, vector)
 			if err != nil {
 				fmt.Println(err.Error())
@@ -68,7 +68,7 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			for i := 0; i < int(query.NumQueries); i++ {
 				for j := i * query.TopK; j < (i+1)*query.TopK; j++ {
 					resultsTmp[i] = append(resultsTmp[i], SearchResultTmp{
-						ResultId:       res.ResultIds[j],
+						ResultID:       res.ResultIds[j],
 						ResultDistance: res.ResultDistances[j],
 					})
 				}
@@ -98,11 +98,11 @@ func (node *QueryNode) Search(searchMessages []*msgPb.SearchMsg) msgPb.Status {
 			Entities:  &entities,
 			Distances: make([]float32, 0),
 			QueryId:   msg.Uid,
-			ProxyId:   clientId,
+			ProxyId:   clientID,
 		}
 		for _, rTmp := range resultsTmp {
 			for _, res := range rTmp {
-				results.Entities.Ids = append(results.Entities.Ids, res.ResultId)
+				results.Entities.Ids = append(results.Entities.Ids, res.ResultID)
 				results.Distances = append(results.Distances, res.ResultDistance)
 				results.Scores = append(results.Distances, float32(0))
 			}

@@ -15,7 +15,7 @@ linters-settings:
     locale: US
 
 linters:
-  disable-all: false
+  disable-all: true
   enable:
     - typecheck
     - goimports
@@ -24,8 +24,6 @@ linters:
     - golint
     - ineffassign
     - gosimple
-    - deadcode
-    - structcheck
 
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly

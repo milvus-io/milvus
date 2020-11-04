@@ -23,12 +23,12 @@ const (
 	SegmentPrefix    = "/segment/"
 )
 
-func GetCollectionObjId(key string) string {
+func GetCollectionObjID(key string) string {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
-func GetSegmentObjId(key string) string {
+func GetSegmentObjID(key string) string {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
@@ -133,10 +133,10 @@ func (node *QueryNode) processSegmentCreate(id string, value string) {
 func (node *QueryNode) processCreate(key string, msg string) {
 	println("process create", key)
 	if isCollectionObj(key) {
-		objID := GetCollectionObjId(key)
+		objID := GetCollectionObjID(key)
 		node.processCollectionCreate(objID, msg)
 	} else if isSegmentObj(key) {
-		objID := GetSegmentObjId(key)
+		objID := GetSegmentObjID(key)
 		node.processSegmentCreate(objID, msg)
 	} else {
 		println("can not process create msg:", key)
@@ -170,10 +170,10 @@ func (node *QueryNode) processCollectionModify(id string, value string) {
 func (node *QueryNode) processModify(key string, msg string) {
 	// println("process modify")
 	if isCollectionObj(key) {
-		objID := GetCollectionObjId(key)
+		objID := GetCollectionObjID(key)
 		node.processCollectionModify(objID, msg)
 	} else if isSegmentObj(key) {
-		objID := GetSegmentObjId(key)
+		objID := GetSegmentObjID(key)
 		node.processSegmentModify(objID, msg)
 	} else {
 		println("can not process modify msg:", key)
@@ -183,7 +183,7 @@ func (node *QueryNode) processModify(key string, msg string) {
 func (node *QueryNode) processSegmentDelete(id string) {
 	println("Delete segment: ", id)
 
-	segmentId, err := strconv.ParseInt(id, 10, 64)
+	segmentID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		log.Println("Cannot parse segment id:" + id)
 	}
@@ -191,7 +191,7 @@ func (node *QueryNode) processSegmentDelete(id string) {
 	for _, col := range node.Collections {
 		for _, p := range col.Partitions {
 			for _, s := range p.Segments {
-				if s.SegmentId == segmentId {
+				if s.SegmentID == segmentID {
 					p.DeleteSegment(node, s)
 				}
 			}
@@ -202,22 +202,22 @@ func (node *QueryNode) processSegmentDelete(id string) {
 func (node *QueryNode) processCollectionDelete(id string) {
 	println("Delete collection: ", id)
 
-	collectionId, err := strconv.ParseInt(id, 10, 64)
+	collectionID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		log.Println("Cannot parse collection id:" + id)
 	}
 
-	targetCollection := node.GetCollectionByID(collectionId)
+	targetCollection := node.GetCollectionByID(collectionID)
 	node.DeleteCollection(targetCollection)
 }
 
 func (node *QueryNode) processDelete(key string) {
 	println("process delete")
 	if isCollectionObj(key) {
-		objID := GetCollectionObjId(key)
+		objID := GetCollectionObjID(key)
 		node.processCollectionDelete(objID)
 	} else if isSegmentObj(key) {
-		objID := GetSegmentObjId(key)
+		objID := GetSegmentObjID(key)
 		node.processSegmentDelete(objID)
 	} else {
 		println("can not process delete msg:", key)
@@ -256,7 +256,7 @@ func (node *QueryNode) loadCollections() error {
 		return err
 	}
 	for i := range keys {
-		objID := GetCollectionObjId(keys[i])
+		objID := GetCollectionObjID(keys[i])
 		node.processCollectionCreate(objID, values[i])
 	}
 	return nil
@@ -267,7 +267,7 @@ func (node *QueryNode) loadSegments() error {
 		return err
 	}
 	for i := range keys {
-		objID := GetSegmentObjId(keys[i])
+		objID := GetSegmentObjID(keys[i])
 		node.processSegmentCreate(objID, values[i])
 	}
 	return nil

@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"flag"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/master"
-	"go.uber.org/zap"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/master"
+	"go.uber.org/zap"
 )
 
 func main() {

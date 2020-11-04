@@ -17,25 +17,25 @@ func GetMarshalers(inputMsgType MsgType, outputMsgType MsgType) (*TsMsgMarshaler
 
 func GetMarshaler(MsgType MsgType) *TsMsgMarshaler {
 	switch MsgType {
-	case kInsert:
+	case KInsert:
 		insertMarshaler := &InsertMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = insertMarshaler
 		return &tsMsgMarshaller
-	case kDelete:
+	case KDelete:
 		deleteMarshaler := &DeleteMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = deleteMarshaler
 		return &tsMsgMarshaller
-	case kSearch:
+	case KSearch:
 		searchMarshaler := &SearchMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchMarshaler
 		return &tsMsgMarshaller
-	case kSearchResult:
+	case KSearchResult:
 		searchResultMarshler := &SearchResultMarshaler{}
 		var tsMsgMarshaller TsMsgMarshaler = searchResultMarshler
 		return &tsMsgMarshaller
-	case kTimeSync:
-		timeSyncMarshaler := &TimeSyncMarshaler{}
-		var tsMsgMarshaller TsMsgMarshaler = timeSyncMarshaler
+	case KTimeTick:
+		timeTickMarshaler := &TimeTickMarshaler{}
+		var tsMsgMarshaller TsMsgMarshaler = timeTickMarshaler
 		return &tsMsgMarshaller
 	default:
 		return nil
@@ -143,28 +143,28 @@ func (srm *SearchResultMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Stat
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
-/////////////////////////////////////TimeSync///////////////////////////////////////////////
+/////////////////////////////////////TimeTick///////////////////////////////////////////////
 
-type TimeSyncMarshaler struct{}
+type TimeTickMarshaler struct{}
 
-func (tm *TimeSyncMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	timeSyncTask := (*input).(TimeSyncTask)
-	timeSyncMsg := &timeSyncTask.TimeTickMsg
-	mb, err := proto.Marshal(timeSyncMsg)
+func (tm *TimeTickMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
+	timeTickTask := (*input).(TimeTickTask)
+	timeTickMsg := &timeTickTask.TimeTickMsg
+	mb, err := proto.Marshal(timeTickMsg)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
 	return mb, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
-func (tm *TimeSyncMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
-	timeSyncMsg := internalPb.TimeTickMsg{}
-	err := proto.Unmarshal(input, &timeSyncMsg)
-	timeSyncTask := TimeSyncTask{TimeTickMsg: timeSyncMsg}
+func (tm *TimeTickMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
+	timeTickMsg := internalPb.TimeTickMsg{}
+	err := proto.Unmarshal(input, &timeTickMsg)
+	timeTickTask := TimeTickTask{TimeTickMsg: timeTickMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = timeSyncTask
+	var tsMsg TsMsg = timeTickTask
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 

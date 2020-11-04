@@ -19,7 +19,8 @@ func TestReader_startQueryNode(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	pulsarAddr := "pulsar://"
 	pulsarAddr += conf.Config.Pulsar.Address
@@ -37,7 +38,8 @@ func TestReader_RunInsertDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"
@@ -67,7 +69,8 @@ func TestReader_RunSearch(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	pulsarAddr := "pulsar://"

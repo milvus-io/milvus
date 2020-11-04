@@ -126,7 +126,23 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) commonPb.Status {
 		reBucketValues[channelId] = bucketValues
 	}
 
-	result := ms.repackFunc(tsMsgs, reBucketValues)
+	var result map[int32]*MsgPack
+	if ms.repackFunc != nil {
+		result = ms.repackFunc(tsMsgs, reBucketValues)
+	} else {
+		result = make(map[int32]*MsgPack)
+		for i, request := range tsMsgs {
+			keys := reBucketValues[i]
+			for _, channelId := range keys {
+				_, ok := result[channelId]
+				if ok == false {
+					msgPack := MsgPack{}
+					result[channelId] = &msgPack
+				}
+				result[channelId].Msgs = append(result[channelId].Msgs, request)
+			}
+		}
+	}
 	for k, v := range result {
 		for i := 0; i < len(v.Msgs); i++ {
 			mb, status := (*ms.msgMarshaler).Marshal(v.Msgs[i])
@@ -273,7 +289,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(ctx context.Context,
 			(*ms.consumers[channelIndex]).Ack(pulsarMsg)
 			tsMsg, status := (*ms.msgUnmarshaler).Unmarshal(pulsarMsg.Payload())
 			// TODO:: Find the EOF
-			if (*tsMsg).Type() == kTimeSync {
+			if (*tsMsg).Type() == KTimeTick {
 				eofMsgMap[channelIndex] = (*tsMsg).EndTs()
 				wg.Done()
 				return

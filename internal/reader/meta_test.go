@@ -20,28 +20,28 @@ func TestMeta_GetCollectionObjId(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	var key = "/collection/collection0"
-	var collectionObjId1 = GetCollectionObjId(key)
+	var collectionObjID1 = GetCollectionObjID(key)
 
-	assert.Equal(t, collectionObjId1, "/collection/collection0")
+	assert.Equal(t, collectionObjID1, "/collection/collection0")
 
 	key = "fakeKey"
-	var collectionObjId2 = GetCollectionObjId(key)
+	var collectionObjID2 = GetCollectionObjID(key)
 
-	assert.Equal(t, collectionObjId2, "fakeKey")
+	assert.Equal(t, collectionObjID2, "fakeKey")
 }
 
 func TestMeta_GetSegmentObjId(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	var key = "/segment/segment0"
-	var segmentObjId1 = GetSegmentObjId(key)
+	var segmentObjID1 = GetSegmentObjID(key)
 
-	assert.Equal(t, segmentObjId1, "/segment/segment0")
+	assert.Equal(t, segmentObjID1, "/segment/segment0")
 
 	key = "fakeKey"
-	var segmentObjId2 = GetSegmentObjId(key)
+	var segmentObjID2 = GetSegmentObjID(key)
 
-	assert.Equal(t, segmentObjId2, "fakeKey")
+	assert.Equal(t, segmentObjID2, "fakeKey")
 }
 
 func TestMeta_isCollectionObj(t *testing.T) {
@@ -158,7 +158,8 @@ func TestMeta_ProcessCollectionCreate(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -185,7 +186,8 @@ func TestMeta_ProcessSegmentCreate(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -202,7 +204,7 @@ func TestMeta_ProcessSegmentCreate(t *testing.T) {
 	node.processSegmentCreate(id, value)
 	s := node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 }
@@ -211,7 +213,8 @@ func TestMeta_ProcessCreate(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -242,7 +245,7 @@ func TestMeta_ProcessCreate(t *testing.T) {
 	node.processCreate(key2, msg2)
 	s := node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 }
@@ -251,7 +254,8 @@ func TestMeta_ProcessSegmentModify(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -268,7 +272,7 @@ func TestMeta_ProcessSegmentModify(t *testing.T) {
 	node.processSegmentCreate(id, value)
 	var s = node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 
@@ -280,7 +284,7 @@ func TestMeta_ProcessSegmentModify(t *testing.T) {
 	node.processSegmentModify(id, newValue)
 	s = node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177888))
 	assert.Equal(t, s.SegmentStatus, 0)
 }
@@ -289,7 +293,8 @@ func TestMeta_ProcessCollectionModify(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -333,7 +338,8 @@ func TestMeta_ProcessModify(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -364,7 +370,7 @@ func TestMeta_ProcessModify(t *testing.T) {
 	node.processCreate(key2, msg2)
 	s := node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 
@@ -394,7 +400,7 @@ func TestMeta_ProcessModify(t *testing.T) {
 	node.processModify(key2, msg4)
 	s = node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177888))
 	assert.Equal(t, s.SegmentStatus, 0)
 }
@@ -403,7 +409,8 @@ func TestMeta_ProcessSegmentDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -420,7 +427,7 @@ func TestMeta_ProcessSegmentDelete(t *testing.T) {
 	node.processSegmentCreate(id, value)
 	s := node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 
@@ -434,7 +441,8 @@ func TestMeta_ProcessCollectionDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -466,7 +474,8 @@ func TestMeta_ProcessDelete(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -497,7 +506,7 @@ func TestMeta_ProcessDelete(t *testing.T) {
 	node.processCreate(key2, msg2)
 	s := node.SegmentsMap[int64(0)]
 
-	assert.Equal(t, s.SegmentId, int64(0))
+	assert.Equal(t, s.SegmentID, int64(0))
 	assert.Equal(t, s.SegmentCloseTime, uint64(70368744177663))
 	assert.Equal(t, s.SegmentStatus, 0)
 
@@ -515,7 +524,8 @@ func TestMeta_ProcessResp(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -537,7 +547,8 @@ func TestMeta_LoadCollections(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -553,7 +564,8 @@ func TestMeta_LoadSegments(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -569,7 +581,8 @@ func TestMeta_InitFromMeta(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	mc := msgclient.ReaderMessageClient{}
 	node := CreateQueryNode(ctx, 0, 0, &mc)
@@ -582,7 +595,8 @@ func TestMeta_RunMetaService(t *testing.T) {
 	conf.LoadConfig("config.yaml")
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, _ := context.WithDeadline(context.Background(), d)
+	ctx, cancel := context.WithDeadline(context.Background(), d)
+	defer cancel()
 
 	node := CreateQueryNode(ctx, 0, 0, nil)
 

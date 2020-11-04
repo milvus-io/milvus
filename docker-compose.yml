@@ -24,4 +24,4 @@ services:
     working_dir: "/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "
-        make all"
+        make verifiers && make all"
