@@ -330,7 +330,7 @@ TEST_F(MetaTest, FAILED_TEST) {
     {
         uint64_t count;
         status = impl_->Count("notexist", count);
-        ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
+        ASSERT_EQ(count, 0);
 
         FIU_ENABLE_FIU("SqliteMetaImpl.Count.throw_exception");
         status = impl_->Count("notexist", count);

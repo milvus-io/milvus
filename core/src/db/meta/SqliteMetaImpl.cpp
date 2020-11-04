@@ -2391,14 +2391,6 @@ SqliteMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
         fiu_do_on("SqliteMetaImpl.Count.throw_exception", throw std::exception());
         server::MetricCollector metric;
 
-        CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(collection_schema);
-
-        if (!status.ok()) {
-            return status;
-        }
-
         std::string statement = "SELECT row_count FROM " + std::string(META_TABLEFILES)
             + " WHERE table_id = " + Quote(collection_id)
             + " AND (file_type = " + std::to_string(SegmentSchema::RAW)
@@ -2409,7 +2401,7 @@ SqliteMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
         std::lock_guard<std::mutex> meta_lock(operation_mutex_);
 
         AttrsMapList res;
-        status = SqlQuery(statement, &res);
+        auto status = SqlQuery(statement, &res);
         if (!status.ok()) {
             return status;
         }
