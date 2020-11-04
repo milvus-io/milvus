@@ -24,10 +24,11 @@ class Value {
         return value_;
     }
 
-    void
-    set(const T& v) {
+    Value&
+    operator=(T value) {
         std::lock_guard<std::mutex> lock(mutex_);
-        value_ = v;
+        value_ = value;
+        return *this;
     }
 
  private:

@@ -157,7 +157,7 @@ BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, Val
 void
 BoolConfig::Init() {
     BaseConfig::Init();
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -182,7 +182,7 @@ BoolConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
+        config_ = value;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
@@ -208,7 +208,7 @@ StringConfig::StringConfig(const char* name, const char* alias, bool modifiable,
 void
 StringConfig::Init() {
     BaseConfig::Init();
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -227,7 +227,7 @@ StringConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(val);
+        config_ = val;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
@@ -255,7 +255,7 @@ EnumConfig::Init() {
     BaseConfig::Init();
     assert(enum_value_ != nullptr);
     assertm(not enum_value_->empty(), "enum value empty");
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -282,7 +282,7 @@ EnumConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
+        config_ = value;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
@@ -316,7 +316,7 @@ IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiabl
 void
 IntegerConfig::Init() {
     BaseConfig::Init();
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -348,7 +348,7 @@ IntegerConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
+        config_ = value;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
@@ -376,7 +376,7 @@ FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifia
 void
 FloatingConfig::Init() {
     BaseConfig::Init();
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -403,7 +403,7 @@ FloatingConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
+        config_ = value;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
@@ -431,7 +431,7 @@ SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int
 void
 SizeConfig::Init() {
     BaseConfig::Init();
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
@@ -461,7 +461,7 @@ SizeConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
+        config_ = value;
     } catch (ConfigError& e) {
         throw;
     } catch (...) {
