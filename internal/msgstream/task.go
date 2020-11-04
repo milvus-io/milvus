@@ -184,28 +184,28 @@ func (srt SearchResultTask) HashKeys() []int32 {
 }
 
 /////////////////////////////////////////TimeSync//////////////////////////////////////////
-type TimeSyncTask struct {
+type TimeTickMsg struct {
 	HashValues []int32
 	internalPb.TimeTickMsg
 }
 
-func (tst TimeSyncTask) SetTs(ts Timestamp) {
+func (tst TimeTickMsg) SetTs(ts Timestamp) {
 	tst.Timestamp = uint64(ts)
 }
 
-func (tst TimeSyncTask) BeginTs() Timestamp {
+func (tst TimeTickMsg) BeginTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
-func (tst TimeSyncTask) EndTs() Timestamp {
+func (tst TimeTickMsg) EndTs() Timestamp {
 	return Timestamp(tst.Timestamp)
 }
 
-func (tst TimeSyncTask) Type() MsgType {
+func (tst TimeTickMsg) Type() MsgType {
 	return KTimeSync
 }
 
-func (tst TimeSyncTask) HashKeys() []int32 {
+func (tst TimeTickMsg) HashKeys() []int32 {
 	return tst.HashValues
 }
 
