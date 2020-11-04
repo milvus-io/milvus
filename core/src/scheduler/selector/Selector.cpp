@@ -8,44 +8,34 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-#pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-#include "Pass.h"
+#include "scheduler/selector/Selector.h"
 
 namespace milvus {
 namespace scheduler {
 
-class Optimizer {
- public:
-    explicit Optimizer(std::vector<PassPtr> pass_list) : pass_list_(std::move(pass_list)) {
+void
+Selector::Init() {
+    for (auto& pass : pass_list_) {
+        pass->Init();
+    }
+}
+
+bool
+Selector::Run(const TaskPtr& task) {
+    for (auto& pass : pass_list_) {
+        if (pass->Run(task)) {
+            return true;
+        }
     }
 
-    void
-    Init();
+    return false;
+}
 
-    bool
-    Run(const TaskPtr& task);
-
-    void
-    Stop();
-
- private:
-    std::vector<PassPtr> pass_list_;
-};
-
-using OptimizerPtr = std::shared_ptr<Optimizer>;
+void
+Selector::Stop() {
+    pass_list_ = std::vector<PassPtr>();
+}
 
 }  // namespace scheduler
 }  // namespace milvus
