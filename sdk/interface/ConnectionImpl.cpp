@@ -135,15 +135,8 @@ ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::
 
 Status
 ConnectionImpl::Search(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                       const std::string& dsl, const VectorParam& vector_param, const std::string& extra_params,
-                       TopKQueryResult& query_result) {
-    return client_proxy_->Search(collection_name, partition_list, dsl, vector_param, extra_params, query_result);
-}
-
-Status
-ConnectionImpl::SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-                         milvus::BooleanQueryPtr& boolean_query, const std::string& extra_params,
-                         milvus::TopKQueryResult& query_result) {
+                       nlohmann::json& dsl, const std::string& extra_params, TopKQueryResult& query_result) {
+    return client_proxy_->Search(collection_name, partition_list, dsl, extra_params, query_result);
 }
 
 Status
