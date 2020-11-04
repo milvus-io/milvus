@@ -364,9 +364,9 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                     return Status{SERVER_INVALID_ARGUMENT, msg};
                 }
             }
-            if (general_query->bin->is_not) {
-                bitset->negate();
-            }
+        }
+        if (general_query->bin->is_not) {
+            bitset->negate();
         }
         return status;
     } else {

@@ -14,6 +14,7 @@
 #include <any>
 #include <memory>
 #include <string>
+#include <thirdparty/nlohmann/json.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -443,6 +444,8 @@ class Connection {
      * @brief Search entities in a collection
      *
      * This method is used to query entity in collection.
+     * When nq is 1000, dimension is 512, setting a query vector in dsl_json needs 109ms,
+     * and getting query vector from dsl_json needs 301ms,
      *
      * @param collection_name, target collection's name.
      * @param partition_tag_array, target partitions, keep empty if no partition specified.
@@ -462,12 +465,8 @@ class Connection {
      * @return Indicate if query is successful.
      */
     virtual Status
-    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const VectorParam& vector_param, const std::string& extra_params, TopKQueryResult& query_result) = 0;
-
-    virtual Status
-    SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) = 0;
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, nlohmann::json& dsl,
+           const std::string& extra_params, TopKQueryResult& query_result) = 0;
 
     /**
      * @brief List entity ids from a segment

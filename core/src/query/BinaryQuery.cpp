@@ -278,10 +278,13 @@ Status
 ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
-        for (auto& query : boolean_query->getBooleanQueries()) {
-            if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
-                std::string msg = "The direct child node of 'bool' node cannot be 'should' node or 'must_not' node.";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+        if (boolean_query->getOccur() != Occur::MUST) {
+            for (auto& query : boolean_query->getBooleanQueries()) {
+                if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
+                    std::string msg =
+                        "The direct child node of 'bool' node cannot be 'should' node or 'must_not' node.";
+                    return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                }
             }
         }
         std::vector<BooleanQueryPtr> paths;
