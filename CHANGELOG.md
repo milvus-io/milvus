@@ -2,6 +2,20 @@
 
 Please mark all changes in change log and use the issue from GitHub
 
+# Milvus 0.12.0 (TBD)
+
+## Bug
+
+## Feature
+-   \#263 Add new indexes: NGT_PANNG NGT_ONNG
+-   \#3132 Add new indexes: RHNSW_PQ RHNSW_SQ
+-   \#3920 Allow an optional parameter `nbits` when creating IVF_PQ index
+
+## Improvement
+
+## Task
+
+
 # Milvus 0.11.1 (TBD)
 
 ## Bug
@@ -101,6 +115,24 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3465 Optimize gc event executor
 -   \#3631 Add build option `-rdynamic` in CMakeList.txt
 -   \#3882 Params in Restful-api is different from the params in other SDKs
+
+## Task
+
+# Milvus 0.10.3 (2020-9-21)
+## Bug
+-   \#3536 Release search task in time to avoid excessive memory usage
+-   \#3656 Fix to check search params 'nprobe' of BIN_IVF_FLAT
+-   \#3742 If the GPU cache is too small, IVF_SQ8H using multiple GPUs will cause to crash
+-   \#3760 After IVF_SQ8H querying, an CUDA error will occur when Milvus exits
+
+## Feature
+
+## Improvement
+-   \#3213 Allow users to specify a distance type at runtime for Flat index
+-   \#3254 Allow more choices for the parameter ‘m’ of IVF_PQ
+-   \#3606 The supported parameter 'nprobe' of IVF is expanded to [1, 16384]
+-   \#3639 The supported parameter 'topk' of searching is expanded to [1, 16384]
+-   \#3784 Upgrade mishards up to v0.10.3
 
 ## Task
 
