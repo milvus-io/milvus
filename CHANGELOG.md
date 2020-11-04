@@ -9,6 +9,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#3906 Change DeleteTask state when it is loaded to avoid server crash.
 -   \#4012 Milvus hangs when continually creating and dropping partitions.
 -   \#4075 Improve performance for create large amount of partitions
+-   \#4174 Search out of memory: CPU2GPU1 with index flat
 
 ## Feature
 -   \#3773 Support IVF_PQ to run on FPGA.
