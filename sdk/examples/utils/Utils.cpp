@@ -394,6 +394,56 @@ Utils::GenDSLJson(nlohmann::json& dsl_json, int64_t topk, const std::string& met
 }
 
 void
+Utils::GenSpecificDSLJson(nlohmann::json& dsl_json, int64_t topk, const std::string& metric_type,
+                          std::vector<milvus::VectorData>& vectors) {
+    //    dsl_json = {{"bool",
+    //                 {"must",
+    //                  {{"term", {"release_year", {2002, 2003}}},
+    //                   {{"range", {{"duration", {"GT", 250}}}}},
+    //                   {{"vector", "placeholder_1"}}}}}};
+
+    auto dsl = R"({
+        "bool": {
+            "must": [
+                {
+                    "must_not": [
+                        {
+                            "term": {"release_year": [2003, 2002]}
+                        }
+                    ]
+                },
+                {
+                    "must": [
+                        {
+                            "vector": {
+                                "embedding": {
+                                    "topk": "topk",
+                                    "query": "placeholder",
+                                    "metric_type": "metric_type"
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    })";
+    dsl_json = nlohmann::json::parse(dsl);
+    auto& must_json = dsl_json["bool"]["must"][1]["must"];
+    //    must_json[0]["term"]["release_year"] = {2002, 2003};
+    //    must_json[1]["range"]["duration"] = {{"GT", 250}};
+    std::vector<std::vector<float>> embedding;
+    embedding.reserve(vectors.size());
+    for (int64_t i = 0; i < vectors.size(); i++) {
+        embedding.emplace_back(vectors[i].float_data);
+    }
+
+    must_json[0]["vector"]["embedding"]["query"] = embedding;
+    must_json[0]["vector"]["embedding"]["topk"] = topk;
+    must_json[0]["vector"]["embedding"]["metric_type"] = metric_type;
+}
+
+void
 Utils::GenPureVecDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
     nlohmann::json bool_json, vector_json;
     std::string placeholder = "placeholder_1";

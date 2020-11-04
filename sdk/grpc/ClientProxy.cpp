@@ -755,8 +755,10 @@ ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vec
 void
 ParseDsl(const milvus::Mapping& mapping, nlohmann::json& dsl_json, nlohmann::json& vector_json,
          std::vector<VectorData>& vector_records) {
+    auto str = dsl_json.dump();
     if (dsl_json.is_array()) {
         for (auto& query : dsl_json) {
+            //            auto aaa = query.begin().key();
             if (query.contains("vector")) {
                 auto vector_query_json = query["vector"];
                 auto placeholder = "placeholder" + std::to_string(GetRandomNumber());
@@ -786,12 +788,14 @@ ParseDsl(const milvus::Mapping& mapping, nlohmann::json& dsl_json, nlohmann::jso
                     return;
                 }
             } else if (query.contains("must") || query.contains("should") || query.contains("must_not")) {
-                ParseDsl(mapping, query, vector_json, vector_records);
+                ParseDsl(mapping, query.begin().value(), vector_json, vector_records);
             }
         }
-    }
-    for (auto& object : dsl_json.items()) {
-        ParseDsl(mapping, object.value(), vector_json, vector_records);
+    } else {
+        for (auto& object : dsl_json.items()) {
+            auto aaa = object.key();
+            ParseDsl(mapping, object.value(), vector_json, vector_records);
+        }
     }
 }
 
@@ -807,6 +811,7 @@ ClientProxy::Search(const std::string& collection_name, const std::vector<std::s
         }
         nlohmann::json vector_json;
         std::vector<milvus::VectorData> vector_records;
+        auto str = dsl.dump();
         ParseDsl(mapping, dsl, vector_json, vector_records);
 
         ::milvus::grpc::SearchParam search_param;
