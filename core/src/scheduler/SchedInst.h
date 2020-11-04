@@ -11,6 +11,11 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
 #include "BuildMgr.h"
 #include "CPUBuilder.h"
 #include "JobMgr.h"
@@ -23,12 +28,7 @@
 #include "selector/FaissIVFPass.h"
 #include "selector/FaissIVFSQ8HPass.h"
 #include "selector/FallbackPass.h"
-#include "selector/Optimizer.h"
-
-#include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
+#include "selector/Selector.h"
 
 namespace milvus {
 namespace scheduler {
@@ -87,9 +87,9 @@ class JobMgrInst {
     static std::mutex mutex_;
 };
 
-class OptimizerInst {
+class SelectorInst {
  public:
-    static OptimizerPtr
+    static SelectorPtr
     GetInstance() {
         if (instance == nullptr) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -121,14 +121,14 @@ class OptimizerInst {
                 }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());
-                instance = std::make_shared<Optimizer>(pass_list);
+                instance = std::make_shared<Selector>(pass_list);
             }
         }
         return instance;
     }
 
  private:
-    static scheduler::OptimizerPtr instance;
+    static scheduler::SelectorPtr instance;
     static std::mutex mutex_;
 };
 

@@ -60,6 +60,11 @@ class Scheduler : public interface::dumpable {
     OnTaskTableUpdated(const EventPtr& event);
 
  private:
+    static void
+    SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
+                                        std::shared_ptr<LoadCompletedEvent> event);
+
+ private:
     void
     process(const EventPtr& event);
 

@@ -168,7 +168,7 @@ Resource::loader_function() {
                 BuildMgrInst::GetInstance()->Take();
                 LOG_SERVER_DEBUG_ << name() << " load BuildIndexTask";
             }
-            LoadFile(task_item->task);
+            Load(task_item->task);
             task_item->Loaded();
             if (task_item->from) {
                 task_item->from->Moved();
@@ -201,7 +201,7 @@ Resource::executor_function() {
                 break;
             }
             auto start = get_current_timestamp();
-            Process(task_item->task);
+            Execute(task_item->task);
             task_item->task = FinishedTask::Create(task_item->task);
             auto finish = get_current_timestamp();
             ++total_task_;

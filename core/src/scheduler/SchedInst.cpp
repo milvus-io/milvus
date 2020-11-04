@@ -32,8 +32,8 @@ std::mutex SchedInst::mutex_;
 scheduler::JobMgrPtr JobMgrInst::instance = nullptr;
 std::mutex JobMgrInst::mutex_;
 
-OptimizerPtr OptimizerInst::instance = nullptr;
-std::mutex OptimizerInst::mutex_;
+SelectorPtr SelectorInst::instance = nullptr;
+std::mutex SelectorInst::mutex_;
 
 BuildMgrPtr BuildMgrInst::instance = nullptr;
 std::mutex BuildMgrInst::mutex_;
@@ -89,7 +89,7 @@ load_simple_config() {
 void
 StartSchedulerService() {
     load_simple_config();
-    OptimizerInst::GetInstance()->Init();
+    SelectorInst::GetInstance()->Init();
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
     JobMgrInst::GetInstance()->Start();
@@ -102,7 +102,7 @@ StopSchedulerService() {
     JobMgrInst::GetInstance()->Stop();
     SchedInst::GetInstance()->Stop();
     ResMgrInst::GetInstance()->Stop();
-    OptimizerInst::GetInstance()->Stop();
+    SelectorInst::GetInstance()->Stop();
 }
 
 }  // namespace scheduler
