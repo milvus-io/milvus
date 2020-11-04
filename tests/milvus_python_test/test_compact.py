@@ -112,7 +112,7 @@ class TestCompactBase:
         expected: data_size before and after Compact
         '''
         # vector = gen_single_vector(dim)
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         assert len(ids) == 1
         connect.flush([collection])
         # get collection info before compact
@@ -133,7 +133,7 @@ class TestCompactBase:
         method: add entities and compact collection
         expected: data_size before and after Compact
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         # get collection info before compact
         info = connect.get_collection_stats(collection)
@@ -154,7 +154,7 @@ class TestCompactBase:
         method: add entities, delete a few and compact collection
         expected: status ok, data size maybe is smaller after compact
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
@@ -182,7 +182,7 @@ class TestCompactBase:
         method: add entities, delete a few and compact collection
         expected: status ok, data size maybe is smaller after compact
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
@@ -211,7 +211,7 @@ class TestCompactBase:
         method: add entities, delete all and compact collection
         expected: status ok, no data size in collection info because collection is empty
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, ids)
@@ -237,7 +237,7 @@ class TestCompactBase:
         '''
         connect.create_partition(collection, default_tag)
         assert connect.has_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         info = connect.get_collection_stats(collection)
         logging.getLogger().info(info["partitions"])
@@ -276,7 +276,7 @@ class TestCompactBase:
         expected: status ok, index description no change, data size smaller after compact
         '''
         count = 10
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         connect.flush([collection])
@@ -301,7 +301,7 @@ class TestCompactBase:
         method: add entity and compact collection twice
         expected: status ok, data size no change
         '''
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         # get collection info before compact
         info = connect.get_collection_stats(collection)
@@ -327,7 +327,7 @@ class TestCompactBase:
         method: add entities, delete part and compact collection twice
         expected: status ok, data size smaller after first compact, no change after second
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -365,7 +365,7 @@ class TestCompactBase:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
         for i in range(num_collections):
-            ids = connect.insert(collection_list[i], entities)
+            ids = connect.bulk_insert(collection_list[i], entities)
             connect.delete_entity_by_id(collection_list[i], ids[:nb//2])
             status = connect.compact(collection_list[i])
             assert status.OK()
@@ -377,7 +377,7 @@ class TestCompactBase:
         method: after compact operation, add entity
         expected: status ok, entity added
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         # get collection info before compact
@@ -389,7 +389,7 @@ class TestCompactBase:
         info = connect.get_collection_stats(collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         res = connect.count_entities(collection)
         assert res == default_nb+1
@@ -401,7 +401,7 @@ class TestCompactBase:
         method: after compact operation, create index
         expected: status ok, index description no change
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, ids[:10])
         assert status.OK()
@@ -419,7 +419,7 @@ class TestCompactBase:
         method: after compact operation, delete entities
         expected: status ok, entities deleted
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         status = connect.compact(collection)
@@ -437,7 +437,7 @@ class TestCompactBase:
         method: after compact operation, search vector
         expected: status ok
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         status = connect.compact(collection)
@@ -467,7 +467,7 @@ class TestCompactBinary:
         method: add vector and compact collection
         expected: status ok, vector added
         '''
-        ids = connect.insert(binary_collection, default_binary_entity)
+        ids = connect.bulk_insert(binary_collection, default_binary_entity)
         assert len(ids) == 1
         connect.flush([binary_collection])
         # get collection info before compact
@@ -487,7 +487,7 @@ class TestCompactBinary:
         method: add entities and compact collection
         expected: status ok, entities added
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         # get collection info before compact
@@ -507,7 +507,7 @@ class TestCompactBinary:
         method: add entities, delete a few and compact collection
         expected: status ok, data size is smaller after compact
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
@@ -536,7 +536,7 @@ class TestCompactBinary:
         method: add entities, delete all and compact collection
         expected: status ok, no data size in collection info because collection is empty
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         status = connect.delete_entity_by_id(binary_collection, ids)
@@ -559,7 +559,7 @@ class TestCompactBinary:
         method: add entity and compact collection twice
         expected: status ok
         '''
-        ids = connect.insert(binary_collection, default_binary_entity)
+        ids = connect.bulk_insert(binary_collection, default_binary_entity)
         assert len(ids) == 1
         connect.flush([binary_collection])
         # get collection info before compact
@@ -585,7 +585,7 @@ class TestCompactBinary:
         method: add entities, delete part and compact collection twice
         expected: status ok, data size smaller after first compact, no change after second
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
@@ -624,7 +624,7 @@ class TestCompactBinary:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_binary_fields)
         for i in range(num_collections):
-            ids = connect.insert(collection_list[i], entities)
+            ids = connect.bulk_insert(collection_list[i], entities)
             assert len(ids) == nq
             status = connect.delete_entity_by_id(collection_list[i], [ids[0], ids[-1]])
             assert status.OK()
@@ -642,7 +642,7 @@ class TestCompactBinary:
         method: after compact operation, add entity
         expected: status ok, entity added
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         # get collection info before compact
         info = connect.get_collection_stats(binary_collection)
@@ -653,7 +653,7 @@ class TestCompactBinary:
         info = connect.get_collection_stats(binary_collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert(size_before == size_after)
-        ids = connect.insert(binary_collection, default_binary_entity)
+        ids = connect.bulk_insert(binary_collection, default_binary_entity)
         connect.flush([binary_collection])
         res = connect.count_entities(binary_collection)
         assert res == default_nb + 1
@@ -665,7 +665,7 @@ class TestCompactBinary:
         method: after compact operation, delete entities
         expected: status ok, entities deleted
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         status = connect.compact(binary_collection)
         assert status.OK()
@@ -684,7 +684,7 @@ class TestCompactBinary:
         method: after compact operation, search vector
         expected: status ok
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         status = connect.compact(binary_collection)
@@ -705,7 +705,7 @@ class TestCompactBinary:
         method: after compact operation, search vector
         expected: status ok
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.flush([collection])
         status = connect.compact(collection)
