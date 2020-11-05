@@ -9,36 +9,33 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
-
-#include "server/delivery/strategy/ReqStrategy.h"
-#include "utils/Status.h"
-#include "value/config/ConfigMgr.h"
-
-#include <memory>
-#include <queue>
-#include <string>
+#include "scheduler/selector/Selector.h"
 
 namespace milvus {
-namespace server {
+namespace scheduler {
 
-class SearchReqStrategy : public ReqStrategy, public ConfigObserver {
- public:
-    SearchReqStrategy();
+void
+Selector::Init() {
+    for (auto& pass : pass_list_) {
+        pass->Init();
+    }
+}
 
-    ~SearchReqStrategy();
+bool
+Selector::Run(const TaskPtr& task) {
+    for (auto& pass : pass_list_) {
+        if (pass->Run(task)) {
+            return true;
+        }
+    }
 
-    Status
-    ReScheduleQueue(const BaseReqPtr& request, std::queue<BaseReqPtr>& queue) override;
+    return false;
+}
 
- public:
-    void
-    ConfigUpdate(const std::string& name) override;
+void
+Selector::Stop() {
+    pass_list_ = std::vector<PassPtr>();
+}
 
- private:
-    int64_t search_combine_nq_ = 0;
-};
-
-using ReqStrategyPtr = std::shared_ptr<ReqStrategy>;
-}  // namespace server
+}  // namespace scheduler
 }  // namespace milvus

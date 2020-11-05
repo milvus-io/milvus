@@ -11,13 +11,13 @@
 
 #include "db/snapshot/Snapshots.h"
 
-#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus::engine::snapshot {
 

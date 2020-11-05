@@ -17,7 +17,6 @@
 #include <cstring>
 #include <unordered_map>
 
-#include "config/ConfigMgr.h"
 #include "db/snapshot/Snapshots.h"
 #include "index/archive/KnowhereResource.h"
 #include "log/LogMgr.h"
@@ -31,6 +30,7 @@
 #include "server/init/Timezone.h"
 #include "server/web_impl/WebServer.h"
 #include "src/version.h"
+#include "value/config/ConfigMgr.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include <yaml-cpp/yaml.h>
 #include "tracing/TracerUtil.h"

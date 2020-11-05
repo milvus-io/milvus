@@ -8,32 +8,44 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
-
 #pragma once
 
-#include "scheduler/ResourceMgr.h"
-#include "scheduler/resource/Resource.h"
-
+#include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class Action {
+class Selector {
  public:
-    static void
-    PushTaskToNeighbourRandomly(TaskTableItemPtr task_item, const ResourcePtr& self);
+    explicit Selector(std::vector<PassPtr> pass_list) : pass_list_(std::move(pass_list)) {
+    }
 
-    static void
-    PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self);
+    void
+    Init();
 
-    static void
-    PushTaskToResource(TaskTableItemPtr task_item, const ResourcePtr& dest);
+    bool
+    Run(const TaskPtr& task);
 
-    static void
-    SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
-                                        std::shared_ptr<LoadCompletedEvent> event);
+    void
+    Stop();
+
+ private:
+    std::vector<PassPtr> pass_list_;
 };
+
+using SelectorPtr = std::shared_ptr<Selector>;
 
 }  // namespace scheduler
 }  // namespace milvus

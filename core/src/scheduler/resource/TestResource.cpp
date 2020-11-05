@@ -27,12 +27,12 @@ TestResource::TestResource(std::string name, uint64_t device_id, bool enable_exe
 }
 
 void
-TestResource::LoadFile(TaskPtr task) {
+TestResource::Load(TaskPtr task) {
     task->Load(LoadType::TEST, 0);
 }
 
 void
-TestResource::Process(TaskPtr task) {
+TestResource::Execute(TaskPtr task) {
     task->Execute();
 }
 

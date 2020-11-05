@@ -23,8 +23,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "config/ConfigMgr.h"
 #include "scheduler/selector/Pass.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace scheduler {

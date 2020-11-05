@@ -11,12 +11,12 @@
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/selector/FaissFlatPass.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/ServerConfig.h"
 #include "faiss/gpu/utils/DeviceUtils.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 namespace milvus {

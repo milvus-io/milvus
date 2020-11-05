@@ -18,7 +18,7 @@
 #include "scheduler/CPUBuilder.h"
 #include "scheduler/JobMgr.h"
 #include "scheduler/SchedInst.h"
-#include "scheduler/selector/Optimizer.h"
+#include "scheduler/selector/Selector.h"
 #include "scheduler/task/Task.h"
 #include "utils/TimeRecorder.h"
 
@@ -77,7 +77,7 @@ JobMgr::worker_function() {
         auto tasks = build_task(job);
         rc.RecordSection("build_tasks");
         for (auto& task : tasks) {
-            OptimizerInst::GetInstance()->Run(task);
+            SelectorInst::GetInstance()->Run(task);
         }
         rc.RecordSection("optimize");
 

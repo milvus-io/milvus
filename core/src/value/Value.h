@@ -9,15 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <fiu-control.h>
-#include <fiu/fiu-local.h>
-#include <gtest/gtest.h>
+#pragma once
 
-#include "config/ServerConfig.h"
+#include <mutex>
 
-TEST(ServerConfigTest, parse_invalid_devices) {
-    fiu_init(0);
-    fiu_enable("ParseGPUDevices.invalid_format", 1, nullptr, 0);
-    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
-    ASSERT_EQ(collections.size(), 0);
-}
+namespace milvus {
+
+template <typename T>
+class Value {
+ public:
+    const T&
+    operator()() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return value_;
+    }
+
+    Value&
+    operator=(T value) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        value_ = value;
+        return *this;
+    }
+
+ private:
+    std::mutex mutex_;
+    T value_;
+};
+
+}  // namespace milvus

@@ -28,10 +28,10 @@ class GpuResource : public Resource {
 
  protected:
     void
-    LoadFile(TaskPtr task) override;
+    Load(TaskPtr task) override;
 
     void
-    Process(TaskPtr task) override;
+    Execute(TaskPtr task) override;
 };
 
 }  // namespace scheduler

@@ -30,7 +30,7 @@ target_link_libraries(test_storage
         server
         milvus_engine
         metrics
-        config
+        value
         utils
         tracing
         query
