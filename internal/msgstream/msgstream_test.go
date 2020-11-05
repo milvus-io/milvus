@@ -78,7 +78,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 		tsMsg = searchMsg
 	case internalPb.MsgType_kSearchResult:
 		searchResult := internalPb.SearchResult{
-			MsgType: internalPb.MsgType_kSearchResult,
+			MsgType:         internalPb.MsgType_kSearchResult,
 			Status:          &commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS},
 			ReqId:           reqId,
 			ProxyId:         1,
@@ -93,7 +93,7 @@ func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 		tsMsg = searchResultMsg
 	case internalPb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
-			MsgType: internalPb.MsgType_kTimeTick,
+			MsgType:   internalPb.MsgType_kTimeTick,
 			PeerId:    reqId,
 			Timestamp: 1,
 		}
@@ -175,8 +175,7 @@ func TestStream_Insert(t *testing.T) {
 	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kInsert, internalPb.MsgType_kInsert, false)
 }
 
-func
-TestStream_Delete(t *testing.T) {
+func TestStream_Delete(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"delete"}
 	consumerChannels := []string{"delete"}
@@ -204,8 +203,7 @@ func TestStream_Search(t *testing.T) {
 	initStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, &msgPack, internalPb.MsgType_kSearch, internalPb.MsgType_kSearch, false)
 }
 
-func
-TestStream_SearchResult(t *testing.T) {
+func TestStream_SearchResult(t *testing.T) {
 	pulsarAddress := "pulsar://localhost:6650"
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}

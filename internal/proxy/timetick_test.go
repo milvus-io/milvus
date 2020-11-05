@@ -8,7 +8,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	pb "github.com/zilliztech/milvus-distributed/internal/proto/message"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func TestTimeTick(t *testing.T) {
@@ -72,7 +72,7 @@ func TestTimeTick(t *testing.T) {
 				return
 			}
 			msg := cm.Message
-			var tsm pb.TimeSyncMsg
+			var tsm internalpb.TimeTickMsg
 			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
 				return
 			}

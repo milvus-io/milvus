@@ -15,11 +15,11 @@ type TsMsg interface {
 
 type BaseMsg struct {
 	BeginTimestamp Timestamp
-	EndTimestamp Timestamp
-	HashValues []int32
+	EndTimestamp   Timestamp
+	HashValues     []int32
 }
 
-func (bm *BaseMsg) BeginTs() Timestamp{
+func (bm *BaseMsg) BeginTs() Timestamp {
 	return bm.BeginTimestamp
 }
 
