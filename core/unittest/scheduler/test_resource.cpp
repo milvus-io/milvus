@@ -24,7 +24,7 @@
 namespace milvus {
 namespace scheduler {
 
-constexpr uint64_t max_once_load = 2;
+constexpr uint64_t max_once_load = 1;
 
 /************ ResourceBaseTest ************/
 class ResourceBaseTest : public testing::Test {
