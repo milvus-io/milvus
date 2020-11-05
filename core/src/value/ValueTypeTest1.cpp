@@ -12,7 +12,7 @@
 #include <cstring>
 #include <functional>
 
-#include "config/ConfigType.h"
+#include "value/ValueType.h"
 #include "gtest/gtest.h"
 
 namespace milvus {
