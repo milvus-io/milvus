@@ -136,7 +136,7 @@ using BaseValuePtr = std::shared_ptr<BaseValue>;
 class BoolValue : public BaseValue {
  public:
     BoolValue(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
-               std::function<bool(bool val, std::string& err)> is_valid_fn = nullptr);
+              std::function<bool(bool val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<bool>& config_;
@@ -157,8 +157,8 @@ class BoolValue : public BaseValue {
 class StringValue : public BaseValue {
  public:
     StringValue(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
-                 const char* default_value,
-                 std::function<bool(const std::string& val, std::string& err)> is_valid_fn = nullptr);
+                const char* default_value,
+                std::function<bool(const std::string& val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<std::string>& config_;
@@ -179,7 +179,7 @@ class StringValue : public BaseValue {
 class EnumValue : public BaseValue {
  public:
     EnumValue(const char* name, const char* alias, bool modifiable, valueEnum* enumd, Value<int64_t>& config,
-               int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+              int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
@@ -201,8 +201,8 @@ class EnumValue : public BaseValue {
 class IntegerValue : public BaseValue {
  public:
     IntegerValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                  Value<int64_t>& config, int64_t default_value,
-                  std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+                 Value<int64_t>& config, int64_t default_value,
+                 std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
@@ -225,8 +225,8 @@ class IntegerValue : public BaseValue {
 class FloatingValue : public BaseValue {
  public:
     FloatingValue(const char* name, const char* alias, bool modifiable, double lower_bound, double upper_bound,
-                   Value<double>& config, double default_value,
-                   std::function<bool(double val, std::string& err)> is_valid_fn = nullptr);
+                  Value<double>& config, double default_value,
+                  std::function<bool(double val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<double>& config_;
@@ -249,8 +249,8 @@ class FloatingValue : public BaseValue {
 class SizeValue : public BaseValue {
  public:
     SizeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-               Value<int64_t>& config, int64_t default_value,
-               std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+              Value<int64_t>& config, int64_t default_value,
+              std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
@@ -283,11 +283,11 @@ class SizeValue : public BaseValue {
 
 #define CreateIntegerValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
     std::make_shared<IntegerValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
-                                    is_valid)
+                                   is_valid)
 
 #define CreateFloatingValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
     std::make_shared<FloatingValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
-                                     is_valid)
+                                    is_valid)
 
 #define CreateSizeValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid) \
     std::make_shared<SizeValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), is_valid)

@@ -11,4 +11,8 @@
 
 #include "value/status/ServerStatus.h"
 
-namespace milvus {}
+namespace milvus {
+
+ServerStatus server_status;
+
+}  // namespace milvus

@@ -12,20 +12,36 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 
-#include "value/Value.h"
+#include "value/ValueMgr.h"
 #include "value/ValueType.h"
 
 namespace milvus {
-struct ServerStatus {
-    using String = Value<std::string>;
-    using Bool = Value<bool>;
-    using Integer = Value<int64_t>;
-    using Floating = Value<double>;
 
-    Bool indexing;
+class StatusMgr : public ValueMgr {
+ public:
+    static ValueMgr&
+    GetInstance() {
+        return instance;
+    }
+
+ private:
+    static StatusMgr instance;
+
+ public:
+    StatusMgr();
+
+    /* throws std::exception only */
+    void
+    Set(const std::string& name, const std::string& value, bool update) override;
+
+    /* throws std::exception only */
+    std::string
+    Get(const std::string& name) const override;
+
+ private:
+    const std::unordered_map<std::string, BaseValuePtr>& status_list_ = value_list_;
 };
-
-extern ServerStatus server_status;
 
 }  // namespace milvus

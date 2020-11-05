@@ -168,8 +168,7 @@ class ValidFloatingValueTest : public testing::Test, public Utils<double> {
 };
 
 TEST_F(ValidFloatingValueTest, init_load_update_get_test) {
-    auto validate =
-        std::bind(&ValidFloatingValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+    auto validate = std::bind(&ValidFloatingValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<double> floating_value;
     auto floating_config = CreateFloatingValue("f", _MODIFIABLE, -10.0, 10.0, floating_value, 3.14, validate);

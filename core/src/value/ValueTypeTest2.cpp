@@ -233,8 +233,7 @@ TEST_F(IntegerValueTest, string_exception_test) {
 
 TEST_F(IntegerValueTest, standard_exception_test) {
     Value<int64_t> integer_value;
-    auto integer_config =
-        CreateIntegerValue("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_exception);
+    auto integer_config = CreateIntegerValue("i", true, 1024, 65535, integer_value, 19530, valid_check_raise_exception);
     integer_config->Init();
 
     EXPECT_THROW(integer_config->Set("2048", true), Unexpected);

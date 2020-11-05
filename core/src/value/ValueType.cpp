@@ -197,8 +197,8 @@ BoolValue::Get() {
 }
 
 StringValue::StringValue(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
-                           const char* default_value,
-                           std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
+                         const char* default_value,
+                         std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
     : BaseValue(name, alias, modifiable),
       config_(config),
       default_value_(default_value),
@@ -242,7 +242,7 @@ StringValue::Get() {
 }
 
 EnumValue::EnumValue(const char* name, const char* alias, bool modifiable, valueEnum* enumd, Value<int64_t>& config,
-                       int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+                     int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseValue(name, alias, modifiable),
       config_(config),
       enum_value_(enumd),
@@ -303,8 +303,8 @@ EnumValue::Get() {
 }
 
 IntegerValue::IntegerValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
-                             int64_t upper_bound, Value<int64_t>& config, int64_t default_value,
-                             std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+                           int64_t upper_bound, Value<int64_t>& config, int64_t default_value,
+                           std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
@@ -363,8 +363,8 @@ IntegerValue::Get() {
 }
 
 FloatingValue::FloatingValue(const char* name, const char* alias, bool modifiable, double lower_bound,
-                               double upper_bound, Value<double>& config, double default_value,
-                               std::function<bool(double val, std::string& err)> is_valid_fn)
+                             double upper_bound, Value<double>& config, double default_value,
+                             std::function<bool(double val, std::string& err)> is_valid_fn)
     : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
@@ -418,8 +418,8 @@ FloatingValue::Get() {
 }
 
 SizeValue::SizeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                       Value<int64_t>& config, int64_t default_value,
-                       std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+                     Value<int64_t>& config, int64_t default_value,
+                     std::function<bool(int64_t val, std::string& err)> is_valid_fn)
     : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),

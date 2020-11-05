@@ -17,6 +17,11 @@ set( VALUE_SRCS     config/ConfigInit.cpp
                     config/ConfigMgr.cpp
                     config/ServerConfig.h
                     config/ServerConfig.cpp
+                    status/StatusInit.cpp
+                    status/StatusMgr.h
+                    status/StatusMgr.cpp
+                    status/ServerStatus.h
+                    status/ServerStatus.cpp
                     Value.h
                     ValueMgr.h
                     ValueMgr.cpp

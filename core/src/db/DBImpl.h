@@ -124,9 +124,6 @@ class DBImpl : public DB, public ValueObserver {
     void
     ValueUpdate(const std::string& name) override;
 
-    bool
-    IsBuildingIndex() override;
-
  private:
     bool
     ServiceAvailable();

@@ -33,6 +33,7 @@
 #include "utils/Exception.h"
 #include "utils/TimeRecorder.h"
 #include "value/config/ServerConfig.h"
+#include "value/status/ServerStatus.h"
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>
@@ -1174,18 +1175,14 @@ void
 DBImpl::IncreaseLiveBuildTaskNum() {
     std::lock_guard<std::mutex> lock(live_build_count_mutex_);
     ++live_build_num_;
+    server_status.indexing = live_build_num_ > 0;
 }
 
 void
 DBImpl::DecreaseLiveBuildTaskNum() {
     std::lock_guard<std::mutex> lock(live_build_count_mutex_);
     --live_build_num_;
-}
-
-bool
-DBImpl::IsBuildingIndex() {
-    std::lock_guard<std::mutex> lock(live_build_count_mutex_);
-    return live_build_num_ > 0;
+    server_status.indexing = live_build_num_ > 0;
 }
 
 void

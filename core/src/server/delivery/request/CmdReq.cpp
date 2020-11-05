@@ -16,6 +16,7 @@
 #include "src/version.h"
 #include "utils/TimeRecorder.h"
 #include "value/config/ConfigMgr.h"
+#include "value/status/ServerStatus.h"
 
 #include <algorithm>
 #include <cctype>
@@ -46,7 +47,7 @@ CmdReq::OnExecute() {
     } else if (cmd_ == "status") {
         json resp;
         resp["require_restart"] = ConfigMgr::GetInstance().RequireRestart();
-        resp["indexing"] = DBWrapper::DB()->IsBuildingIndex();
+        resp["indexing"] = server_status.indexing();
         resp["uptime"] = uptime();
         resp["server_time"] = now();
         result_ = resp.dump();
