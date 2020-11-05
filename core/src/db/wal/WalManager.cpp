@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalManager.h"
-#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "db/wal/WalOperationCodec.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 #include <map>
 #include <memory>

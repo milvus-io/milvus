@@ -14,8 +14,8 @@
 #include <string>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "utils/Status.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus::server {
 

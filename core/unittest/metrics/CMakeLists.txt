@@ -35,7 +35,7 @@ add_executable(test_metrics
 target_link_libraries(test_metrics
         knowhere
         metrics
-        config
+        value
         ${unittest_libs})
 
 install(TARGETS test_metrics DESTINATION unittest)

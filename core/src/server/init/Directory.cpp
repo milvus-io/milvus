@@ -17,7 +17,7 @@
 #include <boost/filesystem.hpp>
 #include <string>
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus::server {
 Status

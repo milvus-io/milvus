@@ -10,13 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CmdReq.h"
-#include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "src/version.h"
-#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ConfigMgr.h"
+#include "value/status/ServerStatus.h"
 
 #include <algorithm>
 #include <cctype>
@@ -47,7 +47,7 @@ CmdReq::OnExecute() {
     } else if (cmd_ == "status") {
         json resp;
         resp["require_restart"] = ConfigMgr::GetInstance().RequireRestart();
-        resp["indexing"] = DBWrapper::DB()->IsBuildingIndex();
+        resp["indexing"] = server_status.indexing();
         resp["uptime"] = uptime();
         resp["server_time"] = now();
         result_ = resp.dump();
@@ -83,7 +83,7 @@ CmdReq::OnExecute() {
         try {
             auto words = split(cmd_, ' ');
             if (words.size() == 3) {
-                ConfigMgr::GetInstance().Set(words[1], words[2]);
+                ConfigMgr::GetInstance().Set(words[1], words[2], true);
             } else {
                 stat = Status(SERVER_UNEXPECTED_ERROR, "Wrong parameter size ");
             }

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "config/ConfigType.h"
+#include "value/ValueType.h"
 
 #include <strings.h>
 #include <algorithm>
@@ -128,7 +128,7 @@ parse_bytes(const std::string& str, std::string& err) {
 namespace milvus {
 
 std::vector<std::string>
-OptionValue(const configEnum& ce) {
+OptionValue(const valueEnum& ce) {
     std::vector<std::string> ret;
     for (auto& e : ce) {
         ret.emplace_back(e.first);
@@ -136,32 +136,32 @@ OptionValue(const configEnum& ce) {
     return ret;
 }
 
-BaseConfig::BaseConfig(const char* name, const char* alias, bool modifiable)
+BaseValue::BaseValue(const char* name, const char* alias, bool modifiable)
     : name_(name), alias_(alias), modifiable_(modifiable) {
 }
 
 void
-BaseConfig::Init() {
+BaseValue::Init() {
     assertm(not inited_, "already initialized");
     inited_ = true;
 }
 
-BoolConfig::BoolConfig(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
-                       std::function<bool(bool val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+BoolValue::BoolValue(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
+                     std::function<bool(bool val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       default_value_(default_value),
       is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
-BoolConfig::Init() {
-    BaseConfig::Init();
-    config_.set(default_value_);
+BoolValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
 }
 
 void
-BoolConfig::Set(const std::string& val, bool update) {
+BoolValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -182,8 +182,8 @@ BoolConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
-    } catch (ConfigError& e) {
+        config_ = value;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -191,28 +191,28 @@ BoolConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-BoolConfig::Get() {
+BoolValue::Get() {
     assertm(inited_, "uninitialized");
     return config_() ? "true" : "false";
 }
 
-StringConfig::StringConfig(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
-                           const char* default_value,
-                           std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+StringValue::StringValue(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
+                         const char* default_value,
+                         std::function<bool(const std::string& val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       default_value_(default_value),
       is_valid_fn_(std::move(is_valid_fn)) {
 }
 
 void
-StringConfig::Init() {
-    BaseConfig::Init();
-    config_.set(default_value_);
+StringValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
 }
 
 void
-StringConfig::Set(const std::string& val, bool update) {
+StringValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -227,8 +227,8 @@ StringConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(val);
-    } catch (ConfigError& e) {
+        config_ = val;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -236,14 +236,14 @@ StringConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-StringConfig::Get() {
+StringValue::Get() {
     assertm(inited_, "uninitialized");
     return config_();
 }
 
-EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, Value<int64_t>& config,
-                       int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+EnumValue::EnumValue(const char* name, const char* alias, bool modifiable, valueEnum* enumd, Value<int64_t>& config,
+                     int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       enum_value_(enumd),
       default_value_(default_value),
@@ -251,15 +251,15 @@ EnumConfig::EnumConfig(const char* name, const char* alias, bool modifiable, con
 }
 
 void
-EnumConfig::Init() {
-    BaseConfig::Init();
+EnumValue::Init() {
+    BaseValue::Init();
     assert(enum_value_ != nullptr);
     assertm(not enum_value_->empty(), "enum value empty");
-    config_.set(default_value_);
+    config_ = default_value_;
 }
 
 void
-EnumConfig::Set(const std::string& val, bool update) {
+EnumValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -282,8 +282,8 @@ EnumConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
-    } catch (ConfigError& e) {
+        config_ = value;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -291,7 +291,7 @@ EnumConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-EnumConfig::Get() {
+EnumValue::Get() {
     assertm(inited_, "uninitialized");
     auto val = config_();
     for (auto& it : *enum_value_) {
@@ -302,10 +302,10 @@ EnumConfig::Get() {
     return "unknown";
 }
 
-IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
-                             int64_t upper_bound, Value<int64_t>& config, int64_t default_value,
-                             std::function<bool(int64_t val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+IntegerValue::IntegerValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound,
+                           int64_t upper_bound, Value<int64_t>& config, int64_t default_value,
+                           std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
@@ -314,13 +314,13 @@ IntegerConfig::IntegerConfig(const char* name, const char* alias, bool modifiabl
 }
 
 void
-IntegerConfig::Init() {
-    BaseConfig::Init();
-    config_.set(default_value_);
+IntegerValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
 }
 
 void
-IntegerConfig::Set(const std::string& val, bool update) {
+IntegerValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -348,8 +348,8 @@ IntegerConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
-    } catch (ConfigError& e) {
+        config_ = value;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -357,15 +357,15 @@ IntegerConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-IntegerConfig::Get() {
+IntegerValue::Get() {
     assertm(inited_, "uninitialized");
     return std::to_string(config_());
 }
 
-FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound,
-                               double upper_bound, Value<double>& config, double default_value,
-                               std::function<bool(double val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+FloatingValue::FloatingValue(const char* name, const char* alias, bool modifiable, double lower_bound,
+                             double upper_bound, Value<double>& config, double default_value,
+                             std::function<bool(double val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
@@ -374,13 +374,13 @@ FloatingConfig::FloatingConfig(const char* name, const char* alias, bool modifia
 }
 
 void
-FloatingConfig::Init() {
-    BaseConfig::Init();
-    config_.set(default_value_);
+FloatingValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
 }
 
 void
-FloatingConfig::Set(const std::string& val, bool update) {
+FloatingValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -403,8 +403,8 @@ FloatingConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
-    } catch (ConfigError& e) {
+        config_ = value;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -412,15 +412,15 @@ FloatingConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-FloatingConfig::Get() {
+FloatingValue::Get() {
     assertm(inited_, "uninitialized");
     return std::to_string(config_());
 }
 
-SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                       Value<int64_t>& config, int64_t default_value,
-                       std::function<bool(int64_t val, std::string& err)> is_valid_fn)
-    : BaseConfig(name, alias, modifiable),
+SizeValue::SizeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
+                     Value<int64_t>& config, int64_t default_value,
+                     std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
       config_(config),
       lower_bound_(lower_bound),
       upper_bound_(upper_bound),
@@ -429,13 +429,13 @@ SizeConfig::SizeConfig(const char* name, const char* alias, bool modifiable, int
 }
 
 void
-SizeConfig::Init() {
-    BaseConfig::Init();
-    config_.set(default_value_);
+SizeValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
 }
 
 void
-SizeConfig::Set(const std::string& val, bool update) {
+SizeValue::Set(const std::string& val, bool update) {
     assertm(inited_, "uninitialized");
     try {
         /* Check modifiable */
@@ -461,8 +461,8 @@ SizeConfig::Set(const std::string& val, bool update) {
         }
 
         /* Set value */
-        config_.set(value);
-    } catch (ConfigError& e) {
+        config_ = value;
+    } catch (ValueError& e) {
         throw;
     } catch (...) {
         throw Unexpected(name_, val);
@@ -470,7 +470,7 @@ SizeConfig::Set(const std::string& val, bool update) {
 }
 
 std::string
-SizeConfig::Get() {
+SizeValue::Get() {
     assertm(inited_, "uninitialized");
     auto val = config_();
     const int64_t gb = 1024ll * 1024 * 1024;

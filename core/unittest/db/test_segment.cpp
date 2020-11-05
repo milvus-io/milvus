@@ -25,7 +25,7 @@
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/Resources.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "segment/IdBloomFilter.h"

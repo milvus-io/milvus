@@ -13,25 +13,25 @@
 
 #include <opentracing/mocktracer/tracer.h>
 
-#include <experimental/filesystem>
+#include <fiu-control.h>
 #include <boost/filesystem.hpp>
+#include <experimental/filesystem>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
-#include <fiu-control.h>
-#include <random>
 
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/ServerConfig.h"
 #include "codecs/Codec.h"
 #include "db/DBFactory.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/Snapshots.h"
 #include "db/snapshot/ResourceHolders.h"
+#include "db/snapshot/Snapshots.h"
+#include "value/config/ServerConfig.h"
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
@@ -43,14 +43,13 @@
 #include "scheduler/SchedInst.h"
 #include "utils/CommonUtil.h"
 
-
 INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
-    explicit DBTestEnvironment(const std::string &uri) : uri_(uri) {
+    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {
     }
 
     std::string
@@ -67,7 +66,7 @@ class DBTestEnvironment : public ::testing::Environment {
     std::string uri_;
 };
 
-DBTestEnvironment *test_env = nullptr;
+DBTestEnvironment* test_env = nullptr;
 
 }  // namespace
 
@@ -82,8 +81,8 @@ BaseTest::InitLog() {
 
 void
 BaseTest::SnapshotStart(bool mock_store, DBOptions options) {
-    auto store = Store::Build(options.meta_.backend_uri_, options.meta_.path_,
-            milvus::codec::Codec::instance().GetSuffixSet());
+    auto store =
+        Store::Build(options.meta_.backend_uri_, options.meta_.path_, milvus::codec::Codec::instance().GetSuffixSet());
 
     milvus::engine::snapshot::OperationExecutor::Init(store);
     milvus::engine::snapshot::OperationExecutor::GetInstance().Start();
@@ -201,9 +200,9 @@ DBTest::SetUp() {
 void
 DBTest::TearDown() {
     db_->Stop();
-    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+    db_ = nullptr;  // db must be stopped before JobMgr and Snapshot
 
-    //TODO: Clear GPU Cache if needed
+    // TODO: Clear GPU Cache if needed
     milvus::cache::CpuCacheMgr::GetInstance().ClearCache();
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
@@ -246,9 +245,9 @@ SegmentTest::TearDown() {
 void
 MetaTest::SetUp() {
     auto engine = std::make_shared<milvus::engine::meta::MockEngine>();
-//    milvus::engine::DBMetaOptions options;
-//    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
-//    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
+    //    milvus::engine::DBMetaOptions options;
+    //    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+    //    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
     meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
     meta_->TruncateAll();
 }
@@ -290,7 +289,7 @@ SchedulerTest::SetUp() {
 void
 SchedulerTest::TearDown() {
     db_->Stop();
-    db_ = nullptr; // db must be stopped before JobMgr and Snapshot
+    db_ = nullptr;  // db must be stopped before JobMgr and Snapshot
 
     milvus::scheduler::JobMgrInst::GetInstance()->Stop();
     milvus::scheduler::SchedInst::GetInstance()->Stop();
@@ -354,7 +353,7 @@ WalTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int
-main(int argc, char **argv) {
+main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     std::string uri;

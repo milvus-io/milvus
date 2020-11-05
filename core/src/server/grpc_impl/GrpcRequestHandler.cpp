@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "query/BinaryQuery.h"
 #include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
@@ -27,6 +26,7 @@
 #include "tracing/TracerUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {

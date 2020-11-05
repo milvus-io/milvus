@@ -24,7 +24,6 @@
 
 #include <fiu/fiu-local.h>
 
-#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/CompoundOperations.h"
@@ -34,6 +33,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace engine {

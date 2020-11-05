@@ -21,11 +21,11 @@
 #include <unordered_set>
 #include <vector>
 
-#include "config/ConfigMgr.h"
 #include "db/SnapshotVisitor.h"
 #include "db/insert/MemSegment.h"
 #include "db/snapshot/Snapshots.h"
 #include "utils/Status.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace engine {

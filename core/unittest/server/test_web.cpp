@@ -23,7 +23,6 @@
 #include <oatpp/web/client/ApiClient.hpp>
 #include <oatpp/web/client/HttpRequestExecutor.hpp>
 
-#include "config/ConfigMgr.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/Snapshots.h"
@@ -40,6 +39,7 @@
 #include "src/version.h"
 #include "utils/CommonUtil.h"
 #include "utils/StringHelpFunctions.h"
+#include "value/config/ConfigMgr.h"
 
 INITIALIZE_EASYLOGGINGPP
 

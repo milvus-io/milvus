@@ -20,8 +20,6 @@
 
 #include <fiu/fiu-local.h>
 
-#include "config/ConfigMgr.h"
-#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "metrics/SystemInfo.h"
 #include "query/BinaryQuery.h"
@@ -34,6 +32,8 @@
 #include "thirdparty/nlohmann/json.hpp"
 #include "utils/ConfigUtils.h"
 #include "utils/StringHelpFunctions.h"
+#include "value/config/ConfigMgr.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {

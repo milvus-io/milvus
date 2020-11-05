@@ -11,28 +11,37 @@
 
 #pragma once
 
-#include <mutex>
+#include <string>
+#include <unordered_map>
+
+#include "value/ValueMgr.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
-template <typename T>
-class Value {
+class StatusMgr : public ValueMgr {
  public:
-    const T&
-    operator()() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return value_;
-    }
-
-    void
-    set(const T& v) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        value_ = v;
+    static ValueMgr&
+    GetInstance() {
+        return instance;
     }
 
  private:
-    std::mutex mutex_;
-    T value_;
+    static StatusMgr instance;
+
+ public:
+    StatusMgr();
+
+    /* throws std::exception only */
+    void
+    Set(const std::string& name, const std::string& value, bool update) override;
+
+    /* throws std::exception only */
+    std::string
+    Get(const std::string& name) const override;
+
+ private:
+    const std::unordered_map<std::string, BaseValuePtr>& status_list_ = value_list_;
 };
 
 }  // namespace milvus

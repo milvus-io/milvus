@@ -15,12 +15,13 @@
 #include <cstring>
 #include <string>
 
-#include "config/ConfigMgr.h"
 #include "easyloggingpp/easylogging++.h"
 #include "server/Server.h"
 #include "src/version.h"
 #include "utils/SignalHandler.h"
 #include "utils/Status.h"
+#include "value/config/ConfigMgr.h"
+#include "value/status/StatusMgr.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -130,9 +131,15 @@ main(int argc, char* argv[]) {
     signal(SIGTERM, milvus::HandleSignal);
 
     try {
+        milvus::StatusMgr::GetInstance().Init();
+    } catch (...) {
+        std::cerr << "Server status init failed." << std::endl;
+        goto FAIL;
+    }
+
+    try {
         milvus::ConfigMgr::GetInstance().Init();
         milvus::ConfigMgr::GetInstance().LoadFile(config_filename);
-        milvus::ConfigMgr::GetInstance().FilePath() = config_filename;
         std::cout << "Successfully load configuration from " << config_filename << "." << std::endl;
     } catch (std::exception& ex) {
         std::cerr << "Load configuration file " << config_filename << " failed: " << ex.what() << std::endl;
