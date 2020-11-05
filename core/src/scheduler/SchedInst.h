@@ -17,13 +17,13 @@
 #include "ResourceMgr.h"
 #include "Scheduler.h"
 #include "Utils.h"
-#include "config/ServerConfig.h"
 #include "selector/BuildIndexPass.h"
 #include "selector/FaissFlatPass.h"
 #include "selector/FaissIVFPass.h"
 #include "selector/FaissIVFSQ8HPass.h"
 #include "selector/FallbackPass.h"
 #include "selector/Optimizer.h"
+#include "value/config/ServerConfig.h"
 
 #include <memory>
 #include <mutex>

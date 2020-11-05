@@ -12,23 +12,12 @@
 #include <fiu-control.h>
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
-#include "ConfigMgr.h"
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 
-namespace milvus {
-
-// TODO: need a safe directory for testing
-// TEST(ConfigMgrTest, set_version) {
-//    ConfigMgr::GetInstance().Init();
-//    ConfigMgr::GetInstance().LoadMemory(R"(
-// version: 0.1
-//)");
-//    ConfigMgr::GetInstance().FilePath() = "/tmp/milvus_unittest_configmgr.yaml";
-//
-//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "0.1");
-//    ConfigMgr::GetInstance().Set("version", "100.0");
-//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "100.0");
-//}
-
-}  // namespace milvus
+TEST(ServerConfigTest, parse_invalid_devices) {
+    fiu_init(0);
+    fiu_enable("ParseGPUDevices.invalid_format", 1, nullptr, 0);
+    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
+    ASSERT_EQ(collections.size(), 0);
+}

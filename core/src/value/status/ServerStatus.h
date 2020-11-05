@@ -11,30 +11,9 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-
-#include "cache/CacheMgr.h"
-#include "cache/DataObj.h"
-#include "value/config/ConfigMgr.h"
+#include "value/Value.h"
 
 namespace milvus {
-namespace cache {
+struct ServerStatus {};
 
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ValueObserver {
- private:
-    CpuCacheMgr();
-
-    ~CpuCacheMgr();
-
- public:
-    static CpuCacheMgr&
-    GetInstance();
-
- public:
-    void
-    ValueUpdate(const std::string& name) override;
-};
-
-}  // namespace cache
 }  // namespace milvus

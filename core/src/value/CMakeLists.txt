@@ -12,43 +12,43 @@
 #-------------------------------------------------------------------------------
 
 # library
-set( CONFIG_SRCS    ConfigInit.cpp
-                    ConfigMgr.h
-                    ConfigMgr.cpp
-                    ConfigType.h
-                    ConfigType.cpp
-                    ServerConfig.h
-                    ServerConfig.cpp
+set( VALUE_SRCS     config/ConfigInit.cpp
+                    config/ConfigMgr.h
+                    config/ConfigMgr.cpp
+                    config/ConfigType.h
+                    config/ConfigType.cpp
+                    config/ServerConfig.h
+                    config/ServerConfig.cpp
                     Value.h
                     ValueMgr.h
                     ValueMgr.cpp
                     )
 
-set( CONFIG_LIBS    yaml-cpp
+set( VALUE_LIBS     yaml-cpp
                     fiu
                     )
 
 create_library(
-        TARGET      config
-        SRCS        ${CONFIG_SRCS}
-        LIBS        ${CONFIG_LIBS}
+        TARGET      value
+        SRCS        ${VALUE_SRCS}
+        LIBS        ${VALUE_LIBS}
 )
 
 if ( BUILD_UNIT_TEST )
     create_library(
-            TARGET      config-fiu
-            SRCS        ${CONFIG_SRCS}
-            LIBS        ${CONFIG_LIBS}
+            TARGET      value-fiu
+            SRCS        ${VALUE_SRCS}
+            LIBS        ${VALUE_LIBS}
             DEFS        FIU_ENABLE
     )
-    target_compile_definitions(config-fiu PRIVATE FIU_ENABLE)
+    target_compile_definitions(value-fiu PRIVATE FIU_ENABLE)
 
     set(GTEST_LIBS gtest gtest_main gmock gmock_main)
 
     create_executable(
             TARGET      ConfigMgrTest
-            SRCS        ConfigMgrTest
-            LIBS        config-fiu ${GTEST_LIBS}
+            SRCS        config/ConfigMgrTest
+            LIBS        value-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
 
@@ -58,8 +58,8 @@ if ( BUILD_UNIT_TEST )
 
     create_executable(
             TARGET      ServerConfigTest
-            SRCS        ServerConfigTest
-            LIBS        config-fiu ${GTEST_LIBS}
+            SRCS        config/ServerConfigTest
+            LIBS        value-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
 
@@ -69,8 +69,8 @@ if ( BUILD_UNIT_TEST )
 
     create_executable(
             TARGET      ConfigTypeTest
-            SRCS        ConfigTypeTest1 ConfigTypeTest2
-            LIBS        config-fiu ${GTEST_LIBS}
+            SRCS        config/ConfigTypeTest1 config/ConfigTypeTest2
+            LIBS        value-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
 

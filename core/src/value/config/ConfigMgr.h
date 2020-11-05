@@ -19,8 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/ConfigType.h"
-#include "config/ValueMgr.h"
+#include "value/ValueMgr.h"
+#include "value/config/ConfigType.h"
 
 namespace milvus {
 

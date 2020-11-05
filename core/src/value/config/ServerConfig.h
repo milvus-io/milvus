@@ -16,8 +16,8 @@
 #include <utility>
 #include <vector>
 
-#include "config/ConfigType.h"
-#include "config/Value.h"
+#include "value/Value.h"
+#include "value/config/ConfigType.h"
 
 namespace milvus {
 

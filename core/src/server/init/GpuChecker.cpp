@@ -18,8 +18,8 @@
 
 #include <fiu/fiu-local.h>
 
-#include "config/ServerConfig.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {

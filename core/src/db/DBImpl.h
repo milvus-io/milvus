@@ -24,8 +24,8 @@
 #include "db/DB.h"
 #include "db/SegmentTaskTracker.h"
 
-#include "config/ConfigMgr.h"
 #include "utils/ThreadPool.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace engine {

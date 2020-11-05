@@ -12,7 +12,7 @@
 #include <sys/sysinfo.h>
 #include <fstream>
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 
 /* to find modifiable settings fast */
 #define _MODIFIABLE (true)

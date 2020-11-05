@@ -9,32 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "value/status/ServerStatus.h"
 
-#include <memory>
-#include <string>
-
-#include "cache/CacheMgr.h"
-#include "cache/DataObj.h"
-#include "value/config/ConfigMgr.h"
-
-namespace milvus {
-namespace cache {
-
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ValueObserver {
- private:
-    CpuCacheMgr();
-
-    ~CpuCacheMgr();
-
- public:
-    static CpuCacheMgr&
-    GetInstance();
-
- public:
-    void
-    ValueUpdate(const std::string& name) override;
-};
-
-}  // namespace cache
-}  // namespace milvus
+namespace milvus {}

@@ -11,9 +11,9 @@
 
 #pragma once
 
-#include "config/ConfigMgr.h"
 #include "server/delivery/strategy/ReqStrategy.h"
 #include "utils/Status.h"
+#include "value/config/ConfigMgr.h"
 
 #include <memory>
 #include <queue>

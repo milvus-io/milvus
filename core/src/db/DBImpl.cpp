@@ -12,7 +12,6 @@
 #include "db/DBImpl.h"
 #include "cache/CpuCacheMgr.h"
 #include "codecs/Codec.h"
-#include "config/ServerConfig.h"
 #include "db/IDGenerator.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
@@ -33,6 +32,7 @@
 #include "segment/Utils.h"
 #include "utils/Exception.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 #include <src/scheduler/job/BuildIndexJob.h>

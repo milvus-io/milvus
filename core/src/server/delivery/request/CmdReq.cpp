@@ -10,12 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CmdReq.h"
-#include "config/ConfigMgr.h"
 #include "metrics/SystemInfo.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "src/version.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ConfigMgr.h"
 
 #include <algorithm>
 #include <cctype>

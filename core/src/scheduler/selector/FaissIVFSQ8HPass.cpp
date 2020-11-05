@@ -12,13 +12,13 @@
 #ifdef MILVUS_GPU_VERSION
 #include "scheduler/selector/FaissIVFSQ8HPass.h"
 #include "cache/GpuCacheMgr.h"
-#include "config/ServerConfig.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 #include <utility>
 

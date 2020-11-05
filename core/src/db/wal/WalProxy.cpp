@@ -10,13 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/wal/WalProxy.h"
-#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "db/snapshot/Snapshots.h"
 #include "db/wal/WalManager.h"
 #include "db/wal/WalOperation.h"
 #include "utils/Exception.h"
+#include "value/config/ServerConfig.h"
 
 #include <utility>
 

@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "Value.h"
+#include "value/Value.h"
 
 namespace milvus {
 

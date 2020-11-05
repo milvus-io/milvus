@@ -16,13 +16,13 @@
 #include <string>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/DBFactory.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {
