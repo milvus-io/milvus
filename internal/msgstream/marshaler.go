@@ -47,7 +47,7 @@ func GetMarshaler(MsgType MsgType) *TsMsgMarshaler {
 type InsertMarshaler struct{}
 
 func (im *InsertMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	insertTask := (*input).(InsertTask)
+	insertTask := (*input).(*InsertMsg)
 	insertRequest := &insertTask.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
 	if err != nil {
@@ -59,12 +59,12 @@ func (im *InsertMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (im *InsertMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	insertTask := InsertTask{InsertRequest: insertRequest}
+	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = insertTask
+	var tsMsg TsMsg = insertMsg
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
@@ -73,8 +73,8 @@ func (im *InsertMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 type DeleteMarshaler struct{}
 
 func (dm *DeleteMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	deleteTask := (*input).(DeleteTask)
-	deleteRequest := &deleteTask.DeleteRequest
+	deleteMsg := (*input).(*DeleteMsg)
+	deleteRequest := &deleteMsg.DeleteRequest
 	mb, err := proto.Marshal(deleteRequest)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -85,11 +85,11 @@ func (dm *DeleteMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (dm *DeleteMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	deleteRequest := internalPb.DeleteRequest{}
 	err := proto.Unmarshal(input, &deleteRequest)
-	deleteTask := DeleteTask{DeleteRequest: deleteRequest}
+	deleteMsg := &DeleteMsg{DeleteRequest: deleteRequest}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = deleteTask
+	var tsMsg TsMsg = deleteMsg
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
@@ -98,8 +98,8 @@ func (dm *DeleteMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 type SearchMarshaler struct{}
 
 func (sm *SearchMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	searchTask := (*input).(SearchTask)
-	searchRequest := &searchTask.SearchRequest
+	searchMsg := (*input).(*SearchMsg)
+	searchRequest := &searchMsg.SearchRequest
 	mb, err := proto.Marshal(searchRequest)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -110,11 +110,11 @@ func (sm *SearchMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (sm *SearchMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	searchRequest := internalPb.SearchRequest{}
 	err := proto.Unmarshal(input, &searchRequest)
-	searchTask := SearchTask{SearchRequest: searchRequest}
+	searchMsg := &SearchMsg{SearchRequest: searchRequest}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = searchTask
+	var tsMsg TsMsg = searchMsg
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
@@ -123,8 +123,8 @@ func (sm *SearchMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 type SearchResultMarshaler struct{}
 
 func (srm *SearchResultMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	searchResultTask := (*input).(SearchResultTask)
-	searchResult := &searchResultTask.SearchResult
+	searchResultMsg := (*input).(*SearchResultMsg)
+	searchResult := &searchResultMsg.SearchResult
 	mb, err := proto.Marshal(searchResult)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
@@ -135,11 +135,11 @@ func (srm *SearchResultMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status
 func (srm *SearchResultMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	searchResult := internalPb.SearchResult{}
 	err := proto.Unmarshal(input, &searchResult)
-	searchResultTask := SearchResultTask{SearchResult: searchResult}
+	searchResultMsg := &SearchResultMsg{SearchResult: searchResult}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = searchResultTask
+	var tsMsg TsMsg = searchResultMsg
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
 
@@ -148,9 +148,9 @@ func (srm *SearchResultMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Stat
 type TimeTickMarshaler struct{}
 
 func (tm *TimeTickMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-	timeTickTask := (*input).(TimeTickTask)
-	timeTickMsg := &timeTickTask.TimeTickMsg
-	mb, err := proto.Marshal(timeTickMsg)
+	timeTickMsg := (*input).(*TimeTickMsg)
+	timeTick := &timeTickMsg.TimeTickMsg
+	mb, err := proto.Marshal(timeTick)
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
@@ -160,35 +160,10 @@ func (tm *TimeTickMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
 func (tm *TimeTickMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
 	timeTickMsg := internalPb.TimeTickMsg{}
 	err := proto.Unmarshal(input, &timeTickMsg)
-	timeTickTask := TimeTickTask{TimeTickMsg: timeTickMsg}
+	timeTick := &TimeTickMsg{TimeTickMsg: timeTickMsg}
 	if err != nil {
 		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
 	}
-	var tsMsg TsMsg = timeTickTask
+	var tsMsg TsMsg = timeTick
 	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
 }
-
-///////////////////////////////////////Key2Seg///////////////////////////////////////////////
-//
-//type Key2SegMarshaler struct{}
-//
-//func (km *Key2SegMarshaler) Marshal(input *TsMsg) ([]byte, commonPb.Status) {
-//	key2SegTask := (*input).(Key2SegTask)
-//	key2SegMsg := &key2SegTask.Key2SegMsg
-//	mb, err := proto.Marshal(key2SegMsg)
-//	if err != nil{
-//		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
-//	}
-//	return mb, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
-//}
-//
-//func (km *Key2SegMarshaler) Unmarshal(input []byte) (*TsMsg, commonPb.Status) {
-//	key2SegMsg := internalPb.Key2SegMsg{}
-//	err := proto.Unmarshal(input, &key2SegMsg)
-//	key2SegTask := Key2SegTask{key2SegMsg}
-//	if err != nil{
-//		return nil, commonPb.Status{ErrorCode: commonPb.ErrorCode_UNEXPECTED_ERROR}
-//	}
-//	var tsMsg TsMsg = key2SegTask
-//	return &tsMsg, commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS}
-//}

@@ -34,14 +34,14 @@ func (msNode *msgStreamNode) Operate(in []*Msg) []*Msg {
 	// TODO: add time range check
 
 	var dmMsg = dmMsg{
-		insertMessages: make([]*msgstream.InsertTask, 0),
+		insertMessages: make([]*msgstream.InsertMsg, 0),
 		// deleteMessages: make([]*msgstream.DeleteTask, 0),
 		timeRange: streamMsg.timeRange,
 	}
 	for _, msg := range streamMsg.tsMessages {
 		switch (*msg).Type() {
 		case internalPb.MsgType_kInsert:
-			dmMsg.insertMessages = append(dmMsg.insertMessages, (*msg).(*msgstream.InsertTask))
+			dmMsg.insertMessages = append(dmMsg.insertMessages, (*msg).(*msgstream.InsertMsg))
 		// case msgstream.KDelete:
 		//	dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:
