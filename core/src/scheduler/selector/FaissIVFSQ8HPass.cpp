@@ -90,7 +90,7 @@ FaissIVFSQ8HPass::Run(const TaskPtr& task) {
 }
 
 void
-FaissIVFSQ8HPass::ValueUpdate(const std::string& name) {
+FaissIVFSQ8HPass::ConfigUpdate(const std::string& name) {
     threshold_ = config.gpu.gpu_search_threshold();
 }
 

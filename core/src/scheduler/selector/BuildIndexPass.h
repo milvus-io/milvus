@@ -29,7 +29,7 @@
 namespace milvus {
 namespace scheduler {
 
-class BuildIndexPass : public Pass, public ValueObserver {
+class BuildIndexPass : public Pass, public ConfigObserver {
  public:
     BuildIndexPass() = default;
 
@@ -42,7 +42,7 @@ class BuildIndexPass : public Pass, public ValueObserver {
 
  public:
     void
-    ValueUpdate(const std::string& name) override;
+    ConfigUpdate(const std::string& name) override;
 
  private:
     bool

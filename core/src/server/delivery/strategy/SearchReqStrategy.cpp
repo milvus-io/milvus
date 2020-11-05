@@ -44,7 +44,7 @@ SearchReqStrategy::ReScheduleQueue(const BaseReqPtr& req, std::queue<BaseReqPtr>
 }
 
 void
-SearchReqStrategy::ValueUpdate(const std::string& name) {
+SearchReqStrategy::ConfigUpdate(const std::string& name) {
     search_combine_nq_ = config.engine.search_combine_nq();
 }
 

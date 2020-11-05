@@ -24,6 +24,17 @@
 
 namespace milvus {
 
+class ConfigObserver : public ValueObserver {
+ public:
+    void
+    ValueUpdate(const std::string& name) override {
+        ConfigUpdate(name);
+    }
+
+    virtual void
+    ConfigUpdate(const std::string& name) = 0;
+};
+
 class ConfigMgr : public ValueMgr {
  public:
     static ConfigMgr&

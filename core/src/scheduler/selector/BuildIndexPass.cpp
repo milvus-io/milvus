@@ -83,7 +83,7 @@ BuildIndexPass::Run(const TaskPtr& task) {
 }
 
 void
-BuildIndexPass::ValueUpdate(const std::string& name) {
+BuildIndexPass::ConfigUpdate(const std::string& name) {
 }
 
 }  // namespace scheduler

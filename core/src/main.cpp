@@ -21,6 +21,7 @@
 #include "utils/SignalHandler.h"
 #include "utils/Status.h"
 #include "value/config/ConfigMgr.h"
+#include "value/status/StatusMgr.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -128,6 +129,13 @@ main(int argc, char* argv[]) {
     signal(SIGSEGV, milvus::HandleSignal);
     signal(SIGUSR2, milvus::HandleSignal);
     signal(SIGTERM, milvus::HandleSignal);
+
+    try {
+        milvus::StatusMgr::GetInstance().Init();
+    } catch (...) {
+        std::cerr << "Server status init failed." << std::endl;
+        goto FAIL;
+    }
 
     try {
         milvus::ConfigMgr::GetInstance().Init();
