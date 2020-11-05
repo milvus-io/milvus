@@ -162,8 +162,18 @@ SqliteEngine::SqliteEngine(const DBMetaOptions& options) : options_(options) {
     }
 
     sqlite3_extended_result_codes(db_, 1);  // allow extend error code
+
     if (SQLITE_OK != sqlite3_exec(db_, "pragma journal_mode = WAL", nullptr, nullptr, nullptr)) {
         std::string errs = "Sqlite configure wal journal mode to WAL failed: " + ErrorMsg(db_);
+        std::cerr << errs << std::endl;
+        throw std::runtime_error(errs);
+    }
+
+    // Set synchronous = NORMAL can reduce number of times the database engine sync, and
+    // WAL mode is safe from corruption with synchronous=NORMAL.
+    // See <a href="https://www.sqlite.org/pragma.html">schema.synchronous</a>
+    if (SQLITE_OK != sqlite3_exec(db_, "PRAGMA synchronous = NORMAL", nullptr, nullptr, nullptr)) {
+        std::string errs = "Sqlite configure synchronous = NORMAL failed: " + ErrorMsg(db_);
         std::cerr << errs << std::endl;
         throw std::runtime_error(errs);
     }

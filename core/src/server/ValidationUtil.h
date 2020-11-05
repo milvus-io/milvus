@@ -27,10 +27,10 @@ constexpr int64_t GPU_QUERY_MAX_TOPK = 2048;
 constexpr int64_t GPU_QUERY_MAX_NPROBE = 2048;
 
 extern Status
-ValidateCollectionName(const std::string& collection_name);
+ValidateCollectionName(std::string& collection_name);
 
 extern Status
-ValidateFieldName(const std::string& field_name);
+ValidateFieldName(std::string& field_name);
 
 extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
@@ -57,7 +57,10 @@ extern Status
 ValidateSearchTopk(int64_t top_k);
 
 extern Status
-ValidatePartitionTags(const std::vector<std::string>& partition_tags, bool for_create);
+ValidatePartitionTag(std::string& partition_tag, bool strict_check);
+
+extern Status
+ValidatePartitionTags(std::vector<std::string>& partition_tags, bool strict_check);
 
 extern Status
 ValidateInsertDataSize(const InsertParam& insert_param);

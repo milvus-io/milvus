@@ -273,12 +273,32 @@ def gen_entities(nb, is_normal=False):
     return entities
 
 
+def gen_entities_new(nb, is_normal=False):
+    vectors = gen_vectors(nb, default_dim, is_normal)
+    entities = [
+        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "float", "values": [float(i) for i in range(nb)]},
+        {"name": default_float_vec_field_name, "values": vectors}
+    ]
+    return entities
+
+
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
         {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
         {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
         {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
+    ]
+    return raw_vectors, entities
+
+
+def gen_binary_entities_new(nb):
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
+    entities = [
+        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "float", "values": [float(i) for i in range(nb)]},
+        {"name": default_binary_vec_field_name, "values": vectors}
     ]
     return raw_vectors, entities
 
@@ -550,11 +570,10 @@ def gen_invalid_strs():
         [1],
         None,
         "12-s",
-        " ",
+        # " ",
         # "",
         # None,
         "12 s",
-        " siede ",
         "(mn)",
         "中文",
         "a".join("a" for i in range(256))

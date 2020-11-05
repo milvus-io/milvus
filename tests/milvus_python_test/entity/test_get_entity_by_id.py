@@ -52,7 +52,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         assert res_count == default_nb
@@ -66,7 +66,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -79,7 +79,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -96,7 +96,7 @@ class TestGetBase:
         if args["handler"] == "HTTP":
             pytest.skip("skip in http mode")
 
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         with pytest.raises(Exception) as e:
             res = connect.get_entity_by_id(collection, ids)
@@ -108,7 +108,7 @@ class TestGetBase:
         expected: entity returned equals insert
         '''
         ids = [1 for i in range(default_nb)]
-        res_ids = connect.insert(id_collection, default_entities, ids)
+        res_ids = connect.bulk_insert(id_collection, default_entities, ids)
         connect.flush([id_collection])
         get_ids = [ids[0]]
         res = connect.get_entity_by_id(id_collection, get_ids)
@@ -122,7 +122,7 @@ class TestGetBase:
         expected: entity returned equals insert
         '''
         ids = [1]
-        res_ids = connect.insert(id_collection, default_entity, ids)
+        res_ids = connect.bulk_insert(id_collection, default_entity, ids)
         connect.flush([id_collection])
         get_ids = [1, 1]
         res = connect.get_entity_by_id(id_collection, get_ids)
@@ -137,7 +137,7 @@ class TestGetBase:
         method: add entities, and get entity with the same ids
         expected: entity returned equals insert
         '''
-        res_ids = connect.insert(collection, default_entities)
+        res_ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [res_ids[0], res_ids[0]]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -157,7 +157,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         get_ids = [ids[0], 1, ids[-1]]
         res = connect.get_entity_by_id(binary_collection, get_ids)
@@ -178,7 +178,7 @@ class TestGetBase:
         expected: entity returned
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag = default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -192,7 +192,7 @@ class TestGetBase:
         expected: entity returned
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -208,7 +208,7 @@ class TestGetBase:
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -224,7 +224,7 @@ class TestGetBase:
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, default_entities, partition_tag = default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         res = connect.get_entity_by_id(collection, get_ids)
@@ -241,8 +241,8 @@ class TestGetBase:
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
         new_entities = gen_entities(default_nb + 1)
-        ids = connect.insert(collection, default_entities, partition_tag = default_tag)
-        ids_new = connect.insert(collection, new_entities, partition_tag = tag_new)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
+        ids_new = connect.bulk_insert(collection, new_entities, partition_tag = tag_new)
         connect.flush([collection])
         get_ids = ids[:get_pos]
         get_ids.extend(ids_new[:get_pos])
@@ -260,7 +260,7 @@ class TestGetBase:
         expected: entity returned
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag = default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
@@ -280,7 +280,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int64"]
@@ -297,7 +297,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int64", "float", default_float_vec_field_name]
@@ -320,7 +320,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
@@ -334,7 +334,7 @@ class TestGetBase:
         method: add entity, and get
         expected: entity returned equals insert
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_ids = [ids[get_pos]]
         fields = ["int1288"]
@@ -347,7 +347,7 @@ class TestGetBase:
         method: add entity and get 
         expected: empty result
         '''
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         res = connect.get_entity_by_id(collection, [1])
         assert res[0] is None
@@ -358,7 +358,7 @@ class TestGetBase:
         method: add entity and get
         expected: error raised
         '''
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
@@ -376,7 +376,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[get_pos]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -391,7 +391,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -407,7 +407,7 @@ class TestGetBase:
         method: add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -424,7 +424,7 @@ class TestGetBase:
         method: add entities batch, create index, get
         expected: entity returned
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
@@ -441,7 +441,7 @@ class TestGetBase:
         '''
         ids = []
         for i in range(default_nb):
-            ids.append(connect.insert(collection, default_entity)[0])
+            ids.append(connect.bulk_insert(collection, default_entity)[0])
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         get_ids = ids[:get_pos]
@@ -456,7 +456,7 @@ class TestGetBase:
         expected:
         '''
         ids = [i for i in range(default_nb)]
-        res_ids = connect.insert(id_collection, default_entities, ids)
+        res_ids = connect.bulk_insert(id_collection, default_entities, ids)
         connect.flush([id_collection])
         status = connect.delete_entity_by_id(id_collection, [res_ids[1]])
         connect.flush([id_collection])
@@ -473,7 +473,7 @@ class TestGetBase:
         method: disable autoflush, add entities, and delete, get entity by the given id
         expected: empty result
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = ids[:get_pos]
         try:
@@ -494,7 +494,7 @@ class TestGetBase:
         '''
         ids = [i for i in range(default_nb)]
         ids[0] = 1
-        res_ids = connect.insert(id_collection, default_entities, ids)
+        res_ids = connect.bulk_insert(id_collection, default_entities, ids)
         connect.flush([id_collection])
         status = connect.delete_entity_by_id(id_collection, [1])
         connect.flush([id_collection])
@@ -509,7 +509,7 @@ class TestGetBase:
         expected: get one entity
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag = default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [ids[get_pos]])
         connect.flush([collection])
@@ -517,7 +517,7 @@ class TestGetBase:
         assert res[0] is None
 
     def test_get_entity_by_id_multithreads(self, connect, collection):
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_id = ids[100:200]
 
@@ -540,7 +540,7 @@ class TestGetBase:
         method: thread do insert and get
         expected:
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         get_id = ids[:1000]
 
@@ -549,7 +549,7 @@ class TestGetBase:
             step = 1000
             for i in range(default_nb // step):
                 group_entities = gen_entities(step, False)
-                connect.insert(collection, group_entities)
+                connect.bulk_insert(collection, group_entities)
                 connect.flush([collection])
 
         def get():
@@ -588,7 +588,7 @@ class TestGetBase:
                         {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(step)]},
                         {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": group_vector}
                     ]
-                    group_ids = connect.insert(collection, group_entities)
+                    group_ids = connect.bulk_insert(collection, group_entities)
                     connect.flush([collection])
                     executor.submit(get, group_ids, group_entities)
 

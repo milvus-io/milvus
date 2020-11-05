@@ -43,9 +43,9 @@ class TestRestartBase:
         method: call function: create collection, then insert/flush, restart server and assert row count
         expected: row count keep the same
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -67,7 +67,7 @@ class TestRestartBase:
         expected: row count equals 0
         '''
         # disable_autoflush()
-        ids = connect.insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
@@ -95,7 +95,7 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         '''
         # disable_autoflush()
-        ids = connect.insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
         delete_ids = ids[big_nb//4:big_nb//4+delete_length]
@@ -128,7 +128,7 @@ class TestRestartBase:
         expected: row count equals nb
         '''
         # disable_autoflush()
-        ids = connect.insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index)
         res_count = connect.count_entities(collection)
@@ -160,7 +160,7 @@ class TestRestartBase:
         # disable_autoflush()
         loop = 5
         for i in range(loop):
-            ids = connect.insert(collection, big_entities)
+            ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, default_index, _async=True)
         res_count = connect.count_entities(collection)
@@ -206,7 +206,7 @@ class TestRestartBase:
         expected: row count equals (nb - delete_length)
         '''
         # disable_autoflush()
-        ids = connect.insert(collection, big_entities)
+        ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
         loop = 10
@@ -251,7 +251,7 @@ class TestRestartBase:
             collection_name = gen_unique_str(uid)
             collection_list.append(collection_name)
             connect.create_collection(collection_name, default_fields)
-            ids = connect.insert(collection_name, big_entities)
+            ids = connect.bulk_insert(collection_name, big_entities)
         connect.flush(collection_list, _async=True)
         res_count = connect.count_entities(collection_list[-1])
         logging.getLogger().info(res_count)
@@ -294,7 +294,7 @@ class TestRestartBase:
             tag_tmp = gen_unique_str()
             partitions.append(tag_tmp)
             connect.create_partition(collection, tag_tmp)
-            ids = connect.insert(collection, big_entities, partition_tag=tag_tmp)
+            ids = connect.bulk_insert(collection, big_entities, partition_tag=tag_tmp)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
