@@ -52,7 +52,7 @@ Flatten(const YAML::Node& node, std::unordered_map<std::string, std::string>& ta
 
 namespace milvus {
 
-extern std::unordered_map<std::string, BaseConfigPtr>
+extern std::unordered_map<std::string, BaseValuePtr>
 InitConfig();
 
 extern const char* config_file_template;
@@ -121,7 +121,7 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
     auto old_value = config_list_.at(name)->Get();
 
     try {
-        /* Set value, throws ConfigError only. */
+        /* Set value, throws ValueError only. */
         config_list_.at(name)->Set(value, update);
 
         if (update) {
@@ -136,10 +136,10 @@ ConfigMgr::Set(const std::string& name, const std::string& value, bool update) {
                 require_restart_ |= true;
             }
         }
-    } catch (ConfigError& e) {
+    } catch (ValueError& e) {
         /* Convert to std::runtime_error. */
         throw std::runtime_error(e.message());
-    } catch (SaveConfigError& e) {
+    } catch (SaveValueError& e) {
         /* Save config failed, rollback and convert to std::runtime_error. */
         config_list_.at(name)->Set(old_value, false);
         throw std::runtime_error(e.message);
@@ -164,7 +164,7 @@ ConfigMgr::Get(const std::string& name) const {
 void
 ConfigMgr::Save() {
     if (config_file_.empty()) {
-        throw SaveConfigError("Cannot save config into empty path.");
+        throw SaveValueError("Cannot save config into empty path.");
     }
 
     std::string file_content(config_file_template);
@@ -178,7 +178,7 @@ ConfigMgr::Save() {
     config_file.close();
 
     if (config_file.fail()) {
-        throw SaveConfigError("Cannot save config into file: " + config_file_ + ".");
+        throw SaveValueError("Cannot save config into file: " + config_file_ + ".");
     }
 }
 

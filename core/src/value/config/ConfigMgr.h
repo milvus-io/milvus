@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "value/ValueMgr.h"
-#include "value/config/ConfigType.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
@@ -61,8 +61,8 @@ class ConfigMgr : public ValueMgr {
     Get(const std::string& name) const override;
 
  private:
-    struct SaveConfigError : public std::exception {
-        explicit SaveConfigError(const std::string& msg) : message(msg) {
+    struct SaveValueError : public std::exception {
+        explicit SaveValueError(const std::string& msg) : message(msg) {
         }
         const std::string message;
     };
@@ -71,7 +71,7 @@ class ConfigMgr : public ValueMgr {
     Save();
 
  private:
-    const std::unordered_map<std::string, BaseConfigPtr>& config_list_ = value_list_;
+    const std::unordered_map<std::string, BaseValuePtr>& config_list_ = value_list_;
     std::string config_file_;
     bool require_restart_ = false;
     std::set<std::string> effective_immediately_;

@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "value/Value.h"
-#include "value/config/ConfigType.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
@@ -26,7 +26,7 @@ enum ClusterRole {
     RO,
 };
 
-const configEnum ClusterRoleMap{
+const valueEnum ClusterRoleMap{
     {"rw", ClusterRole::RW},
     {"ro", ClusterRole::RO},
 };
@@ -38,7 +38,7 @@ enum SimdType {
     AVX512,
 };
 
-const configEnum SimdMap{
+const valueEnum SimdMap{
     {"auto", SimdType::AUTO},
     {"sse", SimdType::SSE},
     {"avx2", SimdType::AVX2},
@@ -50,7 +50,7 @@ enum ClusteringType {
     K_MEANS_PLUS_PLUS,
 };
 
-const configEnum ClusteringMap{
+const valueEnum ClusteringMap{
     {"k-means", ClusteringType::K_MEANS},
     {"k-means++", ClusteringType::K_MEANS_PLUS_PLUS},
 };

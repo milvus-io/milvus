@@ -15,13 +15,13 @@
 set( VALUE_SRCS     config/ConfigInit.cpp
                     config/ConfigMgr.h
                     config/ConfigMgr.cpp
-                    config/ConfigType.h
-                    config/ConfigType.cpp
                     config/ServerConfig.h
                     config/ServerConfig.cpp
                     Value.h
                     ValueMgr.h
                     ValueMgr.cpp
+                    ValueType.h
+                    ValueType.cpp
                     )
 
 set( VALUE_LIBS     yaml-cpp
@@ -68,13 +68,13 @@ if ( BUILD_UNIT_TEST )
             )
 
     create_executable(
-            TARGET      ConfigTypeTest
-            SRCS        config/ConfigTypeTest1 config/ConfigTypeTest2
+            TARGET      ValueTypeTest
+            SRCS        ValueTypeTest1 ValueTypeTest2
             LIBS        value-fiu ${GTEST_LIBS}
             DEFS        FIU_ENABLE
     )
 
-    add_test ( NAME     ConfigTypeTest
-               COMMAND  $<TARGET_FILE:ConfigTypeTest>
+    add_test ( NAME     ValueTypeTest
+               COMMAND  $<TARGET_FILE:ValueTypeTest>
                )
 endif()

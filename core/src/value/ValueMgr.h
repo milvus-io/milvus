@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "config/ConfigType.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 class ValueObserver {
@@ -52,7 +52,7 @@ class BaseValueMgr {
 
 class ValueMgr : public BaseValueMgr {
  public:
-    explicit ValueMgr(std::unordered_map<std::string, BaseConfigPtr> init_list) : value_list_(std::move(init_list)) {
+    explicit ValueMgr(std::unordered_map<std::string, BaseValuePtr> init_list) : value_list_(std::move(init_list)) {
     }
 
     ValueMgr(const ValueMgr&) = delete;
@@ -80,6 +80,6 @@ class ValueMgr : public BaseValueMgr {
     JsonDump() const;
 
  protected:
-    const std::unordered_map<std::string, BaseConfigPtr> value_list_;
+    const std::unordered_map<std::string, BaseValuePtr> value_list_;
 };
 }  // namespace milvus
