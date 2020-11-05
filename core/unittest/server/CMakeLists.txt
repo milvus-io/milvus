@@ -31,7 +31,7 @@ target_link_libraries( test_server
                                 server
                                  milvus_engine
                                  metrics
-                                 config
+                                 value
                                  stdc++
                                  utils
                                  tracing
