@@ -12,8 +12,8 @@
 #include <cstring>
 #include <functional>
 
-#include "value/ValueType.h"
 #include "gtest/gtest.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
