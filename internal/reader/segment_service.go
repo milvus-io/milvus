@@ -1,59 +1,53 @@
 package reader
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-//func (node *QueryNode) SegmentsManagement() {
-//	//node.queryNodeTimeSync.updateTSOTimeSync()
-//	//var timeNow = node.queryNodeTimeSync.TSOTimeSync
-//
-//	timeNow := node.messageClient.GetTimeNow() >> 18
-//
-//	for _, collection := range node.Collections {
-//		for _, partition := range collection.Partitions {
-//			for _, segment := range partition.Segments {
-//				if segment.SegmentStatus != SegmentOpened {
-//					continue
-//				}
-//
-//				// fmt.Println("timeNow = ", timeNow, "SegmentCloseTime = ", segment.SegmentCloseTime)
-//				if timeNow >= segment.SegmentCloseTime {
-//					go segment.CloseSegment(collection)
-//				}
-//			}
-//		}
-//	}
-//}
+type segmentService struct {
+	ctx       context.Context
+	msgStream *msgstream.PulsarMsgStream
+	node      *QueryNode
+}
 
-//func (node *QueryNode) SegmentManagementService() {
-//	sleepMillisecondTime := 1000
-//	fmt.Println("do segments management in ", strconv.Itoa(sleepMillisecondTime), "ms")
-//	for {
-//		select {
-//		case <-node.ctx.Done():
-//			return
-//		default:
-//			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-//			node.SegmentsManagement()
-//		}
-//	}
-//}
+func newSegmentService(ctx context.Context, node *QueryNode, pulsarAddress string) *segmentService {
+	// TODO: add pulsar message stream init
 
-func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
+	return &segmentService{
+		ctx:  ctx,
+		node: node,
+	}
+}
+
+func (sService *segmentService) start() {
+	sleepMillisecondTime := 1000
+	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
+	for {
+		select {
+		case <-sService.ctx.Done():
+			return
+		default:
+			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+			sService.sendSegmentStatistic()
+		}
+	}
+}
+
+func (sService *segmentService) sendSegmentStatistic() {
 	var statisticData = make([]internalpb.SegmentStatistics, 0)
 
-	for segmentID, segment := range node.SegmentsMap {
-		currentMemSize := segment.GetMemSize()
+	for segmentID, segment := range sService.node.SegmentsMap {
+		currentMemSize := segment.getMemSize()
 		segment.LastMemSize = currentMemSize
 
-		segmentNumOfRows := segment.GetRowCount()
+		segmentNumOfRows := segment.getRowCount()
 
 		stat := internalpb.SegmentStatistics{
 			// TODO: set master pb's segment id type from uint64 to int64
@@ -67,22 +61,9 @@ func (node *QueryNode) SegmentStatistic(sleepMillisecondTime int) {
 
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
-	var status = node.PublicStatistic(&statisticData)
-	if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		log.Printf("Publish segments statistic failed")
-	}
+	sService.publicStatistic(&statisticData)
 }
 
-func (node *QueryNode) SegmentStatisticService() {
-	sleepMillisecondTime := 1000
-	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
-	for {
-		select {
-		case <-node.ctx.Done():
-			return
-		default:
-			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
-			node.SegmentStatistic(sleepMillisecondTime)
-		}
-	}
+func (sService *segmentService) publicStatistic(statistic *[]internalpb.SegmentStatistics) {
+	// TODO: publish statistic
 }

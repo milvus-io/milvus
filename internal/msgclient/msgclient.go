@@ -212,14 +212,14 @@ func (mc *ReaderMessageClient) InitClient(ctx context.Context, url string) {
 	proxyIdList := conf.Config.Master.ProxyIdList
 
 	searchResultTopicName := "SearchResult-"
-	searchTopicName := "Search"
+	searchTopicName := "search"
 	key2SegTopicName := "Key2Seg"
 	timeSyncTopicName := "TimeSync"
 	insertOrDeleteTopicName := "InsertOrDelete-"
 
 	if conf.Config.Pulsar.Authentication {
 		searchResultTopicName = "SearchResult-" + conf.Config.Pulsar.User + "-"
-		searchTopicName = "Search-" + conf.Config.Pulsar.User
+		searchTopicName = "search-" + conf.Config.Pulsar.User
 		key2SegTopicName = "Key2Seg-" + conf.Config.Pulsar.User
 		// timeSyncTopicName = "TimeSync-" + conf.Config.Pulsar.User
 		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
@@ -468,7 +468,7 @@ func (mc *WriterMessageClient) InitClient(url string) {
 
 	if conf.Config.Pulsar.Authentication {
 		key2SegTopicName = "Key2Seg-" + conf.Config.Pulsar.User
-		searchByIdTopicName = "Search-" + conf.Config.Pulsar.User
+		searchByIdTopicName = "search-" + conf.Config.Pulsar.User
 		// timeSyncTopicName = "TimeSync-" + conf.Config.Pulsar.User
 		insertOrDeleteTopicName = "InsertOrDelete-" + conf.Config.Pulsar.User + "-"
 	}

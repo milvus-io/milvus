@@ -14,6 +14,8 @@ func (dmNode *dmNode) Name() string {
 }
 
 func (dmNode *dmNode) Operate(in []*Msg) []*Msg {
+	// fmt.Println("Do dmNode operation")
+
 	// TODO: add filtered by schema update
 	// But for now, we think all the messages are valid
 
@@ -28,7 +30,12 @@ func (dmNode *dmNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	var res Msg = dmMsg
+	var fdmMsg = filteredDmMsg{
+		insertMessages: dmMsg.insertMessages,
+		timeRange:      dmMsg.timeRange,
+	}
+
+	var res Msg = &fdmMsg
 	return []*Msg{&res}
 }
 

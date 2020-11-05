@@ -12,10 +12,12 @@ type filteredDmNode struct {
 }
 
 func (fdmNode *filteredDmNode) Name() string {
-	return "dmNode"
+	return "fdmNode"
 }
 
 func (fdmNode *filteredDmNode) Operate(in []*Msg) []*Msg {
+	// fmt.Println("Do filteredDmNode operation")
+
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in filteredDmNode")
 		// TODO: add error handling

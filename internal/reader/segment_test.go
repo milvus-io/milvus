@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"math"
 	"testing"
 
@@ -14,10 +15,11 @@ import (
 func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	ctx := context.Background()
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -27,9 +29,9 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -40,10 +42,11 @@ func TestSegment_ConstructorAndDestructor(t *testing.T) {
 func TestSegment_SegmentInsert(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	ctx := context.Background()
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -53,8 +56,8 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -71,23 +74,26 @@ func TestSegment_SegmentInsert(t *testing.T) {
 	bs := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
-	var records [][]byte
+	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		records = append(records, rawData)
+		blob := &commonpb.Blob {
+			Value: rawData,
+		}
+		records = append(records, blob)
 	}
 
 	// 4. Do PreInsert
-	var offset = segment.SegmentPreInsert(N)
+	var offset = segment.segmentPreInsert(N)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -98,10 +104,11 @@ func TestSegment_SegmentInsert(t *testing.T) {
 func TestSegment_SegmentDelete(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -115,17 +122,17 @@ func TestSegment_SegmentDelete(t *testing.T) {
 	timestamps := []uint64{0, 0, 0}
 
 	// 3. Do PreDelete
-	var offset = segment.SegmentPreDelete(10)
+	var offset = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 4. Do Delete
-	var err = segment.SegmentDelete(offset, &ids, &timestamps)
+	var err = segment.segmentDelete(offset, &ids, &timestamps)
 	assert.NoError(t, err)
 
 	// 5. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -136,10 +143,11 @@ func TestSegment_SegmentDelete(t *testing.T) {
 func TestSegment_SegmentSearch(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -167,20 +175,23 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	bs := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
-	var records [][]byte
+	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
+		blob := &commonpb.Blob {
+			Value: rawData,
+		}
 		ids = append(ids, int64(i))
 		timestamps = append(timestamps, uint64(i+1))
-		records = append(records, rawData)
+		records = append(records, blob)
 	}
 
 	// 4. Do PreInsert
-	var offset = segment.SegmentPreInsert(N)
+	var offset = segment.segmentPreInsert(N)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Do search
 	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
@@ -191,15 +202,17 @@ func TestSegment_SegmentSearch(t *testing.T) {
 	var vectorRecord = msgPb.VectorRowRecord{
 		FloatData: queryRawData,
 	}
-	query := node.QueryJSON2Info(&queryJSON)
-	var searchRes, searchErr = segment.SegmentSearch(query, timestamps[N/2], &vectorRecord)
+
+	sService := searchService{}
+	query := sService.queryJSON2Info(&queryJSON)
+	var searchRes, searchErr = segment.segmentSearch(query, timestamps[N/2], &vectorRecord)
 	assert.NoError(t, searchErr)
 	fmt.Println(searchRes)
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -210,10 +223,11 @@ func TestSegment_SegmentSearch(t *testing.T) {
 func TestSegment_SegmentPreInsert(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -223,13 +237,13 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreInsert
-	var offset = segment.SegmentPreInsert(10)
+	var offset = segment.segmentPreInsert(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -240,10 +254,11 @@ func TestSegment_SegmentPreInsert(t *testing.T) {
 func TestSegment_SegmentPreDelete(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -253,13 +268,13 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Do PreDelete
-	var offset = segment.SegmentPreDelete(10)
+	var offset = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 3. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -267,55 +282,14 @@ func TestSegment_SegmentPreDelete(t *testing.T) {
 	node.Close()
 }
 
-//  Segment util functions test
-////////////////////////////////////////////////////////////////////////////
-//func TestSegment_GetStatus(t *testing.T) {
-//	ctx := context.Background()
-//	// 1. Construct node, collection, partition and segment
-//	node := NewQueryNode(ctx, 0, 0)
-//	var collection = node.NewCollection(0, "collection0", "")
-//	var partition = collection.NewPartition("partition0")
-//	var segment = partition.NewSegment(0)
-//
-//	// 2. Get segment status
-//	var status = segment.GetStatus()
-//	assert.Equal(t, status, SegmentOpened)
-//
-//	// 3. Destruct collection, partition and segment
-//	partition.DeleteSegment(segment)
-//	collection.DeletePartition(partition)
-//	node.DeleteCollection(collection)
-//
-//	node.Close()
-//}
-
-//func TestSegment_Close(t *testing.T) {
-//	ctx := context.Background()
-//	// 1. Construct node, collection, partition and segment
-//	node := NewQueryNode(ctx, 0, 0)
-//	var collection = node.NewCollection(0, "collection0", "")
-//	var partition = collection.NewPartition("partition0")
-//	var segment = partition.NewSegment(0)
-//
-//	// 2. Close segment
-//	var err = segment.CloseSegment(collection)
-//	assert.NoError(t, err)
-//
-//	// 3. Destruct collection, partition and segment
-//	partition.DeleteSegment(segment)
-//	collection.DeletePartition(partition)
-//	node.DeleteCollection(collection)
-//
-//	node.Close()
-//}
-
 func TestSegment_GetRowCount(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -326,7 +300,7 @@ func TestSegment_GetRowCount(t *testing.T) {
 
 	// 2. Create ids and timestamps
 	ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -343,27 +317,30 @@ func TestSegment_GetRowCount(t *testing.T) {
 	bs := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
-	var records [][]byte
+	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		records = append(records, rawData)
+		blob := &commonpb.Blob {
+			Value: rawData,
+		}
+		records = append(records, blob)
 	}
 
 	// 4. Do PreInsert
-	var offset = segment.SegmentPreInsert(N)
+	var offset = segment.segmentPreInsert(N)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Get segment row count
-	var rowCount = segment.GetRowCount()
+	var rowCount = segment.getRowCount()
 	assert.Equal(t, rowCount, int64(len(ids)))
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -374,10 +351,11 @@ func TestSegment_GetRowCount(t *testing.T) {
 func TestSegment_GetDeletedCount(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -391,22 +369,22 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 	timestamps := []uint64{0, 0, 0}
 
 	// 3. Do PreDelete
-	var offset = segment.SegmentPreDelete(10)
+	var offset = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 4. Do Delete
-	var err = segment.SegmentDelete(offset, &ids, &timestamps)
+	var err = segment.segmentDelete(offset, &ids, &timestamps)
 	assert.NoError(t, err)
 
 	// 5. Get segment deleted count
-	var deletedCount = segment.GetDeletedCount()
+	var deletedCount = segment.getDeletedCount()
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(0))
 
 	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -417,10 +395,11 @@ func TestSegment_GetDeletedCount(t *testing.T) {
 func TestSegment_GetMemSize(t *testing.T) {
 	ctx := context.Background()
 	// 1. Construct node, collection, partition and segment
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
+	var segment = partition.newSegment(0)
 
 	node.SegmentsMap[int64(0)] = segment
 
@@ -430,8 +409,8 @@ func TestSegment_GetMemSize(t *testing.T) {
 	assert.Equal(t, len(node.SegmentsMap), 1)
 
 	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
 
 	// 3. Create records, use schema below:
 	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
@@ -448,27 +427,30 @@ func TestSegment_GetMemSize(t *testing.T) {
 	bs := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bs, 1)
 	rawData = append(rawData, bs...)
-	var records [][]byte
+	var records []*commonpb.Blob
 	for i := 0; i < N; i++ {
-		records = append(records, rawData)
+		blob := &commonpb.Blob {
+			Value: rawData,
+		}
+		records = append(records, blob)
 	}
 
 	// 4. Do PreInsert
-	var offset = segment.SegmentPreInsert(N)
+	var offset = segment.segmentPreInsert(N)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
+	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
 
 	// 6. Get memory usage in bytes
-	var memSize = segment.GetMemSize()
-	assert.Equal(t, memSize, uint64(2785280))
+	var memSize = segment.getMemSize()
+	assert.Equal(t, memSize, int64(2785280))
 
 	// 7. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
+	partition.deleteSegment(node, segment)
+	collection.deletePartition(node, partition)
+	node.deleteCollection(collection)
 
 	assert.Equal(t, len(node.Collections), 0)
 	assert.Equal(t, len(node.SegmentsMap), 0)
@@ -476,68 +458,68 @@ func TestSegment_GetMemSize(t *testing.T) {
 	node.Close()
 }
 
-func TestSegment_RealSchemaTest(t *testing.T) {
-	ctx := context.Background()
-	// 1. Construct node, collection, partition and segment
-	//var schemaString = "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  " +
-	//	"field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
-	//	"field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n" +
-	//	"\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n"
-	var schemaString = "id: 6875229265736357360\nname: \"collection0\"\nschema: \u003c\n  " +
-		"field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
-		"field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n    dim: 16\n  " +
-		"\u003e\n\u003e\ncreate_time: 1600764055\nsegment_ids: 6875229265736357360\npartition_tags: \"default\"\n"
-	node := NewQueryNode(ctx, 0, 0)
-	var collection = node.NewCollection(0, "collection0", schemaString)
-	var partition = collection.NewPartition("partition0")
-	var segment = partition.NewSegment(0)
-
-	node.SegmentsMap[int64(0)] = segment
-
-	assert.Equal(t, collection.CollectionName, "collection0")
-	assert.Equal(t, partition.PartitionName, "partition0")
-	assert.Equal(t, segment.SegmentID, int64(0))
-	assert.Equal(t, len(node.SegmentsMap), 1)
-
-	// 2. Create ids and timestamps
-	//ids := []int64{1, 2, 3}
-	//timestamps := []uint64{0, 0, 0}
-
-	// 3. Create records, use schema below:
-	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
-	// schema_tmp->AddField("age", DataType::INT32);
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records [][]byte
-	for i := 0; i < N; i++ {
-		records = append(records, rawData)
-	}
-
-	// 4. Do PreInsert
-	var offset = segment.SegmentPreInsert(N)
-	assert.GreaterOrEqual(t, offset, int64(0))
-
-	// 5. Do Insert
-	//var err = segment.SegmentInsert(offset, &ids, &timestamps, &records)
-	//assert.NoError(t, err)
-
-	// 6. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
-	collection.DeletePartition(node, partition)
-	node.DeleteCollection(collection)
-
-	assert.Equal(t, len(node.Collections), 0)
-	assert.Equal(t, len(node.SegmentsMap), 0)
-
-	node.Close()
-}
+//func TestSegment_RealSchemaTest(t *testing.T) {
+//	ctx := context.Background()
+//	// 1. Construct node, collection, partition and segment
+//	var schemaString = "id: 6875229265736357360\nname: \"collection0\"\nschema: \u003c\n  " +
+//		"field_metas: \u003c\n    field_name: \"field_3\"\n    type: INT32\n    dim: 1\n  \u003e\n  " +
+//		"field_metas: \u003c\n    field_name: \"field_vec\"\n    type: VECTOR_FLOAT\n    dim: 16\n  " +
+//		"\u003e\n\u003e\ncreate_time: 1600764055\nsegment_ids: 6875229265736357360\npartition_tags: \"default\"\n"
+//	pulsarUrl := "pulsar://localhost:6650"
+//	node := NewQueryNode(ctx, 0, pulsarUrl)
+//	var collection = node.newCollection(0, "collection0", schemaString)
+//	var partition = collection.newPartition("partition0")
+//	var segment = partition.newSegment(0)
+//
+//	node.SegmentsMap[int64(0)] = segment
+//
+//	assert.Equal(t, collection.CollectionName, "collection0")
+//	assert.Equal(t, partition.PartitionName, "partition0")
+//	assert.Equal(t, segment.SegmentID, int64(0))
+//	assert.Equal(t, len(node.SegmentsMap), 1)
+//
+//	// 2. Create ids and timestamps
+//	ids := []int64{1, 2, 3}
+//	timestamps := []uint64{0, 0, 0}
+//
+//	// 3. Create records, use schema below:
+//	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
+//	// schema_tmp->AddField("age", DataType::INT32);
+//	const DIM = 16
+//	const N = 3
+//	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+//	var rawData []byte
+//	for _, ele := range vec {
+//		buf := make([]byte, 4)
+//		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+//		rawData = append(rawData, buf...)
+//	}
+//	bs := make([]byte, 4)
+//	binary.LittleEndian.PutUint32(bs, 1)
+//	rawData = append(rawData, bs...)
+//	var records []*commonpb.Blob
+//	for i := 0; i < N; i++ {
+//		blob := &commonpb.Blob {
+//			Value: rawData,
+//		}
+//		records = append(records, blob)
+//	}
+//
+//	// 4. Do PreInsert
+//	var offset = segment.segmentPreInsert(N)
+//	assert.GreaterOrEqual(t, offset, int64(0))
+//
+//	// 5. Do Insert
+//	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+//	assert.NoError(t, err)
+//
+//	// 6. Destruct collection, partition and segment
+//	partition.deleteSegment(node, segment)
+//	collection.deletePartition(node, partition)
+//	node.deleteCollection(collection)
+//
+//	assert.Equal(t, len(node.Collections), 0)
+//	assert.Equal(t, len(node.SegmentsMap), 0)
+//
+//	node.Close()
+//}

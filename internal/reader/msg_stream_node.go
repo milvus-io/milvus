@@ -18,6 +18,8 @@ func (msNode *msgStreamNode) Name() string {
 }
 
 func (msNode *msgStreamNode) Operate(in []*Msg) []*Msg {
+	// fmt.Println("Do msgStreamNode operation")
+
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in msgStreamNode")
 		// TODO: add error handling
@@ -46,6 +48,7 @@ func (msNode *msgStreamNode) Operate(in []*Msg) []*Msg {
 			log.Println("Non supporting message type:", (*msg).Type())
 		}
 	}
+
 	var res Msg = &dmMsg
 	return []*Msg{&res}
 }

@@ -15,179 +15,75 @@ import "C"
 
 import (
 	"context"
-	"time"
+	"errors"
+	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/msgclient"
-	msgPb "github.com/zilliztech/milvus-distributed/internal/proto/message"
 )
 
 type Timestamp = typeutil.Timestamp
 
-type QueryNodeDataBuffer struct {
-	InsertDeleteBuffer      []*msgPb.InsertOrDeleteMsg
-	SearchBuffer            []*msgPb.SearchMsg
-	validInsertDeleteBuffer []bool
-	validSearchBuffer       []bool
-}
-
-type QueryInfo struct {
-	NumQueries int64  `json:"num_queries"`
-	TopK       int    `json:"topK"`
-	FieldName  string `json:"field_name"`
-}
-
-type MsgCounter struct {
-	InsertCounter int64
-	InsertTime    time.Time
-
-	DeleteCounter int64
-	DeleteTime    time.Time
-
-	SearchCounter int64
-	SearchTime    time.Time
-}
-
-type InsertLog struct {
-	MsgLength              int
-	DurationInMilliseconds int64
-	InsertTime             time.Time
-	NumSince               int64
-	Speed                  float64
-}
-
 type QueryNode struct {
-	// context
 	ctx context.Context
 
-	QueryNodeID          uint64
-	Collections          []*Collection
-	SegmentsMap          map[int64]*Segment
-	messageClient        *msgclient.ReaderMessageClient
-	queryNodeTimeSync    *QueryNodeTime
-	buffer               QueryNodeDataBuffer
-	deletePreprocessData DeletePreprocessData
-	deleteData           DeleteData
-	insertData           InsertData
-	kvBase               *kv.EtcdKV
-	msgCounter           *MsgCounter
-	InsertLogs           []InsertLog
+	QueryNodeID uint64
+	pulsarURL   string
+
+	Collections []*Collection
+	SegmentsMap map[int64]*Segment
+
+	queryNodeTime *QueryNodeTime
+
+	manipulationService *manipulationService
+	metaService         *metaService
+	searchService       *searchService
+	segmentService      *segmentService
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64) *QueryNode {
-	mc := msgclient.ReaderMessageClient{}
-
-	queryNodeTimeSync := &QueryNodeTime{
-		ReadTimeSyncMin: timeSync,
-		ReadTimeSyncMax: timeSync,
-		WriteTimeSync:   timeSync,
-		ServiceTimeSync: timeSync,
-		TSOTimeSync:     timeSync,
-	}
+func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *QueryNode {
+	queryNodeTimeSync := &QueryNodeTime{}
 
 	segmentsMap := make(map[int64]*Segment)
 
-	buffer := QueryNodeDataBuffer{
-		InsertDeleteBuffer:      make([]*msgPb.InsertOrDeleteMsg, 0),
-		SearchBuffer:            make([]*msgPb.SearchMsg, 0),
-		validInsertDeleteBuffer: make([]bool, 0),
-		validSearchBuffer:       make([]bool, 0),
-	}
-
-	msgCounter := MsgCounter{
-		InsertCounter: 0,
-		DeleteCounter: 0,
-		SearchCounter: 0,
-	}
-
 	return &QueryNode{
-		ctx:               ctx,
-		QueryNodeID:       queryNodeID,
-		Collections:       nil,
-		SegmentsMap:       segmentsMap,
-		messageClient:     &mc,
-		queryNodeTimeSync: queryNodeTimeSync,
-		buffer:            buffer,
-		msgCounter:        &msgCounter,
+		ctx: ctx,
+
+		QueryNodeID: queryNodeID,
+		pulsarURL:   pulsarURL,
+
+		Collections: nil,
+		SegmentsMap: segmentsMap,
+
+		queryNodeTime: queryNodeTimeSync,
+
+		manipulationService: nil,
+		metaService:         nil,
+		searchService:       nil,
+		segmentService:      nil,
 	}
+}
+
+func (node *QueryNode) Start() {
+	node.manipulationService = newManipulationService(node.ctx, node, node.pulsarURL)
+	node.searchService = newSearchService(node.ctx, node, node.pulsarURL)
+	node.metaService = newMetaService(node.ctx, node)
+	node.segmentService = newSegmentService(node.ctx, node, node.pulsarURL)
+
+	go node.manipulationService.start()
+	go node.searchService.start()
+	go node.metaService.start()
+	node.segmentService.start()
 }
 
 func (node *QueryNode) Close() {
-	if node.messageClient != nil {
-		node.messageClient.Close()
-	}
-	if node.kvBase != nil {
-		node.kvBase.Close()
-	}
+	// TODO: close services
 }
 
-func CreateQueryNode(ctx context.Context, queryNodeID uint64, timeSync uint64, mc *msgclient.ReaderMessageClient) *QueryNode {
-	queryNodeTimeSync := &QueryNodeTime{
-		ReadTimeSyncMin: timeSync,
-		ReadTimeSyncMax: timeSync,
-		WriteTimeSync:   timeSync,
-		ServiceTimeSync: timeSync,
-		TSOTimeSync:     timeSync,
-	}
-
-	segmentsMap := make(map[int64]*Segment)
-
-	buffer := QueryNodeDataBuffer{
-		InsertDeleteBuffer:      make([]*msgPb.InsertOrDeleteMsg, 0),
-		SearchBuffer:            make([]*msgPb.SearchMsg, 0),
-		validInsertDeleteBuffer: make([]bool, 0),
-		validSearchBuffer:       make([]bool, 0),
-	}
-
-	msgCounter := MsgCounter{
-		InsertCounter: 0,
-		InsertTime:    time.Now(),
-		DeleteCounter: 0,
-		DeleteTime:    time.Now(),
-		SearchCounter: 0,
-		SearchTime:    time.Now(),
-	}
-
-	return &QueryNode{
-		ctx:               ctx,
-		QueryNodeID:       queryNodeID,
-		Collections:       nil,
-		SegmentsMap:       segmentsMap,
-		messageClient:     mc,
-		queryNodeTimeSync: queryNodeTimeSync,
-		buffer:            buffer,
-		msgCounter:        &msgCounter,
-		InsertLogs:        make([]InsertLog, 0),
-	}
-}
-
-func (node *QueryNode) QueryNodeDataInit() {
-	deletePreprocessData := DeletePreprocessData{
-		deleteRecords: make([]*DeleteRecord, 0),
-		count:         0,
-	}
-
-	deleteData := DeleteData{
-		deleteIDs:        make(map[int64][]int64),
-		deleteTimestamps: make(map[int64][]uint64),
-		deleteOffset:     make(map[int64]int64),
-	}
-
-	insertData := InsertData{
-		insertIDs:        make(map[int64][]int64),
-		insertTimestamps: make(map[int64][]uint64),
-		// insertRecords:    make(map[int64][][]byte),
-		insertOffset: make(map[int64]int64),
-	}
-
-	node.deletePreprocessData = deletePreprocessData
-	node.deleteData = deleteData
-	node.insertData = insertData
-}
-
-func (node *QueryNode) NewCollection(collectionID int64, collectionName string, schemaConfig string) *Collection {
+func (node *QueryNode) newCollection(collectionID int64, collectionName string, schemaConfig string) *Collection {
+	/*
+		CCollection
+		newCollection(const char* collection_name, const char* schema_conf);
+	*/
 	cName := C.CString(collectionName)
 	cSchema := C.CString(schemaConfig)
 	collection := C.NewCollection(cName, cSchema)
@@ -198,10 +94,10 @@ func (node *QueryNode) NewCollection(collectionID int64, collectionName string, 
 	return newCollection
 }
 
-func (node *QueryNode) DeleteCollection(collection *Collection) {
+func (node *QueryNode) deleteCollection(collection *Collection) {
 	/*
 		void
-		DeleteCollection(CCollection collection);
+		deleteCollection(CCollection collection);
 	*/
 	cPtr := collection.CollectionPtr
 	C.DeleteCollection(cPtr)
@@ -221,4 +117,65 @@ func (node *QueryNode) DeleteCollection(collection *Collection) {
 	}
 
 	node.Collections = tmpCollections
+}
+
+/************************************** util functions ***************************************/
+// Function `GetSegmentByEntityId` should return entityIDs, timestamps and segmentIDs
+//func (node *QueryNode) GetKey2Segments() (*[]int64, *[]uint64, *[]int64) {
+//	var entityIDs = make([]int64, 0)
+//	var timestamps = make([]uint64, 0)
+//	var segmentIDs = make([]int64, 0)
+//
+//	var key2SegMsg = node.messageClient.Key2SegMsg
+//	for _, msg := range key2SegMsg {
+//		if msg.SegmentId == nil {
+//			segmentIDs = append(segmentIDs, -1)
+//			entityIDs = append(entityIDs, msg.Uid)
+//			timestamps = append(timestamps, msg.Timestamp)
+//		} else {
+//			for _, segmentID := range msg.SegmentId {
+//				segmentIDs = append(segmentIDs, segmentID)
+//				entityIDs = append(entityIDs, msg.Uid)
+//				timestamps = append(timestamps, msg.Timestamp)
+//			}
+//		}
+//	}
+//
+//	return &entityIDs, &timestamps, &segmentIDs
+//}
+
+func (node *QueryNode) getCollectionByID(collectionID int64) *Collection {
+	for _, collection := range node.Collections {
+		if collection.CollectionID == collectionID {
+			return collection
+		}
+	}
+
+	return nil
+}
+
+func (node *QueryNode) getCollectionByCollectionName(collectionName string) (*Collection, error) {
+	for _, collection := range node.Collections {
+		if collection.CollectionName == collectionName {
+			return collection, nil
+		}
+	}
+
+	return nil, errors.New("Cannot found collection: " + collectionName)
+}
+
+func (node *QueryNode) getSegmentBySegmentID(segmentID int64) (*Segment, error) {
+	targetSegment, ok := node.SegmentsMap[segmentID]
+
+	if !ok {
+		return nil, errors.New("cannot found segment with id = " + strconv.FormatInt(segmentID, 10))
+	}
+
+	return targetSegment, nil
+}
+
+func (node *QueryNode) foundSegmentBySegmentID(segmentID int64) bool {
+	_, ok := node.SegmentsMap[segmentID]
+
+	return ok
 }

@@ -9,16 +9,17 @@ import (
 
 func TestPartition_NewSegment(t *testing.T) {
 	ctx := context.Background()
-	node := NewQueryNode(ctx, 0, 0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
 
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
 
-	var segment = partition.NewSegment(0)
+	var segment = partition.newSegment(0)
 	node.SegmentsMap[int64(0)] = segment
 
 	assert.Equal(t, collection.CollectionName, "collection0")
-	assert.Equal(t, collection.CollectionID, uint64(0))
+	assert.Equal(t, collection.CollectionID, int64(0))
 	assert.Equal(t, partition.PartitionName, "partition0")
 	assert.Equal(t, node.Collections[0].Partitions[0].Segments[0].SegmentID, int64(0))
 
@@ -27,22 +28,23 @@ func TestPartition_NewSegment(t *testing.T) {
 	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 1)
 
 	assert.Equal(t, segment.SegmentID, int64(0))
-	assert.Equal(t, node.FoundSegmentBySegmentID(int64(0)), true)
+	assert.Equal(t, node.foundSegmentBySegmentID(int64(0)), true)
 }
 
 func TestPartition_DeleteSegment(t *testing.T) {
 	// 1. Construct node, collection, partition and segment
 	ctx := context.Background()
-	node := NewQueryNode(ctx, 0, 0)
+	pulsarUrl := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarUrl)
 
-	var collection = node.NewCollection(0, "collection0", "")
-	var partition = collection.NewPartition("partition0")
+	var collection = node.newCollection(0, "collection0", "")
+	var partition = collection.newPartition("partition0")
 
-	var segment = partition.NewSegment(0)
+	var segment = partition.newSegment(0)
 	node.SegmentsMap[int64(0)] = segment
 
 	assert.Equal(t, collection.CollectionName, "collection0")
-	assert.Equal(t, collection.CollectionID, uint64(0))
+	assert.Equal(t, collection.CollectionID, int64(0))
 	assert.Equal(t, partition.PartitionName, "partition0")
 	assert.Equal(t, node.Collections[0].Partitions[0].Segments[0].SegmentID, int64(0))
 
@@ -53,10 +55,10 @@ func TestPartition_DeleteSegment(t *testing.T) {
 	assert.Equal(t, segment.SegmentID, int64(0))
 
 	// 2. Destruct collection, partition and segment
-	partition.DeleteSegment(node, segment)
+	partition.deleteSegment(node, segment)
 
 	assert.Equal(t, len(collection.Partitions), 1)
 	assert.Equal(t, len(node.Collections), 1)
 	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 0)
-	assert.Equal(t, node.FoundSegmentBySegmentID(int64(0)), false)
+	assert.Equal(t, node.foundSegmentBySegmentID(int64(0)), false)
 }

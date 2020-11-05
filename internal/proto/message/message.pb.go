@@ -3977,7 +3977,7 @@ func (c *milvusServiceClient) GetEntityIDs(ctx context.Context, in *GetEntityIDs
 
 func (c *milvusServiceClient) Search(ctx context.Context, in *SearchParam, opts ...grpc.CallOption) (*QueryResult, error) {
 	out := new(QueryResult)
-	err := c.cc.Invoke(ctx, "/milvus.grpc.MilvusService/Search", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.grpc.MilvusService/search", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -4276,7 +4276,7 @@ func (*UnimplementedMilvusServiceServer) GetEntityIDs(ctx context.Context, req *
 	return nil, status.Errorf(codes.Unimplemented, "method GetEntityIDs not implemented")
 }
 func (*UnimplementedMilvusServiceServer) Search(ctx context.Context, req *SearchParam) (*QueryResult, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method search not implemented")
 }
 func (*UnimplementedMilvusServiceServer) SearchInSegment(ctx context.Context, req *SearchInSegmentParam) (*QueryResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchInSegment not implemented")
@@ -4620,7 +4620,7 @@ func _MilvusService_Search_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.grpc.MilvusService/Search",
+		FullMethod: "/milvus.grpc.MilvusService/search",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MilvusServiceServer).Search(ctx, req.(*SearchParam))
@@ -4827,7 +4827,7 @@ var _MilvusService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _MilvusService_GetEntityIDs_Handler,
 		},
 		{
-			MethodName: "Search",
+			MethodName: "search",
 			Handler:    _MilvusService_Search_Handler,
 		},
 		{

@@ -1,13 +1,13 @@
 package reader
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path"
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
@@ -23,6 +23,55 @@ const (
 	SegmentPrefix    = "/segment/"
 )
 
+type metaService struct {
+	ctx    context.Context
+	kvBase *kv.EtcdKV
+	node   *QueryNode
+}
+
+func newMetaService(ctx context.Context, node *QueryNode) *metaService {
+	ETCDAddr := "http://"
+	ETCDAddr += conf.Config.Etcd.Address
+	ETCDPort := conf.Config.Etcd.Port
+	ETCDAddr = ETCDAddr + ":" + strconv.FormatInt(int64(ETCDPort), 10)
+
+	cli, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{ETCDAddr},
+		DialTimeout: 5 * time.Second,
+	})
+
+	return &metaService{
+		ctx:    ctx,
+		kvBase: kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath),
+		node:   node,
+	}
+}
+
+func (mService *metaService) start() {
+	// init from meta
+	err := mService.loadCollections()
+	if err != nil {
+		log.Fatal("metaService loadCollections failed")
+	}
+	err = mService.loadSegments()
+	if err != nil {
+		log.Fatal("metaService loadSegments failed")
+	}
+
+	metaChan := mService.kvBase.WatchWithPrefix("")
+	for {
+		select {
+		case <-mService.ctx.Done():
+			return
+		case resp := <-metaChan:
+			err := mService.processResp(resp)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
+}
+
 func GetCollectionObjID(key string) string {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
@@ -36,9 +85,8 @@ func GetSegmentObjID(key string) string {
 func isCollectionObj(key string) bool {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
-	// println("prefix is :$", prefix)
 	index := strings.Index(key, prefix)
-	// println("index is :", index)
+
 	return index == 0
 }
 
@@ -46,6 +94,7 @@ func isSegmentObj(key string) bool {
 	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
+
 	return index == 0
 }
 
@@ -88,99 +137,104 @@ func printSegmentStruct(obj *segment.Segment) {
 	}
 }
 
-func (node *QueryNode) processCollectionCreate(id string, value string) {
+func (mService *metaService) processCollectionCreate(id string, value string) {
 	println(fmt.Sprintf("Create Collection:$%s$", id))
-	collection, err := collection.JSON2Collection(value)
+
+	col, err := collection.JSON2Collection(value)
 	if err != nil {
-		println("error of json 2 collection")
+		println("error of json 2 col")
 		println(err.Error())
 	}
-	//printCollectionStruct(collection)
-	newCollection := node.NewCollection(collection.ID, collection.Name, collection.GrpcMarshalString)
-	for _, partitionTag := range collection.PartitionTags {
-		newCollection.NewPartition(partitionTag)
+
+	if col != nil {
+		newCollection := mService.node.newCollection(col.ID, col.Name, col.GrpcMarshalString)
+		for _, partitionTag := range col.PartitionTags {
+			newCollection.newPartition(partitionTag)
+		}
 	}
 }
 
-func (node *QueryNode) processSegmentCreate(id string, value string) {
+func (mService *metaService) processSegmentCreate(id string, value string) {
 	println("Create Segment: ", id)
-	segment, err := segment.JSON2Segment(value)
+
+	seg, err := segment.JSON2Segment(value)
 	if err != nil {
-		println("error of json 2 segment")
+		println("error of json 2 seg")
 		println(err.Error())
 	}
-	//printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	if !isSegmentChannelRangeInQueryNodeChannelRange(seg) {
 		return
 	}
 
-	collection := node.GetCollectionByID(segment.CollectionID)
-	if collection != nil {
-		partition := collection.GetPartitionByName(segment.PartitionTag)
-		if partition != nil {
-			newSegmentID := int64(segment.SegmentID) // todo change all to uint64
-			// start new segment and add it into partition.OpenedSegments
-			newSegment := partition.NewSegment(newSegmentID)
-			// newSegment.SegmentStatus = SegmentOpened
-			newSegment.SegmentCloseTime = segment.CloseTimeStamp
-			node.SegmentsMap[newSegmentID] = newSegment
+	// TODO: what if seg == nil? We need to notify master and return rpc request failed
+	if seg != nil {
+		col := mService.node.getCollectionByID(seg.CollectionID)
+		if col != nil {
+			partition := col.getPartitionByName(seg.PartitionTag)
+			if partition != nil {
+				newSegmentID := seg.SegmentID
+				newSegment := partition.newSegment(newSegmentID)
+				newSegment.SegmentCloseTime = seg.CloseTimeStamp
+				mService.node.SegmentsMap[newSegmentID] = newSegment
+			}
 		}
 	}
-	// segment.CollectionName
 }
 
-func (node *QueryNode) processCreate(key string, msg string) {
+func (mService *metaService) processCreate(key string, msg string) {
 	println("process create", key)
 	if isCollectionObj(key) {
 		objID := GetCollectionObjID(key)
-		node.processCollectionCreate(objID, msg)
+		mService.processCollectionCreate(objID, msg)
 	} else if isSegmentObj(key) {
 		objID := GetSegmentObjID(key)
-		node.processSegmentCreate(objID, msg)
+		mService.processSegmentCreate(objID, msg)
 	} else {
 		println("can not process create msg:", key)
 	}
 }
 
-func (node *QueryNode) processSegmentModify(id string, value string) {
-	// println("Modify Segment: ", id)
-
-	segment, err := segment.JSON2Segment(value)
+func (mService *metaService) processSegmentModify(id string, value string) {
+	seg, err := segment.JSON2Segment(value)
 	if err != nil {
 		println("error of json 2 segment")
 		println(err.Error())
 	}
-	// printSegmentStruct(segment)
 
-	if !isSegmentChannelRangeInQueryNodeChannelRange(segment) {
+	if !isSegmentChannelRangeInQueryNodeChannelRange(seg) {
 		return
 	}
 
-	seg, err := node.GetSegmentBySegmentID(int64(segment.SegmentID)) // todo change  to uint64
 	if seg != nil {
-		seg.SegmentCloseTime = segment.CloseTimeStamp
+		queryNodeSeg, err := mService.node.getSegmentBySegmentID(seg.SegmentID)
+		if err != nil {
+			println(err)
+		}
+
+		if queryNodeSeg != nil {
+			queryNodeSeg.SegmentCloseTime = seg.CloseTimeStamp
+		}
 	}
 }
 
-func (node *QueryNode) processCollectionModify(id string, value string) {
+func (mService *metaService) processCollectionModify(id string, value string) {
 	println("Modify Collection: ", id)
 }
 
-func (node *QueryNode) processModify(key string, msg string) {
-	// println("process modify")
+func (mService *metaService) processModify(key string, msg string) {
 	if isCollectionObj(key) {
 		objID := GetCollectionObjID(key)
-		node.processCollectionModify(objID, msg)
+		mService.processCollectionModify(objID, msg)
 	} else if isSegmentObj(key) {
 		objID := GetSegmentObjID(key)
-		node.processSegmentModify(objID, msg)
+		mService.processSegmentModify(objID, msg)
 	} else {
 		println("can not process modify msg:", key)
 	}
 }
 
-func (node *QueryNode) processSegmentDelete(id string) {
+func (mService *metaService) processSegmentDelete(id string) {
 	println("Delete segment: ", id)
 
 	segmentID, err := strconv.ParseInt(id, 10, 64)
@@ -188,18 +242,18 @@ func (node *QueryNode) processSegmentDelete(id string) {
 		log.Println("Cannot parse segment id:" + id)
 	}
 
-	for _, col := range node.Collections {
+	for _, col := range mService.node.Collections {
 		for _, p := range col.Partitions {
 			for _, s := range p.Segments {
 				if s.SegmentID == segmentID {
-					p.DeleteSegment(node, s)
+					p.deleteSegment(mService.node, s)
 				}
 			}
 		}
 	}
 }
 
-func (node *QueryNode) processCollectionDelete(id string) {
+func (mService *metaService) processCollectionDelete(id string) {
 	println("Delete collection: ", id)
 
 	collectionID, err := strconv.ParseInt(id, 10, 64)
@@ -207,42 +261,42 @@ func (node *QueryNode) processCollectionDelete(id string) {
 		log.Println("Cannot parse collection id:" + id)
 	}
 
-	targetCollection := node.GetCollectionByID(collectionID)
-	node.DeleteCollection(targetCollection)
+	targetCollection := mService.node.getCollectionByID(collectionID)
+	mService.node.deleteCollection(targetCollection)
 }
 
-func (node *QueryNode) processDelete(key string) {
+func (mService *metaService) processDelete(key string) {
 	println("process delete")
+
 	if isCollectionObj(key) {
 		objID := GetCollectionObjID(key)
-		node.processCollectionDelete(objID)
+		mService.processCollectionDelete(objID)
 	} else if isSegmentObj(key) {
 		objID := GetSegmentObjID(key)
-		node.processSegmentDelete(objID)
+		mService.processSegmentDelete(objID)
 	} else {
 		println("can not process delete msg:", key)
 	}
 }
 
-func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
+func (mService *metaService) processResp(resp clientv3.WatchResponse) error {
 	err := resp.Err()
 	if err != nil {
 		return err
 	}
-	// println("processResp!!!!!\n")
 
 	for _, ev := range resp.Events {
 		if ev.IsCreate() {
 			key := string(ev.Kv.Key)
 			msg := string(ev.Kv.Value)
-			node.processCreate(key, msg)
+			mService.processCreate(key, msg)
 		} else if ev.IsModify() {
 			key := string(ev.Kv.Key)
 			msg := string(ev.Kv.Value)
-			node.processModify(key, msg)
+			mService.processModify(key, msg)
 		} else if ev.Type == mvccpb.DELETE {
 			key := string(ev.Kv.Key)
-			node.processDelete(key)
+			mService.processDelete(key)
 		} else {
 			println("Unrecognized etcd msg!")
 		}
@@ -250,57 +304,30 @@ func (node *QueryNode) processResp(resp clientv3.WatchResponse) error {
 	return nil
 }
 
-func (node *QueryNode) loadCollections() error {
-	keys, values, err := node.kvBase.LoadWithPrefix(CollectionPrefix)
+func (mService *metaService) loadCollections() error {
+	keys, values, err := mService.kvBase.LoadWithPrefix(CollectionPrefix)
 	if err != nil {
 		return err
 	}
+
 	for i := range keys {
 		objID := GetCollectionObjID(keys[i])
-		node.processCollectionCreate(objID, values[i])
+		mService.processCollectionCreate(objID, values[i])
 	}
+
 	return nil
 }
-func (node *QueryNode) loadSegments() error {
-	keys, values, err := node.kvBase.LoadWithPrefix(SegmentPrefix)
+
+func (mService *metaService) loadSegments() error {
+	keys, values, err := mService.kvBase.LoadWithPrefix(SegmentPrefix)
 	if err != nil {
 		return err
 	}
+
 	for i := range keys {
 		objID := GetSegmentObjID(keys[i])
-		node.processSegmentCreate(objID, values[i])
+		mService.processSegmentCreate(objID, values[i])
 	}
-	return nil
-}
 
-func (node *QueryNode) InitFromMeta() error {
-	//pass
-	etcdAddr := "http://"
-	etcdAddr += conf.Config.Etcd.Address
-	etcdPort := conf.Config.Etcd.Port
-	etcdAddr = etcdAddr + ":" + strconv.FormatInt(int64(etcdPort), 10)
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdAddr},
-		DialTimeout: 5 * time.Second,
-	})
-	//defer cli.Close()
-	node.kvBase = kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
-	node.loadCollections()
-	node.loadSegments()
 	return nil
-}
-
-func (node *QueryNode) RunMetaService(wg *sync.WaitGroup) {
-	//node.InitFromMeta()
-	metaChan := node.kvBase.WatchWithPrefix("")
-	for {
-		select {
-		case <-node.ctx.Done():
-			wg.Done()
-			println("DONE!!!!!!")
-			return
-		case resp := <-metaChan:
-			node.processResp(resp)
-		}
-	}
 }

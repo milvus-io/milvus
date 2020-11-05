@@ -19,10 +19,10 @@ type Partition struct {
 	Segments      []*Segment
 }
 
-func (p *Partition) NewSegment(segmentID int64) *Segment {
+func (p *Partition) newSegment(segmentID int64) *Segment {
 	/*
 		CSegmentBase
-		NewSegment(CPartition partition, unsigned long segment_id);
+		newSegment(CPartition partition, unsigned long segment_id);
 	*/
 	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentID))
 
@@ -31,10 +31,10 @@ func (p *Partition) NewSegment(segmentID int64) *Segment {
 	return newSegment
 }
 
-func (p *Partition) DeleteSegment(node *QueryNode, segment *Segment) {
+func (p *Partition) deleteSegment(node *QueryNode, segment *Segment) {
 	/*
 		void
-		DeleteSegment(CSegmentBase segment);
+		deleteSegment(CSegmentBase segment);
 	*/
 	cPtr := segment.SegmentPtr
 	C.DeleteSegment(cPtr)
