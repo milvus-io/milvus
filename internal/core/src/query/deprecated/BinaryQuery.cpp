@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "query/BinaryQuery.h"
+#include "BinaryQuery.h"
 
 namespace milvus {
 namespace query_old {

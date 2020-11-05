@@ -6,7 +6,7 @@
 #include "segcore/SegmentDefs.h"
 // #include "knowhere/index/Index.h"
 // #include "knowhere/index/IndexType.h"
-#include "query/GeneralQuery.h"
+#include "query/deprecated/GeneralQuery.h"
 
 namespace milvus {
 namespace segcore {

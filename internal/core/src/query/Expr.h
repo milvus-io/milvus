@@ -54,15 +54,6 @@ struct BoolBinaryExpr : BinaryExpr {
     accept(ExprVisitor&) override;
 };
 
-// // TODO: not enabled in sprint 1
-// struct ArthmeticBinaryOpExpr : BinaryExpr {
-//     enum class OpType { Add, Sub, Multiply, Divide };
-//     OpType op_type_;
-//  public:
-//     void
-//     accept(ExprVisitor&) override;
-// };
-
 using FieldId = int64_t;
 
 struct TermExpr : Expr {

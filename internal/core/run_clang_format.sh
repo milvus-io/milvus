@@ -7,7 +7,7 @@ fi
 CorePath=$1
 
 formatThis() {
-    find "$1" | grep -E "(*\.cpp|*\.h|*\.cc)$" | grep -v "/thirdparty" | grep -v "\.pb\." | xargs clang-format-10 -i
+    find "$1" | grep -E "(*\.cpp|*\.h|*\.cc)$" | grep -v "gen_tools/templates" | grep -v "/thirdparty" | grep -v "\.pb\." | xargs clang-format-10 -i
 }
 
 formatThis "${CorePath}/src"
