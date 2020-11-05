@@ -2532,7 +2532,7 @@ DBImpl::GetCollectionRowCountRecursively(const std::string& collection_id, uint6
     status = meta_ptr_->ShowPartitions(collection_id, partition_array);
     for (auto& schema : partition_array) {
         uint64_t partition_row_count = 0;
-        status = GetCollectionRowCountRecursively(schema.collection_id_, partition_row_count);
+        status = meta_ptr_->Count(schema.collection_id_, partition_row_count);
         fiu_do_on("DBImpl.GetCollectionRowCountRecursively.fail_get_collection_rowcount_for_partition",
                   status = Status(DB_ERROR, ""));
         if (!status.ok()) {
