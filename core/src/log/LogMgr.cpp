@@ -19,9 +19,9 @@
 
 #include <boost/filesystem.hpp>
 
-#include "config/ServerConfig.h"
 #include "log/LogMgr.h"
 #include "utils/Status.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 

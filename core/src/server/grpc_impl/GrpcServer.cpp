@@ -32,11 +32,11 @@
 #include <vector>
 
 #include "GrpcRequestHandler.h"
-#include "config/ServerConfig.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/interceptor/SpanInterceptor.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {

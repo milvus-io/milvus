@@ -14,12 +14,12 @@
 #include <chrono>
 #include <sstream>
 
-#include "config/ServerConfig.h"
 #include "db/Utils.h"
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceGCEvent.h"
 #include "db/snapshot/Snapshots.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus::engine::snapshot {
 

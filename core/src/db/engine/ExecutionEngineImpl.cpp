@@ -16,7 +16,6 @@
 #include <utility>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "db/SnapshotUtils.h"
 #include "db/Utils.h"
 #include "segment/SegmentReader.h"
@@ -27,6 +26,7 @@
 #include "utils/Log.h"
 #include "utils/Status.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ServerConfig.h"
 
 #include "knowhere/common/Config.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"

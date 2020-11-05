@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CreatePartitionReq.h"
-#include "config/ServerConfig.h"
 #include "server/DBWrapper.h"
 #include "server/ValidationUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 #include <memory>

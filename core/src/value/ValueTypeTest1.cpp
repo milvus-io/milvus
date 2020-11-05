@@ -12,8 +12,8 @@
 #include <cstring>
 #include <functional>
 
-#include "config/ConfigType.h"
 #include "gtest/gtest.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
@@ -33,16 +33,16 @@ class Utils {
     T validate_value;
 };
 
-/* ValidBoolConfigTest */
-class ValidBoolConfigTest : public testing::Test, public Utils<bool> {
+/* ValidBoolValueTest */
+class ValidBoolValueTest : public testing::Test, public Utils<bool> {
  protected:
 };
 
-TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidBoolConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidBoolValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidBoolValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<bool> bool_value;
-    auto bool_config = CreateBoolConfig("b", _MODIFIABLE, bool_value, false, validate);
+    auto bool_config = CreateBoolValue("b", _MODIFIABLE, bool_value, false, validate);
     ASSERT_EQ(bool_config->modifiable_, true);
 
     bool_config->Init();
@@ -76,16 +76,16 @@ TEST_F(ValidBoolConfigTest, init_load_update_get_test) {
     }
 }
 
-/* ValidStringConfigTest */
-class ValidStringConfigTest : public testing::Test, public Utils<std::string> {
+/* ValidStringValueTest */
+class ValidStringValueTest : public testing::Test, public Utils<std::string> {
  protected:
 };
 
-TEST_F(ValidStringConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidStringConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidStringValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidStringValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<std::string> string_value;
-    auto string_config = CreateStringConfig("s", _MODIFIABLE, string_value, "Magic", validate);
+    auto string_config = CreateStringValue("s", _MODIFIABLE, string_value, "Magic", validate);
     ASSERT_EQ(string_config->modifiable_, true);
 
     string_config->Init();
@@ -119,16 +119,16 @@ TEST_F(ValidStringConfigTest, init_load_update_get_test) {
     }
 }
 
-/* ValidIntegerConfigTest */
-class ValidIntegerConfigTest : public testing::Test, public Utils<int64_t> {
+/* ValidIntegerValueTest */
+class ValidIntegerValueTest : public testing::Test, public Utils<int64_t> {
  protected:
 };
 
-TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidIntegerConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidIntegerValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidIntegerValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<int64_t> integer_value;
-    auto integer_config = CreateIntegerConfig("i", _MODIFIABLE, -100, 100, integer_value, 42, validate);
+    auto integer_config = CreateIntegerValue("i", _MODIFIABLE, -100, 100, integer_value, 42, validate);
     ASSERT_EQ(integer_config->modifiable_, true);
 
     integer_config->Init();
@@ -162,17 +162,16 @@ TEST_F(ValidIntegerConfigTest, init_load_update_get_test) {
     }
 }
 
-/* ValidFloatingConfigTest */
-class ValidFloatingConfigTest : public testing::Test, public Utils<double> {
+/* ValidFloatingValueTest */
+class ValidFloatingValueTest : public testing::Test, public Utils<double> {
  protected:
 };
 
-TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
-    auto validate =
-        std::bind(&ValidFloatingConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidFloatingValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidFloatingValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<double> floating_value;
-    auto floating_config = CreateFloatingConfig("f", _MODIFIABLE, -10.0, 10.0, floating_value, 3.14, validate);
+    auto floating_config = CreateFloatingValue("f", _MODIFIABLE, -10.0, 10.0, floating_value, 3.14, validate);
     ASSERT_EQ(floating_config->modifiable_, true);
 
     floating_config->Init();
@@ -206,8 +205,8 @@ TEST_F(ValidFloatingConfigTest, init_load_update_get_test) {
     }
 }
 
-/* ValidEnumConfigTest */
-class ValidEnumConfigTest : public testing::Test, public Utils<int64_t> {
+/* ValidEnumValueTest */
+class ValidEnumValueTest : public testing::Test, public Utils<int64_t> {
  protected:
 };
 
@@ -218,16 +217,16 @@ class ValidEnumConfigTest : public testing::Test, public Utils<int64_t> {
 // template <>
 // int64_t Utils<int64_t>::prev_value = 0;
 
-TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidEnumConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidEnumValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidEnumValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
-    configEnum testEnum{
+    valueEnum testEnum{
         {"a", 1},
         {"b", 2},
         {"c", 3},
     };
     Value<int64_t> enum_value;
-    auto enum_config = CreateEnumConfig("e", _MODIFIABLE, &testEnum, enum_value, 1, validate);
+    auto enum_config = CreateEnumValue("e", _MODIFIABLE, &testEnum, enum_value, 1, validate);
     ASSERT_EQ(enum_config->modifiable_, true);
 
     enum_config->Init();
@@ -261,8 +260,8 @@ TEST_F(ValidEnumConfigTest, init_load_update_get_test) {
     }
 }
 
-/* ValidSizeConfigTest */
-class ValidSizeConfigTest : public testing::Test, public Utils<int64_t> {
+/* ValidSizeValueTest */
+class ValidSizeValueTest : public testing::Test, public Utils<int64_t> {
  protected:
 };
 
@@ -273,11 +272,11 @@ class ValidSizeConfigTest : public testing::Test, public Utils<int64_t> {
 // template <>
 // int64_t Utils<int64_t>::prev_value = 0;
 
-TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
-    auto validate = std::bind(&ValidSizeConfigTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
+TEST_F(ValidSizeValueTest, init_load_update_get_test) {
+    auto validate = std::bind(&ValidSizeValueTest::validate_fn, this, std::placeholders::_1, std::placeholders::_2);
 
     Value<int64_t> size_value;
-    auto size_config = CreateSizeConfig("i", _MODIFIABLE, 0, 1024 * 1024, size_value, 1024, validate);
+    auto size_config = CreateSizeValue("i", _MODIFIABLE, 0, 1024 * 1024, size_value, 1024, validate);
     ASSERT_EQ(size_config->modifiable_, true);
 
     size_config->Init();
@@ -313,7 +312,7 @@ TEST_F(ValidSizeConfigTest, init_load_update_get_test) {
 
 class ValidTest : public testing::Test {
  protected:
-    configEnum family{
+    valueEnum family{
         {"ipv4", 1},
         {"ipv6", 2},
     };
@@ -332,11 +331,11 @@ class ValidTest : public testing::Test {
     void
     SetUp() override {
         config_list = {
-            CreateBoolConfig("running", true, server.running, true, nullptr),
-            CreateStringConfig("hostname", true, server.hostname, "Magic", nullptr),
-            CreateEnumConfig("socket_family", false, &family, server.family, 2, nullptr),
-            CreateIntegerConfig("port", true, 1024, 65535, server.port, 19530, nullptr),
-            CreateFloatingConfig("uptime", true, 0, 9999.0, server.uptime, 0, nullptr),
+            CreateBoolValue("running", true, server.running, true, nullptr),
+            CreateStringValue("hostname", true, server.hostname, "Magic", nullptr),
+            CreateEnumValue("socket_family", false, &family, server.family, 2, nullptr),
+            CreateIntegerValue("port", true, 1024, 65535, server.port, 19530, nullptr),
+            CreateFloatingValue("uptime", true, 0, 9999.0, server.uptime, 0, nullptr),
         };
     }
 
@@ -382,7 +381,7 @@ class ValidTest : public testing::Test {
         throw "Config " + name + " not found.";
     }
 
-    std::vector<BaseConfigPtr> config_list;
+    std::vector<BaseValuePtr> config_list;
 };
 
 }  // namespace milvus

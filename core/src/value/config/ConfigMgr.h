@@ -19,41 +19,23 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config/ConfigType.h"
+#include "value/ValueMgr.h"
+#include "value/ValueType.h"
 
 namespace milvus {
 
-class ConfigObserver {
+class ConfigObserver : public ValueObserver {
  public:
-    virtual ~ConfigObserver() = default;
+    void
+    ValueUpdate(const std::string& name) override {
+        ConfigUpdate(name);
+    }
 
     virtual void
     ConfigUpdate(const std::string& name) = 0;
 };
-using ConfigObserverPtr = std::shared_ptr<ConfigObserver>;
 
-class BaseConfigMgr {
- protected:
-    BaseConfigMgr() = default;
-
- public:
-    // Shared pointer should not be used here
-    void
-    Attach(const std::string& name, ConfigObserver* observer);
-
-    void
-    Detach(const std::string& name, ConfigObserver* observer);
-
- protected:
-    void
-    Notify(const std::string& name);
-
- private:
-    std::unordered_map<std::string, std::list<ConfigObserver*>> observers_;
-    std::mutex observer_mutex_;
-};
-
-class ConfigMgr : public BaseConfigMgr {
+class ConfigMgr : public ValueMgr {
  public:
     static ConfigMgr&
     GetInstance() {
@@ -63,13 +45,7 @@ class ConfigMgr : public BaseConfigMgr {
  private:
     static ConfigMgr instance;
 
-    /* TODO: move into ServerConfig */
  public:
-    std::string&
-    FilePath() {
-        return config_file_;
-    }
-
     bool
     RequireRestart() {
         return require_restart_;
@@ -77,18 +53,6 @@ class ConfigMgr : public BaseConfigMgr {
 
  public:
     ConfigMgr();
-
-    ConfigMgr(const ConfigMgr&) = delete;
-    ConfigMgr&
-    operator=(const ConfigMgr&) = delete;
-
-    ConfigMgr(ConfigMgr&&) = delete;
-    ConfigMgr&
-    operator=(ConfigMgr&&) = delete;
-
- public:
-    void
-    Init();
 
     /* throws std::exception only */
     void
@@ -101,31 +65,24 @@ class ConfigMgr : public BaseConfigMgr {
 
     /* throws std::exception only */
     void
-    Set(const std::string& name, const std::string& value, bool update = true);
+    Set(const std::string& name, const std::string& value, bool update) override;
 
     /* throws std::exception only */
     std::string
-    Get(const std::string& name) const;
-
-    std::string
-    Dump() const;
-
-    std::string
-    JsonDump() const;
+    Get(const std::string& name) const override;
 
  private:
-    struct SaveConfigError : public std::exception {
-        explicit SaveConfigError(const std::string& msg) : message(msg) {
+    struct SaveValueError : public std::exception {
+        explicit SaveValueError(const std::string& msg) : message(msg) {
         }
         const std::string message;
     };
 
     void
-    Save(const std::string& path);
+    Save();
 
  private:
-    const std::unordered_map<std::string, BaseConfigPtr> config_list_;
-    std::mutex mutex_;
+    const std::unordered_map<std::string, BaseValuePtr>& config_list_ = value_list_;
     std::string config_file_;
     bool require_restart_ = false;
     std::set<std::string> effective_immediately_;

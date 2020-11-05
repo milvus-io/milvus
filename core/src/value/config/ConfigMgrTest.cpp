@@ -9,36 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include <fiu-control.h>
+#include <fiu/fiu-local.h>
+#include <gtest/gtest.h>
+#include "ConfigMgr.h"
 
-#include "server/delivery/strategy/ReqStrategy.h"
-#include "utils/Status.h"
-#include "value/config/ConfigMgr.h"
-
-#include <memory>
-#include <queue>
-#include <string>
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
-namespace server {
 
-class SearchReqStrategy : public ReqStrategy, public ConfigObserver {
- public:
-    SearchReqStrategy();
+// TODO: need a safe directory for testing
+// TEST(ConfigMgrTest, set_version) {
+//    ConfigMgr::GetInstance().Init();
+//    ConfigMgr::GetInstance().LoadMemory(R"(
+// version: 0.1
+//)");
+//    ConfigMgr::GetInstance().FilePath() = "/tmp/milvus_unittest_configmgr.yaml";
+//
+//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "0.1");
+//    ConfigMgr::GetInstance().Set("version", "100.0");
+//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "100.0");
+//}
 
-    ~SearchReqStrategy();
-
-    Status
-    ReScheduleQueue(const BaseReqPtr& request, std::queue<BaseReqPtr>& queue) override;
-
- public:
-    void
-    ConfigUpdate(const std::string& name) override;
-
- private:
-    int64_t search_combine_nq_ = 0;
-};
-
-using ReqStrategyPtr = std::shared_ptr<ReqStrategy>;
-}  // namespace server
 }  // namespace milvus

@@ -9,32 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include <fiu-control.h>
+#include <fiu/fiu-local.h>
+#include <gtest/gtest.h>
 
-#include <memory>
-#include <string>
+#include "value/config/ServerConfig.h"
 
-#include "cache/CacheMgr.h"
-#include "cache/DataObj.h"
-#include "value/config/ConfigMgr.h"
-
-namespace milvus {
-namespace cache {
-
-class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
- private:
-    CpuCacheMgr();
-
-    ~CpuCacheMgr();
-
- public:
-    static CpuCacheMgr&
-    GetInstance();
-
- public:
-    void
-    ConfigUpdate(const std::string& name) override;
-};
-
-}  // namespace cache
-}  // namespace milvus
+TEST(ServerConfigTest, parse_invalid_devices) {
+    fiu_init(0);
+    fiu_enable("ParseGPUDevices.invalid_format", 1, nullptr, 0);
+    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
+    ASSERT_EQ(collections.size(), 0);
+}
