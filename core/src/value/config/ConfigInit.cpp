@@ -105,6 +105,8 @@ InitConfig() {
         /* general */
         String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid),
         String(general.meta_uri, "sqlite://:@:/"),
+        Integer(general.stale_snapshots_count, 0, 100, 0),
+        Integer(general.stale_snapshots_duration, 0, std::numeric_limits<int64_t>::max(), 10),
 
         /* network */
         String(network.bind.address, "0.0.0.0"),
@@ -175,6 +177,7 @@ InitConfig() {
 }
 
 const char* config_file_template = R"(
+
 # Copyright (C) 2019-2020 Zilliz. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -210,9 +213,19 @@ cluster:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# stale_snapshots_count| Specify how many stale snapshots to be kept before GC. It  | Integer    |  0              |
+#                      | is ignored if deployed with cluster enabled                |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# stale_snapshots_duration |                                                        | Integer    |  10             |
+#                      | Specify how long the stale snapshots can be GC'ed. The unit|            |                 |
+#                      | is second. It is only effective if deployed with cluster   |            |                 |
+#                      | enabled and cluster.role is rw                             |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 general:
   timezone: @general.timezone@
   meta_uri: @general.meta_uri@
+  stale_snapshots_count: @general.stale_snapshots_count@
+  stale_snapshots_duration: @general.stale_snapshots_duration@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Network Config       | Description                                                | Type       | Default         |

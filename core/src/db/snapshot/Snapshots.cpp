@@ -16,6 +16,7 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
 #include "value/config/ServerConfig.h"
 
@@ -121,8 +122,7 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
 
-    auto policy = std::make_shared<SnapshotNumPolicy>(1);
-    /* auto policy = std::make_shared<SnapshotDurationPolicy>(2000); */
+    auto policy = SnapshotPolicyFactory::Build(config);
     holder = std::make_shared<SnapshotHolder>(collection_id, policy,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
