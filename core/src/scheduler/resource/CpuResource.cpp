@@ -28,12 +28,12 @@ CpuResource::CpuResource(std::string name, uint64_t device_id, bool enable_execu
 }
 
 void
-CpuResource::LoadFile(TaskPtr task) {
+CpuResource::Load(TaskPtr task) {
     task->Load(LoadType::DISK2CPU, 0);
 }
 
 void
-CpuResource::Process(TaskPtr task) {
+CpuResource::Execute(TaskPtr task) {
     if (task->Type() == TaskType::SearchTask) {
         knowhere::BuilderSuspend();
     }

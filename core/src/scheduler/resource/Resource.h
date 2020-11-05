@@ -129,14 +129,14 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
      * Blocking function;
      */
     virtual void
-    LoadFile(TaskPtr task) = 0;
+    Load(TaskPtr task) = 0;
 
     /*
      * Implementation by inherit class;
      * Blocking function;
      */
     virtual void
-    Process(TaskPtr task) = 0;
+    Execute(TaskPtr task) = 0;
 
  private:
     /*

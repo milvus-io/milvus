@@ -11,7 +11,6 @@
 
 #include "scheduler/Scheduler.h"
 #include "Algorithm.h"
-#include "action/Action.h"
 #include "cache/GpuCacheMgr.h"
 #include "event/LoadCompletedEvent.h"
 
@@ -68,6 +67,22 @@ Scheduler::Dump() const {
 }
 
 void
+Scheduler::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
+                                               std::shared_ptr<LoadCompletedEvent> event) {
+    auto task_item = event->task_table_item_;
+    auto task = event->task_table_item_->task;
+
+    if (resource->name() == task->path().Last()) {
+        resource->WakeupExecutor();
+    } else {
+        auto next_res_name = task->path().Next();
+        auto next_res = res_mgr->GetResource(next_res_name);
+        event->task_table_item_->Move();
+        next_res->task_table().Put(task, task_item);
+    }
+}
+
+void
 Scheduler::process(const EventPtr& event) {
     auto process_event = event_register_.at(static_cast<int>(event->Type()));
     process_event(event);
@@ -97,7 +112,7 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
     auto resource = event->resource_;
     resource->WakeupExecutor();
 
-    Action::SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
+    SpecifiedResourceLabelTaskScheduler(res_mgr_, resource, load_completed_event);
     resource->WakeupLoader();
 }
 

@@ -25,12 +25,12 @@ GpuResource::GpuResource(std::string name, uint64_t device_id, bool enable_execu
 }
 
 void
-GpuResource::LoadFile(TaskPtr task) {
+GpuResource::Load(TaskPtr task) {
     task->Load(LoadType::CPU2GPU, device_id_);
 }
 
 void
-GpuResource::Process(TaskPtr task) {
+GpuResource::Execute(TaskPtr task) {
     task->Execute();
 }
 
