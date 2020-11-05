@@ -2,7 +2,17 @@
 
 # Milvus Developer Guides
 
-​                                                                                                                                   by Rentong Guo, Sep 15, 2020
+​                                                                                                                                   by Rentong Guo Sep 15, 2020
+
+
+
+## Acknowledgement
+
+TODO: a formal acknowledgement.
+
+figures: Xuan Yang, Zhenshan Cao
+
+design suggestions: Zhenshan Cao, Xi Ge, Yefu Chen, Guilin Gou, Yihao Dai, Jiquan Long, Xiaomeng Yi, Peng Xu, Hai Jin, Xiangzhou Guo
 
 
 
@@ -338,6 +348,8 @@ type TsMsg interface {
   BeginTs() Timestamp
   EndTs() Timestamp
   Type() MsgType
+  Marshal(*TsMsg) []byte
+  Unmarshal([]byte) *TsMsg
 }
 
 type MsgPack struct {
@@ -346,13 +358,8 @@ type MsgPack struct {
   Msgs []*TsMsg
 }
 
-type TsMsgMarshaler interface {
-  Marshal(input *TsMsg) ([]byte, error)
-  Unmarshal(input []byte) (*TsMsg, error)
-}
 
 type MsgStream interface {
-  SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
   Produce(*MsgPack) error
   Broadcast(*MsgPack) error
   Consume() *MsgPack // message can be consumed exactly once
@@ -363,39 +370,65 @@ type RepackFunc(msgs []* TsMsg, hashKeys [][]int32) map[int32] *MsgPack
 type PulsarMsgStream struct {
   client *pulsar.Client
   repackFunc RepackFunc
-  inputs []*pulsar.Producer
-  msgUnmarshaler []*TsMsgMarshaler
-  outputs []*pulsar.Consumer
-  msgMarshaler []*TsMsgMarshaler
+  producers []*pulsar.Producer
+  consumers []*pulsar.Consumer
+  unmarshal *UnmarshalDispatcher
 }
 
-func (ms *PulsarMsgStream) AddInputTopics(topics []string, unmarshal *TsMsgMarshaler)
-func (ms *PulsarMsgStream) AddOutputTopics(topics []string, marshal *TsMsgMarshaler)
+func (ms *PulsarMsgStream) CreatePulsarProducers(topics []string)
+func (ms *PulsarMsgStream) CreatePulsarConsumers(subname string, topics []string, unmarshal *UnmarshalDispatcher)
 func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func (ms *PulsarMsgStream) Produce(msgs *MsgPack) error
 func (ms *PulsarMsgStream) Broadcast(msgs *MsgPack) error
 func (ms *PulsarMsgStream) Consume() (*MsgPack, error)
+func (ms *PulsarMsgStream) Start() error
+func (ms *PulsarMsgStream) Close() error
+
+func NewPulsarMsgStream(ctx context.Context, pulsarAddr string) *PulsarMsgStream
+
 
 type PulsarTtMsgStream struct {
   client *pulsar.Client
   repackFunc RepackFunc
   producers []*pulsar.Producer
   consumers []*pulsar.Consumer
-  msgMarshaler *TsMsgMarshaler
-  msgUnmarshaler *TsMsgMarshaler
+  unmarshal *UnmarshalDispatcher
   inputBuf []*TsMsg
   unsolvedBuf []*TsMsg
   msgPacks []*MsgPack
 }
 
-func (ms *PulsarTtMsgStream) SetProducers(channels []string)
-func (ms *PulsarTtMsgStream) SetConsumers(channels []string)
-func (ms *PulsarTtMsgStream) SetMsgMarshaler(marshal *TsMsgMarshaler, unmarshal *TsMsgMarshaler)
+func (ms *PulsarTtMsgStream) CreatePulsarProducers(topics []string)
+func (ms *PulsarTtMsgStream) CreatePulsarConsumers(subname string, topics []string, unmarshal *UnmarshalDispatcher)
 func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
 func (ms *PulsarTtMsgStream) Produce(msgs *MsgPack) error
 func (ms *PulsarTtMsgStream) Broadcast(msgs *MsgPack) error
 func (ms *PulsarTtMsgStream) Consume() *MsgPack //return messages in one time tick
+func (ms *PulsarTtMsgStream) Start() error
+func (ms *PulsarTtMsgStream) Close() error
+
+func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string) *PulsarTtMsgStream
 ```
+
+
+
+```go
+type MarshalFunc func(*TsMsg) []byte
+type UnmarshalFunc func([]byte) *TsMsg
+
+
+type UnmarshalDispatcher struct {
+	tempMap map[ReqType]UnmarshalFunc 
+}
+
+func (dispatcher *MarshalDispatcher) Unmarshal([]byte) *TsMsg
+func (dispatcher *MarshalDispatcher) AddMsgTemplate(msgType MsgType, marshal MarshalFunc)
+func (dispatcher *MarshalDispatcher) addDefaultMsgTemplates()
+
+func NewUnmarshalDispatcher() *UnmarshalDispatcher
+```
+
+
 
 
 
@@ -975,7 +1008,7 @@ type task interface {
 
 
 
-A task example is as follows. In this example, we wrap a CreateCollectionRequest (a proto) as a createCollectionTask. The wrapper need to contain task interfaces. 
+A task example is as follows. In this example, we wrap a CreateCollectionRequest (a proto) as a createCollectionTask. The wrapper need to implement task interfaces. 
 
 ``` go
 type createCollectionTask struct {
@@ -1063,10 +1096,10 @@ message SegmentMeta {
 ###### 10.4.2 KV pairs in EtcdKV
 
 ```go
-tenantId string -> tenantMeta string
-proxyId string -> proxyMeta string
-collectionId string -> collectionMeta string
-segmentId string -> segmentMeta string
+"tenant/$tenantId" string -> tenantMetaBlob string
+"proxy/$proxyId" string -> proxyMetaBlob string
+"collection/$collectionId" string -> collectionMetaBlob string
+"segment/$segmentId" string -> segmentMetaBlob string
 ```
 
 Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings converted from int64.
@@ -1128,7 +1161,8 @@ func NewMetaTable(kv kv.Base) (*metaTable,error)
 
 * Soft Time Tick Barrier
 
-<img src="./figs/Soft_time_tick_barrier.png" width=500>
+
+<img src="./figs/soft_time_tick_barrier.png" width=500>
 
 ```go
 type softTimeTickBarrier struct {
@@ -1150,7 +1184,7 @@ func newSoftTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 * Hard Time Tick Barrier
 
-<img src="./figs/Hard_time_tick_barrier.png" width=420>
+<img src="./figs/hard_time_tick_barrier.png" width=420>
 
 ```go
 type hardTimeTickBarrier struct {
@@ -1179,22 +1213,22 @@ type timeSyncMsgProducer struct {
   proxyTtBarrier *softTimeTickBarrier
   WriteNodeTtBarrier *hardTimeTickBarrier
   
-  insertSyncStream *MsgStream
-  deleteSyncStream *MsgStream
+  dmSyncStream *MsgStream // insert & delete
   k2sSyncStream *MsgStream
   
   ctx context.Context
 }
 
-func (syncMsgProducer* timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
-func (syncMsgProducer* timeSyncMsgProducer) SetWriteNodeTtStreams(WriteNodeTt *MsgStream, writeNodeIds []UniqueId)
+func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
+func (syncMsgProducer *timeSyncMsgProducer) SetWriteNodeTtStreams(WriteNodeTt *MsgStream, writeNodeIds []UniqueId)
 
-func (syncMsgProducer* timeSyncMsgProducer) SetInsertSyncStream(insertSync *MsgStream)
-func (syncMsgProducer* timeSyncMsgProducer) SetDeleteSyncStream(deleteSync *MsgStream)
-func (syncMsgProducer* timeSyncMsgProducer) SetK2sSyncStream(k2sSync *MsgStream)
+func (syncMsgProducer *timeSyncMsgProducer) SetDmSyncStream(dmSyncStream *MsgStream)
+func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSyncStream *MsgStream)
 
-func (syncMsgProducer* timeSyncMsgProducer) Start() error
-func (syncMsgProducer* timeSyncMsgProducer) Close() error
+func (syncMsgProducer *timeSyncMsgProducer) Start() error
+func (syncMsgProducer *timeSyncMsgProducer) Close() error
+
+func newTimeSyncMsgProducer(ctx context.Context) *timeSyncMsgProducer error
  ```
 
 
