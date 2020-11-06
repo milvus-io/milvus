@@ -7,7 +7,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <vector>
-#include "EasyAssert.h"
+#include "utils/EasyAssert.h"
 namespace milvus::segcore {
 
 // we don't use std::array because capacity of concurrent_vector wastes too much memory

@@ -10,9 +10,17 @@ struct GeneratedData {
     std::vector<std::vector<char>> cols_;
     void
     generate_rows(int N, SchemaPtr schema);
+    template <typename T>
+    auto
+    get_col(int index) {
+        auto& target = cols_.at(index);
+        std::vector<T> ret(target.size() / sizeof(T));
+        memcpy(ret.data(), target.data(), target.size());
+        return ret;
+    }
 };
 
-void
+inline void
 GeneratedData::generate_rows(int N, SchemaPtr schema) {
     std::vector<int> offset_infos(schema->size() + 1, 0);
     auto sizeof_infos = schema->get_sizeof_infos();

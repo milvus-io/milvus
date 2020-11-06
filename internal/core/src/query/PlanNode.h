@@ -27,7 +27,7 @@ struct PlanNode {
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct VectorPlanNode : PlanNode {
-    std::optional<PlanNodePtr> child_;
+    std::optional<ExprPtr> predicate_;
     int64_t num_queries_;
     int64_t dim_;
     FieldId field_id_;
@@ -38,7 +38,7 @@ struct VectorPlanNode : PlanNode {
 };
 
 struct FloatVectorANNS : VectorPlanNode {
-    std::shared_ptr<float> data;
+    std::vector<float> data_;
     std::string metric_type_;  // TODO: use enum
  public:
     void
@@ -46,7 +46,7 @@ struct FloatVectorANNS : VectorPlanNode {
 };
 
 struct BinaryVectorANNS : VectorPlanNode {
-    std::shared_ptr<uint8_t> data;
+    std::vector<uint8_t> data_;
     std::string metric_type_;  // TODO: use enum
  public:
     void

@@ -13,7 +13,8 @@
 
 # aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
 set(UTILS_FILES 
-Status.cpp
+    Status.cpp
+    EasyAssert.cpp
 )
 
 add_library( utils STATIC ${UTILS_FILES} )

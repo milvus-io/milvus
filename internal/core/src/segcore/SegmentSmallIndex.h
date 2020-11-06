@@ -14,7 +14,7 @@
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
 #include "segcore/DeletedRecord.h"
-#include "EasyAssert.h"
+#include "utils/EasyAssert.h"
 #include "IndexingEntry.h"
 #include "InsertRecord.h"
 

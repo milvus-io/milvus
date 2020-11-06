@@ -5,7 +5,7 @@
 namespace milvus::query {
 class ExprVisitor {
  public:
-    virtual ~ExprVisitor() = 0;
+    virtual ~ExprVisitor() = default;
 
  public:
     virtual void

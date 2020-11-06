@@ -5,7 +5,7 @@
 namespace milvus::query {
 class PlanNodeVisitor {
  public:
-    virtual ~PlanNodeVisitor() = 0;
+    virtual ~PlanNodeVisitor() = default;
 
  public:
     virtual void
