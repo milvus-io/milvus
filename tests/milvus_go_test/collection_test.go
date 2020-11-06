@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"milvus_go_test/utils"
 	"testing"
 
@@ -58,23 +59,21 @@ func TestCreateCollectionWithInvalidName(t *testing.T) {
 
 func TestCreateCollectionInvalidDimension(t *testing.T) {
 	client := GetClient()
-	var dimension int = 0
-	dimParams := map[string]interface{}{
-		"dim": dimension,
-	}
-	extraParams, _ := json.Marshal(dimParams)
+	//var dimension int = 0
+	//extraParams, _ := json.Marshal(dimParams)
+	extraParams := `{"dim": 0}`
 	fields := []milvus.Field{
 		{
 			fieldFloatName,
 			milvus.FLOAT,
-			"",
-			"",
+			milvus.NewParams(""),
+			milvus.NewParams(""),
 		},
 		{
 			fieldFloatVectorName,
 			milvus.VECTORFLOAT,
-			"",
-			string(extraParams),
+			milvus.NewParams(""),
+			milvus.NewParams(extraParams),
 		},
 	}
 	name := utils.RandString(8)
@@ -83,7 +82,7 @@ func TestCreateCollectionInvalidDimension(t *testing.T) {
 		"segment_row_limit": segmentRowLimit,
 	}
 	paramsStr, _ := json.Marshal(params)
-	mapping := milvus.Mapping{CollectionName: name, Fields: fields, ExtraParams: string(paramsStr)}
+	mapping := milvus.Mapping{CollectionName: name, Fields: fields, ExtraParams: milvus.NewParams(string(paramsStr))}
 	status, _ := client.CreateCollection(mapping)
 	assert.Equal(t, status.Ok(), false)
 }
@@ -167,18 +166,29 @@ func TestDescribeCollection(t *testing.T) {
 	assert.Equal(t, mapping.CollectionName, name)
 	t.Log(mapping)
 	//assert.Equal(t, utils.DefaultSegmentRowLimit, mapping.)
-	for i :=0; i<len(mapping.Fields); i++ {
-		if mapping.Fields[i].Type == milvus.VECTORFLOAT {
-			var dat map[string]interface{}
-			json.Unmarshal([]byte(mapping.Fields[i].ExtraParams), &dat)
-			var dim map[string]interface{}
-			json.Unmarshal([]byte(dat["params"].(string)), &dim)
-			assert.Equal(t, utils.DefaultDimension, int(dim["dim"].(float64)))
+	for _, field:= range mapping.Fields {
+		if field.Type == milvus.VECTORFLOAT {
+			extraParams := field.ExtraParams.GetParams()
+			t.Log(gjson.Get(extraParams, "params.dim"))
+			t.Log(field.ExtraParams.Get("params"))
 		}
-		var datMapping map[string]interface{}
-		json.Unmarshal([]byte(mapping.ExtraParams), &datMapping)
-		var params map[string]interface{}
-		json.Unmarshal([]byte(datMapping["params"].(string)), &params)
-		assert.Equal(t, utils.DefaultSegmentRowLimit, int(params["segment_row_limit"].(float64)))
 	}
+	//for i :=0; i<len(mapping.Fields); i++ {
+	//	if mapping.Fields[i].Type == milvus.VECTORFLOAT {
+	//		extraParams := mapping.Fields[i].ExtraParams
+	//		t.Log(gjson.Get(extraParams, "params"))
+			//milvus.Params.Get('params')
+			//milvus.Get(extraParams, "name.last")
+			//var dat map[string]interface{}
+			//json.Unmarshal([]byte(), &dat)
+			//var dim map[string]interface{}
+			//json.Unmarshal([]byte(dat["params"].(string)), &dim)
+			//assert.Equal(t, utils.DefaultDimension, int(dim["dim"].(float64)))
+	//	}
+	//	var datMapping map[string]interface{}
+	//	json.Unmarshal([]byte(mapping.ExtraParams), &datMapping)
+	//	var params map[string]interface{}
+	//	json.Unmarshal([]byte(datMapping["params"].(string)), &params)
+	//	assert.Equal(t, utils.DefaultSegmentRowLimit, int(params["segment_row_limit"].(float64)))
+	//}
 }
