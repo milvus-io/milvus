@@ -27,8 +27,6 @@ func repackFunc(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack {
 func getTsMsg(msgType MsgType, reqId UniqueID, hashValue int32) *TsMsg {
 	var tsMsg TsMsg
 	baseMsg := BaseMsg{
-		beginTs:    0,
-		endTs:      0,
 		HashValues: []int32{hashValue},
 	}
 	switch msgType {

@@ -15,7 +15,7 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type metaTable struct {
-	client        kv.Base                        // client of a reliable kv service, i.e. etcd client
+	client        *kv.EtcdKV                       // client of a reliable kv service, i.e. etcd client
 	tenantId2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
 	proxyId2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
 	collId2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
@@ -27,7 +27,7 @@ type metaTable struct {
 	ddLock     sync.RWMutex
 }
 
-func NewMetaTable(kv kv.Base) (*metaTable, error) {
+func NewMetaTable(kv *kv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
 		client:     kv,
 		tenantLock: sync.RWMutex{},

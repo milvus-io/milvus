@@ -12,6 +12,7 @@ require (
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.3.2
+	github.com/google/btree v1.0.0
 	github.com/json-iterator/go v1.1.10
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/kr/text v0.2.0 // indirect

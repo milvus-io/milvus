@@ -48,7 +48,7 @@ type atomicObject struct {
 type timestampOracle struct {
 	rootPath string
 	key      string
-	kvBase   *kv.EtcdKV
+	kvBase   kv.KVBase
 
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
@@ -117,9 +117,6 @@ func (t *timestampOracle) SyncTimestamp() error {
 
 // ResetUserTimestamp update the physical part with specified tso.
 func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
-	//if !leadership.Check() {
-	//	return errors.New("Setup timestamp failed, lease expired")
-	//}
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
 	prev := (*atomicObject)(atomic.LoadPointer(&t.TSO))
@@ -160,7 +157,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	now := time.Now()
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
-	if jetLag > 3*UpdateTimestampStep {
+	if jetLag > 3 * UpdateTimestampStep {
 		log.Print("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 	}
 
