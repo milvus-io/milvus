@@ -283,6 +283,29 @@ def gen_entities_new(nb, is_normal=False):
     return entities
 
 
+def gen_entities_rows(nb, is_normal=False, _id=True):
+    vectors = gen_vectors(nb, default_dim, is_normal)
+    entities = []
+    if not _id:
+        for i in range(nb):
+            entity = {
+                "_id": i,
+                "int64": i,
+                "float": float(i),
+                default_float_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    else:
+        for i in range(nb):
+            entity = {
+                "int64": i,
+                "float": float(i),
+                default_float_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    return entities
+
+
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
@@ -300,6 +323,29 @@ def gen_binary_entities_new(nb):
         {"name": "float", "values": [float(i) for i in range(nb)]},
         {"name": default_binary_vec_field_name, "values": vectors}
     ]
+    return raw_vectors, entities
+
+
+def gen_binary_entities_rows(nb, _id=True):
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
+    entities = []
+    if not _id:
+        for i in range(nb):
+            entity = {
+                "_id": i,
+                "int64": i,
+                "float": float(i),
+                default_binary_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    else:
+        for i in range(nb):
+            entity = {
+                "int64": i,
+                "float": float(i),
+                default_binary_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
     return raw_vectors, entities
 
 
@@ -494,6 +540,25 @@ def update_field_value(entities, old_type, new_value):
         if item["type"] == old_type:
             for index, value in enumerate(item["values"]):
                 item["values"][index] = new_value
+    return tmp_entities
+
+
+def update_field_name_row(entities, old_name, new_name):
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
+        if old_name in item:
+            item[new_name] = item[old_name]
+            item.pop(old_name)
+        else:
+            raise Exception("Field %s not in field" % old_name)
+    return tmp_entities
+
+
+def update_field_type_row(entities, old_name, new_name):
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
+        if old_name in item:
+            item["type"] = new_name
     return tmp_entities
 
 
