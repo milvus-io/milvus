@@ -70,8 +70,7 @@ IndexNGTONNG::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    // todo: to be decided
-    index_size_ = 1000000;
+    index_size_ = index_->memSize();
 }
 
 }  // namespace knowhere

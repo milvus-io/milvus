@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstring>
 #include "PrimitiveComparator.h"
 
 class ObjectSpace;
@@ -94,6 +95,15 @@ namespace NGT {
       }
     }
 
+      int64_t memSize() const {
+//          auto obj = (std::vector<ObjectDistance>)(*this);
+          if (this->size() == 0)
+              return 0;
+          else {
+              return (*this)[0].memSize() * this->size();
+          }
+//        return this->size() == 0 ? 0 : (*this)[0].memSize() * (this->size());
+      }
     ObjectDistances &operator=(PersistentObjectDistances &objs);
   };
 
@@ -169,6 +179,7 @@ namespace NGT {
       SharedMemoryAllocator &allocator;
 #endif
       virtual ~Comparator(){}
+      int64_t memSize() { return sizeof(size_t); }
     };
     enum DistanceType {
       DistanceTypeNone			= -1,
@@ -257,6 +268,7 @@ namespace NGT {
 
     size_t getDimension() { return dimension; }
     size_t getPaddedDimension() { return ((dimension - 1) / 16 + 1) * 16; }
+    virtual int64_t memSize() { return sizeof(dimension) + sizeof(distanceType) + sizeof(prefetchOffset) * 2 + sizeof(normalization) + comparator->memSize(); };
 
     template <typename T>
     void normalize(T *data, size_t dim) {
@@ -386,6 +398,8 @@ namespace NGT {
     void *getPointer(size_t idx = 0) const { return vector + idx; }
 
     static Object *allocate(ObjectSpace &objectspace) { return new Object(&objectspace); }
+
+    virtual int64_t memSize() { return std::strlen((char*)vector); }
   private:
     void clear() {
       if (vector != 0) {

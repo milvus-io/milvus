@@ -386,6 +386,7 @@ public:
 
         void set(NGT::Property & prop);
         void get(NGT::Property & prop);
+        int64_t memSize() { return sizeof(*this); }
         int dimension;
         int threadPoolSize;
         ObjectSpace::ObjectType objectType;
@@ -410,6 +411,7 @@ public:
     public:
         InsertionResult() : id(0), identical(false), distance(0.0) {}
         InsertionResult(size_t i, bool tf, Distance d) : id(i), identical(tf), distance(d) {}
+        int64_t memSize() { return sizeof(*this); }
         size_t id;
         bool identical;
         Distance distance; // the distance between the centroid and the inserted object.
@@ -422,6 +424,7 @@ public:
         AccuracyTable(std::vector<std::pair<float, double>> & t) { set(t); }
         AccuracyTable(std::string str) { set(str); }
         void set(std::vector<std::pair<float, double>> & t) { table = t; }
+        int64_t memSize() { return sizeof(*this) + table.capacity() * sizeof(table[0]); }
         void set(std::string str)
         {
             std::vector<std::string> tokens;
@@ -717,6 +720,8 @@ public:
     static void version(std::ostream & os);
     static std::string getVersion();
     std::string getPath() { return path; }
+
+    virtual int64_t memSize() { return redirector.memSize() + sizeof(path) + (index ? getIndex().memSize() : 0); }
 
 protected:
     Object * allocateObject(void * vec, const std::type_info & objectType)
@@ -1635,6 +1640,8 @@ protected:
             throw e;
         }
     }
+
+    virtual int64_t memSize() { return property.memSize() + sizeof(readOnly) + accuracyTable.memSize() + Index::memSize() + NeighborhoodGraph::memSize(); }
     Index::Property property;
 
     bool readOnly;
@@ -1648,6 +1655,9 @@ protected:
 class GraphAndTreeIndex : public GraphIndex, public DVPTree
 {
 public:
+
+    virtual int64_t memSize() { return GraphIndex::memSize() + DVPTree::memSize(); }
+
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
     GraphAndTreeIndex(const std::string & allocator, bool rdOnly = false) : GraphIndex(allocator, false) { initialize(allocator, 0); }
     GraphAndTreeIndex(const std::string & allocator, NGT::Property & prop);
