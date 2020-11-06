@@ -22,7 +22,7 @@
   - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
   - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
   - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
-  - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities_id-get)
+  - [`/collections/{collection_name}/entities` (GET)](#collectionscollection_nameentities-get)
   - [`/collections/{collection_name}/entities` (OPTIONS)](#collectionscollection_nameentities-options)
   - [`/system/{msg}` (GET)](#systemmsg-get)
   - [`/system/{op}` (PUT)](#systemop-put)
