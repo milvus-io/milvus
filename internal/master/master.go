@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
@@ -58,7 +60,18 @@ type Master struct {
 	closeCallbacks []func()
 }
 
-func newKvBase() *kv.EtcdKV {
+func newTSOKVBase(subPath string) * kv.EtcdKV{
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+	client, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdAddr},
+		DialTimeout: 5 * time.Second,
+	})
+	return kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, subPath))
+}
+
+func newKVBase() *kv.EtcdKV {
 	etcdAddr := conf.Config.Etcd.Address
 	etcdAddr += ":"
 	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
@@ -66,7 +79,6 @@ func newKvBase() *kv.EtcdKV {
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	//	defer cli.Close()
 	kvBase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
 	return kvBase
 }
@@ -74,17 +86,15 @@ func newKvBase() *kv.EtcdKV {
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
+	id.InitGlobalIdAllocator("idTimestamp", newTSOKVBase("gid"))
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
-		kvBase:         newKvBase(),
+		kvBase:         newKVBase(),
 		ssChan:         make(chan internalpb.SegmentStatistics, 10),
 		pc:             informer.NewPulsarClient(),
+		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", newTSOKVBase("tso")),
 	}
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	m.tsoAllocator = tso.NewGlobalTSOAllocator("timestamp")
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
 	return m, nil

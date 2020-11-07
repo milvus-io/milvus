@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -30,6 +31,7 @@ type Proxy struct {
 	taskSch               *TaskScheduler
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
+	queryResultMsgStream  *msgstream.PulsarMsgStream
 }
 
 func CreateProxy(ctx context.Context) (*Proxy, error) {
@@ -117,14 +119,60 @@ func (p *Proxy) connectMaster() error {
 	return nil
 }
 
+func (p *Proxy) receiveResultLoop() {
+	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
+
+	for {
+		msgPack := p.queryResultMsgStream.Consume()
+		if msgPack == nil {
+			continue
+		}
+		tsMsg := msgPack.Msgs[0]
+		searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
+		reqId := UniqueID(searchResultMsg.GetReqId())
+		_, ok := queryResultBuf[reqId]
+		if !ok {
+			queryResultBuf[reqId] = make([]*internalpb.SearchResult, 0)
+		}
+		queryResultBuf[reqId] = append(queryResultBuf[reqId], &searchResultMsg.SearchResult)
+		if len(queryResultBuf[reqId]) == 4 {
+			// TODO: use the number of query node instead
+			t := p.taskSch.getTaskByReqId(reqId)
+			qt := (*t).(*QueryTask)
+			qt.resultBuf <- queryResultBuf[reqId]
+			delete(queryResultBuf, reqId)
+		}
+	}
+}
+
+func (p *Proxy) queryResultLoop() {
+	defer p.proxyLoopWg.Done()
+	p.queryResultMsgStream = &msgstream.PulsarMsgStream{}
+	// TODO: config
+	p.queryResultMsgStream.Start()
+
+	go p.receiveResultLoop()
+
+	ctx, cancel := context.WithCancel(p.proxyLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print("proxy is closed...")
+			return
+		}
+	}
+}
+
 func (p *Proxy) startProxyLoop(ctx context.Context) {
 	p.proxyLoopCtx, p.proxyLoopCancel = context.WithCancel(ctx)
-	p.proxyLoopWg.Add(3)
+	p.proxyLoopWg.Add(4)
 
 	p.connectMaster()
 
 	go p.grpcLoop()
 	go p.pulsarMsgStreamLoop()
+	go p.queryResultLoop()
 	go p.scheduleLoop()
 }
 
