@@ -17,7 +17,6 @@ type TSOClient struct {
 	mux    sync.Mutex
 }
 
-// window is 1000ms default
 func (c *TSOClient) GetTimeStamp(ctx context.Context, n Timestamp) (ts Timestamp, count uint64, window time.Duration, err error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()

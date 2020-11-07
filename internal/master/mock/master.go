@@ -1,39 +1,32 @@
-package master
+package mockmaster
 
 import (
 	"context"
 	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"net"
-	"path"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/controller"
-	"github.com/zilliztech/milvus-distributed/internal/master/informer"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"google.golang.org/grpc"
-
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
-	"go.etcd.io/etcd/clientv3"
 )
+
+const (
+	MOCK_GRPC_PORT=":0"
+)
+
+var GrpcServerAddr net.Addr
 
 // Server is the pd server.
 type Master struct {
-	// Server state.
 	isServing int64
-
-	// Server start timestamp
-	startTimestamp int64
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -46,55 +39,26 @@ type Master struct {
 	// for tso.
 	tsoAllocator tso.Allocator
 
-	// pulsar client
-	pc *informer.PulsarClient
+	kvBase    kv.KVBase
 
-	// chans
-	ssChan chan internalpb.SegmentStatistics
-
-	kvBase    *kv.EtcdKV
-	scheduler *ddRequestScheduler
-	mt        metaTable
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
-}
 
-func newTSOKVBase(subPath string) * kv.EtcdKV{
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	client, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdAddr},
-		DialTimeout: 5 * time.Second,
-	})
-	return kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, subPath))
-}
-
-func newKVBase() *kv.EtcdKV {
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdAddr},
-		DialTimeout: 5 * time.Second,
-	})
-	kvBase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
-	return kvBase
+	grpcAddr net.Addr
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
-	id.InitGlobalIdAllocator("idTimestamp", newTSOKVBase("gid"))
+	id.InitGlobalIdAllocator("idTimestamp", mockkv.NewEtcdKV())
+
 	m := &Master{
 		ctx:            ctx,
-		startTimestamp: time.Now().Unix(),
-		kvBase:         newKVBase(),
-		ssChan:         make(chan internalpb.SegmentStatistics, 10),
-		pc:             informer.NewPulsarClient(),
-		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", newTSOKVBase("tso")),
+		kvBase:         mockkv.NewEtcdKV(),
+		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", mockkv.NewEtcdKV()),
 	}
+
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
 	return m, nil
@@ -103,6 +67,11 @@ func CreateServer(ctx context.Context) (*Master, error) {
 // AddStartCallback adds a callback in the startServer phase.
 func (s *Master) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
+}
+
+// for unittest, get the grpc server addr
+func (s *Master) GetGRPCAddr() net.Addr{
+	return s.grpcAddr
 }
 
 func (s *Master) startServer(ctx context.Context) error {
@@ -175,7 +144,6 @@ func (s *Master) LoopContext() context.Context {
 func (s *Master) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
 	s.serverLoopWg.Add(3)
-	//go s.Se
 	go s.grpcLoop()
 	go s.pulsarLoop()
 	go s.segmentStatisticsLoop()
@@ -189,26 +157,22 @@ func (s *Master) stopServerLoop() {
 	s.serverLoopWg.Wait()
 }
 
-// StartTimestamp returns the start timestamp of this server
-func (s *Master) StartTimestamp() int64 {
-	return s.startTimestamp
-}
 
 func (s *Master) grpcLoop() {
 	defer s.serverLoopWg.Done()
-
-	defaultGRPCPort := ":"
-	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
-	lis, err := net.Listen("tcp", defaultGRPCPort)
+	lis, err := net.Listen("tcp", MOCK_GRPC_PORT)
 	if err != nil {
 		log.Printf("failed to listen: %v", err)
 		return
 	}
 
-	if err := s.grpcServer.Serve(lis); err != nil {
-		panic("grpcServer Start Failed!!")
-	}
+	s.grpcAddr = lis.Addr()
 
+	fmt.Printf("Start MockMaster grpc server , addr:%v\n", s.grpcAddr)
+
+	if err := s.grpcServer.Serve(lis); err != nil {
+		panic("grpcServer Startup Failed!")
+	}
 }
 
 // todo use messagestream
@@ -216,36 +180,11 @@ func (s *Master) pulsarLoop() {
 	defer s.serverLoopWg.Done()
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-
-	consumer, err := s.pc.Client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            conf.Config.Master.PulsarTopic,
-		SubscriptionName: "my-sub",
-		Type:             pulsar.Shared,
-	})
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer func() {
-		if err := consumer.Unsubscribe(); err != nil {
-			log.Fatal(err)
-		}
-		cancel()
-	}()
-
-	consumerChan := consumer.Chan()
-
+	defer cancel()
 	for {
 		select {
-		case msg := <-consumerChan:
-			var m internalpb.SegmentStatistics
-			proto.Unmarshal(msg.Payload(), &m)
-			fmt.Printf("Received message msgId: %#v -- content: '%d'\n",
-				msg.ID(), m.SegmentId)
-			s.ssChan <- m
-			consumer.Ack(msg)
 		case <-ctx.Done():
-			log.Print("server is closed, exit etcd leader loop")
+			log.Print("server is closed, exit pulsar loop")
 			return
 		}
 	}
@@ -257,21 +196,6 @@ func (s *Master) tasksExecutionLoop() {
 
 	for {
 		select {
-		case task := <-s.scheduler.reqQueue:
-			timeStamp, err := (*task).Ts()
-			if err != nil {
-				log.Println(err)
-			} else {
-				if timeStamp < s.scheduler.scheduleTimeStamp {
-					_ = (*task).NotifyTimeout()
-				} else {
-					s.scheduler.scheduleTimeStamp = timeStamp
-					err := (*task).Execute()
-					if err != nil {
-						log.Println("request execution failed caused by error:", err)
-					}
-				}
-			}
 		case <-ctx.Done():
 			log.Print("server is closed, exit task execution loop")
 			return
@@ -287,10 +211,8 @@ func (s *Master) segmentStatisticsLoop() {
 
 	for {
 		select {
-		case ss := <-s.ssChan:
-			controller.ComputeCloseTime(ss, s.kvBase)
 		case <-ctx.Done():
-			log.Print("server is closed, exit etcd leader loop")
+			log.Print("server is closed, exit segmentStatistics loop")
 			return
 		}
 	}
