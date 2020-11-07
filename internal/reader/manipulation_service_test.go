@@ -64,6 +64,7 @@ func TestManipulationService_Start(t *testing.T) {
 	for i := 0; i < msgLength; i++ {
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			InsertRequest: internalPb.InsertRequest{
+				//MsgType:        internalPb.MsgType_kInsert,
 				ReqId:          int64(0),
 				CollectionName: "collection0",
 				PartitionTag:   "default",

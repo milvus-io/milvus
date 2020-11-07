@@ -1,6 +1,7 @@
 package msgstream
 
 import (
+	"github.com/gogo/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -11,6 +12,8 @@ type TsMsg interface {
 	EndTs() Timestamp
 	Type() MsgType
 	HashKeys() []int32
+	Marshal(*TsMsg) ([]byte, error)
+	Unmarshal([]byte) (*TsMsg, error)
 }
 
 type BaseMsg struct {
@@ -41,6 +44,28 @@ func (it *InsertMsg) Type() MsgType {
 	return it.MsgType
 }
 
+func (it *InsertMsg) Marshal(input *TsMsg) ([]byte, error) {
+	insertMsg := (*input).(*InsertMsg)
+	insertRequest := &insertMsg.InsertRequest
+	mb, err := proto.Marshal(insertRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (it *InsertMsg) Unmarshal(input []byte) (*TsMsg, error) {
+	insertRequest := internalPb.InsertRequest{}
+	err := proto.Unmarshal(input, &insertRequest)
+	insertMsg := &InsertMsg{InsertRequest: insertRequest}
+
+	if err != nil {
+		return nil, err
+	}
+	var tsMsg TsMsg = insertMsg
+	return &tsMsg, nil
+}
+
 /////////////////////////////////////////Delete//////////////////////////////////////////
 type DeleteMsg struct {
 	BaseMsg
@@ -49,6 +74,28 @@ type DeleteMsg struct {
 
 func (dt *DeleteMsg) Type() MsgType {
 	return dt.MsgType
+}
+
+func (dt *DeleteMsg) Marshal(input *TsMsg) ([]byte, error) {
+	deleteTask := (*input).(*DeleteMsg)
+	deleteRequest := &deleteTask.DeleteRequest
+	mb, err := proto.Marshal(deleteRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (dt *DeleteMsg) Unmarshal(input []byte) (*TsMsg, error) {
+	deleteRequest := internalPb.DeleteRequest{}
+	err := proto.Unmarshal(input, &deleteRequest)
+	deleteMsg := &DeleteMsg{DeleteRequest: deleteRequest}
+
+	if err != nil {
+		return nil, err
+	}
+	var tsMsg TsMsg = deleteMsg
+	return &tsMsg, nil
 }
 
 /////////////////////////////////////////Search//////////////////////////////////////////
@@ -61,6 +108,28 @@ func (st *SearchMsg) Type() MsgType {
 	return st.MsgType
 }
 
+func (st *SearchMsg) Marshal(input *TsMsg) ([]byte, error) {
+	searchTask := (*input).(*SearchMsg)
+	searchRequest := &searchTask.SearchRequest
+	mb, err := proto.Marshal(searchRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (st *SearchMsg) Unmarshal(input []byte) (*TsMsg, error) {
+	searchRequest := internalPb.SearchRequest{}
+	err := proto.Unmarshal(input, &searchRequest)
+	searchMsg := &SearchMsg{SearchRequest: searchRequest}
+
+	if err != nil {
+		return nil, err
+	}
+	var tsMsg TsMsg = searchMsg
+	return &tsMsg, nil
+}
+
 /////////////////////////////////////////SearchResult//////////////////////////////////////////
 type SearchResultMsg struct {
 	BaseMsg
@@ -71,6 +140,28 @@ func (srt *SearchResultMsg) Type() MsgType {
 	return srt.MsgType
 }
 
+func (srt *SearchResultMsg) Marshal(input *TsMsg) ([]byte, error) {
+	searchResultTask := (*input).(*SearchResultMsg)
+	searchResultRequest := &searchResultTask.SearchResult
+	mb, err := proto.Marshal(searchResultRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (srt *SearchResultMsg) Unmarshal(input []byte) (*TsMsg, error) {
+	searchResultRequest := internalPb.SearchResult{}
+	err := proto.Unmarshal(input, &searchResultRequest)
+	searchResultMsg := &SearchResultMsg{SearchResult: searchResultRequest}
+
+	if err != nil {
+		return nil, err
+	}
+	var tsMsg TsMsg = searchResultMsg
+	return &tsMsg, nil
+}
+
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 type TimeTickMsg struct {
 	BaseMsg
@@ -79,6 +170,28 @@ type TimeTickMsg struct {
 
 func (tst *TimeTickMsg) Type() MsgType {
 	return tst.MsgType
+}
+
+func (tst *TimeTickMsg) Marshal(input *TsMsg) ([]byte, error) {
+	timeTickTask := (*input).(*TimeTickMsg)
+	timeTick := &timeTickTask.TimeTickMsg
+	mb, err := proto.Marshal(timeTick)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (tst *TimeTickMsg) Unmarshal(input []byte) (*TsMsg, error) {
+	timeTickMsg := internalPb.TimeTickMsg{}
+	err := proto.Unmarshal(input, &timeTickMsg)
+	timeTick := &TimeTickMsg{TimeTickMsg: timeTickMsg}
+
+	if err != nil {
+		return nil, err
+	}
+	var tsMsg TsMsg = timeTick
+	return &tsMsg, nil
 }
 
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
