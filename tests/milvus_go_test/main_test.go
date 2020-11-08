@@ -117,7 +117,7 @@ func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 		fmt.Printf(name)
 		params := map[string]interface{}{
 			"auto_id":           autoId,
-			"segment_row_count": utils.DefaultSegmentRowLimit,
+			"segment_row_limit": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
 		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: milvus.NewParams(string(paramsStr))}
@@ -138,7 +138,7 @@ func GenCollectionParams(name string, autoId bool, segmentRowLimit int) milvus.M
 	//if client != nil {
 	params := map[string]interface{}{
 		"auto_id":           autoId,
-		"segment_row_count": utils.DefaultSegmentRowLimit,
+		"segment_row_limit": utils.DefaultSegmentRowLimit,
 	}
 	paramsStr, _ := json.Marshal(params)
 	mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: milvus.NewParams(string(paramsStr))}
