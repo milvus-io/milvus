@@ -11,22 +11,22 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-type segmentService struct {
+type statsService struct {
 	ctx       context.Context
 	msgStream *msgstream.PulsarMsgStream
-	node      *QueryNode
+	container *ColSegContainer
 }
 
-func newSegmentService(ctx context.Context, node *QueryNode, pulsarAddress string) *segmentService {
+func newStatsService(ctx context.Context, container *ColSegContainer, pulsarAddress string) *statsService {
 	// TODO: add pulsar message stream init
 
-	return &segmentService{
-		ctx:  ctx,
-		node: node,
+	return &statsService{
+		ctx:       ctx,
+		container: container,
 	}
 }
 
-func (sService *segmentService) start() {
+func (sService *statsService) start() {
 	sleepMillisecondTime := 1000
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
@@ -40,12 +40,12 @@ func (sService *segmentService) start() {
 	}
 }
 
-func (sService *segmentService) sendSegmentStatistic() {
+func (sService *statsService) sendSegmentStatistic() {
 	var statisticData = make([]internalpb.SegmentStatistics, 0)
 
-	for segmentID, segment := range sService.node.SegmentsMap {
+	for segmentID, segment := range sService.container.segments {
 		currentMemSize := segment.getMemSize()
-		segment.LastMemSize = currentMemSize
+		segment.lastMemSize = currentMemSize
 
 		segmentNumOfRows := segment.getRowCount()
 
@@ -64,6 +64,6 @@ func (sService *segmentService) sendSegmentStatistic() {
 	sService.publicStatistic(&statisticData)
 }
 
-func (sService *segmentService) publicStatistic(statistic *[]internalpb.SegmentStatistics) {
+func (sService *statsService) publicStatistic(statistic *[]internalpb.SegmentStatistics) {
 	// TODO: publish statistic
 }

@@ -6,45 +6,51 @@ import (
 	"sync"
 )
 
-const maxQueueLength = 1024
-
 type Node interface {
 	Name() string
 	MaxQueueLength() int32
 	MaxParallelism() int32
-	SetPipelineStates(states *flowGraphStates)
 	Operate(in []*Msg) []*Msg
+	IsInputNode() bool
 }
 
 type BaseNode struct {
 	maxQueueLength int32
 	maxParallelism int32
-	graphStates    *flowGraphStates
 }
 
 type nodeCtx struct {
 	node                   *Node
 	inputChannels          []chan *Msg
-	inputMessages          [][]*Msg
+	inputMessages          []*Msg
 	downstream             []*nodeCtx
 	downstreamInputChanIdx map[string]int
+
+	NumActiveTasks    int64
+	NumCompletedTasks int64
 }
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
+	if (*nodeCtx.node).IsInputNode() {
+		inStream, ok := (*nodeCtx.node).(*InputNode)
+		if !ok {
+			log.Fatal("Invalid inputNode")
+		}
+		go (*inStream.inStream).Start()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			wg.Done()
 			return
 		default:
-			if !nodeCtx.allUpstreamDone() {
-				continue
-			}
-			nodeCtx.getMessagesFromChannel()
 			// inputs from inputsMessages for Operate
 			inputs := make([]*Msg, 0)
-			for i := 0; i < len(nodeCtx.inputMessages); i++ {
-				inputs = append(inputs, nodeCtx.inputMessages[i]...)
+
+			if !(*nodeCtx.node).IsInputNode() {
+				nodeCtx.collectInputMessages()
+				inputs = nodeCtx.inputMessages
 			}
 			n := *nodeCtx.node
 			res := n.Operate(inputs)
@@ -78,30 +84,17 @@ func (nodeCtx *nodeCtx) ReceiveMsg(wg *sync.WaitGroup, msg *Msg, inputChanIdx in
 	wg.Done()
 }
 
-func (nodeCtx *nodeCtx) allUpstreamDone() bool {
+func (nodeCtx *nodeCtx) collectInputMessages() {
 	inputsNum := len(nodeCtx.inputChannels)
-	hasInputs := 0
-	for i := 0; i < inputsNum; i++ {
-		channel := nodeCtx.inputChannels[i]
-		if len(channel) > 0 {
-			hasInputs++
-		}
-	}
-	return hasInputs == inputsNum
-}
-
-func (nodeCtx *nodeCtx) getMessagesFromChannel() {
-	inputsNum := len(nodeCtx.inputChannels)
-	nodeCtx.inputMessages = make([][]*Msg, inputsNum)
+	nodeCtx.inputMessages = make([]*Msg, inputsNum)
 
 	// init inputMessages,
 	// receive messages from inputChannels,
 	// and move them to inputMessages.
 	for i := 0; i < inputsNum; i++ {
-		nodeCtx.inputMessages[i] = make([]*Msg, 0)
 		channel := nodeCtx.inputChannels[i]
 		msg := <-channel
-		nodeCtx.inputMessages[i] = append(nodeCtx.inputMessages[i], msg)
+		nodeCtx.inputMessages = append(nodeCtx.inputMessages, msg)
 	}
 }
 
@@ -121,6 +114,6 @@ func (node *BaseNode) SetMaxParallelism(n int32) {
 	node.maxParallelism = n
 }
 
-func (node *BaseNode) SetPipelineStates(states *flowGraphStates) {
-	node.graphStates = states
+func (node *BaseNode) IsInputNode() bool {
+	return false
 }

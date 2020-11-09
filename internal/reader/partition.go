@@ -14,40 +14,22 @@ package reader
 import "C"
 
 type Partition struct {
-	PartitionPtr  C.CPartition
-	PartitionName string
-	Segments      []*Segment
+	partitionTag string
+	segments     []*Segment
 }
 
-func (p *Partition) newSegment(segmentID int64) *Segment {
-	/*
-		CSegmentBase
-		newSegment(CPartition partition, unsigned long segment_id);
-	*/
-	segmentPtr := C.NewSegment(p.PartitionPtr, C.ulong(segmentID))
-
-	var newSegment = &Segment{SegmentPtr: segmentPtr, SegmentID: segmentID}
-	p.Segments = append(p.Segments, newSegment)
-	return newSegment
+func (p *Partition) Tag() string {
+	return (*p).partitionTag
 }
 
-func (p *Partition) deleteSegment(node *QueryNode, segment *Segment) {
-	/*
-		void
-		deleteSegment(CSegmentBase segment);
-	*/
-	cPtr := segment.SegmentPtr
-	C.DeleteSegment(cPtr)
+func (p *Partition) Segments() *[]*Segment {
+	return &(*p).segments
+}
 
-	tmpSegments := make([]*Segment, 0)
-
-	for _, s := range p.Segments {
-		if s.SegmentID == segment.SegmentID {
-			delete(node.SegmentsMap, s.SegmentID)
-		} else {
-			tmpSegments = append(tmpSegments, s)
-		}
+func newPartition(partitionTag string) *Partition {
+	var newPartition = &Partition{
+		partitionTag: partitionTag,
 	}
 
-	p.Segments = tmpSegments
+	return newPartition
 }

@@ -65,7 +65,7 @@ package reader
 //	node.SegmentsMap[int64(0)] = segment
 //
 //	assert.Equal(t, collection.CollectionName, "collection0")
-//	assert.Equal(t, partition.PartitionName, "partition0")
+//	assert.Equal(t, partition.partitionTag, "partition0")
 //	assert.Equal(t, segment.SegmentID, int64(0))
 //	assert.Equal(t, len(node.SegmentsMap), 1)
 //
@@ -129,7 +129,7 @@ package reader
 //	node.SegmentsMap[int64(0)] = segment
 //
 //	assert.Equal(t, collection.CollectionName, "collection0")
-//	assert.Equal(t, partition.PartitionName, "partition0")
+//	assert.Equal(t, partition.partitionTag, "partition0")
 //	assert.Equal(t, segment.SegmentID, int64(0))
 //	assert.Equal(t, len(node.SegmentsMap), 1)
 //
@@ -157,7 +157,7 @@ package reader
 //	var partition = collection.newPartition("partition0")
 //
 //	var p = collection.getPartitionByName("partition0")
-//	assert.Equal(t, p.PartitionName, "partition0")
+//	assert.Equal(t, p.partitionTag, "partition0")
 //
 //	collection.deletePartition(node, partition)
 //	node.deleteCollection(collection)

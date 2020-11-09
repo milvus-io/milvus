@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"github.com/gogo/protobuf/proto"
 	"log"
 	"path"
 	"reflect"
@@ -12,8 +13,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/master/collection"
-	"github.com/zilliztech/milvus-distributed/internal/master/segment"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
@@ -24,12 +24,12 @@ const (
 )
 
 type metaService struct {
-	ctx    context.Context
-	kvBase *kv.EtcdKV
-	node   *QueryNode
+	ctx       context.Context
+	kvBase    *kv.EtcdKV
+	container *ColSegContainer
 }
 
-func newMetaService(ctx context.Context, node *QueryNode) *metaService {
+func newMetaService(ctx context.Context, container *ColSegContainer) *metaService {
 	ETCDAddr := "http://"
 	ETCDAddr += conf.Config.Etcd.Address
 	ETCDPort := conf.Config.Etcd.Port
@@ -41,9 +41,9 @@ func newMetaService(ctx context.Context, node *QueryNode) *metaService {
 	})
 
 	return &metaService{
-		ctx:    ctx,
-		kvBase: kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath),
-		node:   node,
+		ctx:       ctx,
+		kvBase:    kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath),
+		container: container,
 	}
 }
 
@@ -98,7 +98,7 @@ func isSegmentObj(key string) bool {
 	return index == 0
 }
 
-func isSegmentChannelRangeInQueryNodeChannelRange(segment *segment.Segment) bool {
+func isSegmentChannelRangeInQueryNodeChannelRange(segment *etcdpb.SegmentMeta) bool {
 	if segment.ChannelStart > segment.ChannelEnd {
 		log.Printf("Illegal segment channel range")
 		return false
@@ -107,14 +107,14 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *segment.Segment) bool
 	var queryNodeChannelStart = conf.Config.Reader.TopicStart
 	var queryNodeChannelEnd = conf.Config.Reader.TopicEnd
 
-	if segment.ChannelStart >= queryNodeChannelStart && segment.ChannelEnd <= queryNodeChannelEnd {
+	if segment.ChannelStart >= int32(queryNodeChannelStart) && segment.ChannelEnd <= int32(queryNodeChannelEnd) {
 		return true
 	}
 
 	return false
 }
 
-func printCollectionStruct(obj *collection.Collection) {
+func printCollectionStruct(obj *etcdpb.CollectionMeta) {
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)
 	typeOfS := v.Type()
@@ -127,7 +127,7 @@ func printCollectionStruct(obj *collection.Collection) {
 	}
 }
 
-func printSegmentStruct(obj *segment.Segment) {
+func printSegmentStruct(obj *etcdpb.SegmentMeta) {
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)
 	typeOfS := v.Type()
@@ -140,16 +140,14 @@ func printSegmentStruct(obj *segment.Segment) {
 func (mService *metaService) processCollectionCreate(id string, value string) {
 	println(fmt.Sprintf("Create Collection:$%s$", id))
 
-	col, err := collection.JSON2Collection(value)
-	if err != nil {
-		println("error of json 2 col")
-		println(err.Error())
-	}
-
+	col := mService.collectionUnmarshal(value)
 	if col != nil {
-		newCollection := mService.node.newCollection(col.ID, col.Name, col.GrpcMarshalString)
+		newCollection := mService.container.addCollection(col, value)
 		for _, partitionTag := range col.PartitionTags {
-			newCollection.newPartition(partitionTag)
+			err := mService.container.addPartition(newCollection, partitionTag)
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}
 }
@@ -157,26 +155,30 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 func (mService *metaService) processSegmentCreate(id string, value string) {
 	println("Create Segment: ", id)
 
-	seg, err := segment.JSON2Segment(value)
-	if err != nil {
-		println("error of json 2 seg")
-		println(err.Error())
-	}
-
+	seg := mService.segmentUnmarshal(value)
 	if !isSegmentChannelRangeInQueryNodeChannelRange(seg) {
 		return
 	}
 
 	// TODO: what if seg == nil? We need to notify master and return rpc request failed
 	if seg != nil {
-		col := mService.node.getCollectionByID(seg.CollectionID)
+		var col, err = mService.container.getCollectionByID(seg.CollectionId)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 		if col != nil {
-			partition := col.getPartitionByName(seg.PartitionTag)
+			var partition, err = mService.container.getPartitionByTag(seg.PartitionTag)
+			if err != nil {
+				log.Println(err)
+				return
+			}
 			if partition != nil {
-				newSegmentID := seg.SegmentID
-				newSegment := partition.newSegment(newSegmentID)
-				newSegment.SegmentCloseTime = seg.CloseTimeStamp
-				mService.node.SegmentsMap[newSegmentID] = newSegment
+				err = mService.container.addSegment(col, partition, seg.SegmentId)
+				if err != nil {
+					log.Println(err)
+					return
+				}
 			}
 		}
 	}
@@ -196,25 +198,21 @@ func (mService *metaService) processCreate(key string, msg string) {
 }
 
 func (mService *metaService) processSegmentModify(id string, value string) {
-	seg, err := segment.JSON2Segment(value)
-	if err != nil {
-		println("error of json 2 segment")
-		println(err.Error())
-	}
+	seg := mService.segmentUnmarshal(value)
 
 	if !isSegmentChannelRangeInQueryNodeChannelRange(seg) {
 		return
 	}
 
 	if seg != nil {
-		queryNodeSeg, err := mService.node.getSegmentBySegmentID(seg.SegmentID)
+		targetSegment, err := mService.container.getSegmentByID(seg.SegmentId)
 		if err != nil {
-			println(err)
+			log.Println(err)
+			return
 		}
 
-		if queryNodeSeg != nil {
-			queryNodeSeg.SegmentCloseTime = seg.CloseTimeStamp
-		}
+		// TODO: do modify
+		fmt.Println(targetSegment)
 	}
 }
 
@@ -237,32 +235,43 @@ func (mService *metaService) processModify(key string, msg string) {
 func (mService *metaService) processSegmentDelete(id string) {
 	println("Delete segment: ", id)
 
-	segmentID, err := strconv.ParseInt(id, 10, 64)
+	var segmentID, err = strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		log.Println("Cannot parse segment id:" + id)
 	}
 
-	for _, col := range mService.node.Collections {
-		for _, p := range col.Partitions {
-			for _, s := range p.Segments {
-				if s.SegmentID == segmentID {
-					p.deleteSegment(mService.node, s)
-				}
-			}
-		}
+	seg, err := mService.container.getSegmentByID(segmentID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	err = mService.container.removeSegment(seg)
+	if err != nil {
+		log.Println(err)
+		return
 	}
 }
 
 func (mService *metaService) processCollectionDelete(id string) {
 	println("Delete collection: ", id)
 
-	collectionID, err := strconv.ParseInt(id, 10, 64)
+	var collectionID, err = strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		log.Println("Cannot parse collection id:" + id)
 	}
 
-	targetCollection := mService.node.getCollectionByID(collectionID)
-	mService.node.deleteCollection(targetCollection)
+	targetCollection, err := mService.container.getCollectionByID(collectionID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	err = mService.container.removeCollection(targetCollection)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 }
 
 func (mService *metaService) processDelete(key string) {
@@ -330,4 +339,43 @@ func (mService *metaService) loadSegments() error {
 	}
 
 	return nil
+}
+
+//----------------------------------------------------------------------- Unmarshal and Marshal
+func (mService *metaService) collectionUnmarshal(value string) *etcdpb.CollectionMeta {
+	col := etcdpb.CollectionMeta{}
+	err := proto.Unmarshal([]byte(value), &col)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	return &col
+}
+
+func (mService *metaService) collectionMarshal(col *etcdpb.CollectionMeta) string {
+	value, err := proto.Marshal(col)
+	if err != nil {
+		log.Println(err)
+		return ""
+	}
+	return string(value)
+}
+
+func (mService *metaService) segmentUnmarshal(value string) *etcdpb.SegmentMeta {
+	seg := etcdpb.SegmentMeta{}
+	err := proto.Unmarshal([]byte(value), &seg)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	return &seg
+}
+
+func (mService *metaService) segmentMarshal(seg *etcdpb.SegmentMeta) string {
+	value, err := proto.Marshal(seg)
+	if err != nil {
+		log.Println(err)
+		return ""
+	}
+	return string(value)
 }

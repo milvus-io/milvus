@@ -12,59 +12,47 @@ package reader
 
 */
 import "C"
-import "github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-type UniqueID = typeutil.UniqueID
+import (
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+)
 
 type Collection struct {
-	CollectionPtr  C.CCollection
-	CollectionName string
-	CollectionID   UniqueID
-	Partitions     []*Partition
+	collectionPtr C.CCollection
+	meta          *etcdpb.CollectionMeta
+	partitions    []*Partition
 }
 
-func (c *Collection) newPartition(partitionName string) *Partition {
+func (c *Collection) Name() string {
+	return (*c.meta).Schema.Name
+}
+
+func (c *Collection) ID() UniqueID {
+	return (*c.meta).Id
+}
+
+func (c *Collection) Partitions() *[]*Partition {
+	return &c.partitions
+}
+
+func newCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) *Collection {
 	/*
-		CPartition
-		newPartition(CCollection collection, const char* partition_name);
+		CCollection
+		newCollection(const char* schema_conf);
 	*/
-	cName := C.CString(partitionName)
-	partitionPtr := C.NewPartition(c.CollectionPtr, cName)
+	cTmp := C.CString("tmp")
+	cCollMetaBlob := C.CString(collMetaBlob)
+	collection := C.NewCollection(cTmp, cCollMetaBlob)
 
-	var newPartition = &Partition{PartitionPtr: partitionPtr, PartitionName: partitionName}
-	c.Partitions = append(c.Partitions, newPartition)
-	return newPartition
+	var newCollection = &Collection{collectionPtr: collection, meta: collMeta}
+
+	return newCollection
 }
 
-func (c *Collection) deletePartition(node *QueryNode, partition *Partition) {
+func deleteCollection(collection *Collection) {
 	/*
 		void
-		deletePartition(CPartition partition);
+		deleteCollection(CCollection collection);
 	*/
-	cPtr := partition.PartitionPtr
-	C.DeletePartition(cPtr)
-
-	tmpPartitions := make([]*Partition, 0)
-
-	for _, p := range c.Partitions {
-		if p.PartitionName == partition.PartitionName {
-			for _, s := range p.Segments {
-				delete(node.SegmentsMap, s.SegmentID)
-			}
-		} else {
-			tmpPartitions = append(tmpPartitions, p)
-		}
-	}
-
-	c.Partitions = tmpPartitions
-}
-
-func (c *Collection) getPartitionByName(partitionName string) (partition *Partition) {
-	for _, partition := range c.Partitions {
-		if partition.PartitionName == partitionName {
-			return partition
-		}
-	}
-	return nil
-	// TODO: remove from c.Partitions
+	cPtr := collection.collectionPtr
+	C.DeleteCollection(cPtr)
 }

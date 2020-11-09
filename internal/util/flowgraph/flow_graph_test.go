@@ -179,22 +179,22 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 
 	var a Node = &nodeA{
 		BaseNode: BaseNode{
-			maxQueueLength: maxQueueLength,
+			maxQueueLength: MaxQueueLength,
 		},
 	}
 	var b Node = &nodeB{
 		BaseNode: BaseNode{
-			maxQueueLength: maxQueueLength,
+			maxQueueLength: MaxQueueLength,
 		},
 	}
 	var c Node = &nodeC{
 		BaseNode: BaseNode{
-			maxQueueLength: maxQueueLength,
+			maxQueueLength: MaxQueueLength,
 		},
 	}
 	var d Node = &nodeD{
 		BaseNode: BaseNode{
-			maxQueueLength: maxQueueLength,
+			maxQueueLength: MaxQueueLength,
 		},
 		resChan: make(chan float64),
 	}

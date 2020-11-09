@@ -23,7 +23,7 @@ func (s *Segment) buildIndex(collection *Collection) commonpb.Status {
 		int
 		BuildIndex(CCollection c_collection, CSegmentBase c_segment);
 	*/
-	var status = C.BuildIndex(collection.CollectionPtr, s.SegmentPtr)
+	var status = C.BuildIndex(collection.collectionPtr, s.segmentPtr)
 	if status != 0 {
 		return commonpb.Status{ErrorCode: commonpb.ErrorCode_BUILD_INDEX_ERROR}
 	}

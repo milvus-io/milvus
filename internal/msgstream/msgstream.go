@@ -43,11 +43,14 @@ type PulsarMsgStream struct {
 	receiveBuf     chan *MsgPack
 	receiveBufSize int64
 	wait           sync.WaitGroup
+	streamCancel   func()
 }
 
-func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream{
+func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStream {
+	streamCtx, streamCancel := context.WithCancel(ctx)
 	return &PulsarMsgStream{
-		ctx: ctx,
+		ctx:            streamCtx,
+		streamCancel:   streamCancel,
 		receiveBufSize: receiveBufSize,
 	}
 }
@@ -96,11 +99,16 @@ func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *PulsarMsgStream) Start() {
-	ms.wait.Add(1)
-	go ms.bufMsgPackToChannel()
+	if ms.consumers != nil {
+		ms.wait.Add(1)
+		go ms.bufMsgPackToChannel()
+	}
 }
 
 func (ms *PulsarMsgStream) Close() {
+	ms.streamCancel()
+	ms.wait.Wait()
+
 	for _, producer := range ms.producers {
 		if producer != nil {
 			(*producer).Close()
@@ -114,7 +122,6 @@ func (ms *PulsarMsgStream) Close() {
 	if ms.client != nil {
 		(*ms.client).Close()
 	}
-	ms.wait.Wait()
 }
 
 func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
@@ -228,12 +235,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 						log.Printf("Failed to unmarshal message header, error = %v", err)
 						continue
 					}
-					unMarshalFunc, ok:= (*ms.unmarshal).tempMap[headerMsg.MsgType]
-					if ok == false {
-						log.Printf("Not set unmarshalFunc for messageType %v", headerMsg.MsgType)
-						continue
-					}
-					tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
+					tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.MsgType)
 					if err != nil {
 						log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 						continue
@@ -257,8 +259,10 @@ type PulsarTtMsgStream struct {
 }
 
 func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64) *PulsarTtMsgStream {
+	streamCtx, streamCancel := context.WithCancel(ctx)
 	pulsarMsgStream := PulsarMsgStream{
-		ctx: ctx,
+		ctx:            streamCtx,
+		streamCancel:   streamCancel,
 		receiveBufSize: receiveBufSize,
 	}
 	return &PulsarTtMsgStream{

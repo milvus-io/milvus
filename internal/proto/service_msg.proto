@@ -55,9 +55,12 @@ message PlaceholderValue {
     string tag = 1;
     PlaceholderType type = 2;
     // value contains the serialized VectorValues
-    common.Blob value = 3;
+    bytes value = 3;
 }
 
+message PlaceholderGroup {
+    repeated PlaceholderValue placeholders = 1;
+}
 
 /**
  * @brief Query for Search call
@@ -66,7 +69,7 @@ message Query {
     string collection_name = 1;
     repeated string partition_tags = 2;
     string dsl = 3;
-    repeated PlaceholderValue placeholders = 4;
+    bytes placeholder_group = 4;
 }
 
 

@@ -2,23 +2,11 @@ package reader
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type Msg = flowgraph.Msg
-
-type msgStreamMsg struct {
-	tsMessages []*msgstream.TsMsg
-	timeRange  TimeRange
-}
-
-type dmMsg struct {
-	insertMessages []*msgstream.InsertMsg
-	// TODO: add delete message support
-	// deleteMessages []*msgstream.DeleteTask
-	timeRange TimeRange
-}
+type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 type key2SegMsg struct {
 	tsMessages []*msgstream.TsMsg
@@ -29,37 +17,18 @@ type schemaUpdateMsg struct {
 	timeRange TimeRange
 }
 
-type filteredDmMsg struct {
+type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	// TODO: add delete message support
-	// deleteMessages []*msgstream.DeleteTask
 	timeRange TimeRange
 }
 
-type insertMsg struct {
-	insertData InsertData
-	timeRange  TimeRange
-}
-
-type deletePreprocessMsg struct {
-	deletePreprocessData DeletePreprocessData
-	timeRange            TimeRange
-}
-
 type deleteMsg struct {
-	deleteData DeleteData
-	timeRange  TimeRange
+	deleteMessages []*msgstream.DeleteMsg
+	timeRange TimeRange
 }
 
 type serviceTimeMsg struct {
 	timeRange TimeRange
-}
-
-type InsertData struct {
-	insertIDs        map[UniqueID][]UniqueID
-	insertTimestamps map[UniqueID][]Timestamp
-	insertRecords    map[UniqueID][]*commonpb.Blob
-	insertOffset     map[UniqueID]int64
 }
 
 type DeleteData struct {
@@ -79,22 +48,6 @@ type DeletePreprocessData struct {
 	count         int32
 }
 
-func (msMsg *msgStreamMsg) TimeTick() Timestamp {
-	return msMsg.timeRange.timestampMax
-}
-
-func (msMsg *msgStreamMsg) DownStreamNodeIdx() int {
-	return 0
-}
-
-func (dmMsg *dmMsg) TimeTick() Timestamp {
-	return dmMsg.timeRange.timestampMax
-}
-
-func (dmMsg *dmMsg) DownStreamNodeIdx() int {
-	return 0
-}
-
 func (ksMsg *key2SegMsg) TimeTick() Timestamp {
 	return ksMsg.timeRange.timestampMax
 }
@@ -111,14 +64,6 @@ func (suMsg *schemaUpdateMsg) DownStreamNodeIdx() int {
 	return 0
 }
 
-func (fdmMsg *filteredDmMsg) TimeTick() Timestamp {
-	return fdmMsg.timeRange.timestampMax
-}
-
-func (fdmMsg *filteredDmMsg) DownStreamNodeIdx() int {
-	return 0
-}
-
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
 }
@@ -132,14 +77,6 @@ func (dMsg *deleteMsg) TimeTick() Timestamp {
 }
 
 func (dMsg *deleteMsg) DownStreamNodeIdx() int {
-	return 0
-}
-
-func (dpMsg *deletePreprocessMsg) TimeTick() Timestamp {
-	return dpMsg.timeRange.timestampMax
-}
-
-func (dpMsg *deletePreprocessMsg) DownStreamNodeIdx() int {
 	return 0
 }
 
