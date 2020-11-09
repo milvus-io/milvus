@@ -61,6 +61,10 @@ jobs:
           path: .docker
           key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('internal/core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-
+      - name: Start Service
+        shell: bash
+        run: |
+          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
       - name: Docker Run
         run: |
           docker-compose run ubuntu

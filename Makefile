@@ -16,7 +16,7 @@ GOPATH 	:= $(shell $(GO) env GOPATH)
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 
-all: build-cpp build-go 
+all: build-cpp build-go
 
 #TODO: Use ruleguard to check code specifications
 get-check-deps:
@@ -68,7 +68,7 @@ build-cpp-with-unittest:
 unittest: test-cpp test-go
 
 #TODO: proxy master reader writer's unittest
-test-go: verifiers build-go
+test-go:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
