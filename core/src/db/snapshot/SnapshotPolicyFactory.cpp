@@ -10,8 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "db/snapshot/SnapshotPolicyFactory.h"
-#include "db/Utils.h"
 #include <fiu/fiu-local.h>
+#include "db/Utils.h"
 
 namespace milvus {
 namespace engine {
@@ -25,8 +25,14 @@ SnapshotPolicyPtr
 SnapshotPolicyFactory::Build(ServerConfig& server_config) {
     auto is_cluster = server_config.cluster.enable();
     auto role = server_config.cluster.role();
-    fiu_do_on("snapshot.policy.ro_cluster", { is_cluster = true; role = ClusterRole::RO; });
-    fiu_do_on("snapshot.policy.w_cluster", { is_cluster = true; role = ClusterRole::RW; });
+    fiu_do_on("snapshot.policy.ro_cluster", {
+        is_cluster = true;
+        role = ClusterRole::RO;
+    });
+    fiu_do_on("snapshot.policy.w_cluster", {
+        is_cluster = true;
+        role = ClusterRole::RW;
+    });
     if (!is_cluster | role == ClusterRole::RO) {
         auto nums = server_config.general.stale_snapshots_count();
         fiu_do_on("snapshot.policy.stale_count_0", { nums = 0; });

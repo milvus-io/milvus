@@ -27,7 +27,6 @@ class SnapshotHolder {
     using ScopedPtr = std::shared_ptr<ScopedSnapshotT>;
 
     explicit SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, GCHandler gc_handler = nullptr);
-    /* explicit SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1); */
 
     ID_TYPE
     GetID() const {
@@ -45,6 +44,9 @@ class SnapshotHolder {
         gc_handler_ = gc_handler;
         return Status::OK();
     }
+
+    int
+    NumOfSnapshot() const;
 
     bool
     IsActive(Snapshot::Ptr& ss);

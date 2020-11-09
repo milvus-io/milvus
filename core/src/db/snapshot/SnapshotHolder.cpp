@@ -109,6 +109,12 @@ SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
     return status;
 }
 
+int
+SnapshotHolder::NumOfSnapshot() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return active_.size();
+}
+
 bool
 SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
     auto collection = ss->GetCollection();

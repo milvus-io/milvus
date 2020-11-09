@@ -72,6 +72,14 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 }
 
 Status
+Snapshots::NumOfSnapshot(const std::string& collection_name, int& num) const {
+    SnapshotHolderPtr holder;
+    STATUS_CHECK(GetHolder(collection_name, holder));
+    num = holder->NumOfSnapshot();
+    return Status::OK();
+}
+
+Status
 Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
     STATUS_CHECK(LoadHolder(store, collection_id, holder));
