@@ -1309,6 +1309,19 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
     int64_t request_size = request->ByteSizeLong();
     WaitToInsert(request_id, request_size);
 
+    auto satus = OnInsert(context, request, response);
+
+    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
+
+    // release resources
+    FinishInsert(request_id, request_size);
+
+    return satus;
+}
+
+::grpc::Status
+GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
+                             ::milvus::grpc::EntityIds* response) {
     engine::IDNumbers vector_ids;
     vector_ids.reserve(request->entity_id_array_size());
     for (int64_t i = 0; i < request->entity_id_array_size(); i++) {
@@ -1400,12 +1413,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
                insert_param.id_returned_.size() * sizeof(int64_t));
     }
 
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", request_id.c_str(), __func__);
     SET_RESPONSE(response->mutable_status(), status, context);
-
-    // release resources
-    FinishInsert(request_id, request_size);
-
     return ::grpc::Status::OK;
 }
 
