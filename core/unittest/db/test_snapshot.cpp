@@ -335,6 +335,8 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
 }
 
 TEST_F(SnapshotTest, PartitionTest) {
+    fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+    fiu_enable("snapshot.policy.duration_10ms", 1, nullptr, 0);
     std::string collection_name("c1");
     LSN_TYPE lsn = 1;
     auto ss = CreateCollection(collection_name, ++lsn);
@@ -429,6 +431,9 @@ TEST_F(SnapshotTest, PartitionTest) {
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(curr_ss->NumberOfPartitions(), total_partition_num - i - 1);
     }
+
+    fiu_disable("snapshot.policy.w_cluster");
+    fiu_disable("snapshot.policy.duration_10ms");
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {
@@ -456,6 +461,57 @@ TEST_F(SnapshotTest, PartitionTest2) {
 
     status = cp_op->Push();
     ASSERT_FALSE(status.ok()) << status.ToString();
+}
+
+TEST_F(SnapshotTest, SnapshotPolicyTest) {
+    auto build_env = [&](const std::string& collection_name) {
+        LSN_TYPE lsn = 1;
+        auto ss = CreateCollection(collection_name, ++lsn);
+        ASSERT_TRUE(ss);
+
+        SegmentFileContext sf_context;
+        SFContextBuilder(sf_context, ss);
+
+        auto& partitions = ss->GetResources<Partition>();
+        auto total_row_cnt = 0;
+        for (auto& kv : partitions) {
+            auto num = RandomInt(10, 10);
+            for (auto i = 0; i < num; ++i) {
+                auto row_cnt = RandomInt(100, 100);
+                ASSERT_TRUE(CreateSegment(ss, kv.first, ++lsn, sf_context, row_cnt).ok());
+                total_row_cnt += row_cnt;
+                std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            }
+        };
+
+        auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+    };
+
+    {
+        build_env("c1");
+    }
+    {
+        fiu_enable("snapshot.policy.stale_count_4", 1, nullptr, 0);
+        build_env("c2");
+        fiu_disable("snapshot.policy.stale_count_4");
+    }
+    {
+        fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+        fiu_enable("snapshot.policy.duration_50ms", 1, nullptr, 0);
+        build_env("c3");
+
+        fiu_disable("snapshot.policy.w_cluster");
+        fiu_disable("snapshot.policy.duration_50ms");
+    }
+    {
+        fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+        fiu_enable("snapshot.policy.duration_100ms", 1, nullptr, 0);
+        build_env("c4");
+
+        fiu_disable("snapshot.policy.w_cluster");
+        fiu_disable("snapshot.policy.duration_100ms");
+    }
 }
 
 TEST_F(SnapshotTest, DropSegmentTest){
