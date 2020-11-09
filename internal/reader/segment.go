@@ -7,7 +7,6 @@ package reader
 #cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "collection_c.h"
-#include "partition_c.h"
 #include "segment_c.h"
 
 */
@@ -41,8 +40,7 @@ func newSegment(collection *Collection, segmentID int64) *Segment {
 		CSegmentBase
 		newSegment(CPartition partition, unsigned long segment_id);
 	*/
-	var tmp C.CPartition
-	segmentPtr := C.NewSegment(tmp, C.ulong(segmentID))
+	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID))
 	var newSegment = &Segment{segmentPtr: segmentPtr, segmentID: segmentID}
 
 	return newSegment

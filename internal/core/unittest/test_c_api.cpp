@@ -10,41 +10,23 @@
 namespace chrono = std::chrono;
 
 TEST(CApiTest, CollectionTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
+    auto collection = NewCollection(schema_tmp_conf);
     DeleteCollection(collection);
-}
-
-TEST(CApiTest, PartitonTest) {
-    auto collection_name = "collection0";
-    auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    DeleteCollection(collection);
-    DeletePartition(partition);
 }
 
 TEST(CApiTest, SegmentTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, InsertTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -73,17 +55,13 @@ TEST(CApiTest, InsertTest) {
     assert(res == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, DeleteTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -94,17 +72,13 @@ TEST(CApiTest, DeleteTest) {
     assert(del_res == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, SearchTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -146,17 +120,13 @@ TEST(CApiTest, SearchTest) {
     assert(sea_res == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, BuildIndexTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
@@ -205,49 +175,37 @@ TEST(CApiTest, BuildIndexTest) {
     assert(sea_res == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, IsOpenedTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     auto is_opened = IsOpened(segment);
     assert(is_opened);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, CloseTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     auto status = Close(segment);
     assert(status == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
     std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
@@ -285,7 +243,6 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     assert(memory_usage_size == 2785280);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
@@ -315,12 +272,9 @@ generate_data(int N) {
 }  // namespace
 
 TEST(CApiTest, TestSearchPreference) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     auto beg = chrono::high_resolution_clock::now();
     auto next = beg;
@@ -432,17 +386,13 @@ TEST(CApiTest, TestSearchPreference) {
     //    }
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, GetDeletedCountTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     long delete_row_ids[] = {100000, 100001, 100002};
     unsigned long delete_timestamps[] = {0, 0, 0};
@@ -457,17 +407,13 @@ TEST(CApiTest, GetDeletedCountTest) {
     assert(deleted_count == 0);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, GetRowCountTest) {
-    auto collection_name = "collection0";
     auto schema_tmp_conf = "";
-    auto collection = NewCollection(collection_name, schema_tmp_conf);
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
+    auto collection = NewCollection(schema_tmp_conf);
+    auto segment = NewSegment(collection, 0);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -480,23 +426,18 @@ TEST(CApiTest, GetRowCountTest) {
     assert(row_count == N);
 
     DeleteCollection(collection);
-    DeletePartition(partition);
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, SchemaTest) {
-    std::string schema_string =
-        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
-        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
-        "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
-        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
-
-    auto collection_name = "collection0";
-    auto collection = NewCollection(collection_name, schema_string.data());
-    auto partition_name = "partition0";
-    auto partition = NewPartition(collection, partition_name);
-    auto segment = NewSegment(partition, 0);
-    DeleteCollection(collection);
-    DeletePartition(partition);
-    DeleteSegment(segment);
-}
+//TEST(CApiTest, SchemaTest) {
+//    std::string schema_string =
+//        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
+//        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
+//        "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
+//        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
+//
+//    auto collection = NewCollection(schema_string.data());
+//    auto segment = NewSegment(collection, 0);
+//    DeleteCollection(collection);
+//    DeleteSegment(segment);
+//}

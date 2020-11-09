@@ -7,7 +7,6 @@ package reader
 #cgo LDFLAGS: -L../core/output/lib -lmilvus_segcore -Wl,-rpath=../core/output/lib
 
 #include "collection_c.h"
-#include "partition_c.h"
 #include "segment_c.h"
 
 */
