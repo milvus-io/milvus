@@ -179,7 +179,7 @@ func GenDSL(name string, metricType milvus.MetricType, indexType milvus.IndexTyp
 
 func GenInvalidStrs() []string {
 	strs := []string{
-		"_",
+		//"_",
 		" ",
 		"测试",
 	}

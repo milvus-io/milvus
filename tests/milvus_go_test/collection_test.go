@@ -31,6 +31,12 @@ func TestCreateCollectionBinary(t *testing.T) {
 	t.Log(status)
 	assert.Equal(t, status.Ok(), true)
 	assert.Equal(t, value, true)
+	mapping, _, _ := client.GetCollectionInfo(name)
+	var fieldType []milvus.DataType
+	for _, field:= range mapping.Fields {
+		fieldType = append(fieldType, field.Type)
+	}
+	assert.Contains(t, fieldType, milvus.VECTORBINARY)
 }
 
 func TestCreateCollectionWithoutConnect(t *testing.T) {
