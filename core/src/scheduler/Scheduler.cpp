@@ -78,7 +78,7 @@ Scheduler::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, Re
         auto next_res_name = task->path().Next();
         auto next_res = res_mgr->GetResource(next_res_name);
         event->task_table_item_->Move();
-        next_res->task_table().Put(task, task_item);
+        next_res->task_table().PutToLoad(task, task_item);
     }
 }
 

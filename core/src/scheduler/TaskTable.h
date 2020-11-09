@@ -13,6 +13,7 @@
 
 #include <deque>
 #include <functional>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -102,8 +103,7 @@ struct TaskTableItem : public interface::dumpable {
 
 class TaskTable : public interface::dumpable {
  public:
-    TaskTable() : table_(TASK_TABLE_MAX_COUNT) {
-    }
+    TaskTable() = default;
 
     TaskTable(const TaskTable&) = delete;
     TaskTable(TaskTable&&) = delete;
@@ -118,106 +118,24 @@ class TaskTable : public interface::dumpable {
         subscriber_ = std::move(subscriber);
     }
 
+    TaskTableItemPtr
+    PickToLoad();
+
+    TaskTableItemPtr
+    PickToExecute();
+
     void
-    Put(TaskPtr task, TaskTableItemPtr from = nullptr);
+    PutToLoad(TaskPtr task, TaskTableItemPtr from = nullptr);
 
-    size_t
-    TaskToExecute();
-
-    std::vector<uint64_t>
-    PickToLoad(uint64_t limit);
-
-    std::vector<uint64_t>
-    PickToExecute(uint64_t limit);
-
- public:
-    inline const TaskTableItemPtr& operator[](uint64_t index) {
-        return table_[index];
-    }
-
-    inline const TaskTableItemPtr&
-    at(uint64_t index) {
-        return table_[index];
-    }
-
-    inline size_t
-    capacity() {
-        return table_.capacity();
-    }
-
-    inline size_t
-    size() {
-        return table_.size();
-    }
-
- public:
-    /******** Action ********/
-
-    // TODO(wxyu): bool to Status
-    /*
-     * Load a task;
-     * Set state loading;
-     * Called by loader;
-     */
-    inline bool
-    Load(uint64_t index) {
-        return table_[index]->Load();
-    }
-
-    /*
-     * Load task finished;
-     * Set state loaded;
-     * Called by loader;
-     */
-    inline bool
-    Loaded(uint64_t index) {
-        return table_[index]->Loaded();
-    }
-
-    /*
-     * Execute a task;
-     * Set state executing;
-     * Called by executor;
-     */
-    inline bool
-    Execute(uint64_t index) {
-        return table_[index]->Execute();
-    }
-
-    /*
-     * Execute task finished;
-     * Set state executed;
-     * Called by executor;
-     */
-    inline bool
-    Executed(uint64_t index) {
-        return table_[index]->Executed();
-    }
-
-    /*
-     * Move a task;
-     * Set state moving;
-     * Called by scheduler;
-     */
-
-    inline bool
-    Move(uint64_t index) {
-        return table_[index]->Move();
-    }
-
-    /*
-     * Move task finished;
-     * Set state moved;
-     * Called by scheduler;
-     */
-    inline bool
-    Moved(uint64_t index) {
-        return table_[index]->Moved();
-    }
+    void
+    PutToExecute(TaskTableItemPtr task);
 
  private:
     std::uint64_t id_ = 0;
-    CircleQueue<TaskTableItemPtr> table_;
+    std::list<TaskTableItemPtr> load_queue_;
+    std::list<TaskTableItemPtr> execute_queue_;
+    std::mutex load_mutex_;
+    std::mutex execute_mutex_;
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always

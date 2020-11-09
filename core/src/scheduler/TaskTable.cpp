@@ -153,161 +153,55 @@ TaskTableItem::SetFinished(const TaskPtr& t) {
     task = t;
 }
 
-std::vector<uint64_t>
-TaskTable::PickToLoad(uint64_t limit) {
-#if 1
-    // TimeRecorder rc("");
-    std::vector<uint64_t> indexes;
-    bool cross = false;
-
-    uint64_t available_begin = table_.front() + 1;
-    for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
-        auto index = available_begin + i;
-        if (table_[index] == nullptr) {
-            break;
-        }
-        if (index % table_.capacity() == table_.rear()) {
-            break;
-        }
-        if (not cross && table_[index]->IsFinish()) {
-            table_.set_front(index);
-        } else if (table_[index]->state == TaskTableItemState::LOADED) {
-            cross = true;
-            ++loaded_count;
-            if (loaded_count >= 1) {
-                return std::vector<uint64_t>();
-            }
-        } else if (table_[index]->state == TaskTableItemState::START) {
-            cross = true;
-            auto task = table_[index]->task;
-
-            // if task is a build index task, limit it
-            if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
-                if (BuildMgrInst::GetInstance()->NumOfAvailable() < 1) {
-                    LOG_SERVER_WARNING_ << "BuildMgr doesnot have available place for building index";
-                    continue;
-                }
-            }
-            indexes.push_back(index);
-            ++pick_count;
-        } else {
-            cross = true;
-        }
+TaskTableItemPtr
+TaskTable::PickToLoad() {
+    std::lock_guard<std::mutex> lock(load_mutex_);
+    if (load_queue_.size() > 0) {
+        auto task = load_queue_.front();
+        load_queue_.pop_front();
+        return task;
+    } else {
+        return nullptr;
     }
-    // rc.ElapseFromBegin("PickToLoad ");
-    return indexes;
-#else
-    size_t count = 0;
-    for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
-        if (not table_[j]) {
-            LOG_SERVER_WARNING_ << "collection[" << j << "] is nullptr";
-        }
-
-        if (table_[j]->task->path().Current() == "cpu") {
-            if (table_[j]->task->Type() == TaskType::BuildIndexTask && BuildMgrInst::GetInstance()->numoftasks() < 1) {
-                return std::vector<uint64_t>();
-            }
-        }
-
-        if (table_[j]->state == TaskTableItemState::LOADED) {
-            ++count;
-            if (count > 2)
-                return std::vector<uint64_t>();
-        }
-    }
-
-    std::vector<uint64_t> indexes;
-    bool cross = false;
-    for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
-        if (not cross && table_[i]->IsFinish()) {
-            last_finish_ = i;
-        } else if (table_[i]->state == TaskTableItemState::START) {
-            auto task = table_[i]->task;
-            if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
-                if (BuildMgrInst::GetInstance()->numoftasks() == 0) {
-                    break;
-                } else {
-                    cross = true;
-                    indexes.push_back(i);
-                    ++count;
-                    BuildMgrInst::GetInstance()->take();
-                }
-            } else {
-                cross = true;
-                indexes.push_back(i);
-                ++count;
-            }
-        }
-    }
-    return indexes;
-#endif
 }
 
-std::vector<uint64_t>
-TaskTable::PickToExecute(uint64_t limit) {
-    // TimeRecorder rc("");
-    std::vector<uint64_t> indexes;
-    bool cross = false;
-    uint64_t available_begin = table_.front() + 1;
-    for (uint64_t i = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
-        uint64_t index = available_begin + i;
-        if (not table_[index]) {
-            break;
-        }
-        if (index % table_.capacity() == table_.rear()) {
-            break;
-        }
-
-        if (not cross && table_[index]->IsFinish()) {
-            table_.set_front(index);
-        } else if (table_[index]->state == TaskTableItemState::LOADED) {
-            cross = true;
-            indexes.push_back(index);
-            ++pick_count;
-        } else {
-            cross = true;
-        }
+TaskTableItemPtr
+TaskTable::PickToExecute() {
+    std::lock_guard<std::mutex> lock(execute_mutex_);
+    if (execute_queue_.size() > 0) {
+        auto task = execute_queue_.front();
+        execute_queue_.pop_front();
+        return task;
+    } else {
+        return nullptr;
     }
-    // rc.ElapseFromBegin("PickToExecute ");
-    return indexes;
 }
 
 void
-TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
+TaskTable::PutToLoad(TaskPtr task, TaskTableItemPtr from) {
     auto item = std::make_shared<TaskTableItem>(std::move(from));
     item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
-    table_.put(std::move(item));
+    load_queue_.emplace_back(item);
     if (subscriber_) {
         subscriber_();
     }
 }
 
-size_t
-TaskTable::TaskToExecute() {
-    size_t count = 0;
-    auto begin = table_.front() + 1;
-    for (size_t i = 0; i < table_.size(); ++i) {
-        auto index = begin + i;
-        if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
-            ++count;
-        }
+void
+TaskTable::PutToExecute(TaskTableItemPtr task) {
+    execute_queue_.emplace_back(task);
+    if (subscriber_) {
+        subscriber_();
     }
-    return count;
 }
 
 json
 TaskTable::Dump() const {
     std::vector<json> list;
     std::cout << "for start" << std::endl;
-
-    std::cout << "table.front: " << table_.front() << std::endl;
-    std::cout << "table.rear: " << table_.rear() << std::endl;
-    for (auto i = table_.front(); i < table_.rear(); i++) {
-        list.push_back(table_[i]->Dump());
-    }
     std::cout << "for end" << std::endl;
     return json{list};
 }

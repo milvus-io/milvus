@@ -93,7 +93,7 @@ JobMgr::worker_function() {
                 if (task->Type() == TaskType::BuildIndexTask && task->path().Last() == "cpu") {
                     CPUBuilderInst::GetInstance()->Put(task);
                 } else {
-                    disk->task_table().Put(task, nullptr);
+                    disk->task_table().PutToLoad(task, nullptr);
                 }
             }
         }
