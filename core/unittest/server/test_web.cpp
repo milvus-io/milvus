@@ -807,7 +807,7 @@ TEST_F(WebControllerTest, SEARCH) {
                             "field_vec":
                                 {
                                 "topk": 2,
-                                "values": [[1, 2, 3, 4]],
+                                "query": [[1, 2, 3, 4]],
                                 "metric_type": "L2",
                                 "params": {
                                     "nprobe": 1024

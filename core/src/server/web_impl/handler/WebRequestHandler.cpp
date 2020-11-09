@@ -657,7 +657,7 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
                 vector_query->extra_params = vector_param_it.value()["params"];
             }
 
-            auto& values = vector_param_it.value()["values"];
+            auto& values = vector_param_it.value()["query"];
             vector_query->query_vector.vector_count = values.size();
             for (auto& vector_records : values) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
@@ -819,19 +819,21 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             return status;
         }
 
-        nlohmann::json result_json;
+        milvus::json result_json;
         result_json["nq"] = result->row_num_;
         if (result->row_num_ == 0) {
             result_json["result"] = std::vector<int64_t>();
-            result_str = result_json.dump();
+            milvus::json data_json;
+            data_json["data"] = result_json;
+            result_str = data_json.dump();
             return Status::OK();
         }
 
         auto step = result->result_ids_.size() / result->row_num_;  // topk
         for (int64_t i = 0; i < result->row_num_; i++) {
-            nlohmann::json raw_result_json;
+            milvus::json raw_result_json;
             for (size_t j = 0; j < step; j++) {
-                nlohmann::json one_result_json;
+                milvus::json one_result_json;
                 one_result_json["id"] = std::to_string(result->result_ids_.at(i * step + j));
                 one_result_json["distance"] = std::to_string(result->result_distances_.at(i * step + j));
                 FloatJson one_entity_json;
@@ -898,7 +900,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             }
             result_json["result"].push_back(raw_result_json);
         }
-        nlohmann::json data_json;
+        milvus::json data_json;
         data_json["data"] = result_json;
         result_str = data_json.dump();
     }
@@ -908,7 +910,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
 
 StatusDtoT
 WebRequestHandler::DeleteByIDs(const OString& collection_name, const OString& payload, OString& response) {
-    auto json = nlohmann::json::parse(payload->std_str());
+    auto json = milvus::json::parse(payload->std_str());
     std::vector<int64_t> entity_ids;
     if (!json.contains("ids")) {
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, R"(Field "delete" must contains "ids")");
@@ -928,7 +930,7 @@ WebRequestHandler::DeleteByIDs(const OString& collection_name, const OString& pa
 
     auto status = req_handler_.DeleteEntityByID(context_ptr_, collection_name->std_str(), entity_ids);
 
-    nlohmann::json result_json;
+    milvus::json result_json;
     AddStatusToJson(result_json, status.code(), status.message());
     std::string result_str = result_json.dump();
 
@@ -939,7 +941,7 @@ WebRequestHandler::DeleteByIDs(const OString& collection_name, const OString& pa
 
 Status
 WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std::vector<int64_t>& ids,
-                                  std::vector<std::string>& field_names, nlohmann::json& json_out) {
+                                  std::vector<std::string>& field_names, milvus::json& json_out) {
     std::vector<bool> valid_row;
     engine::DataChunkPtr data_chunk;
     engine::snapshot::FieldElementMappings field_mappings;
@@ -1243,7 +1245,7 @@ WebRequestHandler::SetGpuConfig(const GPUConfigDtoT& gpu_config_dto) {
  */
 StatusDtoT
 WebRequestHandler::CreateCollection(const milvus::server::web::OString& body) {
-    auto json_str = nlohmann::json::parse(body->c_str());
+    auto json_str = milvus::json::parse(body->c_str());
     std::string collection_name = json_str["collection_name"];
 
     // TODO(yukun): do checking
@@ -1322,9 +1324,9 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         page_size = std::min(collections.size() - offset, static_cast<size_t>(page_size));
     }
 
-    nlohmann::json collections_json;
+    milvus::json collections_json;
     for (int64_t i = offset; i < page_size + offset; i++) {
-        nlohmann::json collection_json;
+        milvus::json collection_json;
         status = GetCollectionMetaInfo(collections.at(i), collection_json);
         if (!status.ok()) {
             ASSIGN_RETURN_STATUS_DTO(status)
@@ -1332,7 +1334,7 @@ WebRequestHandler::ShowCollections(const OQueryParams& query_params, OString& re
         collections_json.push_back(collection_json);
     }
 
-    nlohmann::json result_json;
+    milvus::json result_json;
     result_json["data"]["total"] = collections.size();
     if (collections_json.empty()) {
         result_json["data"]["collections"] = std::vector<int64_t>();
@@ -1358,13 +1360,13 @@ WebRequestHandler::GetCollection(const OString& collection_name, const OQueryPar
     }
 
     if (!stat.empty() && stat == "stat") {
-        nlohmann::json json;
+        milvus::json json;
         status = GetCollectionStat(collection_name->std_str(), json);
         result = status.ok() ? json.dump().c_str() : "NULL";
     } else {
-        nlohmann::json json;
+        milvus::json json;
         status = GetCollectionMetaInfo(collection_name->std_str(), json);
-        nlohmann::json result_json;
+        milvus::json result_json;
         result_json["data"] = json;
         result = status.ok() ? result_json.dump().c_str() : "NULL";
     }
@@ -1387,7 +1389,7 @@ WebRequestHandler::DropCollection(const OString& collection_name) {
 StatusDtoT
 WebRequestHandler::CreateIndex(const OString& collection_name, const OString& field_name, const OString& body) {
     try {
-        auto request_json = nlohmann::json::parse(body->std_str());
+        auto request_json = milvus::json::parse(body->std_str());
         if (!request_json.contains("index_type")) {
             RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Field \'index_type\' is required");
         }
@@ -1489,7 +1491,7 @@ StatusDtoT
 WebRequestHandler::DropPartition(const OString& collection_name, const OString& body) {
     std::string tag;
     try {
-        auto json = nlohmann::json::parse(body->std_str());
+        auto json = milvus::json::parse(body->std_str());
         tag = json["partition_tag"].get<std::string>();
     } catch (nlohmann::detail::parse_error& e) {
         RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
@@ -1544,8 +1546,8 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
         ASSIGN_RETURN_STATUS_DTO(status)
     }
 
-    nlohmann::json info_json = nlohmann::json::parse(stats);
-    nlohmann::json segments_json = nlohmann::json::array();
+    milvus::json info_json = milvus::json::parse(stats);
+    milvus::json segments_json = milvus::json::array();
     for (auto& par : info_json["partitions"]) {
         if (!(all_required || tag.empty() || tag == par["tag"])) {
             continue;
@@ -1559,13 +1561,13 @@ WebRequestHandler::ShowSegments(const OString& collection_name, const OQueryPara
             }
         }
     }
-    nlohmann::json result_json;
+    milvus::json result_json;
     if (!all_required) {
         int64_t size = segments_json.size();
         int iter_begin = std::min(size, offset);
         int iter_end = std::min(size, offset + page_size);
 
-        nlohmann::json segments_slice_json = nlohmann::json::array();
+        milvus::json segments_slice_json = milvus::json::array();
         segments_slice_json.insert(segments_slice_json.begin(), segments_json.begin() + iter_begin,
                                    segments_json.begin() + iter_end);
         result_json["segments"] = segments_slice_json;  // segments_json;
@@ -1603,7 +1605,7 @@ WebRequestHandler::GetSegmentInfo(const OString& collection_name, const OString&
     int64_t segment_id = atol(id_str.c_str());
     std::string re = info->std_str();
     status = Status::OK();
-    nlohmann::json json;
+    milvus::json json;
     // Get vectors
     if (re == "vectors") {
         status = GetSegmentVectors(collection_name->std_str(), segment_id, page_size, offset, json);
@@ -1628,7 +1630,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
         RETURN_STATUS_DTO(BODY_FIELD_LOSS, "Request payload is required.")
     }
 
-    auto body_json = nlohmann::json::parse(body->c_str());
+    auto body_json = milvus::json::parse(body->c_str());
     std::string partition_name;
     if (body_json.contains("partition_tag")) {
         partition_name = body_json["partition_tag"];
@@ -1722,14 +1724,14 @@ WebRequestHandler::GetEntity(const milvus::server::web::OString& collection_name
     auto status = Status::OK();
     try {
         if (query_params.get("offset") && query_params.get("page_size")) {
-            nlohmann::json json_out;
+            milvus::json json_out;
             auto offset = std::stoi(query_params.get("offset")->std_str(), nullptr);
             auto page_size = std::stoi(query_params.get("page_size")->std_str(), nullptr);
             std::string partition_tag;
             if (query_params.get("partition_tag")) {
                 partition_tag = query_params.get("partition_tag")->std_str();
             }
-            nlohmann::json result_json;
+            milvus::json result_json;
             status = GetPageEntities(collection_name->std_str(), partition_tag, page_size, offset, json_out);
             if (!status.ok()) {
                 result_json["data"]["entities"] = json::array();
@@ -1792,9 +1794,9 @@ WebRequestHandler::EntityOp(const OString& collection_name, const OQueryParams& 
     std::string result_str;
 
     try {
-        nlohmann::json payload_json;
+        milvus::json payload_json;
         if (!payload->std_str().empty()) {
-            payload_json = nlohmann::json::parse(payload->std_str());
+            payload_json = milvus::json::parse(payload->std_str());
         }
         if (query_params.get("offset") || query_params.get("page_size") || query_params.get("ids")) {
             status = GetEntity(collection_name, query_params, response);
@@ -1872,7 +1874,7 @@ WebRequestHandler::SystemOp(const OString& op, const OString& body_str, OString&
         fiu_do_on("WebRequestHandler.SystemOp.raise_parse_error",
                   throw nlohmann::detail::parse_error::create(0, 0, ""));
         fiu_do_on("WebRequestHandler.SystemOp.raise_type_error", throw nlohmann::detail::type_error::create(0, ""));
-        nlohmann::json j = nlohmann::json::parse(body_str->c_str());
+        milvus::json j = milvus::json::parse(body_str->c_str());
         if (op->equals("task")) {
             if (j.contains("load")) {
                 status = PreLoadCollection(j["load"], result_str);
