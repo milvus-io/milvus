@@ -24,7 +24,6 @@ type Proxy struct {
 	proxyLoopCancel func()
 	proxyLoopWg     sync.WaitGroup
 
-	servicepb.UnimplementedMilvusServiceServer
 	grpcServer            *grpc.Server
 	masterConn            *grpc.ClientConn
 	masterClient          masterpb.MasterClient
@@ -32,6 +31,10 @@ type Proxy struct {
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
 	queryResultMsgStream  *msgstream.PulsarMsgStream
+
+	// Add callback functions at different stages
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 func CreateProxy(ctx context.Context) (*Proxy, error) {
@@ -40,6 +43,25 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		ctx: ctx,
 	}
 	return m, nil
+}
+
+// AddStartCallback adds a callback in the startServer phase.
+func (s *Proxy) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
+}
+
+func (s *Proxy) startProxy(ctx context.Context) error {
+
+	// Run callbacks
+	for _, cb := range s.startCallbacks {
+		cb()
+	}
+	return nil
+}
+
+// AddCloseCallback adds a callback in the Close phase.
+func (s *Proxy) AddCloseCallback(callbacks ...func()) {
+	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
 
 func (p *Proxy) grpcLoop() {
@@ -55,16 +77,6 @@ func (p *Proxy) grpcLoop() {
 	servicepb.RegisterMilvusServiceServer(p.grpcServer, p)
 	if err = p.grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Proxy grpc server fatal error=%v", err)
-	}
-
-	ctx, cancel := context.WithCancel(p.proxyLoopCtx)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("proxy is closed...")
-			return
-		}
 	}
 }
 
@@ -164,6 +176,8 @@ func (p *Proxy) queryResultLoop() {
 	}
 }
 
+
+
 func (p *Proxy) startProxyLoop(ctx context.Context) {
 	p.proxyLoopCtx, p.proxyLoopCancel = context.WithCancel(ctx)
 	p.proxyLoopWg.Add(4)
@@ -177,8 +191,26 @@ func (p *Proxy) startProxyLoop(ctx context.Context) {
 }
 
 func (p *Proxy) Run() error {
+	if err := p.startProxy(p.ctx); err != nil {
+		return err
+	}
 	p.startProxyLoop(p.ctx)
-
-	p.proxyLoopWg.Wait()
 	return nil
+}
+
+func (p *Proxy) stopProxyLoop() {
+	if p.grpcServer != nil{
+		p.grpcServer.GracefulStop()
+	}
+	p.proxyLoopCancel()
+	p.proxyLoopWg.Wait()
+}
+
+// Close closes the server.
+func (p *Proxy) Close() {
+	p.stopProxyLoop()
+	for _, cb := range p.closeCallbacks {
+		cb()
+	}
+	log.Print("proxy closed.")
 }

@@ -3,9 +3,10 @@ package msgstream
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/gogo/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"testing"
 )
 
 type InsertTask struct {
@@ -26,7 +27,7 @@ func (tt *InsertTask) Marshal(input *TsMsg) ([]byte, error) {
 func (tt *InsertTask) Unmarshal(input []byte) (*TsMsg, error) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	testMsg := &InsertTask{InsertMsg: InsertMsg{InsertRequest:insertRequest}}
+	testMsg := &InsertTask{InsertMsg: InsertMsg{InsertRequest: insertRequest}}
 	testMsg.Tag = testMsg.PartitionTag
 
 	if err != nil {
@@ -36,7 +37,7 @@ func (tt *InsertTask) Unmarshal(input []byte) (*TsMsg, error) {
 	return &tsMsg, nil
 }
 
-func getMsg(reqId UniqueID, hashValue int32) *TsMsg {
+func getMsg(reqID UniqueID, hashValue int32) *TsMsg {
 	var tsMsg TsMsg
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
@@ -45,7 +46,7 @@ func getMsg(reqId UniqueID, hashValue int32) *TsMsg {
 	}
 	insertRequest := internalPb.InsertRequest{
 		MsgType:        internalPb.MsgType_kInsert,
-		ReqId:          reqId,
+		ReqId:          reqID,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",
 		SegmentId:      1,
@@ -59,7 +60,7 @@ func getMsg(reqId UniqueID, hashValue int32) *TsMsg {
 	}
 
 	testTask := InsertTask{
-		InsertMsg:insertMsg,
+		InsertMsg: insertMsg,
 	}
 	tsMsg = &testTask
 	return &tsMsg

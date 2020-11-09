@@ -2,10 +2,10 @@ package msgstream
 
 import (
 	"context"
-	"github.com/gogo/protobuf/proto"
 	"log"
 	"sync"
 
+	"github.com/gogo/protobuf/proto"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -42,7 +42,7 @@ type PulsarMsgStream struct {
 	unmarshal      *UnmarshalDispatcher
 	receiveBuf     chan *MsgPack
 	receiveBufSize int64
-	wait           sync.WaitGroup
+	wait           *sync.WaitGroup
 	streamCancel   func()
 }
 
@@ -99,6 +99,7 @@ func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *PulsarMsgStream) Start() {
+	ms.wait = &sync.WaitGroup{}
 	if ms.consumers != nil {
 		ms.wait.Add(1)
 		go ms.bufMsgPackToChannel()
@@ -131,13 +132,13 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		return nil
 	}
 	reBucketValues := make([][]int32, len(tsMsgs))
-	for channelId, tsMsg := range tsMsgs {
+	for channelID, tsMsg := range tsMsgs {
 		hashValues := (*tsMsg).HashKeys()
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
 			bucketValues[index] = hashValue % int32(len(ms.producers))
 		}
-		reBucketValues[channelId] = bucketValues
+		reBucketValues[channelID] = bucketValues
 	}
 
 	var result map[int32]*MsgPack
@@ -147,13 +148,13 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		result = make(map[int32]*MsgPack)
 		for i, request := range tsMsgs {
 			keys := reBucketValues[i]
-			for _, channelId := range keys {
-				_, ok := result[channelId]
-				if ok == false {
+			for _, channelID := range keys {
+				_, ok := result[channelID]
+				if !ok {
 					msgPack := MsgPack{}
-					result[channelId] = &msgPack
+					result[channelID] = &msgPack
 				}
-				result[channelId].Msgs = append(result[channelId].Msgs, request)
+				result[channelID].Msgs = append(result[channelID].Msgs, request)
 			}
 		}
 	}
@@ -223,7 +224,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				chanLen := len(consumerChan)
 				for l := 0; l < chanLen; l++ {
 					pulsarMsg, ok := <-consumerChan
-					if ok == false {
+					if !ok {
 						log.Printf("channel closed")
 						return
 					}
@@ -271,8 +272,11 @@ func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64) *PulsarTtMs
 }
 
 func (ms *PulsarTtMsgStream) Start() {
-	ms.wait.Add(1)
-	go ms.bufMsgPackToChannel()
+	ms.wait = &sync.WaitGroup{}
+	if ms.consumers != nil {
+		ms.wait.Add(1)
+		go ms.bufMsgPackToChannel()
+	}
 }
 
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
@@ -294,8 +298,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 			}
 			wg.Wait()
 			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp)
-			if ok == false {
-				log.Printf("timeTick err")
+			if !ok {
+				log.Printf("All timeTick's timestamps are inconsistent")
 			}
 
 			timeTickBuf := make([]*TsMsg, 0)
@@ -333,7 +337,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 		case <-ms.ctx.Done():
 			return
 		case pulsarMsg, ok := <-(*ms.consumers[channelIndex]).Chan():
-			if ok == false {
+			if !ok {
 				log.Printf("consumer closed!")
 				return
 			}
@@ -363,10 +367,10 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
 	checkMap := make(map[Timestamp]int)
 	for _, v := range msg {
-		checkMap[v] += 1
+		checkMap[v]++
 	}
 	if len(checkMap) <= 1 {
-		for k, _ := range checkMap {
+		for k := range checkMap {
 			return k, true
 		}
 	}

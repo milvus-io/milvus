@@ -50,7 +50,7 @@ func main() {
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	//svr.Close()
+	svr.Close()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
