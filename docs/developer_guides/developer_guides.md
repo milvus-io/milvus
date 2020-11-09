@@ -1207,9 +1207,14 @@ func newHardTimeTickBarrier(ctx context.Context, ttStream *MsgStream, peerIds []
 
 
  ```go
+type TimeTickBarrier interface {
+	GetTimeTick() (Timestamp,error)
+	Start() error
+}
+
 type timeSyncMsgProducer struct {
-  proxyTtBarrier *softTimeTickBarrier
-  WriteNodeTtBarrier *hardTimeTickBarrier
+  proxyTtBarrier TimeTickBarrier // softTimeTickBarrier
+  WriteNodeTtBarrier TimeTickBarrier //hardTimeTickBarrier
   
   dmSyncStream *MsgStream // insert & delete
   k2sSyncStream *MsgStream

@@ -8,17 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
-
-type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
 
 const stopReadFlagId int64 = -1
 
