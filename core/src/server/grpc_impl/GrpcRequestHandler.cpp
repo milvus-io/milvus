@@ -1834,7 +1834,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     // step 6: construct and return result
     response->set_row_num(result->row_num_);
     int64_t id_size = result->result_ids_.size();
-    for (long result_id : result->result_ids_) {
+    for (auto result_id : result->result_ids_) {
         if (result_id == -1) {
             id_size--;
             grpc_entity->add_valid_row(false);
