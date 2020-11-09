@@ -35,7 +35,7 @@ class TestMixBase:
              'index_file_size': index_file_size,
              'metric_type': "L2"})
         for i in range(10):
-            status, ids = milvus_instance.insert(collection, vectors)
+            status, ids = milvus_instance.bulk_insert(collection, vectors)
             # logging.getLogger().info(ids)
             if i == 0:
                 id_0 = ids[0]; id_1 = ids[1]
@@ -47,7 +47,7 @@ class TestMixBase:
         #     logging.getLogger().info(result)
         def insert(milvus_instance):
             logging.getLogger().info("In add vectors")
-            status, ids = milvus_instance.insert(collection, vectors)
+            status, ids = milvus_instance.bulk_insert(collection, vectors)
             logging.getLogger().info(status)
         def search(milvus_instance):
             logging.getLogger().info("In search vectors")
@@ -88,7 +88,7 @@ class TestMixBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.L2}
             connect.create_collection(param)
-            status, ids = connect.insert(collection_name=collection_name, records=vectors)
+            status, ids = connect.bulk_insert(collection_name=collection_name, records=vectors)
             idx.append(ids[0])
             idx.append(ids[10])
             idx.append(ids[20])
@@ -101,7 +101,7 @@ class TestMixBase:
                      'index_file_size': index_file_size,
                      'metric_type': MetricType.IP}
             connect.create_collection(param)
-            status, ids = connect.insert(collection_name=collection_name, records=vectors)
+            status, ids = connect.bulk_insert(collection_name=collection_name, records=vectors)
             assert status.OK()
             status = connect.flush([collection_name])
             assert status.OK()

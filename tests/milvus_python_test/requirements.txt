@@ -9,4 +9,4 @@ pytest-level==0.1.1
 pytest-xdist==1.23.2
 scikit-learn>=0.19.1
 kubernetes==10.0.1
-pymilvus-test>=0.4.5
+pymilvus-test>=0.5.0,<0.6.0

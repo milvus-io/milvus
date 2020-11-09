@@ -87,12 +87,8 @@ class ClientProxy : public Connection {
     DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, const std::string& dsl,
-           const VectorParam& vector_param, const std::string& extra_params, TopKQueryResult& query_result) override;
-
-    Status
-    SearchPB(const std::string& collection_name, const std::vector<std::string>& partition_list,
-             BooleanQueryPtr& boolean_query, const std::string& extra_params, TopKQueryResult& query_result) override;
+    Search(const std::string& collection_name, const std::vector<std::string>& partition_list, nlohmann::json& dsl,
+           const std::string& extra_params, TopKQueryResult& query_result) override;
 
     Status
     ListIDInSegment(const std::string& collection_name, const int64_t& segment_id,

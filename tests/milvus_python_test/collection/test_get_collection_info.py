@@ -164,7 +164,7 @@ class TestInfoBase:
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
-        res_ids = connect.insert(collection_name, entities)
+        res_ids = connect.bulk_insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
@@ -188,7 +188,7 @@ class TestInfoBase:
         fields["segment_row_limit"] = get_segment_row_limit
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], default_nb, fields["fields"][-1]["params"]["dim"])
-        res_ids = connect.insert(collection_name, entities)
+        res_ids = connect.bulk_insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
