@@ -10,13 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/ValidationUtil.h"
-#include "config/ServerConfig.h"
 #include "db/Constants.h"
 #include "db/Utils.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 #include <algorithm>

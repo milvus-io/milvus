@@ -17,7 +17,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 

@@ -32,7 +32,7 @@
 
 #endif
 
-#include "config/ServerConfig.h"
+#include "value/config/ServerConfig.h"
 //#include "storage/s3/S3ClientWrapper.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/CommonUtil.h"

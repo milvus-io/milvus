@@ -18,7 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "config/ServerConfig.h"
 #include "db/Types.h"
 #include "db/Utils.h"
 #include "db/snapshot/Operations.h"
@@ -28,6 +27,7 @@
 #include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace engine {

@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include "config/ServerConfig.h"
 #include "db/DB.h"
 #include "db/IDGenerator.h"
 #include "db/Types.h"
@@ -19,6 +18,7 @@
 #include "db/wal/WalOperation.h"
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"
+#include "value/config/ServerConfig.h"
 
 #include <list>
 #include <mutex>

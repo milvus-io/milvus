@@ -327,6 +327,8 @@ namespace NGT {
       savedFdNo = -1;
     }
 
+    int64_t memSize() { return sizeof(*this); }
+
     std::string	logFilePath;
     mode_t	mode;
     int		logFD;
@@ -493,6 +495,8 @@ namespace NGT {
       }
     }
 
+    virtual int64_t memSize() { return vector->memSize() * vectorSize + sizeof(vectorSize) * 2; }
+
     TYPE *vector;
     uint16_t vectorSize;
     uint16_t allocatedSize;
@@ -546,6 +550,8 @@ namespace NGT {
       }
     }
 
+    virtual int64_t memSize() { return size(); }
+
     char *vector;
   };
 
@@ -569,6 +575,7 @@ namespace NGT {
     inline void reset(size_t i) {
       getEntry(i) &= ~getBitString(i);
     }
+    inline int64_t memSize() { return size * sizeof(uint64_t); }
     std::vector<uint64_t>	bitvec;
     uint64_t		size;
   };
@@ -1681,6 +1688,7 @@ namespace NGT {
 
 #ifdef ADVANCED_USE_REMOVED_LIST
     size_t count() { return std::vector<TYPE*>::size() == 0 ? 0 : std::vector<TYPE*>::size() - removedList.size() - 1; }
+    virtual int64_t memSize() { return  std::vector<TYPE*>::size() == 0 ? 0 : (*this)[1]->memSize() * std::vector<TYPE*>::size() + removedList.size() * sizeof(size_t); }
   protected:
     std::priority_queue<size_t, std::vector<size_t>, std::greater<size_t> >	removedList;
 #endif
@@ -1750,6 +1758,7 @@ namespace NGT {
       is >> o.distance;
       return is;
     }
+    int64_t memSize() const { return sizeof(id) + sizeof(distance); }
     uint32_t            id;
     float         distance;
   };
@@ -1763,6 +1772,7 @@ namespace NGT {
   public:
     Container(Object &o, ObjectID i):object(o), id(i) {}
     Container(Container &c):object(c.object), id(c.id) {}
+    virtual int64_t memSize() { return sizeof(ObjectID); }
     Object		&object;
     ObjectID		id;
   };
@@ -1817,6 +1827,11 @@ namespace NGT {
 
     ResultPriorityQueue &getWorkingResult() { return workingResult; }
 
+    virtual int64_t memSize();
+//    virtual int64_t memSize() {
+//        auto workres_size = workingResult.size() == 0 ? 0 : workingResult.size() * workingResult.top().memSize();
+//        return sizeof(size_t) * 3 + sizeof(float) * 3 + result->memSize() + 1 + workres_size + Container::memSize();
+//    }
 
     size_t		size;
     Distance		radius;
@@ -1854,6 +1869,7 @@ namespace NGT {
     }
     void	*getQuery() { return query; }
     const std::type_info &getQueryType() { return *queryType; }
+    virtual int64_t memSize() { return std::strlen((char*)getQuery()) + sizeof(getQueryType()) + SearchContainer::memSize(); }
   private:
     void deleteQuery() {
       if (query == 0) {

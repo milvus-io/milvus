@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/strategy/SearchReqStrategy.h"
-#include "config/ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "value/config/ServerConfig.h"
 
 #include <queue>
 #include <string>

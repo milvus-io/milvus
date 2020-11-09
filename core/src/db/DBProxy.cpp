@@ -178,10 +178,5 @@ DBProxy::Compact(const server::ContextPtr& context, const std::string& collectio
     return db_->Compact(context, collection_name, threshold);
 }
 
-bool
-DBProxy::IsBuildingIndex() {
-    return db_ != nullptr && db_->IsBuildingIndex();
-}
-
 }  // namespace engine
 }  // namespace milvus

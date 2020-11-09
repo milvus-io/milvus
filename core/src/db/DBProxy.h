@@ -105,9 +105,6 @@ class DBProxy : public DB {
     Status
     Compact(const server::ContextPtr& context, const std::string& collection_name, double threshold) override;
 
-    bool
-    IsBuildingIndex() override;
-
  protected:
     DBPtr db_;
     DBOptions options_;

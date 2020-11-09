@@ -18,11 +18,11 @@
 #include <unordered_set>
 #include <vector>
 
-#include "config/ConfigMgr.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Resources.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Status.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace engine {

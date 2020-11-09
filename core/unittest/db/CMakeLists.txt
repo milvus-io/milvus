@@ -36,7 +36,7 @@ target_link_libraries( test_db  ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
                                  metrics
-                                 config
+                                 value
                                  stdc++
                                  utils
                                  tracing

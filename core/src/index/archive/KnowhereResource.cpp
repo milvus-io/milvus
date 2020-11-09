@@ -17,7 +17,6 @@
 #include <faiss/utils/distances.h>
 
 #include "NGT/lib/NGT/defines.h"
-#include "config/ServerConfig.h"
 #include "faiss/FaissHook.h"
 #include "faiss/utils/utils.h"
 #include "knowhere/common/Log.h"
@@ -26,6 +25,7 @@
 #include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 #include <fiu/fiu-local.h>
 #include <map>

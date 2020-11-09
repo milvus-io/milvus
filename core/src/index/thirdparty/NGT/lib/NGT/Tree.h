@@ -487,6 +487,8 @@ namespace NGT {
       }
     }
 
+    virtual int64_t memSize() { return sizeof(size_t) * 2 + sizeof(splitMode) + name.size() + leafNodes.memSize() + internalNodes.memSize(); }
+
   public:
     size_t		internalChildrenSize;
     size_t		leafObjectsSize;

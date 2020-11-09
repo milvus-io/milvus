@@ -12,9 +12,9 @@
 #include <chrono>
 #include <oatpp/network/server/Server.hpp>
 
-#include "config/ServerConfig.h"
 #include "server/web_impl/WebServer.h"
 #include "server/web_impl/controller/WebController.hpp"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace server {

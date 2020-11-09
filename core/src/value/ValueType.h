@@ -20,16 +20,16 @@
 #include <utility>
 #include <vector>
 
-#include "Value.h"
+#include "value/Value.h"
 
 namespace milvus {
 
-using configEnum = const std::unordered_map<std::string, int64_t>;
+using valueEnum = const std::unordered_map<std::string, int64_t>;
 std::vector<std::string>
-OptionValue(const configEnum& ce);
+OptionValue(const valueEnum& ce);
 
-struct ConfigError : public std::exception {
-    explicit ConfigError(const std::string& name, const std::string& value) : name_(name), value_(value) {
+struct ValueError : public std::exception {
+    explicit ValueError(const std::string& name, const std::string& value) : name_(name), value_(value) {
     }
 
     virtual std::string
@@ -40,8 +40,8 @@ struct ConfigError : public std::exception {
     const std::string value_;
 };
 
-struct Immutable : public ConfigError {
-    explicit Immutable(const std::string& name, const std::string& value) : ConfigError(name, value) {
+struct Immutable : public ValueError {
+    explicit Immutable(const std::string& name, const std::string& value) : ValueError(name, value) {
     }
 
     std::string
@@ -50,9 +50,9 @@ struct Immutable : public ConfigError {
     }
 };
 
-struct EnumValueNotFound : public ConfigError {
+struct EnumValueNotFound : public ValueError {
     EnumValueNotFound(const std::string& name, const std::string& value, std::vector<std::string> option_values)
-        : ConfigError(name, value), option_values_(std::move(option_values)) {
+        : ValueError(name, value), option_values_(std::move(option_values)) {
     }
 
     std::string
@@ -69,9 +69,9 @@ struct EnumValueNotFound : public ConfigError {
     std::vector<std::string> option_values_;
 };
 
-struct Invalid : public ConfigError {
+struct Invalid : public ValueError {
     Invalid(const std::string& name, const std::string& value, const std::string& reason)
-        : ConfigError(name, value), reason_(reason) {
+        : ValueError(name, value), reason_(reason) {
     }
 
     std::string
@@ -84,9 +84,9 @@ struct Invalid : public ConfigError {
 };
 
 template <typename T>
-struct OutOfRange : public ConfigError {
+struct OutOfRange : public ValueError {
     OutOfRange(const std::string& name, const std::string& value, T lower_bound, T upper_bound)
-        : ConfigError(name, value), lower_bound_(lower_bound), upper_bound_(upper_bound) {
+        : ValueError(name, value), lower_bound_(lower_bound), upper_bound_(upper_bound) {
     }
 
     std::string
@@ -100,8 +100,8 @@ struct OutOfRange : public ConfigError {
     T upper_bound_;
 };
 
-struct Unexpected : public ConfigError {
-    Unexpected(const std::string& name, const std::string& value) : ConfigError(name, value) {
+struct Unexpected : public ValueError {
+    Unexpected(const std::string& name, const std::string& value) : ValueError(name, value) {
     }
 
     std::string
@@ -110,10 +110,10 @@ struct Unexpected : public ConfigError {
     }
 };
 
-class BaseConfig {
+class BaseValue {
  public:
-    BaseConfig(const char* name, const char* alias, bool modifiable);
-    virtual ~BaseConfig() = default;
+    BaseValue(const char* name, const char* alias, bool modifiable);
+    virtual ~BaseValue() = default;
 
  public:
     bool inited_ = false;
@@ -131,12 +131,12 @@ class BaseConfig {
     virtual std::string
     Get() = 0;
 };
-using BaseConfigPtr = std::shared_ptr<BaseConfig>;
+using BaseValuePtr = std::shared_ptr<BaseValue>;
 
-class BoolConfig : public BaseConfig {
+class BoolValue : public BaseValue {
  public:
-    BoolConfig(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
-               std::function<bool(bool val, std::string& err)> is_valid_fn = nullptr);
+    BoolValue(const char* name, const char* alias, bool modifiable, Value<bool>& config, bool default_value,
+              std::function<bool(bool val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<bool>& config_;
@@ -154,11 +154,11 @@ class BoolConfig : public BaseConfig {
     Get() override;
 };
 
-class StringConfig : public BaseConfig {
+class StringValue : public BaseValue {
  public:
-    StringConfig(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
-                 const char* default_value,
-                 std::function<bool(const std::string& val, std::string& err)> is_valid_fn = nullptr);
+    StringValue(const char* name, const char* alias, bool modifiable, Value<std::string>& config,
+                const char* default_value,
+                std::function<bool(const std::string& val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<std::string>& config_;
@@ -176,14 +176,14 @@ class StringConfig : public BaseConfig {
     Get() override;
 };
 
-class EnumConfig : public BaseConfig {
+class EnumValue : public BaseValue {
  public:
-    EnumConfig(const char* name, const char* alias, bool modifiable, configEnum* enumd, Value<int64_t>& config,
-               int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+    EnumValue(const char* name, const char* alias, bool modifiable, valueEnum* enumd, Value<int64_t>& config,
+              int64_t default_value, std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
-    configEnum* enum_value_;
+    valueEnum* enum_value_;
     const int64_t default_value_;
     std::function<bool(int64_t val, std::string& err)> is_valid_fn_;
 
@@ -198,11 +198,11 @@ class EnumConfig : public BaseConfig {
     Get() override;
 };
 
-class IntegerConfig : public BaseConfig {
+class IntegerValue : public BaseValue {
  public:
-    IntegerConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-                  Value<int64_t>& config, int64_t default_value,
-                  std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+    IntegerValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
+                 Value<int64_t>& config, int64_t default_value,
+                 std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
@@ -222,11 +222,11 @@ class IntegerConfig : public BaseConfig {
     Get() override;
 };
 
-class FloatingConfig : public BaseConfig {
+class FloatingValue : public BaseValue {
  public:
-    FloatingConfig(const char* name, const char* alias, bool modifiable, double lower_bound, double upper_bound,
-                   Value<double>& config, double default_value,
-                   std::function<bool(double val, std::string& err)> is_valid_fn = nullptr);
+    FloatingValue(const char* name, const char* alias, bool modifiable, double lower_bound, double upper_bound,
+                  Value<double>& config, double default_value,
+                  std::function<bool(double val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<double>& config_;
@@ -246,11 +246,11 @@ class FloatingConfig : public BaseConfig {
     Get() override;
 };
 
-class SizeConfig : public BaseConfig {
+class SizeValue : public BaseValue {
  public:
-    SizeConfig(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
-               Value<int64_t>& config, int64_t default_value,
-               std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+    SizeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
+              Value<int64_t>& config, int64_t default_value,
+              std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
 
  private:
     Value<int64_t>& config_;
@@ -272,24 +272,24 @@ class SizeConfig : public BaseConfig {
 
 /* create config with {is_valid} function */
 
-#define CreateBoolConfig(name, modifiable, config_addr, default, is_valid) \
-    std::make_shared<BoolConfig>(name, nullptr, modifiable, config_addr, (default), is_valid)
+#define CreateBoolValue(name, modifiable, config_addr, default, is_valid) \
+    std::make_shared<BoolValue>(name, nullptr, modifiable, config_addr, (default), is_valid)
 
-#define CreateStringConfig(name, modifiable, config_addr, default, is_valid) \
-    std::make_shared<StringConfig>(name, nullptr, modifiable, config_addr, (default), is_valid)
+#define CreateStringValue(name, modifiable, config_addr, default, is_valid) \
+    std::make_shared<StringValue>(name, nullptr, modifiable, config_addr, (default), is_valid)
 
-#define CreateEnumConfig(name, modifiable, enumd, config_addr, default, is_valid) \
-    std::make_shared<EnumConfig>(name, nullptr, modifiable, enumd, config_addr, (default), is_valid)
+#define CreateEnumValue(name, modifiable, enumd, config_addr, default, is_valid) \
+    std::make_shared<EnumValue>(name, nullptr, modifiable, enumd, config_addr, (default), is_valid)
 
-#define CreateIntegerConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
-    std::make_shared<IntegerConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
+#define CreateIntegerValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
+    std::make_shared<IntegerValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
+                                   is_valid)
+
+#define CreateFloatingValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
+    std::make_shared<FloatingValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
                                     is_valid)
 
-#define CreateFloatingConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid)          \
-    std::make_shared<FloatingConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), \
-                                     is_valid)
-
-#define CreateSizeConfig(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid) \
-    std::make_shared<SizeConfig>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), is_valid)
+#define CreateSizeValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid) \
+    std::make_shared<SizeValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), is_valid)
 
 }  // namespace milvus

@@ -23,11 +23,11 @@
 #include <memory>
 #include <utility>
 
-#include "config/ServerConfig.h"
 #include "storage/s3/S3ClientMock.h"
 #include "storage/s3/S3ClientWrapper.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace storage {

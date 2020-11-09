@@ -9,33 +9,23 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "scheduler/selector/Optimizer.h"
+#pragma once
+
+#include <string>
+
+#include "value/Value.h"
+#include "value/ValueType.h"
 
 namespace milvus {
-namespace scheduler {
+struct ServerStatus {
+    using String = Value<std::string>;
+    using Bool = Value<bool>;
+    using Integer = Value<int64_t>;
+    using Floating = Value<double>;
 
-void
-Optimizer::Init() {
-    for (auto& pass : pass_list_) {
-        pass->Init();
-    }
-}
+    Bool indexing;
+};
 
-bool
-Optimizer::Run(const TaskPtr& task) {
-    for (auto& pass : pass_list_) {
-        if (pass->Run(task)) {
-            return true;
-        }
-    }
+extern ServerStatus server_status;
 
-    return false;
-}
-
-void
-Optimizer::Stop() {
-    pass_list_ = std::vector<PassPtr>();
-}
-
-}  // namespace scheduler
 }  // namespace milvus

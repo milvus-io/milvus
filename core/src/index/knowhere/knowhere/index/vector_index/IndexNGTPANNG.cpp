@@ -56,11 +56,23 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Selectively pruned edge size should less than remaining edge size");
     }
 
+    //    std::map<size_t, size_t> stats;
+    //    size_t max_len = 0;
+
     // prune
     auto& graph = dynamic_cast<NGT::GraphIndex&>(index_->getIndex());
     for (size_t id = 1; id < graph.repository.size(); id++) {
         try {
             NGT::GraphNode& node = *graph.getNode(id);
+            //            auto sz = node.size();
+            //            if (max_len < sz)
+            //                max_len = sz;
+            //            auto fd = stats.find(sz);
+            //            if (fd != stats.end()) {
+            //                fd->second ++;
+            //            } else {
+            //                stats[sz] = 1;
+            //            }
             if (node.size() >= forcedly_pruned_edge_size) {
                 node.resize(forcedly_pruned_edge_size);
             }
@@ -101,6 +113,17 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
             continue;
         }
     }
+    /*
+    std::vector<size_t> cnt(max_len, 0);
+    for (auto &pr : stats) {
+        cnt[pr.first] = pr.second;
+    }
+    for (auto i = 0; i < cnt.size(); ++ i) {
+        if (cnt[i]) {
+            std::cout << "len = " << i << ", cnt = " << cnt[i] << std::endl;
+        }
+    }
+    */
 }
 
 void
@@ -108,8 +131,7 @@ IndexNGTPANNG::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    // todo: to be decided
-    index_size_ = 1000000;
+    index_size_ = index_->memSize();
 }
 
 }  // namespace knowhere

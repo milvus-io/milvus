@@ -9,26 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <fiu-control.h>
-#include <fiu/fiu-local.h>
-#include <gtest/gtest.h>
-#include "ConfigMgr.h"
-
-#include "config/ServerConfig.h"
+#include "value/status/ServerStatus.h"
 
 namespace milvus {
 
-// TODO: need a safe directory for testing
-// TEST(ConfigMgrTest, set_version) {
-//    ConfigMgr::GetInstance().Init();
-//    ConfigMgr::GetInstance().LoadMemory(R"(
-// version: 0.1
-//)");
-//    ConfigMgr::GetInstance().FilePath() = "/tmp/milvus_unittest_configmgr.yaml";
-//
-//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "0.1");
-//    ConfigMgr::GetInstance().Set("version", "100.0");
-//    ASSERT_EQ(ConfigMgr::GetInstance().Get("version"), "100.0");
-//}
+ServerStatus server_status;
 
 }  // namespace milvus

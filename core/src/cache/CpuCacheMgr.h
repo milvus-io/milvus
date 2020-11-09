@@ -16,7 +16,7 @@
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
-#include "config/ConfigMgr.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace cache {
