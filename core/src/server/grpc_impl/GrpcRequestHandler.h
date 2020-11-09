@@ -337,6 +337,10 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     void
     FinishInsert(const std::string& request_id, int64_t request_size);
 
+    ::grpc::Status
+    OnInsert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
+             ::milvus::grpc::EntityIds* response);
+
  private:
     ReqHandler req_handler_;
 
