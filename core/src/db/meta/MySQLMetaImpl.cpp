@@ -2752,14 +2752,6 @@ MySQLMetaImpl::Count(const std::string& collection_id, uint64_t& result) {
     try {
         server::MetricCollector metric;
 
-        CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_id;
-        auto status = DescribeCollection(collection_schema);
-
-        if (!status.ok()) {
-            return status;
-        }
-
         mysqlpp::StoreQueryResult res;
         {
             mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
