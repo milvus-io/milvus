@@ -292,8 +292,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         segment::DeletedDocsPtr deleted_docs_ptr;
         segment_reader_->LoadDeletedDocs(deleted_docs_ptr);
         if (deleted_docs_ptr) {
-            faiss::ConcurrentBitsetPtr del_bitset =
-                std::make_shared<faiss::ConcurrentBitset>(entity_count_);
+            faiss::ConcurrentBitsetPtr del_bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
             auto& del_docs = deleted_docs_ptr->GetDeletedDocs();
             for (auto& offset : del_docs) {
                 del_bitset->set(offset);
