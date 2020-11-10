@@ -800,6 +800,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         auto boolean_query_json = query_json["bool"];
         auto boolean_query = std::make_shared<query::BooleanQuery>();
         query_ptr_ = std::make_shared<query::Query>();
+        query_ptr_->partitions = partition_tags;
         query_ptr_->collection_id = collection_name;
 
         status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_);
