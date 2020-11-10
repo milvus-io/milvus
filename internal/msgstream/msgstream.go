@@ -31,6 +31,7 @@ type MsgStream interface {
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
 	Consume() *MsgPack
+	Chan() <-chan *MsgPack
 }
 
 type PulsarMsgStream struct {
@@ -108,7 +109,9 @@ func (ms *PulsarMsgStream) Start() {
 
 func (ms *PulsarMsgStream) Close() {
 	ms.streamCancel()
-	ms.wait.Wait()
+	if ms.wait != nil {
+		ms.wait.Wait()
+	}
 
 	for _, producer := range ms.producers {
 		if producer != nil {
@@ -250,6 +253,10 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 			}
 		}
 	}
+}
+
+func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
+	return ms.receiveBuf
 }
 
 type PulsarTtMsgStream struct {
