@@ -10,7 +10,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4059 milvus raise exception when passing a complex dsl during searching
 -   \#4099 When execute a multiple vectors request, if the result of somerow is not enough, the query data field will be disorder.
 -   \#4113 After milvus 0.11.0 version vector data is misaligned
+-   \#4116 ResfulApi Search return null
 -   \#4170 Must_not query check failed in dsl
+-   \#4205 Restful API error: When the specified partition is retrieved, the partition_tag is not valid
 
 ## Feature
 -   \#4163 Update C++ sdk search interface
