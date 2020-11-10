@@ -3,8 +3,8 @@
         "server": "eros",
         "suite_params": [
             {
-                "suite": "070_stability.yaml",
-                "image_type": "gpu"
+                "suite": "loop_stability.yaml",
+                "image_type": "cpu"
             }
         ]
     }

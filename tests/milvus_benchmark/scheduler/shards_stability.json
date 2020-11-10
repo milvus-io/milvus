@@ -1,9 +1,8 @@
 [
     {
-        "server": "poseidon",
         "suite_params": [
             {
-                "suite": "crud_add.yaml",
+                "suite": "shards_loop_stability.yaml",
                 "image_type": "cpu"
             }
         ]

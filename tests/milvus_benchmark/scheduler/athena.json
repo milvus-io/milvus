@@ -1,9 +1,9 @@
 [
     {
-        "server": "athena",
+        "server": "eros",
         "suite_params": [
             {
-                "suite": "add_flush_performance.yaml",
+                "suite": "cpu_accuracy_ann_debug.yaml",
                 "image_type": "cpu"
             }
         ]

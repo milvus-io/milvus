@@ -32,7 +32,7 @@ def collection_parser(collection_name):
 def parse_ann_collection_name(collection_name):
     data_type = collection_name.split("_")[0]
     dimension = int(collection_name.split("_")[1])
-    metric = collection_name.split("_")[-1]
+    metric = collection_name.split("_")[2]
     # metric = collection_name.attrs['distance']
     # dimension = len(collection_name["train"][0])
     if metric == "euclidean":

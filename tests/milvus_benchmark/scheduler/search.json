@@ -1,10 +1,10 @@
 [
     {
-        "server": "eros",
+        "server": "poseidon",
         "suite_params": [
             {
                 "suite": "debug.yaml",
-                "image_type": "cpu"
+                "image_type": "gpu"
             }
         ]
     }

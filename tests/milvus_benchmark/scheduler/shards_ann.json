@@ -1,9 +1,8 @@
 [
     {
-        "server": "apollo",
         "suite_params": [
             {
-                "suite": "crud_add_flush.yaml",
+                "suite": "shards_ann_debug.yaml",
                 "image_type": "cpu"
             }
         ]

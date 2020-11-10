@@ -1,0 +1,18 @@
+[
+    {
+        "suite_params": [
+            {
+                "suite": "shards_insert_performance.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "shards_ann_debug.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "shards_loop_stability.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]
