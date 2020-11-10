@@ -294,7 +294,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         if (deleted_docs_ptr) {
             faiss::ConcurrentBitsetPtr del_bitset =
                 std::make_shared<faiss::ConcurrentBitset>(deleted_docs_ptr->GetCount());
-            auto & del_docs = deleted_docs_ptr->GetDeletedDocs();
+            auto& del_docs = deleted_docs_ptr->GetDeletedDocs();
             for (auto& offset : del_docs) {
                 del_bitset->set(offset);
             }
@@ -309,16 +309,16 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
 
         // TODO(yhz): The black list is obtain from deleted docs above,
         // there is no need to get blacklist from index.
-//        list = vec_index->GetBlacklist();
-//        if (list != nullptr) {
-//            if (filter_list != nullptr) {
-//                list = (*list) | (*filter_list);
-//            }
-//        } else {
-//            if (filter_list != nullptr) {
-//                list = filter_list;
-//            }
-//        }
+        //        list = vec_index->GetBlacklist();
+        //        if (list != nullptr) {
+        //            if (filter_list != nullptr) {
+        //                list = (*list) | (*filter_list);
+        //            }
+        //        } else {
+        //            if (filter_list != nullptr) {
+        //                list = filter_list;
+        //            }
+        //        }
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
