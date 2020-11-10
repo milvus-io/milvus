@@ -253,7 +253,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     try {
         faiss::ConcurrentBitsetPtr bitset = nullptr;
         std::string vector_placeholder;
-        faiss::ConcurrentBitsetPtr list = nullptr;
+        faiss::ConcurrentBitsetPtr filter_list = nullptr;
 
         SegmentPtr segment_ptr;
         segment_reader_->GetSegment(segment_ptr);
@@ -288,17 +288,37 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         }
         rc.RecordSection("Scalar field filtering");
 
-        // combine filter and deletion
-        list = vec_index->GetBlacklist();
-        if (list != nullptr) {
+        // Merge scalar filter and deletion bitset
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        segment_reader_->LoadDeletedDocs(deleted_docs_ptr);
+        if (deleted_docs_ptr) {
+            faiss::ConcurrentBitsetPtr del_bitset =
+                std::make_shared<faiss::ConcurrentBitset>(deleted_docs_ptr->GetCount());
+            auto & del_docs = deleted_docs_ptr->GetDeletedDocs();
+            for (auto& offset : del_docs) {
+                del_bitset->set(offset);
+            }
             if (bitset != nullptr) {
-                list = (*list) | (*bitset);
+                filter_list = (*bitset) | (*del_bitset);
+            } else {
+                filter_list = del_bitset;
             }
         } else {
-            if (bitset != nullptr) {
-                list = bitset;
-            }
+            filter_list = bitset;
         }
+
+        // TODO(yhz): The black list is obtain from deleted docs above,
+        // there is no need to get blacklist from index.
+//        list = vec_index->GetBlacklist();
+//        if (list != nullptr) {
+//            if (filter_list != nullptr) {
+//                list = (*list) | (*filter_list);
+//            }
+//        } else {
+//            if (filter_list != nullptr) {
+//                list = filter_list;
+//            }
+//        }
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
@@ -307,7 +327,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
         }
 
-        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, list);
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, filter_list);
         if (!status.ok()) {
             return status;
         }
