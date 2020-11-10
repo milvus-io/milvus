@@ -26,11 +26,17 @@ struct PlanNode {
 
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
-struct VectorPlanNode : PlanNode {
-    std::optional<ExprPtr> predicate_;
+struct QueryInfo{
     int64_t num_queries_;
     int64_t dim_;
+    int64_t topK_;
     FieldId field_id_;
+    std::string metric_type_;  // TODO: use enum
+};
+
+struct VectorPlanNode : PlanNode {
+    std::optional<ExprPtr> predicate_;
+    QueryInfo query_info_;
 
  public:
     virtual void
@@ -38,16 +44,12 @@ struct VectorPlanNode : PlanNode {
 };
 
 struct FloatVectorANNS : VectorPlanNode {
-    std::vector<float> data_;
-    std::string metric_type_;  // TODO: use enum
  public:
     void
     accept(PlanNodeVisitor&) override;
 };
 
 struct BinaryVectorANNS : VectorPlanNode {
-    std::vector<uint8_t> data_;
-    std::string metric_type_;  // TODO: use enum
  public:
     void
     accept(PlanNodeVisitor&) override;

@@ -54,7 +54,7 @@ struct BoolBinaryExpr : BinaryExpr {
     accept(ExprVisitor&) override;
 };
 
-using FieldId = int64_t;
+using FieldId = std::string;
 
 struct TermExpr : Expr {
     FieldId field_id_;

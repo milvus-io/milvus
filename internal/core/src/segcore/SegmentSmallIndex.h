@@ -6,6 +6,7 @@
 
 #include <shared_mutex>
 #include <knowhere/index/vector_index/VecIndex.h>
+#include <query/PlanNode.h>
 
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
@@ -70,7 +71,7 @@ class SegmentSmallIndex : public SegmentBase {
 
     // query contains metadata of
     Status
-    Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
+    QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& results) override;
 
     // stop receive insert requests
     // will move data to immutable vector or something
@@ -125,21 +126,18 @@ class SegmentSmallIndex : public SegmentBase {
     explicit SegmentSmallIndex(SchemaPtr schema) : schema_(schema), record_(*schema_), indexing_record_(*schema_) {
     }
 
- private:
-    //    struct MutableRecord {
-    //        ConcurrentVector<uint64_t> uids_;
-    //        tbb::concurrent_vector<Timestamp> timestamps_;
-    //        std::vector<tbb::concurrent_vector<float>> entity_vecs_;
-    //
-    //        MutableRecord(int entity_size) : entity_vecs_(entity_size) {
-    //        }
-    //    };
-
+ public:
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
+    // Status
+    // QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
+
     Status
-    QueryBruteForceImpl(query::QueryPtr query, Timestamp timestamp, QueryResult& results);
+    QueryBruteForceImpl(const query::QueryInfo& info,
+                        const float* query_data,
+                        Timestamp timestamp,
+                        QueryResult& results);
 
     template <typename Type>
     knowhere::IndexPtr

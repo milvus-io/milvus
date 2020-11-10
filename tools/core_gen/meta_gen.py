@@ -36,15 +36,17 @@ def meta_gen(content):
 
         if len(pack) == 1:
             pack.append(None)
-        struct_name, base_name = pack
-        if not base_name:
-            root_base = struct_name
+
         body_res = body_pattern.findall(body)
         if len(body_res) != 1:
+            continue
             eprint(struct_name)
             eprint(body_res)
             eprint(body)
             assert(false)
+        struct_name, base_name = pack
+        if not base_name:
+            root_base = struct_name
         visitor_name, state = body_res[0]
         assert(visitor_name == root_base) 
         if state.strip() == 'override':

@@ -458,7 +458,7 @@ SegmentNaive::QuerySlowImpl(query::QueryPtr query_info, Timestamp timestamp, Que
 }
 
 Status
-SegmentNaive::Query(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
+SegmentNaive::QueryDeprecated(query::QueryPtr query_info, Timestamp timestamp, QueryResult& result) {
     // TODO: enable delete
     // TODO: enable index
     // TODO: remove mock

@@ -56,14 +56,17 @@ TEST(Query, ShowExecutor) {
     int64_t num_queries = 100L;
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
     auto raw_data = DataGen(schema, num_queries);
-    node->data_ = raw_data.get_col<float>(0);
-    node->metric_type_ = "L2";
-    node->num_queries_ = 10;
-    node->dim_ = 16;
+    auto& info = node->query_info_;
+    info.metric_type_ = "L2";
+    info.num_queries_ = 10;
+    info.dim_ = 16;
+    info.topK_ = 20;
+    info.field_id_ = "fakevec";
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
     PlanNodePtr base(node.release());
     auto res = show_visitor.call_child(*base);
-    res["data"] = "...collased...";
-    std::cout << res.dump(4);
+    auto dup = res;
+    dup["data"] = "...collased...";
+    std::cout << dup.dump(4);
 }

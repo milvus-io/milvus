@@ -1,4 +1,3 @@
-#pragma once
 // Generated File
 // DO NOT EDIT
 #include "query/PlanNode.h"

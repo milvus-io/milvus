@@ -134,7 +134,7 @@ Search(CSegmentBase c_segment,
     query_ptr->query_raw_data.resize(num_of_query_raw_data);
     memcpy(query_ptr->query_raw_data.data(), query_raw_data, num_of_query_raw_data * sizeof(float));
 
-    auto res = segment->Query(query_ptr, timestamp, query_result);
+    auto res = segment->QueryDeprecated(query_ptr, timestamp, query_result);
 
     // result_ids and result_distances have been allocated memory in goLang,
     // so we don't need to malloc here.
