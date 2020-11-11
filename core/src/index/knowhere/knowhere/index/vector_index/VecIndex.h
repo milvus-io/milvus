@@ -106,16 +106,12 @@ class VecIndex : public Index {
 
     size_t
     BlacklistSize() {
-        if (bitset_) {
-            return bitset_->size() * sizeof(uint8_t);
-        } else {
-            return 0;
-        }
+        return bitset_ ? bitset_->size() * sizeof(uint8_t) : 0;
     }
 
     size_t
     UidsSize() {
-        return uids_->size() * sizeof(IDType);
+        return uids_ ? uids_->size() * sizeof(IDType) : 0;
     }
 
     virtual int64_t
