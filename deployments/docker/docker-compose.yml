@@ -3,11 +3,11 @@ version: '3.5'
 services:
   etcd:
     image: quay.io/coreos/etcd:latest
-    command: etcd -listen-peer-urls=http://127.0.0.1:12380 -advertise-client-urls=http://127.0.0.1:12379 -listen-client-urls http://0.0.0.0:12379,http://0.0.0.0:14001 -initial-advertise-peer-urls=http://127.0.0.1:12380 --initial-cluster default=http://127.0.0.1:12380
+    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --initial-cluster default=http://127.0.0.1:2380
     ports:
-      - "12379:12379"
-      - "12380:12380"
-      - "14001:14001"
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
 
   pulsar:
     image: apachepulsar/pulsar:latest
