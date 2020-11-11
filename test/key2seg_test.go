@@ -10,7 +10,7 @@ type UniqueID = typeutil.UniqueID
 
 func TestKey2Seg(t *testing.T) {
 	// TODO: fix test
-	return
+	//return
 	//
 	//lookupUrl := "pulsar://localhost:6650"
 	//client, err := pulsar.NewClient(pulsar.ClientOptions{

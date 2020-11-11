@@ -5,6 +5,8 @@ import (
 	"context"
 	"log"
 	"sync"
+
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 )
 
 type BaseTaskQueue struct {
@@ -150,10 +152,26 @@ type TaskScheduler struct {
 	DmQueue *dmTaskQueue
 	DqQueue *dqTaskQueue
 
-	// tsAllocator, ReqIdAllocator
+	idAllocator  *allocator.IdAllocator
+	tsoAllocator *allocator.TimestampAllocator
+
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+func NewTaskScheduler(ctx context.Context,
+	idAllocator *allocator.IdAllocator,
+	tsoAllocator *allocator.TimestampAllocator) (*TaskScheduler, error) {
+	ctx1, cancel := context.WithCancel(ctx)
+	s := &TaskScheduler{
+		idAllocator:  idAllocator,
+		tsoAllocator: tsoAllocator,
+		ctx:          ctx1,
+		cancel:       cancel,
+	}
+
+	return s, nil
 }
 
 func (sched *TaskScheduler) scheduleDdTask() *task {
@@ -204,7 +222,6 @@ func (sched *TaskScheduler) definitionLoop() {
 		(*t).Notify(err)
 
 		sched.DdQueue.AddActiveTask(t)
-		//sched.DdQueue.atLock.Unlock()
 
 		(*t).WaitToFinish()
 		(*t).PostExecute()
@@ -287,8 +304,7 @@ func (sched *TaskScheduler) queryLoop() {
 	}
 }
 
-func (sched *TaskScheduler) Start(ctx context.Context) error {
-	sched.ctx, sched.cancel = context.WithCancel(ctx)
+func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(3)
 
 	go sched.definitionLoop()

@@ -2,32 +2,38 @@ package proxy
 
 import (
 	"context"
+	"log"
+	"math/rand"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
-	"log"
-	"math/rand"
-	"net"
-	"sync"
-	"time"
 )
 
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Proxy struct {
-	ctx             context.Context
 	proxyLoopCtx    context.Context
 	proxyLoopCancel func()
 	proxyLoopWg     sync.WaitGroup
 
-	grpcServer            *grpc.Server
-	masterConn            *grpc.ClientConn
-	masterClient          masterpb.MasterClient
-	taskSch               *TaskScheduler
+	grpcServer   *grpc.Server
+	masterConn   *grpc.ClientConn
+	masterClient masterpb.MasterClient
+	taskSch      *TaskScheduler
+	tick         *timeTick
+
+	idAllocator  *allocator.IdAllocator
+	tsoAllocator *allocator.TimestampAllocator
+
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
 	queryResultMsgStream  *msgstream.PulsarMsgStream
@@ -39,23 +45,59 @@ type Proxy struct {
 
 func CreateProxy(ctx context.Context) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
-	m := &Proxy{
-		ctx: ctx,
+	ctx1, cancel := context.WithCancel(ctx)
+	p := &Proxy{
+		proxyLoopCtx:    ctx1,
+		proxyLoopCancel: cancel,
 	}
-	return m, nil
+	bufSize := int64(1000)
+	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryResultMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+
+	idAllocator, err := allocator.NewIdAllocator(p.proxyLoopCtx)
+
+	if err != nil {
+		return nil, err
+	}
+	p.idAllocator = idAllocator
+
+	tsoAllocator, err := allocator.NewTimestampAllocator(p.proxyLoopCtx)
+	if err != nil {
+		return nil, err
+	}
+	p.tsoAllocator = tsoAllocator
+
+	p.taskSch, err = NewTaskScheduler(p.proxyLoopCtx, p.idAllocator, p.tsoAllocator)
+	if err != nil {
+		return nil, err
+	}
+
+	return p, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (s *Proxy) AddStartCallback(callbacks ...func()) {
-	s.startCallbacks = append(s.startCallbacks, callbacks...)
+func (p *Proxy) AddStartCallback(callbacks ...func()) {
+	p.startCallbacks = append(p.startCallbacks, callbacks...)
 }
 
-func (s *Proxy) startProxy(ctx context.Context) error {
+func (p *Proxy) startProxy() error {
+	err := p.connectMaster()
+	if err != nil {
+		return err
+	}
+	p.manipulationMsgStream.Start()
+	p.queryMsgStream.Start()
+	p.queryResultMsgStream.Start()
+	p.taskSch.Start()
+	p.idAllocator.Start()
+	p.tsoAllocator.Start()
 
 	// Run callbacks
-	for _, cb := range s.startCallbacks {
+	for _, cb := range p.startCallbacks {
 		cb()
 	}
+
 	return nil
 }
 
@@ -80,43 +122,6 @@ func (p *Proxy) grpcLoop() {
 	}
 }
 
-func (p *Proxy) pulsarMsgStreamLoop() {
-	defer p.proxyLoopWg.Done()
-	p.manipulationMsgStream = &msgstream.PulsarMsgStream{}
-	p.queryMsgStream = &msgstream.PulsarMsgStream{}
-	// TODO: config, RepackFunc
-	p.manipulationMsgStream.Start()
-	p.queryMsgStream.Start()
-
-	ctx, cancel := context.WithCancel(p.proxyLoopCtx)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("proxy is closed...")
-			return
-		}
-	}
-}
-
-func (p *Proxy) scheduleLoop() {
-	defer p.proxyLoopWg.Done()
-
-	p.taskSch = &TaskScheduler{}
-	p.taskSch.Start(p.ctx)
-	defer p.taskSch.Close()
-
-	ctx, cancel := context.WithCancel(p.proxyLoopCtx)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("proxy is closed...")
-			return
-		}
-	}
-}
-
 func (p *Proxy) connectMaster() error {
 	log.Printf("Connected to master, master_addr=%s", "127.0.0.1:5053")
 	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
@@ -131,7 +136,9 @@ func (p *Proxy) connectMaster() error {
 	return nil
 }
 
-func (p *Proxy) receiveResultLoop() {
+func (p *Proxy) queryResultLoop() {
+	defer p.proxyLoopWg.Done()
+
 	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
 
 	for {
@@ -141,7 +148,7 @@ func (p *Proxy) receiveResultLoop() {
 		}
 		tsMsg := msgPack.Msgs[0]
 		searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
-		reqId := UniqueID(searchResultMsg.GetReqId())
+		reqId := searchResultMsg.GetReqId()
 		_, ok := queryResultBuf[reqId]
 		if !ok {
 			queryResultBuf[reqId] = make([]*internalpb.SearchResult, 0)
@@ -157,58 +164,41 @@ func (p *Proxy) receiveResultLoop() {
 	}
 }
 
-func (p *Proxy) queryResultLoop() {
-	defer p.proxyLoopWg.Done()
-	p.queryResultMsgStream = &msgstream.PulsarMsgStream{}
-	// TODO: config
-	p.queryResultMsgStream.Start()
-
-	go p.receiveResultLoop()
-
-	ctx, cancel := context.WithCancel(p.proxyLoopCtx)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("proxy is closed...")
-			return
-		}
-	}
-}
-
-
-
-func (p *Proxy) startProxyLoop(ctx context.Context) {
-	p.proxyLoopCtx, p.proxyLoopCancel = context.WithCancel(ctx)
-	p.proxyLoopWg.Add(4)
-
-	p.connectMaster()
-
+func (p *Proxy) startProxyLoop() {
+	p.proxyLoopWg.Add(2)
 	go p.grpcLoop()
-	go p.pulsarMsgStreamLoop()
 	go p.queryResultLoop()
-	go p.scheduleLoop()
+
 }
 
 func (p *Proxy) Run() error {
-	if err := p.startProxy(p.ctx); err != nil {
+	if err := p.startProxy(); err != nil {
 		return err
 	}
-	p.startProxyLoop(p.ctx)
+	p.startProxyLoop()
 	return nil
 }
 
 func (p *Proxy) stopProxyLoop() {
-	if p.grpcServer != nil{
+	p.proxyLoopCancel()
+
+	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()
 	}
-	p.proxyLoopCancel()
+	p.tsoAllocator.Close()
+	p.idAllocator.Close()
+	p.taskSch.Close()
+	p.manipulationMsgStream.Close()
+	p.queryMsgStream.Close()
+	p.queryResultMsgStream.Close()
+
 	p.proxyLoopWg.Wait()
 }
 
 // Close closes the server.
 func (p *Proxy) Close() {
 	p.stopProxyLoop()
+
 	for _, cb := range p.closeCallbacks {
 		cb()
 	}

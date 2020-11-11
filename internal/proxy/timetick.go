@@ -3,75 +3,116 @@ package proxy
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 type timeTick struct {
-	lastTick             Timestamp
-	currentTick          Timestamp
-	interval             uint64
-	pulsarProducer       pulsar.Producer
-	peer_id              int64
-	ctx                  context.Context
+	lastTick    Timestamp
+	currentTick Timestamp
+	interval    uint64
+
+	pulsarProducer pulsar.Producer
+
+	tsoAllocator  *allocator.TimestampAllocator
+	tickMsgStream *msgstream.PulsarMsgStream
+
+	peerID UniqueID
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel func()
+	timer  *time.Ticker
+
 	areRequestsDelivered func(ts Timestamp) bool
-	getTimestamp         func() (Timestamp, error)
 }
 
+func newTimeTick(ctx context.Context, tsoAllocator *allocator.TimestampAllocator) *timeTick {
+	ctx1, cancel := context.WithCancel(ctx)
+	t := &timeTick{
+		ctx:          ctx1,
+		cancel:       cancel,
+		tsoAllocator: tsoAllocator,
+	}
+
+	bufSzie := int64(1000)
+	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSzie)
+
+	pulsarAddress := "pulsar://localhost:6650"
+	producerChannels := []string{"timeTick"}
+	t.tickMsgStream.SetPulsarCient(pulsarAddress)
+	t.tickMsgStream.CreatePulsarProducers(producerChannels)
+	return t
+}
+
+
 func (tt *timeTick) tick() error {
+
 	if tt.lastTick == tt.currentTick {
-		ts, err := tt.getTimestamp()
+		ts, err := tt.tsoAllocator.AllocOne()
 		if err != nil {
 			return err
 		}
 		tt.currentTick = ts
 	}
+
 	if tt.areRequestsDelivered(tt.currentTick) == false {
-		return errors.New("Failed")
+		return nil
 	}
-	tsm := internalpb.TimeTickMsg{
-		MsgType:   internalpb.MsgType_kTimeTick,
-		PeerId:    tt.peer_id,
-		Timestamp: uint64(tt.currentTick),
+	msgPack := msgstream.MsgPack{}
+	var timeTickMsg msgstream.TsMsg = &msgstream.TimeTickMsg{
+		TimeTickMsg: internalpb.TimeTickMsg{
+			MsgType:   internalpb.MsgType_kTimeTick,
+			PeerId:    tt.peerID,
+			Timestamp: tt.currentTick,
+		},
 	}
-	payload, err := proto.Marshal(&tsm)
-	if err != nil {
-		return err
-	}
-	if _, err := tt.pulsarProducer.Send(tt.ctx, &pulsar.ProducerMessage{Payload: payload}); err != nil {
-		return err
-	}
+	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+	tt.tickMsgStream.Produce(&msgPack)
 	tt.lastTick = tt.currentTick
 	return nil
 }
 
-func (tt *timeTick) Restart() error {
+func (tt *timeTick) tickLoop() {
+	defer tt.wg.Done()
+	tt.timer = time.NewTicker(time.Millisecond * time.Duration(tt.interval))
+	for {
+		select {
+		case <-tt.timer.C:
+			if err := tt.tick(); err != nil {
+				log.Printf("timeTick error")
+			}
+		case <-tt.ctx.Done():
+			return
+		}
+	}
+}
+
+func (tt *timeTick) Start() error {
 	tt.lastTick = 0
-	ts, err := tt.getTimestamp()
+	ts, err := tt.tsoAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
 
 	tt.currentTick = ts
-	tick := time.Tick(time.Millisecond * time.Duration(tt.interval))
-
-	go func() {
-		for {
-			select {
-			case <-tick:
-				if err := tt.tick(); err != nil {
-					log.Printf("timeTick error")
-				}
-			case <-tt.ctx.Done():
-				tt.pulsarProducer.Close()
-				return
-			}
-		}
-	}()
+	tt.tickMsgStream.Start()
+	tt.wg.Add(1)
+	go tt.tickLoop()
 	return nil
+}
+
+func (tt *timeTick) Close() {
+	if tt.timer != nil {
+		tt.timer.Stop()
+	}
+	tt.cancel()
+	tt.tickMsgStream.Close()
+	tt.wg.Wait()
 }
