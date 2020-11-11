@@ -2,10 +2,12 @@ package msgstream
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"log"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -22,7 +24,7 @@ type MsgPack struct {
 	Msgs    []*TsMsg
 }
 
-type RepackFunc func(msgs []*TsMsg, hashKeys [][]int32) map[int32]*MsgPack
+type RepackFunc func(msgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 
 type MsgStream interface {
 	Start()
@@ -145,21 +147,22 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	}
 
 	var result map[int32]*MsgPack
+	var err error
 	if ms.repackFunc != nil {
-		result = ms.repackFunc(tsMsgs, reBucketValues)
+		result, err = ms.repackFunc(tsMsgs, reBucketValues)
 	} else {
-		result = make(map[int32]*MsgPack)
-		for i, request := range tsMsgs {
-			keys := reBucketValues[i]
-			for _, channelID := range keys {
-				_, ok := result[channelID]
-				if !ok {
-					msgPack := MsgPack{}
-					result[channelID] = &msgPack
-				}
-				result[channelID].Msgs = append(result[channelID].Msgs, request)
-			}
+		msgType := (*tsMsgs[0]).Type()
+		switch msgType {
+		case internalPb.MsgType_kInsert:
+			result, err = insertRepackFunc(tsMsgs, reBucketValues)
+		case internalPb.MsgType_kDelete:
+			result, err = deleteRepackFunc(tsMsgs, reBucketValues)
+		default:
+			result, err = defaultRepackFunc(tsMsgs, reBucketValues)
 		}
+	}
+	if err != nil {
+		return err
 	}
 	for k, v := range result {
 		for i := 0; i < len(v.Msgs); i++ {
@@ -380,4 +383,114 @@ func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
 		}
 	}
 	return 0, false
+}
+
+func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+	result := make(map[int32]*MsgPack)
+	for i, request := range tsMsgs {
+		if (*request).Type() != internalPb.MsgType_kInsert {
+			return nil, errors.New(string("msg's must be Insert"))
+		}
+		insertRequest := (*request).(*InsertMsg)
+		keys := hashKeys[i]
+
+		timestampLen := len(insertRequest.Timestamps)
+		rowIDLen := len(insertRequest.RowIds)
+		rowDataLen := len(insertRequest.RowData)
+		keysLen := len(keys)
+
+		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
+			return nil, errors.New(string("the length of hashValue, timestamps, rowIDs, RowData are not equal"))
+		}
+		for index, key := range keys {
+			_, ok := result[key]
+			if !ok {
+				msgPack := MsgPack{}
+				result[key] = &msgPack
+			}
+
+			sliceRequest := internalPb.InsertRequest{
+				MsgType: internalPb.MsgType_kInsert,
+				ReqId: insertRequest.ReqId,
+				CollectionName: insertRequest.CollectionName,
+				PartitionTag: insertRequest.PartitionTag,
+				SegmentId: insertRequest.SegmentId,
+				ChannelId: insertRequest.ChannelId,
+				ProxyId: insertRequest.ProxyId,
+				Timestamps: []uint64{insertRequest.Timestamps[index]},
+				RowIds: []int64{insertRequest.RowIds[index]},
+				RowData: []*commonPb.Blob{insertRequest.RowData[index]},
+			}
+
+			var msg TsMsg = &InsertMsg{
+				InsertRequest: sliceRequest,
+			}
+
+			result[key].Msgs = append(result[key].Msgs, &msg)
+		}
+	}
+	return result, nil
+}
+
+func deleteRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+	result := make(map[int32]*MsgPack)
+	for i, request := range tsMsgs {
+		if (*request).Type() != internalPb.MsgType_kDelete {
+			return nil, errors.New(string("msg's must be Delete"))
+		}
+		deleteRequest := (*request).(*DeleteMsg)
+		keys := hashKeys[i]
+
+		timestampLen := len(deleteRequest.Timestamps)
+		primaryKeysLen := len(deleteRequest.PrimaryKeys)
+		keysLen := len(keys)
+
+		if keysLen != timestampLen || keysLen != primaryKeysLen {
+			return nil, errors.New(string("the length of hashValue, timestamps, primaryKeys are not equal"))
+		}
+
+		for index, key := range keys {
+			_, ok := result[key]
+			if !ok {
+				msgPack := MsgPack{}
+				result[key] = &msgPack
+			}
+
+			sliceRequest := internalPb.DeleteRequest{
+				MsgType: internalPb.MsgType_kDelete,
+				ReqId: deleteRequest.ReqId,
+				CollectionName: deleteRequest.CollectionName,
+				ChannelId: deleteRequest.ChannelId,
+				ProxyId: deleteRequest.ProxyId,
+				Timestamps: []uint64{deleteRequest.Timestamps[index]},
+				PrimaryKeys: []int64{deleteRequest.PrimaryKeys[index]},
+			}
+
+			var msg TsMsg = &DeleteMsg{
+				DeleteRequest: sliceRequest,
+			}
+
+			result[key].Msgs = append(result[key].Msgs, &msg)
+		}
+	}
+	return result, nil
+}
+
+func defaultRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+	result := make(map[int32]*MsgPack)
+	for i, request := range tsMsgs {
+		keys := hashKeys[i]
+		if len(keys) != 1 {
+			return nil, errors.New(string("len(msg.hashValue) must equal 1"))
+		}
+		key := keys[0]
+		_, ok := result[key]
+		if !ok {
+			msgPack := MsgPack{}
+			result[key] = &msgPack
+		}
+
+		result[key].Msgs = append(result[key].Msgs, request)
+	}
+	return result, nil
 }
