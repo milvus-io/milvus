@@ -25,7 +25,7 @@ public class TestSearchByService {
     int nq = Constants.nq;
     int segmentRowLimit = Constants.segmentRowLimit;
     ConnectParam connectParam = Constants.connectParam;
-    String collectionName = Utils.genUniqueStr("search");
+    String collectionName = RandomStringUtils.randomAlphabetic(10);
     MilvusClient client = new MilvusGrpcClient(connectParam).withLogging();
 
     FloatSchema floatSchema = new FloatSchema();
