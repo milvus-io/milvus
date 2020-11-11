@@ -44,6 +44,9 @@ represent_literal_str = change_style('|', SafeRepresenter.represent_str)
 yaml.add_representer(literal_str, represent_literal_str)
 
 
+"""
+normalize the vectors for Inner Product
+"""
 def normalize(metric_type, X):
     if metric_type == "ip":
         logger.info("Set normalize for metric_type: %s" % metric_type)
@@ -291,7 +294,9 @@ def update_values(file_path, deploy_mode, hostname, server_config):
             logger.debug(line)
 
 
-# deploy server
+"""
+Deploy server with helm
+"""
 def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, namespace):
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
@@ -342,7 +347,9 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
     return host
 
 
-# delete server
+"""
+Delete server iwth helm
+"""
 def helm_del_server(name, namespace):
     # logger.debug("Sleep 600s before uninstall server")
     # time.sleep(600)

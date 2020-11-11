@@ -11,7 +11,9 @@ def operations_parser(operations):
         logger.debug(run_type)
         return (run_type, run_params)
 
-
+"""
+parse the collection name defined in the suites
+"""
 def collection_parser(collection_name):
     tmp = collection_name.split("_")
     # if len(tmp) != 5:
@@ -45,7 +47,9 @@ def parse_ann_collection_name(collection_name):
         metric_type = "hamming"
     return ("ann_"+data_type, dimension, metric_type)
 
-
+"""
+parse the params defined in suites
+"""
 def search_params_parser(param):
     # parse top-k, set default value if top-k not in param
     if "top_ks" not in param:

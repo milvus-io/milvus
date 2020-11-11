@@ -86,7 +86,9 @@ def get_vectors_from_binary(nq, dimension, data_type):
     vectors = data[0:nq].tolist()
     return vectors
 
-
+"""
+Run each tests defined in the suites
+"""
 class Runner(object):
     def __init__(self):
         pass

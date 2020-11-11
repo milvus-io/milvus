@@ -5,6 +5,9 @@ from client import MilvusClient
 
 
 class MilvusTask(object):
+    """
+    generate milvus client for locust
+    """
     def __init__(self, connection_type="single", **kwargs):
         self.request_type = "grpc"
         if connection_type == "single":
@@ -15,6 +18,10 @@ class MilvusTask(object):
             collection_name = kwargs.get("collection_name")
             self.m = MilvusClient(host=host, port=port, collection_name=collection_name)
 
+    """
+    register success and failure event with using locust.events
+    make sure the task function name in locust equals to te name of function in MilvusClient
+    """
     def __getattr__(self, name):
         func = getattr(self.m, name)
 

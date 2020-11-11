@@ -26,6 +26,9 @@ class LocalRunner(Runner):
         self.host = host
         self.port = port
 
+    """
+    override runner.run
+    """
     def run(self, run_type, collection):
         logger.debug(run_type)
         logger.debug(collection)

@@ -40,6 +40,9 @@ class K8sRunner(Runner):
         self.env_value = None
         
     def init_env(self, server_config, server_host, deploy_mode, image_type, image_tag):
+        """
+        start server with using helm
+        """
         logger.debug("Tests run on server host:")
         logger.debug(server_host)
         self.hostname = server_host
@@ -67,10 +70,16 @@ class K8sRunner(Runner):
         return True
 
     def clean_up(self):
+        """
+        stop server with using helm
+        """
         logger.debug("Start clean up: %s" % self.service_name)
         utils.helm_del_server(self.service_name, namespace)
 
     def report_wrapper(self, milvus_instance, env_value, hostname, collection_info, index_info, search_params, run_params=None):
+        """
+        upload test result
+        """
         metric = Metric()
         metric.set_run_id(timestamp)
         metric.env = Env(env_value)
@@ -87,6 +96,9 @@ class K8sRunner(Runner):
         return metric
 
     def run(self, run_type, collection):
+        """
+        override runner.run
+        """
         logger.debug(run_type)
         logger.debug(collection)
         collection_name = collection["collection_name"] if "collection_name" in collection else None
@@ -94,6 +106,7 @@ class K8sRunner(Runner):
         self.env_value = milvus_instance.get_server_config()
 
         # ugly implemention
+        # remove some parts of result before uploading results
         self.env_value.pop("logs")
         if milvus_instance.get_server_mode() == "CPU":
             if "gpu" in self.env_value:
