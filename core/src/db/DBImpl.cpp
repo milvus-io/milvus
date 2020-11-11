@@ -96,7 +96,15 @@ DBImpl::Start() {
     // LOG_ENGINE_TRACE_ << "DB service start";
     SetAvailable(true);
 
-    // TODO: merge files
+    // server may be closed unexpected, these un-merge files need to be merged when server restart
+    // and soft-delete files need to be deleted when server restart
+    snapshot::IDS_TYPE collection_ids;
+    snapshot::Snapshots::GetInstance().GetCollectionIds(collection_ids);
+    std::set<int64_t> merge_ids;
+    for (auto id : collection_ids) {
+        merge_ids.insert(id);
+    }
+    StartMergeTask(merge_ids, true);
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
