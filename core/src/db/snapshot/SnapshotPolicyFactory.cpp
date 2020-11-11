@@ -33,7 +33,7 @@ SnapshotPolicyFactory::Build(ServerConfig& server_config) {
         is_cluster = true;
         role = ClusterRole::RW;
     });
-    if (!is_cluster | role == ClusterRole::RO) {
+    if (!is_cluster | (role == ClusterRole::RO)) {
         auto nums = server_config.general.stale_snapshots_count();
         fiu_do_on("snapshot.policy.stale_count_0", { nums = 0; });
         fiu_do_on("snapshot.policy.stale_count_1", { nums = 1; });
