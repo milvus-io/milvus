@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -340,7 +341,7 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 
 func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequest) (*internalpb.TsoResponse, error) {
 	count := request.GetCount()
-	ts, err := s.tsoAllocator.GenerateTSO(count)
+	ts, err := tso.Alloc(count)
 
 	if err != nil {
 		return &internalpb.TsoResponse{
