@@ -16,7 +16,7 @@ public class MainClass {
     private static String HOST = "127.0.0.1";
     //    private static String HOST = "192.168.1.238";
     private static int PORT = 19530;
-    public static final ConnectParam CONNECT_PARAM =
+    private static final ConnectParam CONNECT_PARAM =
             new ConnectParam.Builder().withHost(HOST).withPort(PORT).build();
     private static MilvusClient client;
     private final int segmentRowCount = 5000;
@@ -35,6 +35,10 @@ public class MainClass {
 
     public static void setPort(int port) {
         MainClass.PORT = port;
+    }
+
+    public static ConnectParam getConnectParam() {
+        return CONNECT_PARAM;
     }
 
     @DataProvider(name = "DefaultConnectArgs")

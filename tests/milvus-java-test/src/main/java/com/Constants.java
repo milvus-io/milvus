@@ -66,5 +66,5 @@ public interface Constants {
             Utils.setBinarySearchParam(
                     defaultBinaryMetricType, vectorsBinary.subList(0, nq), topk, n_probe);
 
-    ConnectParam connectParam = MainClass.CONNECT_PARAM;
+    ConnectParam connectParam = MainClass.getConnectParam();
 }

@@ -9,6 +9,7 @@ import io.milvus.client.dsl.MilvusService;
 import io.milvus.client.dsl.Query;
 import io.milvus.client.dsl.Schema;
 import io.milvus.client.exception.ServerSideMilvusException;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.Test;
