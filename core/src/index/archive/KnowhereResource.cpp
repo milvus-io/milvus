@@ -76,8 +76,10 @@ KnowhereResource::Initialize() {
     } else {
         int64_t sys_thread_cnt = 8;
         if (milvus::server::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
+            // use half of the available threads
+            omp_thread = (sys_thread_cnt >> 1);
             omp_set_num_threads(omp_thread);
+            LOG_SERVER_DEBUG_ << "Set openmp thread number: " << omp_thread;
         }
     }
 
@@ -99,37 +101,35 @@ KnowhereResource::Initialize() {
 #ifdef MILVUS_GPU_VERSION
     bool enable_gpu = config.gpu.enable();
     fiu_do_on("KnowhereResource.Initialize.disable_gpu", enable_gpu = false);
-    if (!enable_gpu) {
-        return Status::OK();
-    }
+    if (enable_gpu) {
+        struct GpuResourceSetting {
+            int64_t pinned_memory = 256 * M_BYTE;
+            int64_t temp_memory = 256 * M_BYTE;
+            int64_t resource_num = 2;
+        };
+        using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
+        GpuResourcesArray gpu_resources;
 
-    struct GpuResourceSetting {
-        int64_t pinned_memory = 256 * M_BYTE;
-        int64_t temp_memory = 256 * M_BYTE;
-        int64_t resource_num = 2;
-    };
-    using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
-    GpuResourcesArray gpu_resources;
+        // get build index gpu resource
+        std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
 
-    // get build index gpu resource
-    std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
+        for (auto gpu_id : build_index_gpus) {
+            gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+        }
 
-    for (auto gpu_id : build_index_gpus) {
-        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
-    }
+        // get search gpu resource
+        std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
 
-    // get search gpu resource
-    std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
+        for (auto& gpu_id : search_gpus) {
+            gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
+        }
 
-    for (auto& gpu_id : search_gpus) {
-        gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
-    }
-
-    // init gpu resources
-    for (auto& gpu_resource : gpu_resources) {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(gpu_resource.first, gpu_resource.second.pinned_memory,
-                                                                gpu_resource.second.temp_memory,
-                                                                gpu_resource.second.resource_num);
+        // init gpu resources
+        for (auto& gpu_resource : gpu_resources) {
+            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(
+                gpu_resource.first, gpu_resource.second.pinned_memory, gpu_resource.second.temp_memory,
+                gpu_resource.second.resource_num);
+        }
     }
 #endif
 
