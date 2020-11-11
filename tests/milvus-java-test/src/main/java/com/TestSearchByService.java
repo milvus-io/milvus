@@ -10,6 +10,7 @@ import io.milvus.client.dsl.Query;
 import io.milvus.client.dsl.Schema;
 import io.milvus.client.exception.ServerSideMilvusException;
 import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
@@ -36,6 +37,16 @@ public class TestSearchByService {
     MilvusService service = new MilvusService(client, collectionName, floatSchema);
     MilvusService binaryService = new MilvusService(client, collectionName, binarySchema);
 
+    @AfterMethod
+    public void teardown() {
+        if (service.hasCollection(collectionName)) {
+            service.dropCollection();
+        }
+        if (binaryService.hasCollection(collectionName)) {
+            binaryService.dropCollection();
+        }
+    }
+
     // create collection and insert entities, flush
     private List<Long> init_data(int nb) {
         Map<String, List> entities;
@@ -55,14 +66,15 @@ public class TestSearchByService {
     }
 
     // create collection and insert binary entities, flush
-    private List<Long> init_binary_data(int nb) {
+    private List<Long> init_binary_data(List<ByteBuffer> binaryVectors) {
+        int nb = binaryVectors.size();
         List<Long> intValues = new ArrayList<>(nb);
         List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
+        for (int i = 0; i < nb; ++i) {
             intValues.add((long) i);
             floatValues.add((float) i);
         }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
+//        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
         binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
         Assert.assertTrue(binaryService.hasCollection(collectionName));
         List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
@@ -353,23 +365,8 @@ public class TestSearchByService {
 
     @Test
     public void testSearchCollectionBinary() {
-//        List<Long> ids = init_binary_data(Constants.nb);
-        int nb = Constants.nb;
-        List<Long> intValues = new ArrayList<>(nb);
-        List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
-            intValues.add((long) i);
-            floatValues.add((float) i);
-        }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
-        binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
-        Assert.assertTrue(binaryService.hasCollection(collectionName));
-        List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
-                .with(binarySchema.floatField, floatValues)
-                .with(binarySchema.binaryVectorField, binaryVectors));
-        binaryService.flush();
-        Assert.assertEquals(nb, binaryService.countEntities());
-        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryVectors.subList(0, nq), top_k, n_probe);
+        List<Long> ids = init_binary_data(Constants.vectorsBinary);
+        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryQueryVectors, top_k, n_probe);
         SearchParam searchParam = binaryService.buildSearchParam(query);
         SearchResult resSearch = binaryService.search(searchParam);
         Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
@@ -381,26 +378,13 @@ public class TestSearchByService {
 
     @Test
     public void testSearchIVFLATBinary() {
-        int nb = Constants.nb;
-        List<Long> intValues = new ArrayList<>(nb);
-        List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
-            intValues.add((long) i);
-            floatValues.add((float) i);
-        }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
-        binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
-        Assert.assertTrue(binaryService.hasCollection(collectionName));
-        List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
-                .with(binarySchema.floatField, floatValues)
-                .with(binarySchema.binaryVectorField, binaryVectors));
-        binaryService.flush();
+        List<Long> ids = init_binary_data(Constants.vectorsBinary);
         binaryService.createIndex(
                 binarySchema.binaryVectorField,
                 IndexType.BIN_FLAT,
                 MetricType.JACCARD,
                 new JsonBuilder().param("nlist", Constants.n_list).build());
-        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryVectors.subList(0, nq), top_k, n_probe);
+        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryQueryVectors, top_k, n_probe);
         SearchParam searchParam = binaryService.buildSearchParam(query);
         SearchResult resSearch = binaryService.search(searchParam);
         Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
@@ -410,27 +394,12 @@ public class TestSearchByService {
 
     @Test
     public void testSearchPartitionNotExistedBinary() {
-        int nb = Constants.nb;
-        List<Long> intValues = new ArrayList<>(nb);
-        List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
-            intValues.add((long) i);
-            floatValues.add((float) i);
-        }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
-        binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
-        Assert.assertTrue(binaryService.hasCollection(collectionName));
-        // insert
-        List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
-                .with(binarySchema.floatField, floatValues)
-                .with(binarySchema.binaryVectorField, binaryVectors));
-        binaryService.flush();
-//      partition
+        List<Long> ids = init_binary_data(Constants.vectorsBinary);
         String tag = Utils.genUniqueStr("tag");
         List<String> tags = new ArrayList<String>();
         tags.add(tag);
 //        binaryService.createPartition(tag);
-        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryVectors.subList(0, nq), top_k, n_probe);
+        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryQueryVectors, top_k, n_probe);
         SearchParam searchParam = binaryService.buildSearchParam(query).setPartitionTags(tags);
         SearchResult resSearch = binaryService.search(searchParam);
         Assert.assertEquals(resSearch.getTopK(), 0);
@@ -438,53 +407,23 @@ public class TestSearchByService {
 
     @Test(expectedExceptions = ServerSideMilvusException.class)
     public void testSearchInvalidNProbeBinary() {
-//        List<Long> ids = init_binary_data(Constants.nb);
+        List<Long> ids = init_binary_data(Constants.vectorsBinary);
         int n_probe_new = 0;
-        int nb = Constants.nb;
-        List<Long> intValues = new ArrayList<>(nb);
-        List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
-            intValues.add((long) i);
-            floatValues.add((float) i);
-        }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
-        binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
-        Assert.assertTrue(binaryService.hasCollection(collectionName));
-        List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
-                .with(binarySchema.floatField, floatValues)
-                .with(binarySchema.binaryVectorField, binaryVectors));
-        binaryService.flush();
         binaryService.createIndex(
                 binarySchema.binaryVectorField,
                 IndexType.BIN_IVF_FLAT,
                 MetricType.JACCARD,
                 new JsonBuilder().param("nlist", Constants.n_list).build());
-        Assert.assertEquals(nb, binaryService.countEntities());
-        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryVectors.subList(0, nq), top_k, n_probe_new);
+        Query query = genDefaultBinaryQuery(MetricType.JACCARD, Constants.vectorsBinary, top_k, n_probe_new);
         SearchParam searchParam = binaryService.buildSearchParam(query);
         binaryService.search(searchParam);
     }
 
     @Test(expectedExceptions = ServerSideMilvusException.class)
     public void testSearchInvalidTopKBinary() {
-//        List<Long> ids = init_binary_data(Constants.nb);
+        List<Long> ids = init_binary_data(Constants.vectorsBinary);
         int top_k = -1;
-        int nb = Constants.nb;
-        List<Long> intValues = new ArrayList<>(nb);
-        List<Float> floatValues = new ArrayList<>(nb);
-        for (int i = 0; i < Constants.nb; ++i) {
-            intValues.add((long) i);
-            floatValues.add((float) i);
-        }
-        List<ByteBuffer> binaryVectors = Utils.genBinaryVectors(nb, Constants.dimension);
-        binaryService.createCollection(new JsonBuilder().param("segment_row_limit", segmentRowLimit).build());
-        Assert.assertTrue(binaryService.hasCollection(collectionName));
-        List<Long> ids = binaryService.insert(insertParam -> insertParam.with(binarySchema.int64Field, intValues)
-                .with(binarySchema.floatField, floatValues)
-                .with(binarySchema.binaryVectorField, binaryVectors));
-        binaryService.flush();
-        Assert.assertEquals(nb, binaryService.countEntities());
-        Query query = genDefaultBinaryQuery(MetricType.JACCARD, binaryVectors.subList(0, nq), top_k, n_probe);
+        Query query = genDefaultBinaryQuery(MetricType.JACCARD, Constants.vectorsBinary, top_k, n_probe);
         SearchParam searchParam = binaryService.buildSearchParam(query);
         binaryService.search(searchParam);
     }
