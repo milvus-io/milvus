@@ -6,15 +6,16 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
@@ -23,7 +24,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"google.golang.org/grpc"
 
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -57,17 +57,6 @@ type Master struct {
 	closeCallbacks []func()
 }
 
-func newTSOKVBase(subPath string) * kv.EtcdKV{
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	client, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{etcdAddr},
-		DialTimeout: 5 * time.Second,
-	})
-	return kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, subPath))
-}
-
 func newKVBase() *kv.EtcdKV {
 	etcdAddr := conf.Config.Etcd.Address
 	etcdAddr += ":"
@@ -80,11 +69,15 @@ func newKVBase() *kv.EtcdKV {
 	return kvBase
 }
 
+func Init() {
+	rand.Seed(time.Now().UnixNano())
+	id.Init()
+	tso.Init()
+}
+
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context) (*Master, error) {
-	rand.Seed(time.Now().UnixNano())
-	id.InitGlobalIdAllocator("idTimestamp", newTSOKVBase("gid"))
-	tso.InitGlobalTsoAllocator("timestamp", newTSOKVBase("tso"))
+	Init()
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
@@ -179,7 +172,7 @@ func (s *Master) startServerLoop(ctx context.Context) {
 }
 
 func (s *Master) stopServerLoop() {
-	if s.grpcServer != nil{
+	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
 	s.serverLoopCancel()

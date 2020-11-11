@@ -46,8 +46,8 @@ type atomicObject struct {
 
 // timestampOracle is used to maintain the logic of tso.
 type timestampOracle struct {
-	key      string
-	kvBase   kv.KVBase
+	key    string
+	kvBase kv.KVBase
 
 	// TODO: remove saveInterval
 	saveInterval  time.Duration
@@ -83,28 +83,27 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return nil
 }
 
-// SyncTimestamp is used to synchronize the timestamp.
-func (t *timestampOracle) SyncTimestamp() error {
+func (t *timestampOracle) InitTimestamp() error {
 
-	last, err := t.loadTimestamp()
-	if err != nil {
-		return err
-	}
+	//last, err := t.loadTimestamp()
+	//if err != nil {
+	//	return err
+	//}
 
 	next := time.Now()
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
-	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
-		next = last.Add(updateTimestampGuard)
-	}
+	//if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
+	//	next = last.Add(updateTimestampGuard)
+	//}
 
 	save := next.Add(t.saveInterval)
-	if err = t.saveTimestamp(save); err != nil {
+	if err := t.saveTimestamp(save); err != nil {
 		return err
 	}
 
-	log.Print("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
+	//log.Print("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 
 	current := &atomicObject{
 		physical: next,
@@ -156,7 +155,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	now := time.Now()
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
-	if jetLag > 3 * UpdateTimestampStep {
+	if jetLag > 3*UpdateTimestampStep {
 		log.Print("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 	}
 
@@ -197,7 +196,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 // ResetTimestamp is used to reset the timestamp.
 func (t *timestampOracle) ResetTimestamp() {
 	zero := &atomicObject{
-		physical: typeutil.ZeroTime,
+		physical: time.Now(),
 	}
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
 }
