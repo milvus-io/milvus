@@ -99,7 +99,7 @@ SearchReq::OnExecute() {
                 }
 
                 // validate search metric type and DataType match
-                bool is_binary = !(field->GetFtype() == engine::DataType::VECTOR_FLOAT);
+                bool is_binary = field->GetFtype() != engine::DataType::VECTOR_FLOAT;
                 if (query_ptr_->metric_types.find(field->GetName()) != query_ptr_->metric_types.end()) {
                     auto metric_type = query_ptr_->metric_types.at(field->GetName());
                     STATUS_CHECK(ValidateSearchMetricType(metric_type, is_binary));

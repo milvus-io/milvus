@@ -203,8 +203,53 @@ class TestSearchBase:
             for i in range(nq):
                 assert entities[1]["values"][:nq][i] in [r.entity.get('float') for r in res[i]]
         else:
-            with pytest.raises(Exception) as e:
-                res = connect.search(collection, query)
+            with pytest.raises(Exception):
+                connect.search(collection, query)
+
+    def test_search_after_delete(self, connect, collection, get_top_k, get_nq):
+        '''
+        target: test basic search function before and after deletion, all the search params is
+                corrent, change top-k value.
+                check issue <a href="https://github.com/milvus-io/milvus/issues/4200">#4200</a>
+        method: search with the given vectors, check the result
+        expected: the deleted entities do not exist in the result.
+        '''
+        top_k = get_top_k
+        nq = get_nq
+
+        entities, ids = init_data(connect, collection, nb=10000)
+        first_int64_value = entities[0]["values"][0]
+        first_vector = entities[2]["values"][0]
+
+        search_param = get_search_param("FLAT")
+        query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
+        vecs[:] = []
+        vecs.append(first_vector)
+
+        res = None
+        if top_k > max_top_k:
+            with pytest.raises(Exception):
+                connect.search(collection, query, fields=['int64'])
+            pytest.skip("top_k value is larger than max_topp_k")
+        else:
+            res = connect.search(collection, query, fields=['int64'])
+            assert len(res) == 1
+            assert len(res[0]) >= top_k
+            assert res[0][0].id == ids[0]
+            assert res[0][0].entity.get("int64") == first_int64_value
+            assert res[0]._distances[0] < epsilon
+            assert check_id_result(res[0], ids[0])
+
+        connect.delete_entity_by_id(collection, ids[:1])
+        connect.flush([collection])
+
+        res2 = connect.search(collection, query, fields=['int64'])
+        assert len(res2) == 1
+        assert len(res2[0]) >= top_k
+        assert res2[0][0].id != ids[0]
+        if top_k > 1:
+            assert res2[0][0].id == res[0][1].id
+            assert res2[0][0].entity.get("int64") == res[0][1].entity.get("int64")
 
     # TODO:
     @pytest.mark.level(2)
