@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"net"
@@ -15,6 +14,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"google.golang.org/grpc"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -157,7 +157,7 @@ func (p *Proxy) queryResultLoop() {
 		if len(queryResultBuf[reqId]) == 4 {
 			// TODO: use the number of query node instead
 			t := p.taskSch.getTaskByReqId(reqId)
-			qt := t.(*QueryTask)
+			qt := (*t).(*QueryTask)
 			qt.resultBuf <- queryResultBuf[reqId]
 			delete(queryResultBuf, reqId)
 		}

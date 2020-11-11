@@ -51,6 +51,7 @@ func newTimeTick(ctx context.Context, tsoAllocator *allocator.TimestampAllocator
 	return t
 }
 
+
 func (tt *timeTick) tick() error {
 
 	if tt.lastTick == tt.currentTick {
