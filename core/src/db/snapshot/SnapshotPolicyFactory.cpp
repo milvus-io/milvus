@@ -33,6 +33,9 @@ SnapshotPolicyFactory::Build(ServerConfig& server_config) {
         is_cluster = true;
         role = ClusterRole::RW;
     });
+
+    // If server is working with cluster disabled, apply SnapshotNumPolicy
+    // If server is working with cluster enabled and the role is ClusterRole::RO, apply SnapshotNumPolicy
     if (!is_cluster | (role == ClusterRole::RO)) {
         auto nums = server_config.general.stale_snapshots_count();
         fiu_do_on("snapshot.policy.stale_count_0", { nums = 0; });
@@ -44,6 +47,7 @@ SnapshotPolicyFactory::Build(ServerConfig& server_config) {
         return std::make_shared<SnapshotNumPolicy>(nums + 1);
     }
 
+    // Otherwise, apply SnapshotDurationPolicy
     auto duration = server_config.general.stale_snapshots_duration() * US_PER_S;
     fiu_do_on("snapshot.policy.duration_1ms", { duration = MS_PER_S; });
     fiu_do_on("snapshot.policy.duration_10ms", { duration = 10 * MS_PER_S; });

@@ -45,6 +45,7 @@ class SnapshotHolder {
         return Status::OK();
     }
 
+    // Return how many snapshots in active
     int
     NumOfSnapshot() const;
 

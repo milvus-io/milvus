@@ -20,8 +20,10 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+// A class that takes server config, then generates snapshot policy
 class SnapshotPolicyFactory {
  public:
+    // Return a SnapshotPolicy
     static SnapshotPolicyPtr
     Build(ServerConfig& server_config);
 };

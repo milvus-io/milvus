@@ -19,10 +19,12 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+// A base class for snapshot policy
 class SnapshotPolicy {
  public:
     using MapT = std::map<ID_TYPE, Snapshot::Ptr>;
 
+    // Check if should eject any snapshot in ids
     virtual bool
     ShouldEject(const MapT& ids) = 0;
 
@@ -32,6 +34,7 @@ class SnapshotPolicy {
 
 using SnapshotPolicyPtr = std::shared_ptr<SnapshotPolicy>;
 
+// A policy that keeps upto specified num of snapshots
 class SnapshotNumPolicy : public SnapshotPolicy {
  public:
     explicit SnapshotNumPolicy(size_t num);
@@ -40,9 +43,11 @@ class SnapshotNumPolicy : public SnapshotPolicy {
     ShouldEject(const MapT& ids) override;
 
  protected:
+    // Num of snapshots
     size_t num_;
 };
 
+// A policy that keeps all snapshots within specified duration
 class SnapshotDurationPolicy : public SnapshotPolicy {
  public:
     explicit SnapshotDurationPolicy(TS_TYPE us);
@@ -51,6 +56,7 @@ class SnapshotDurationPolicy : public SnapshotPolicy {
     ShouldEject(const MapT& ids) override;
 
  protected:
+    // Duration in us
     TS_TYPE us_;
 };
 

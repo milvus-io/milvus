@@ -489,6 +489,10 @@ TEST_F(SnapshotTest, SnapshotPolicyTest) {
         ASSERT_TRUE(status.ok());
     };
 
+    // Test case:
+    // cluster: disable
+    // stale_snapshots_count: 0
+    // Check the num of snapshot should be 1
     {
         build_env("c1", 1);
         int num;
@@ -498,6 +502,10 @@ TEST_F(SnapshotTest, SnapshotPolicyTest) {
         /* std::cout << "c1 has " << num << " snapshots" << std::endl; */
         ASSERT_EQ(num, 1);
     }
+    // Test case:
+    // cluster: disable
+    // stale_snapshots_count: 4
+    // Check the num of snapshot should be 5
     {
         fiu_enable("snapshot.policy.stale_count_4", 1, nullptr, 0);
         build_env("c2", 1);
@@ -509,6 +517,11 @@ TEST_F(SnapshotTest, SnapshotPolicyTest) {
         ASSERT_EQ(num, 5);
         fiu_disable("snapshot.policy.stale_count_4");
     }
+    // Test case:
+    // cluster: enable
+    // role: ClusterRole::RW
+    // stale_snapshots_duration: 50ms
+    // Check the num of snapshot should be 3
     {
         fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
         fiu_enable("snapshot.policy.duration_50ms", 1, nullptr, 0);
@@ -522,6 +535,11 @@ TEST_F(SnapshotTest, SnapshotPolicyTest) {
         fiu_disable("snapshot.policy.w_cluster");
         fiu_disable("snapshot.policy.duration_50ms");
     }
+    // Test case:
+    // cluster: enable
+    // role: ClusterRole::RW
+    // stale_snapshots_duration: 100ms
+    // Check the num of snapshot should be 4
     {
         fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
         fiu_enable("snapshot.policy.duration_100ms", 1, nullptr, 0);
