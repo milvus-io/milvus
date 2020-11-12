@@ -2,11 +2,11 @@ package master
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"

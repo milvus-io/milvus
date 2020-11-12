@@ -2,11 +2,12 @@ package timesync
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type (
@@ -24,15 +25,8 @@ func (ttBarrier *TestTickBarrier) GetTimeTick() (Timestamp, error) {
 
 func (ttBarrier *TestTickBarrier) Start() error {
 	go func(ctx context.Context) {
-		for {
-			select {
-			case <-ctx.Done():
-				{
-					log.Printf("barrier context done, exit")
-					return
-				}
-			}
-		}
+		<-ctx.Done()
+		log.Printf("barrier context done, exit")
 	}(ttBarrier.ctx)
 	return nil
 }
@@ -90,7 +84,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	producerChannels := []string{"proxyTtBarrier"}
 	consumerChannels := []string{"proxyTtBarrier"}
 	consumerSubName := "proxyTtBarrier"
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	proxyTtInputStream, proxyTtOutputStream := initTestPulsarStream(ctx, pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 
 	producerChannels = []string{"writeNodeBarrier"}
@@ -107,10 +102,10 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	(*writeNodeOutputStream).Start()
 	timeSyncProducer.Start()
 	expected := []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	result_1 := receiveMsg(proxyTtOutputStream)
-	assert.Equal(t, expected, result_1)
-	result_2 := receiveMsg(writeNodeOutputStream)
-	assert.Equal(t, expected, result_2)
+	result1 := receiveMsg(proxyTtOutputStream)
+	assert.Equal(t, expected, result1)
+	result2 := receiveMsg(writeNodeOutputStream)
+	assert.Equal(t, expected, result2)
 
 	timeSyncProducer.Close()
 }

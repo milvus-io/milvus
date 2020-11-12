@@ -2,12 +2,12 @@ package master
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -21,15 +21,15 @@ func TestMaster_CreateCollection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcd_port := strconv.Itoa(int(conf.Config.Etcd.Port))
-	etcd_addr := "127.0.0.1:" + etcd_port
+	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	etcdAddr := "127.0.0.1:" + etcdPort
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcd_addr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	_, err = etcdCli.Delete(ctx, "/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcd_addr})
+	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcdAddr})
 	assert.Nil(t, err)
 	err = svr.Run(10001)
 	assert.Nil(t, err)
@@ -96,7 +96,7 @@ func TestMaster_CreateCollection(t *testing.T) {
 			},
 		},
 	}
-	schema_bytes, err := proto.Marshal(&sch)
+	schemaBytes, err := proto.Marshal(&sch)
 	assert.Nil(t, err)
 
 	req := internalpb.CreateCollectionRequest{
@@ -104,44 +104,44 @@ func TestMaster_CreateCollection(t *testing.T) {
 		ReqId:     1,
 		Timestamp: 11,
 		ProxyId:   1,
-		Schema:    &commonpb.Blob{Value: schema_bytes},
+		Schema:    &commonpb.Blob{Value: schemaBytes},
 	}
 	st, err := cli.CreateCollection(ctx, &req)
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-	coll_meta, err := svr.mt.GetCollectionByName(sch.Name)
+	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
-	t.Logf("collection id = %d", coll_meta.ID)
-	assert.Equal(t, coll_meta.CreateTime, uint64(11))
-	assert.Equal(t, coll_meta.Schema.Name, "col1")
-	assert.Equal(t, coll_meta.Schema.AutoId, false)
-	assert.Equal(t, len(coll_meta.Schema.Fields), 2)
-	assert.Equal(t, coll_meta.Schema.Fields[0].Name, "col1_f1")
-	assert.Equal(t, coll_meta.Schema.Fields[1].Name, "col1_f2")
-	assert.Equal(t, coll_meta.Schema.Fields[0].DataType, schemapb.DataType_VECTOR_FLOAT)
-	assert.Equal(t, coll_meta.Schema.Fields[1].DataType, schemapb.DataType_VECTOR_BINARY)
-	assert.Equal(t, len(coll_meta.Schema.Fields[0].TypeParams), 2)
-	assert.Equal(t, len(coll_meta.Schema.Fields[0].IndexParams), 2)
-	assert.Equal(t, len(coll_meta.Schema.Fields[1].TypeParams), 2)
-	assert.Equal(t, len(coll_meta.Schema.Fields[1].IndexParams), 2)
-	assert.Equal(t, coll_meta.Schema.Fields[0].TypeParams[0].Key, "col1_f1_tk1")
-	assert.Equal(t, coll_meta.Schema.Fields[0].TypeParams[1].Key, "col1_f1_tk2")
-	assert.Equal(t, coll_meta.Schema.Fields[0].TypeParams[0].Value, "col1_f1_tv1")
-	assert.Equal(t, coll_meta.Schema.Fields[0].TypeParams[1].Value, "col1_f1_tv2")
-	assert.Equal(t, coll_meta.Schema.Fields[0].IndexParams[0].Key, "col1_f1_ik1")
-	assert.Equal(t, coll_meta.Schema.Fields[0].IndexParams[1].Key, "col1_f1_ik2")
-	assert.Equal(t, coll_meta.Schema.Fields[0].IndexParams[0].Value, "col1_f1_iv1")
-	assert.Equal(t, coll_meta.Schema.Fields[0].IndexParams[1].Value, "col1_f1_iv2")
+	t.Logf("collection id = %d", collMeta.ID)
+	assert.Equal(t, collMeta.CreateTime, uint64(11))
+	assert.Equal(t, collMeta.Schema.Name, "col1")
+	assert.Equal(t, collMeta.Schema.AutoId, false)
+	assert.Equal(t, len(collMeta.Schema.Fields), 2)
+	assert.Equal(t, collMeta.Schema.Fields[0].Name, "col1_f1")
+	assert.Equal(t, collMeta.Schema.Fields[1].Name, "col1_f2")
+	assert.Equal(t, collMeta.Schema.Fields[0].DataType, schemapb.DataType_VECTOR_FLOAT)
+	assert.Equal(t, collMeta.Schema.Fields[1].DataType, schemapb.DataType_VECTOR_BINARY)
+	assert.Equal(t, len(collMeta.Schema.Fields[0].TypeParams), 2)
+	assert.Equal(t, len(collMeta.Schema.Fields[0].IndexParams), 2)
+	assert.Equal(t, len(collMeta.Schema.Fields[1].TypeParams), 2)
+	assert.Equal(t, len(collMeta.Schema.Fields[1].IndexParams), 2)
+	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Key, "col1_f1_tk1")
+	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[1].Key, "col1_f1_tk2")
+	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Value, "col1_f1_tv1")
+	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[1].Value, "col1_f1_tv2")
+	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[0].Key, "col1_f1_ik1")
+	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[1].Key, "col1_f1_ik2")
+	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[0].Value, "col1_f1_iv1")
+	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[1].Value, "col1_f1_iv2")
 
-	assert.Equal(t, coll_meta.Schema.Fields[1].TypeParams[0].Key, "col1_f2_tk1")
-	assert.Equal(t, coll_meta.Schema.Fields[1].TypeParams[1].Key, "col1_f2_tk2")
-	assert.Equal(t, coll_meta.Schema.Fields[1].TypeParams[0].Value, "col1_f2_tv1")
-	assert.Equal(t, coll_meta.Schema.Fields[1].TypeParams[1].Value, "col1_f2_tv2")
-	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[0].Key, "col1_f2_ik1")
-	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[1].Key, "col1_f2_ik2")
-	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
-	assert.Equal(t, coll_meta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
+	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[0].Key, "col1_f2_tk1")
+	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[1].Key, "col1_f2_tk2")
+	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[0].Value, "col1_f2_tv1")
+	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[1].Value, "col1_f2_tv2")
+	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Key, "col1_f2_ik1")
+	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Key, "col1_f2_ik2")
+	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[0].Value, "col1_f2_iv1")
+	assert.Equal(t, collMeta.Schema.Fields[1].IndexParams[1].Value, "col1_f2_iv2")
 
 	req.Timestamp = Timestamp(10)
 	st, err = cli.CreateCollection(ctx, &req)

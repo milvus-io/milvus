@@ -539,8 +539,8 @@ func TestSegment_segmentDelete(t *testing.T) {
 //func TestSegment_segmentSearch(t *testing.T) {
 //	ctx := context.Background()
 //	// 1. Construct node, collection, partition and segment
-//	pulsarUrl := "pulsar://localhost:6650"
-//	node := NewQueryNode(ctx, 0, pulsarUrl)
+//	pulsarURL := "pulsar://localhost:6650"
+//	node := NewQueryNode(ctx, 0, pulsarURL)
 //	var collection = node.newCollection(0, "collection0", "")
 //	var partition = collection.newPartition("partition0")
 //	var segment = partition.newSegment(0)

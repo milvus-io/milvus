@@ -25,4 +25,4 @@ services:
     working_dir: "/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "
-        make verifiers && make unittest"
+        make build-cpp && make verifiers && make unittest"

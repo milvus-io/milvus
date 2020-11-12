@@ -1,8 +1,9 @@
 package flowgraph
 
 import (
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"log"
+
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type InputNode struct {

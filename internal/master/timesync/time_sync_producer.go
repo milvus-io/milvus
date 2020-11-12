@@ -1,12 +1,12 @@
 package timesync
 
 import (
+	"context"
+	"log"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"log"
-
-	"context"
 )
 
 type timeSyncMsgProducer struct {

@@ -9,18 +9,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func getTtMsg(msgType internalPb.MsgType, peerId UniqueID, timeStamp uint64) *ms.TsMsg {
+func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) *ms.TsMsg {
 	var tsMsg ms.TsMsg
 	baseMsg := ms.BaseMsg{
-		HashValues: []int32{int32(peerId)},
+		HashValues: []int32{int32(peerID)},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
-		PeerId:    peerId,
+		PeerId:    peerID,
 		Timestamp: timeStamp,
 	}
 	timeTickMsg := &ms.TimeTickMsg{
@@ -393,6 +394,8 @@ func TestTt_HardTtBarrierGetTimeTick(t *testing.T) {
 
 	// This will stuck
 	ts, err = sttbarrierStuck.GetTimeTick()
+	assert.NotNil(t, err)
+	assert.Equal(t, Timestamp(0), ts)
 
 	// ---------------------context cancel------------------------
 	channelsCancel := []string{"HardTtBarrierGetTimeTickCancel"}
@@ -424,5 +427,6 @@ func TestTt_HardTtBarrierGetTimeTick(t *testing.T) {
 
 	// This will stuck
 	ts, err = sttbarrierCancel.GetTimeTick()
-
+	assert.NotNil(t, err)
+	assert.Equal(t, Timestamp(0), ts)
 }

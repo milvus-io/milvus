@@ -6,6 +6,7 @@ run:
     - docs
     - scripts
     - internal/core
+    - internal/proto
 
 linters-settings:
   golint:

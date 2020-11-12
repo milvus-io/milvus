@@ -464,7 +464,7 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 		Timestamp: uint64(1),
 	}
 	timeTick := &TimeTickMsg{
-		BaseMsg:       baseMsg,
+		BaseMsg:     baseMsg,
 		TimeTickMsg: timeTickRequest,
 	}
 	var tsMsg TsMsg = timeTick
