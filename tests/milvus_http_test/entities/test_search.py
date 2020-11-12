@@ -24,6 +24,7 @@ def init_data(client, collection, nb=default_nb, partition_tags=None, auto_id=Tr
         else:
             ids = client.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
     client.flush([collection])
+    assert client.count_collection(collection) == nb
     return insert_entities, ids
 
 
@@ -47,6 +48,7 @@ def init_binary_data(client, collection, nb=default_nb, partition_tags=None, aut
         else:
             ids = client.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
     client.flush([collection])
+    assert client.count_collection(collection) == nb
     return insert_raw_vectors, insert_entities, ids
 
 
@@ -219,14 +221,23 @@ class TestSearchBase:
 
     # TODO
     def test_search_with_invalid_metric_type(self, client, collection):
+        """
+        target: test search function with invalid metric type
+        method:
+        expected:
+        """
         entities, ids = init_data(client, collection)
-        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, metric_type="l2")
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, metric_type="l1")
         assert not client.search(collection, query)
 
-    # TODO
     def test_search_binary_flat(self, client, binary_collection):
-        raw_vectors, binary_entities, ids = init_data(client, binary_collection)
-        query, query_vectors = gen_query_vectors(field_name, binary_entities, default_top_k, default_nq)
+        """
+        target: test basic search function on binary collection
+        method: call search function with binary query vectors
+        expected:
+        """
+        raw_vectors, binary_entities, ids = init_binary_data(client, binary_collection)
+        query, query_vectors = gen_query_vectors(default_binary_vec_field_name, binary_entities, default_top_k,default_nq, metric_type='JACCARD')
         data = client.search(binary_collection, query)
         res = data['result']
         assert data['num'] == default_nq
