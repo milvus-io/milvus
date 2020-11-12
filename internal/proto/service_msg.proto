@@ -43,19 +43,15 @@ enum PlaceholderType {
 }
 
 
-message VectorValues {
-    repeated common.Blob value = 1;
-}
-
-
 /**
 * @brief Placeholder value in DSL
 */
 message PlaceholderValue {
     string tag = 1;
     PlaceholderType type = 2;
-    // value contains the serialized VectorValues
-    bytes value = 3;
+    // values is a 2d-array, every array contains a vector
+    repeated bytes values = 3;
+
 }
 
 message PlaceholderGroup {
@@ -69,6 +65,7 @@ message Query {
     string collection_name = 1;
     repeated string partition_tags = 2;
     string dsl = 3;
+    // placeholder_group contains the serialized PlaceholderGroup
     bytes placeholder_group = 4;
 }
 

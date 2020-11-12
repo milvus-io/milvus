@@ -5,6 +5,7 @@
 #include <string>
 #include <optional>
 #include "Expr.h"
+#include "utils/Json.h"
 namespace milvus::query {
 class PlanNodeVisitor;
 
@@ -26,12 +27,12 @@ struct PlanNode {
 
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
-struct QueryInfo{
+struct QueryInfo {
     int64_t num_queries_;
-    int64_t dim_;
     int64_t topK_;
     FieldId field_id_;
     std::string metric_type_;  // TODO: use enum
+    nlohmann::json search_params_;
 };
 
 struct VectorPlanNode : PlanNode {
@@ -44,12 +45,16 @@ struct VectorPlanNode : PlanNode {
 };
 
 struct FloatVectorANNS : VectorPlanNode {
+    std::string placeholder_tag_;
+
  public:
     void
     accept(PlanNodeVisitor&) override;
 };
 
 struct BinaryVectorANNS : VectorPlanNode {
+    std::string placeholder_tag_;
+
  public:
     void
     accept(PlanNodeVisitor&) override;

@@ -429,7 +429,7 @@ TEST(CApiTest, GetRowCountTest) {
     DeleteSegment(segment);
 }
 
-//TEST(CApiTest, SchemaTest) {
+// TEST(CApiTest, SchemaTest) {
 //    std::string schema_string =
 //        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
 //        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "

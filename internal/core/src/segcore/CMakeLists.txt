@@ -10,6 +10,7 @@ set(SEGCORE_FILES
         SegmentBase.cpp
         IndexingEntry.cpp
         InsertRecord.cpp
+        Reduce.cpp
         )
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}

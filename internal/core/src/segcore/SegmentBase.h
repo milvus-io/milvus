@@ -7,6 +7,7 @@
 // #include "knowhere/index/Index.h"
 // #include "knowhere/index/IndexType.h"
 #include "query/deprecated/GeneralQuery.h"
+#include "query/Plan.h"
 
 namespace milvus {
 namespace segcore {
@@ -49,11 +50,14 @@ class SegmentBase {
 
     // query contains metadata of
     virtual Status
-    QueryDeprecated(query::QueryPtr query, Timestamp timestamp, QueryResult& results) = 0;
+    QueryDeprecated(query::QueryDeprecatedPtr query, Timestamp timestamp, QueryResult& results) = 0;
 
-    // // THIS FUNCTION IS REMOVED
-    // virtual Status
-    // GetEntityByIds(Timestamp timestamp, const std::vector<Id>& ids, DataChunkPtr& results) = 0;
+    virtual Status
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_groups[],
+           const Timestamp timestamps[],
+           int num_groups,
+           QueryResult& results) = 0;
 
     // stop receive insert requests
     virtual Status

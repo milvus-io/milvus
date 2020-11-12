@@ -130,7 +130,7 @@ using QueryPtr = std::shared_ptr<Query>;
 }  // namespace query_old
 
 namespace query {
-struct Query {
+struct QueryDeprecated {
     int64_t num_queries;                //
     int topK;                           // topK of queries
     std::string field_name;             // must be fakevec, whose data_type must be VEC_FLOAT(DIM)
@@ -142,6 +142,6 @@ struct Query {
 //    return std::
 //}
 
-using QueryPtr = std::shared_ptr<Query>;
+using QueryDeprecatedPtr = std::shared_ptr<QueryDeprecated>;
 }  // namespace query
 }  // namespace milvus

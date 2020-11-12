@@ -125,7 +125,7 @@ Search(CSegmentBase c_segment,
     milvus::segcore::QueryResult query_result;
 
     // construct QueryPtr
-    auto query_ptr = std::make_shared<milvus::query::Query>();
+    auto query_ptr = std::make_shared<milvus::query::QueryDeprecated>();
 
     query_ptr->num_queries = c_query_info.num_queries;
     query_ptr->topK = c_query_info.topK;

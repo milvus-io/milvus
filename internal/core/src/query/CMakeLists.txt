@@ -6,7 +6,7 @@ set(MILVUS_QUERY_SRCS
         visitors/ShowPlanNodeVisitor.cpp
         visitors/ExecPlanNodeVisitor.cpp
         Parser.cpp
+        Plan.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
 target_link_libraries(milvus_query libprotobuf)
-

@@ -59,7 +59,6 @@ TEST(Query, ShowExecutor) {
     auto& info = node->query_info_;
     info.metric_type_ = "L2";
     info.num_queries_ = 10;
-    info.dim_ = 16;
     info.topK_ = 20;
     info.field_id_ = "fakevec";
     node->predicate_ = std::nullopt;
