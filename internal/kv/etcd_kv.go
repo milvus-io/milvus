@@ -34,7 +34,8 @@ func (kv *EtcdKV) Close() {
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Printf("LoadWithPrefix %s", key)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
@@ -50,7 +51,8 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 func (kv *EtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 	resp, err := kv.client.Get(ctx, key)
 	if err != nil {
 		return "", err
@@ -64,11 +66,12 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 
 func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
-	for _, key_load := range keys {
-		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, key_load)))
+	for _, keyLoad := range keys {
+		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
 	}
 
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
 		return []string{}, err
@@ -96,7 +99,8 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 
 func (kv *EtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 	_, err := kv.client.Put(ctx, key, value)
 	return err
 }
@@ -107,14 +111,18 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
+
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
 }
 
 func (kv *EtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
+
 	_, err := kv.client.Delete(ctx, key)
 	return err
 }
@@ -125,7 +133,9 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key)))
 	}
 
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
+
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
 }
@@ -136,12 +146,14 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
-	for _, key_delete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key_delete)))
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
 	log.Printf("MultiSaveAndRemove")
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
+
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	return err
 }

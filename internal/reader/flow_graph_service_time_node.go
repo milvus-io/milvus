@@ -6,7 +6,7 @@ import (
 
 type serviceTimeNode struct {
 	BaseNode
-	node           *QueryNode
+	node *QueryNode
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -17,7 +17,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	// fmt.Println("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in serviceTimeNode")
+		log.Println("Invalid operate message input in serviceTimeNode, input length = ", len(in))
 		// TODO: add error handling
 	}
 

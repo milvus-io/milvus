@@ -3,10 +3,11 @@ package reader
 import (
 	"errors"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"log"
 	"strconv"
 	"sync"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 type insertNode struct {
@@ -29,7 +30,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 	// fmt.Println("Do insertNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in insertNode")
+		log.Println("Invalid operate message input in insertNode, input length = ", len(in))
 		// TODO: add error handling
 	}
 

@@ -13,7 +13,7 @@ import (
 )
 
 type task interface {
-	Id() UniqueID // return ReqId
+	ID() UniqueID // return ReqId
 	Type() internalpb.MsgType
 	BeginTs() Timestamp
 	EndTs() Timestamp
@@ -49,7 +49,7 @@ func (it *InsertTask) EndTs() Timestamp {
 	return it.ts
 }
 
-func (it *InsertTask) Id() UniqueID {
+func (it *InsertTask) ID() UniqueID {
 	return it.ReqId
 }
 
@@ -85,7 +85,7 @@ func (it *InsertTask) WaitToFinish() error {
 			return err
 		case <-it.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -103,7 +103,7 @@ type CreateCollectionTask struct {
 	cancel       context.CancelFunc
 }
 
-func (cct *CreateCollectionTask) Id() UniqueID {
+func (cct *CreateCollectionTask) ID() UniqueID {
 	return cct.ReqId
 }
 
@@ -153,7 +153,7 @@ func (cct *CreateCollectionTask) WaitToFinish() error {
 			return err
 		case <-cct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -171,7 +171,7 @@ type DropCollectionTask struct {
 	cancel       context.CancelFunc
 }
 
-func (dct *DropCollectionTask) Id() UniqueID {
+func (dct *DropCollectionTask) ID() UniqueID {
 	return dct.ReqId
 }
 
@@ -221,7 +221,7 @@ func (dct *DropCollectionTask) WaitToFinish() error {
 			return err
 		case <-dct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -240,7 +240,7 @@ type QueryTask struct {
 	cancel         context.CancelFunc
 }
 
-func (qt *QueryTask) Id() UniqueID {
+func (qt *QueryTask) ID() UniqueID {
 	return qt.ReqId
 }
 
@@ -294,7 +294,7 @@ func (qt *QueryTask) WaitToFinish() error {
 			return err
 		case <-qt.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -368,7 +368,7 @@ type HasCollectionTask struct {
 	cancel       context.CancelFunc
 }
 
-func (hct *HasCollectionTask) Id() UniqueID {
+func (hct *HasCollectionTask) ID() UniqueID {
 	return hct.ReqId
 }
 
@@ -421,7 +421,7 @@ func (hct *HasCollectionTask) WaitToFinish() error {
 			return err
 		case <-hct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -439,7 +439,7 @@ type DescribeCollectionTask struct {
 	cancel       context.CancelFunc
 }
 
-func (dct *DescribeCollectionTask) Id() UniqueID {
+func (dct *DescribeCollectionTask) ID() UniqueID {
 	return dct.ReqId
 }
 
@@ -491,7 +491,7 @@ func (dct *DescribeCollectionTask) WaitToFinish() error {
 			return err
 		case <-dct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }
@@ -509,7 +509,7 @@ type ShowCollectionsTask struct {
 	cancel       context.CancelFunc
 }
 
-func (sct *ShowCollectionsTask) Id() UniqueID {
+func (sct *ShowCollectionsTask) ID() UniqueID {
 	return sct.ReqId
 }
 
@@ -561,7 +561,7 @@ func (sct *ShowCollectionsTask) WaitToFinish() error {
 			return err
 		case <-sct.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
-			return errors.New("wait to finish failed, timeout!")
+			return errors.New("wait to finish failed, timeout")
 		}
 	}
 }

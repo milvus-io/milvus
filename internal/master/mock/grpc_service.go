@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -31,13 +32,11 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 }
 
 func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error) {
-	return &servicepb.CollectionDescription{
-	}, nil
+	return &servicepb.CollectionDescription{}, nil
 }
 
 func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error) {
-	return &servicepb.StringListResponse{
-	}, nil
+	return &servicepb.StringListResponse{}, nil
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -66,7 +65,7 @@ func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribeP
 	return &servicepb.PartitionDescription{}, nil
 }
 
-func (s *Master) ShowPartitions(ctx context.Context,  in *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error) {
+func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error) {
 	return &servicepb.StringListResponse{}, nil
 }
 
@@ -92,7 +91,6 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 }
 
 func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*internalpb.IdResponse, error) {
-	panic("implement me")
 	count := request.GetCount()
 	ts, err := id.AllocOne()
 
@@ -104,7 +102,7 @@ func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*i
 
 	response := &internalpb.IdResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		Id:     ts,
+		ID:     ts,
 		Count:  count,
 	}
 

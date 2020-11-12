@@ -115,7 +115,7 @@ type Allocator struct {
 	masterAddress string
 	masterConn    *grpc.ClientConn
 	masterClient  masterpb.MasterClient
-	countPerRpc   uint32
+	countPerRPC   uint32
 
 	tChan       tickerChan
 	syncFunc    func()
@@ -135,7 +135,8 @@ func (ta *Allocator) Start() error {
 
 func (ta *Allocator) connectMaster() error {
 	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
-	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		log.Printf("Connect to master failed, error= %v", err)

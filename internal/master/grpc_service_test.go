@@ -2,6 +2,8 @@ package master
 
 import (
 	"context"
+	"testing"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -10,7 +12,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
-	"testing"
 )
 
 func TestMaster_CreateCollection(t *testing.T) {
@@ -105,7 +106,7 @@ func TestMaster_CreateCollection(t *testing.T) {
 
 	coll_meta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
-	t.Logf("collection id = %d", coll_meta.Id)
+	t.Logf("collection id = %d", coll_meta.ID)
 	assert.Equal(t, coll_meta.CreateTime, uint64(11))
 	assert.Equal(t, coll_meta.Schema.Name, "col1")
 	assert.Equal(t, coll_meta.Schema.AutoId, false)

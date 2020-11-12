@@ -93,6 +93,9 @@ func (s *S3Driver) deleteGE(ctx context.Context, key Key, timestamp Timestamp) e
 		return err
 	}
 	keyStart, err := codec.MvccEncode(key, timestamp, "")
+	if err != nil {
+		panic(err)
+	}
 	err = s.driver.DeleteRange(ctx, []byte(keyStart), keys[len(keys)-1])
 	return err
 }
@@ -213,7 +216,7 @@ func (s *S3Driver) GetSegments(ctx context.Context, key Key, timestamp Timestamp
 
 	var segments []string
 	for k, v := range segmentsSet {
-		if v == true {
+		if v {
 			segments = append(segments, k)
 		}
 	}

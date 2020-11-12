@@ -357,7 +357,6 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 }
 
 func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*internalpb.IdResponse, error) {
-	panic("implement me")
 	count := request.GetCount()
 	ts, err := id.AllocOne()
 
@@ -369,7 +368,7 @@ func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*i
 
 	response := &internalpb.IdResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		Id:     ts,
+		ID:     ts,
 		Count:  count,
 	}
 

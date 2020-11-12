@@ -3,11 +3,6 @@ package mockmaster
 import (
 	"context"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"net"
@@ -15,11 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
+
+	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 )
 
 const (
-	MOCK_GRPC_PORT=":0"
+	MOCKGRPCPORT = ":0"
 )
 
 var GrpcServerAddr net.Addr
@@ -39,7 +40,7 @@ type Master struct {
 	// for tso.
 	tsoAllocator tso.Allocator
 
-	kvBase    kv.KVBase
+	kvBase kv.Base
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -51,11 +52,11 @@ type Master struct {
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
-	id.InitGlobalIdAllocator("idTimestamp", mockkv.NewEtcdKV())
+	id.InitGlobalIDAllocator("idTimestamp", mockkv.NewEtcdKV())
 
 	m := &Master{
-		ctx:            ctx,
-		kvBase:         mockkv.NewEtcdKV(),
+		ctx:          ctx,
+		kvBase:       mockkv.NewEtcdKV(),
 		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", mockkv.NewEtcdKV()),
 	}
 
@@ -70,7 +71,7 @@ func (s *Master) AddStartCallback(callbacks ...func()) {
 }
 
 // for unittest, get the grpc server addr
-func (s *Master) GetGRPCAddr() net.Addr{
+func (s *Master) GetGRPCAddr() net.Addr {
 	return s.grpcAddr
 }
 
@@ -150,17 +151,16 @@ func (s *Master) startServerLoop(ctx context.Context) {
 }
 
 func (s *Master) stopServerLoop() {
-	if s.grpcServer != nil{
+	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 }
 
-
 func (s *Master) grpcLoop() {
 	defer s.serverLoopWg.Done()
-	lis, err := net.Listen("tcp", MOCK_GRPC_PORT)
+	lis, err := net.Listen("tcp", MOCKGRPCPORT)
 	if err != nil {
 		log.Printf("failed to listen: %v", err)
 		return
@@ -181,26 +181,18 @@ func (s *Master) pulsarLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("server is closed, exit pulsar loop")
-			return
-		}
-	}
+
+	<-ctx.Done()
+	log.Print("server is closed, exit pulsar loop")
 }
 
 func (s *Master) tasksExecutionLoop() {
 	defer s.serverLoopWg.Done()
-	ctx, _ := context.WithCancel(s.serverLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("server is closed, exit task execution loop")
-			return
-		}
-	}
+	<-ctx.Done()
+	log.Print("server is closed, exit task execution loop")
 }
 
 func (s *Master) segmentStatisticsLoop() {
@@ -209,11 +201,6 @@ func (s *Master) segmentStatisticsLoop() {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Print("server is closed, exit segmentStatistics loop")
-			return
-		}
-	}
+	<-ctx.Done()
+	log.Print("server is closed, exit segmentStatistics loop")
 }

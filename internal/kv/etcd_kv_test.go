@@ -14,7 +14,8 @@ func TestEtcdKV_Load(t *testing.T) {
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 
 	defer kv.Close()
 	defer kv.client.Delete(ctx, rootpath, clientv3.WithPrefix())
@@ -67,7 +68,8 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 
 	defer kv.Close()
 	defer kv.client.Delete(ctx, rootpath, clientv3.WithPrefix())
@@ -93,7 +95,8 @@ func TestEtcdKV_Remove(t *testing.T) {
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 
 	defer kv.Close()
 	defer kv.client.Delete(ctx, rootpath, clientv3.WithPrefix())
@@ -159,8 +162,8 @@ func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 	assert.Nil(t, err)
 	rootpath := "/etcd/test/root"
 	kv := NewEtcdKV(cli, rootpath)
-	ctx, _ := context.WithTimeout(context.TODO(), requestTimeout)
-
+	ctx, cancel := context.WithTimeout(context.TODO(), requestTimeout)
+	defer cancel()
 	defer kv.Close()
 	defer kv.client.Delete(ctx, rootpath, clientv3.WithPrefix())
 

@@ -7,8 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	mockmaster "github.com/zilliztech/milvus-distributed/internal/master/mock"
 	"go.uber.org/zap"
+
+	mockmaster "github.com/zilliztech/milvus-distributed/internal/master/mock"
 )
 
 func main() {

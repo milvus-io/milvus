@@ -2,12 +2,13 @@ package proxy
 
 import (
 	"context"
-	"google.golang.org/grpc"
 	"log"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -31,7 +32,7 @@ type Proxy struct {
 	taskSch      *TaskScheduler
 	tick         *timeTick
 
-	idAllocator  *allocator.IdAllocator
+	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
 
 	manipulationMsgStream *msgstream.PulsarMsgStream
@@ -55,7 +56,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
 	p.queryResultMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
 
-	idAllocator, err := allocator.NewIdAllocator(p.proxyLoopCtx)
+	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx)
 
 	if err != nil {
 		return nil, err
@@ -102,8 +103,8 @@ func (p *Proxy) startProxy() error {
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (s *Proxy) AddCloseCallback(callbacks ...func()) {
-	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
+func (p *Proxy) AddCloseCallback(callbacks ...func()) {
+	p.closeCallbacks = append(p.closeCallbacks, callbacks...)
 }
 
 func (p *Proxy) grpcLoop() {
@@ -124,7 +125,9 @@ func (p *Proxy) grpcLoop() {
 
 func (p *Proxy) connectMaster() error {
 	log.Printf("Connected to master, master_addr=%s", "127.0.0.1:5053")
-	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	conn, err := grpc.DialContext(ctx, "127.0.0.1:5053", grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		log.Printf("Connect to master failed, error= %v", err)
@@ -148,18 +151,18 @@ func (p *Proxy) queryResultLoop() {
 		}
 		tsMsg := msgPack.Msgs[0]
 		searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
-		reqId := searchResultMsg.GetReqId()
-		_, ok := queryResultBuf[reqId]
+		reqID := searchResultMsg.GetReqID()
+		_, ok := queryResultBuf[reqID]
 		if !ok {
-			queryResultBuf[reqId] = make([]*internalpb.SearchResult, 0)
+			queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
 		}
-		queryResultBuf[reqId] = append(queryResultBuf[reqId], &searchResultMsg.SearchResult)
-		if len(queryResultBuf[reqId]) == 4 {
+		queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+		if len(queryResultBuf[reqID]) == 4 {
 			// TODO: use the number of query node instead
-			t := p.taskSch.getTaskByReqId(reqId)
+			t := p.taskSch.getTaskByReqID(reqID)
 			qt := t.(*QueryTask)
-			qt.resultBuf <- queryResultBuf[reqId]
-			delete(queryResultBuf, reqId)
+			qt.resultBuf <- queryResultBuf[reqID]
+			delete(queryResultBuf, reqID)
 		}
 	}
 }

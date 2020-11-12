@@ -179,15 +179,13 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 
 func (s *Segment) segmentSearch(query *queryInfo, timestamp Timestamp, vectorRecord *servicePb.PlaceholderValue) (*SearchResult, error) {
 	/*
-	*/
+	 */
 	//type CQueryInfo C.CQueryInfo
-
 
 	/*
 		void* Search(void* plan, void* placeholder_groups, uint64_t* timestamps, int num_groups, long int* result_ids,
 		       float* result_distances)
 	*/
-
 
 	cQuery := C.CQueryInfo{
 		num_queries: C.long(query.NumQueries),

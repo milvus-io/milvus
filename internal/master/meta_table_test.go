@@ -14,17 +14,17 @@ import (
 func TestMetaTable_Collection(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
 	assert.Nil(t, err)
-	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	meta, err := NewMetaTable(etcd_kv)
+	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
 	defer meta.client.Close()
 
-	col_meta := pb.CollectionMeta{
-		Id: 100,
+	colMeta := pb.CollectionMeta{
+		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -32,8 +32,8 @@ func TestMetaTable_Collection(t *testing.T) {
 		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
-	col_meta_2 := pb.CollectionMeta{
-		Id: 50,
+	colMeta2 := pb.CollectionMeta{
+		ID: 50,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -41,8 +41,8 @@ func TestMetaTable_Collection(t *testing.T) {
 		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
-	col_meta_3 := pb.CollectionMeta{
-		Id: 30,
+	colMeta3 := pb.CollectionMeta{
+		ID: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -50,8 +50,8 @@ func TestMetaTable_Collection(t *testing.T) {
 		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
-	col_meta_4 := pb.CollectionMeta{
-		Id: 30,
+	colMeta4 := pb.CollectionMeta{
+		ID: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -59,8 +59,8 @@ func TestMetaTable_Collection(t *testing.T) {
 		SegmentIds:    []UniqueID{1},
 		PartitionTags: []string{},
 	}
-	col_meta_5 := pb.CollectionMeta{
-		Id: 30,
+	colMeta5 := pb.CollectionMeta{
+		ID: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -68,84 +68,84 @@ func TestMetaTable_Collection(t *testing.T) {
 		SegmentIds:    []UniqueID{1},
 		PartitionTags: []string{"1"},
 	}
-	seg_id_1 := pb.SegmentMeta{
+	segID1 := pb.SegmentMeta{
 		SegmentId:    200,
 		CollectionId: 100,
 		PartitionTag: "p1",
 	}
-	seg_id_2 := pb.SegmentMeta{
+	segID2 := pb.SegmentMeta{
 		SegmentId:    300,
 		CollectionId: 100,
 		PartitionTag: "p1",
 	}
-	seg_id_3 := pb.SegmentMeta{
+	segID3 := pb.SegmentMeta{
 		SegmentId:    400,
 		CollectionId: 100,
 		PartitionTag: "p2",
 	}
-	err = meta.AddCollection(&col_meta)
+	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddCollection(&col_meta_2)
+	err = meta.AddCollection(&colMeta2)
 	assert.NotNil(t, err)
-	err = meta.AddCollection(&col_meta_3)
+	err = meta.AddCollection(&colMeta3)
 	assert.Nil(t, err)
-	err = meta.AddCollection(&col_meta_4)
+	err = meta.AddCollection(&colMeta4)
 	assert.NotNil(t, err)
-	err = meta.AddCollection(&col_meta_5)
+	err = meta.AddCollection(&colMeta5)
 	assert.NotNil(t, err)
-	has_collection := meta.HasCollection(col_meta.Id)
-	assert.True(t, has_collection)
-	err = meta.AddPartition(col_meta.Id, "p1")
+	hasCollection := meta.HasCollection(colMeta.ID)
+	assert.True(t, hasCollection)
+	err = meta.AddPartition(colMeta.ID, "p1")
 	assert.Nil(t, err)
-	err = meta.AddPartition(col_meta.Id, "p2")
+	err = meta.AddPartition(colMeta.ID, "p2")
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_1)
+	err = meta.AddSegment(&segID1)
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_2)
+	err = meta.AddSegment(&segID2)
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_3)
+	err = meta.AddSegment(&segID3)
 	assert.Nil(t, err)
-	get_col_meta, err := meta.GetCollectionByName(col_meta.Schema.Name)
+	getColMeta, err := meta.GetCollectionByName(colMeta.Schema.Name)
 	assert.Nil(t, err)
-	assert.Equal(t, 3, len(get_col_meta.SegmentIds))
-	err = meta.DeleteCollection(col_meta.Id)
+	assert.Equal(t, 3, len(getColMeta.SegmentIds))
+	err = meta.DeleteCollection(colMeta.ID)
 	assert.Nil(t, err)
-	has_collection = meta.HasCollection(col_meta.Id)
-	assert.False(t, has_collection)
-	_, err = meta.GetSegmentById(seg_id_1.SegmentId)
+	hasCollection = meta.HasCollection(colMeta.ID)
+	assert.False(t, hasCollection)
+	_, err = meta.GetSegmentByID(segID1.SegmentId)
 	assert.NotNil(t, err)
-	_, err = meta.GetSegmentById(seg_id_2.SegmentId)
+	_, err = meta.GetSegmentByID(segID2.SegmentId)
 	assert.NotNil(t, err)
-	_, err = meta.GetSegmentById(seg_id_3.SegmentId)
+	_, err = meta.GetSegmentByID(segID3.SegmentId)
 	assert.NotNil(t, err)
 
 	err = meta.reloadFromKV()
 	assert.Nil(t, err)
 
-	assert.Equal(t, 0, len(meta.proxyId2Meta))
-	assert.Equal(t, 0, len(meta.tenantId2Meta))
-	assert.Equal(t, 1, len(meta.collName2Id))
-	assert.Equal(t, 1, len(meta.collId2Meta))
-	assert.Equal(t, 0, len(meta.segId2Meta))
+	assert.Equal(t, 0, len(meta.proxyID2Meta))
+	assert.Equal(t, 0, len(meta.tenantID2Meta))
+	assert.Equal(t, 1, len(meta.collName2ID))
+	assert.Equal(t, 1, len(meta.collID2Meta))
+	assert.Equal(t, 0, len(meta.segID2Meta))
 
-	err = meta.DeleteCollection(col_meta_3.Id)
+	err = meta.DeleteCollection(colMeta3.ID)
 	assert.Nil(t, err)
 }
 
 func TestMetaTable_DeletePartition(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
 	assert.Nil(t, err)
-	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	meta, err := NewMetaTable(etcd_kv)
+	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
 	defer meta.client.Close()
 
-	col_meta := pb.CollectionMeta{
-		Id: 100,
+	colMeta := pb.CollectionMeta{
+		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -153,75 +153,75 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
-	seg_id_1 := pb.SegmentMeta{
+	segID1 := pb.SegmentMeta{
 		SegmentId:    200,
 		CollectionId: 100,
 		PartitionTag: "p1",
 	}
-	seg_id_2 := pb.SegmentMeta{
+	segID2 := pb.SegmentMeta{
 		SegmentId:    300,
 		CollectionId: 100,
 		PartitionTag: "p1",
 	}
-	seg_id_3 := pb.SegmentMeta{
+	segID3 := pb.SegmentMeta{
 		SegmentId:    400,
 		CollectionId: 100,
 		PartitionTag: "p2",
 	}
-	err = meta.AddCollection(&col_meta)
+	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddPartition(col_meta.Id, "p1")
+	err = meta.AddPartition(colMeta.ID, "p1")
 	assert.Nil(t, err)
-	err = meta.AddPartition(col_meta.Id, "p2")
+	err = meta.AddPartition(colMeta.ID, "p2")
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_1)
+	err = meta.AddSegment(&segID1)
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_2)
+	err = meta.AddSegment(&segID2)
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_id_3)
+	err = meta.AddSegment(&segID3)
 	assert.Nil(t, err)
-	after_coll_meta, err := meta.GetCollectionByName("coll1")
+	afterCollMeta, err := meta.GetCollectionByName("coll1")
 	assert.Nil(t, err)
-	assert.Equal(t, 2, len(after_coll_meta.PartitionTags))
-	assert.Equal(t, 3, len(after_coll_meta.SegmentIds))
+	assert.Equal(t, 2, len(afterCollMeta.PartitionTags))
+	assert.Equal(t, 3, len(afterCollMeta.SegmentIds))
 	err = meta.DeletePartition(100, "p1")
 	assert.Nil(t, err)
-	after_coll_meta, err = meta.GetCollectionByName("coll1")
+	afterCollMeta, err = meta.GetCollectionByName("coll1")
 	assert.Nil(t, err)
-	assert.Equal(t, 1, len(after_coll_meta.PartitionTags))
-	assert.Equal(t, 1, len(after_coll_meta.SegmentIds))
-	has_partition := meta.HasPartition(col_meta.Id, "p1")
-	assert.False(t, has_partition)
-	has_partition = meta.HasPartition(col_meta.Id, "p2")
-	assert.True(t, has_partition)
-	_, err = meta.GetSegmentById(seg_id_1.SegmentId)
+	assert.Equal(t, 1, len(afterCollMeta.PartitionTags))
+	assert.Equal(t, 1, len(afterCollMeta.SegmentIds))
+	hasPartition := meta.HasPartition(colMeta.ID, "p1")
+	assert.False(t, hasPartition)
+	hasPartition = meta.HasPartition(colMeta.ID, "p2")
+	assert.True(t, hasPartition)
+	_, err = meta.GetSegmentByID(segID1.SegmentId)
 	assert.NotNil(t, err)
-	_, err = meta.GetSegmentById(seg_id_2.SegmentId)
+	_, err = meta.GetSegmentByID(segID2.SegmentId)
 	assert.NotNil(t, err)
-	_, err = meta.GetSegmentById(seg_id_3.SegmentId)
+	_, err = meta.GetSegmentByID(segID3.SegmentId)
 	assert.Nil(t, err)
-	after_coll_meta, err = meta.GetCollectionByName("coll1")
+	afterCollMeta, err = meta.GetCollectionByName("coll1")
 	assert.Nil(t, err)
 
 	err = meta.reloadFromKV()
 	assert.Nil(t, err)
 
-	assert.Equal(t, 0, len(meta.proxyId2Meta))
-	assert.Equal(t, 0, len(meta.tenantId2Meta))
-	assert.Equal(t, 1, len(meta.collName2Id))
-	assert.Equal(t, 1, len(meta.collId2Meta))
-	assert.Equal(t, 1, len(meta.segId2Meta))
+	assert.Equal(t, 0, len(meta.proxyID2Meta))
+	assert.Equal(t, 0, len(meta.tenantID2Meta))
+	assert.Equal(t, 1, len(meta.collName2ID))
+	assert.Equal(t, 1, len(meta.collID2Meta))
+	assert.Equal(t, 1, len(meta.segID2Meta))
 }
 
 func TestMetaTable_Segment(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{"127.0.0.1:2379"}})
 	assert.Nil(t, err)
-	etcd_kv := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	meta, err := NewMetaTable(etcd_kv)
+	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
 	defer meta.client.Close()
 
@@ -230,8 +230,8 @@ func TestMetaTable_Segment(t *testing.T) {
 	err = meta.client.MultiRemove(keys)
 	assert.Nil(t, err)
 
-	col_meta := pb.CollectionMeta{
-		Id: 100,
+	colMeta := pb.CollectionMeta{
+		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -239,48 +239,48 @@ func TestMetaTable_Segment(t *testing.T) {
 		SegmentIds:    []UniqueID{},
 		PartitionTags: []string{},
 	}
-	seg_meta := pb.SegmentMeta{
+	segMeta := pb.SegmentMeta{
 		SegmentId:    200,
 		CollectionId: 100,
 		PartitionTag: "p1",
 	}
-	err = meta.AddCollection(&col_meta)
+	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddPartition(col_meta.Id, "p1")
+	err = meta.AddPartition(colMeta.ID, "p1")
 	assert.Nil(t, err)
-	err = meta.AddSegment(&seg_meta)
+	err = meta.AddSegment(&segMeta)
 	assert.Nil(t, err)
-	get_seg_meta, err := meta.GetSegmentById(seg_meta.SegmentId)
+	getSegMeta, err := meta.GetSegmentByID(segMeta.SegmentId)
 	assert.Nil(t, err)
-	assert.Equal(t, &seg_meta, get_seg_meta)
-	err = meta.CloseSegment(seg_meta.SegmentId, Timestamp(11), 111)
+	assert.Equal(t, &segMeta, getSegMeta)
+	err = meta.CloseSegment(segMeta.SegmentId, Timestamp(11), 111)
 	assert.Nil(t, err)
-	get_seg_meta, err = meta.GetSegmentById(seg_meta.SegmentId)
+	getSegMeta, err = meta.GetSegmentByID(segMeta.SegmentId)
 	assert.Nil(t, err)
-	assert.Equal(t, get_seg_meta.NumRows, int64(111))
-	assert.Equal(t, get_seg_meta.CloseTime, uint64(11))
-	err = meta.DeleteSegment(seg_meta.SegmentId)
+	assert.Equal(t, getSegMeta.NumRows, int64(111))
+	assert.Equal(t, getSegMeta.CloseTime, uint64(11))
+	err = meta.DeleteSegment(segMeta.SegmentId)
 	assert.Nil(t, err)
-	get_seg_meta, err = meta.GetSegmentById(seg_meta.SegmentId)
-	assert.Nil(t, get_seg_meta)
+	getSegMeta, err = meta.GetSegmentByID(segMeta.SegmentId)
+	assert.Nil(t, getSegMeta)
 	assert.NotNil(t, err)
-	get_col_meta, err := meta.GetCollectionByName(col_meta.Schema.Name)
+	getColMeta, err := meta.GetCollectionByName(colMeta.Schema.Name)
 	assert.Nil(t, err)
-	assert.Equal(t, 0, len(get_col_meta.SegmentIds))
+	assert.Equal(t, 0, len(getColMeta.SegmentIds))
 
-	meta.tenantId2Meta = make(map[UniqueID]pb.TenantMeta)
-	meta.proxyId2Meta = make(map[UniqueID]pb.ProxyMeta)
-	meta.collId2Meta = make(map[UniqueID]pb.CollectionMeta)
-	meta.collName2Id = make(map[string]UniqueID)
-	meta.segId2Meta = make(map[UniqueID]pb.SegmentMeta)
+	meta.tenantID2Meta = make(map[UniqueID]pb.TenantMeta)
+	meta.proxyID2Meta = make(map[UniqueID]pb.ProxyMeta)
+	meta.collID2Meta = make(map[UniqueID]pb.CollectionMeta)
+	meta.collName2ID = make(map[string]UniqueID)
+	meta.segID2Meta = make(map[UniqueID]pb.SegmentMeta)
 
 	err = meta.reloadFromKV()
 	assert.Nil(t, err)
 
-	assert.Equal(t, 0, len(meta.proxyId2Meta))
-	assert.Equal(t, 0, len(meta.tenantId2Meta))
-	assert.Equal(t, 1, len(meta.collName2Id))
-	assert.Equal(t, 1, len(meta.collId2Meta))
-	assert.Equal(t, 0, len(meta.segId2Meta))
+	assert.Equal(t, 0, len(meta.proxyID2Meta))
+	assert.Equal(t, 0, len(meta.tenantID2Meta))
+	assert.Equal(t, 1, len(meta.collName2ID))
+	assert.Equal(t, 1, len(meta.collID2Meta))
+	assert.Equal(t, 0, len(meta.segID2Meta))
 
 }

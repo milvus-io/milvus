@@ -12,9 +12,10 @@ package reader
 */
 import "C"
 import (
+	"strconv"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"strconv"
 )
 
 // TODO: rename
@@ -120,9 +121,9 @@ func (container *ColSegContainer) removePartition(partition *Partition) error {
 	if hasPartition && targetCollection != nil {
 		*targetCollection.Partitions() = tmpPartitions
 		return nil
-	} else {
-		return errors.New("cannot found partition, tag = " + partition.Tag())
 	}
+
+	return errors.New("cannot found partition, tag = " + partition.Tag())
 }
 
 func (container *ColSegContainer) getPartitionByTag(partitionTag string) (*Partition, error) {
@@ -186,9 +187,9 @@ func (container *ColSegContainer) removeSegment(segment *Segment) error {
 	if hasSegment && targetPartition != nil {
 		*targetPartition.Segments() = tmpSegments
 		return nil
-	} else {
-		return errors.New("cannot found segment, id = " + strconv.FormatInt(segment.ID(), 10))
 	}
+
+	return errors.New("cannot found segment, id = " + strconv.FormatInt(segment.ID(), 10))
 }
 
 func (container *ColSegContainer) getSegmentByID(segmentID int64) (*Segment, error) {

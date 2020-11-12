@@ -26,7 +26,8 @@ func TestTimeTick(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	ctx, _ := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
 
 	//var curTs Timestamp
 	//curTs = 0
@@ -39,7 +40,9 @@ func TestTimeTick(t *testing.T) {
 	}
 	tt.Start()
 
-	ctx2, _ := context.WithTimeout(context.Background(), time.Second*2)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second*2)
+	defer cancel2()
+
 	isbreak := false
 	for {
 		if isbreak {

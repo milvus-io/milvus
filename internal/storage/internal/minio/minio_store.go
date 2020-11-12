@@ -6,15 +6,14 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
-	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
+	storageType "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
-type minioDriver struct {
+type MinioDriver struct {
 	driver *minioStore
 }
 
-func NewMinioDriver(ctx context.Context) (*minioDriver, error) {
+func NewMinioDriver(ctx context.Context) (*MinioDriver, error) {
 	// to-do read conf
 	var endPoint = "localhost:9000"
 	var accessKeyID = "testminio"
@@ -41,15 +40,15 @@ func NewMinioDriver(ctx context.Context) (*minioDriver, error) {
 			return nil, err
 		}
 	}
-	return &minioDriver{
+	return &MinioDriver{
 		&minioStore{
 			client: minioClient,
 		},
 	}, nil
 }
 
-func (s *minioDriver) put(ctx context.Context, key Key, value Value, timestamp Timestamp, suffix string) error {
-	minioKey, err := MvccEncode(key, timestamp, suffix)
+func (s *MinioDriver) put(ctx context.Context, key storageType.Key, value storageType.Value, timestamp storageType.Timestamp, suffix string) error {
+	minioKey, err := codec.MvccEncode(key, timestamp, suffix)
 	if err != nil {
 		return err
 	}
@@ -58,8 +57,8 @@ func (s *minioDriver) put(ctx context.Context, key Key, value Value, timestamp T
 	return err
 }
 
-func (s *minioDriver) scanLE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error) {
-	keyEnd, err := MvccEncode(key, timestamp, "")
+func (s *MinioDriver) scanLE(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp, keyOnly bool) ([]storageType.Timestamp, []storageType.Key, []storageType.Value, error) {
+	keyEnd, err := codec.MvccEncode(key, timestamp, "")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -69,7 +68,7 @@ func (s *minioDriver) scanLE(ctx context.Context, key Key, timestamp Timestamp, 
 		return nil, nil, nil, err
 	}
 
-	var timestamps []Timestamp
+	var timestamps []storageType.Timestamp
 	for _, key := range keys {
 		_, timestamp, _, _ := codec.MvccDecode(key)
 		timestamps = append(timestamps, timestamp)
@@ -78,8 +77,8 @@ func (s *minioDriver) scanLE(ctx context.Context, key Key, timestamp Timestamp, 
 	return timestamps, keys, values, nil
 }
 
-func (s *minioDriver) scanGE(ctx context.Context, key Key, timestamp Timestamp, keyOnly bool) ([]Timestamp, []Key, []Value, error) {
-	keyStart, err := MvccEncode(key, timestamp, "")
+func (s *MinioDriver) scanGE(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp, keyOnly bool) ([]storageType.Timestamp, []storageType.Key, []storageType.Value, error) {
+	keyStart, err := codec.MvccEncode(key, timestamp, "")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -89,7 +88,7 @@ func (s *minioDriver) scanGE(ctx context.Context, key Key, timestamp Timestamp, 
 		return nil, nil, nil, err
 	}
 
-	var timestamps []Timestamp
+	var timestamps []storageType.Timestamp
 	for _, key := range keys {
 		_, timestamp, _, _ := codec.MvccDecode(key)
 		timestamps = append(timestamps, timestamp)
@@ -98,30 +97,36 @@ func (s *minioDriver) scanGE(ctx context.Context, key Key, timestamp Timestamp, 
 	return timestamps, keys, values, nil
 }
 
-//scan(ctx context.Context, key Key, start Timestamp, end Timestamp, withValue bool) ([]Timestamp, []Key, []Value, error)
-func (s *minioDriver) deleteLE(ctx context.Context, key Key, timestamp Timestamp) error {
-	keyEnd, err := MvccEncode(key, timestamp, "delete")
+//scan(ctx context.Context, key storageType.Key, start storageType.Timestamp, end storageType.Timestamp, withValue bool) ([]storageType.Timestamp, []storageType.Key, []storageType.Value, error)
+func (s *MinioDriver) deleteLE(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp) error {
+	keyEnd, err := codec.MvccEncode(key, timestamp, "delete")
 	if err != nil {
 		return err
 	}
 	err = s.driver.DeleteRange(ctx, key, keyEnd)
 	return err
 }
-func (s *minioDriver) deleteGE(ctx context.Context, key Key, timestamp Timestamp) error {
+func (s *MinioDriver) deleteGE(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp) error {
 	keys, _, err := s.driver.GetByPrefix(ctx, key, true)
 	if err != nil {
 		return err
 	}
-	keyStart, err := MvccEncode(key, timestamp, "")
-	err = s.driver.DeleteRange(ctx, []byte(keyStart), keys[len(keys)-1])
-	return err
+	keyStart, err := codec.MvccEncode(key, timestamp, "")
+	if err != nil {
+		panic(err)
+	}
+	err = s.driver.DeleteRange(ctx, keyStart, keys[len(keys)-1])
+	if err != nil {
+		panic(err)
+	}
+	return nil
 }
-func (s *minioDriver) deleteRange(ctx context.Context, key Key, start Timestamp, end Timestamp) error {
-	keyStart, err := MvccEncode(key, start, "")
+func (s *MinioDriver) deleteRange(ctx context.Context, key storageType.Key, start storageType.Timestamp, end storageType.Timestamp) error {
+	keyStart, err := codec.MvccEncode(key, start, "")
 	if err != nil {
 		return err
 	}
-	keyEnd, err := MvccEncode(key, end, "")
+	keyEnd, err := codec.MvccEncode(key, end, "")
 	if err != nil {
 		return err
 	}
@@ -129,8 +134,8 @@ func (s *minioDriver) deleteRange(ctx context.Context, key Key, start Timestamp,
 	return err
 }
 
-func (s *minioDriver) GetRow(ctx context.Context, key Key, timestamp Timestamp) (Value, error) {
-	minioKey, err := MvccEncode(key, timestamp, "")
+func (s *MinioDriver) GetRow(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp) (storageType.Value, error) {
+	minioKey, err := codec.MvccEncode(key, timestamp, "")
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +145,7 @@ func (s *minioDriver) GetRow(ctx context.Context, key Key, timestamp Timestamp) 
 		return nil, err
 	}
 
-	_, _, suffix, err := MvccDecode(keys[0])
+	_, _, suffix, err := codec.MvccDecode(keys[0])
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +155,8 @@ func (s *minioDriver) GetRow(ctx context.Context, key Key, timestamp Timestamp) 
 
 	return values[0], err
 }
-func (s *minioDriver) GetRows(ctx context.Context, keys []Key, timestamps []Timestamp) ([]Value, error) {
-	var values []Value
+func (s *MinioDriver) GetRows(ctx context.Context, keys []storageType.Key, timestamps []storageType.Timestamp) ([]storageType.Value, error) {
+	var values []storageType.Value
 	for i, key := range keys {
 		value, err := s.GetRow(ctx, key, timestamps[i])
 		if err != nil {
@@ -162,15 +167,15 @@ func (s *minioDriver) GetRows(ctx context.Context, keys []Key, timestamps []Time
 	return values, nil
 }
 
-func (s *minioDriver) PutRow(ctx context.Context, key Key, value Value, segment string, timestamp Timestamp) error {
-	minioKey, err := MvccEncode(key, timestamp, segment)
+func (s *MinioDriver) PutRow(ctx context.Context, key storageType.Key, value storageType.Value, segment string, timestamp storageType.Timestamp) error {
+	minioKey, err := codec.MvccEncode(key, timestamp, segment)
 	if err != nil {
 		return err
 	}
 	err = s.driver.Put(ctx, minioKey, value)
 	return err
 }
-func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, segments []string, timestamps []Timestamp) error {
+func (s *MinioDriver) PutRows(ctx context.Context, keys []storageType.Key, values []storageType.Value, segments []string, timestamps []storageType.Timestamp) error {
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
@@ -186,7 +191,7 @@ func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, s
 	}
 
 	errCh := make(chan error)
-	f := func(ctx2 context.Context, keys2 []Key, values2 []Value, segments2 []string, timestamps2 []Timestamp) {
+	f := func(ctx2 context.Context, keys2 []storageType.Key, values2 []storageType.Value, segments2 []string, timestamps2 []storageType.Timestamp) {
 		for i := 0; i < len(keys2); i++ {
 			err := s.PutRow(ctx2, keys2[i], values2[i], segments2[i], timestamps2[i])
 			errCh <- err
@@ -211,8 +216,8 @@ func (s *minioDriver) PutRows(ctx context.Context, keys []Key, values []Value, s
 	return nil
 }
 
-func (s *minioDriver) GetSegments(ctx context.Context, key Key, timestamp Timestamp) ([]string, error) {
-	keyEnd, err := MvccEncode(key, timestamp, "")
+func (s *MinioDriver) GetSegments(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp) ([]string, error) {
+	keyEnd, err := codec.MvccEncode(key, timestamp, "")
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +227,7 @@ func (s *minioDriver) GetSegments(ctx context.Context, key Key, timestamp Timest
 	}
 	segmentsSet := map[string]bool{}
 	for _, key := range keys {
-		_, _, segment, err := MvccDecode(key)
+		_, _, segment, err := codec.MvccDecode(key)
 		if err != nil {
 			panic("must no error")
 		}
@@ -233,15 +238,15 @@ func (s *minioDriver) GetSegments(ctx context.Context, key Key, timestamp Timest
 
 	var segments []string
 	for k, v := range segmentsSet {
-		if v == true {
+		if v {
 			segments = append(segments, k)
 		}
 	}
 	return segments, err
 }
 
-func (s *minioDriver) DeleteRow(ctx context.Context, key Key, timestamp Timestamp) error {
-	minioKey, err := MvccEncode(key, timestamp, "delete")
+func (s *MinioDriver) DeleteRow(ctx context.Context, key storageType.Key, timestamp storageType.Timestamp) error {
+	minioKey, err := codec.MvccEncode(key, timestamp, "delete")
 	if err != nil {
 		return err
 	}
@@ -250,7 +255,7 @@ func (s *minioDriver) DeleteRow(ctx context.Context, key Key, timestamp Timestam
 	return err
 }
 
-func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamps []Timestamp) error {
+func (s *MinioDriver) DeleteRows(ctx context.Context, keys []storageType.Key, timestamps []storageType.Timestamp) error {
 	maxThread := 100
 	batchSize := 1
 	keysLength := len(keys)
@@ -266,7 +271,7 @@ func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamps []T
 	}
 
 	errCh := make(chan error)
-	f := func(ctx2 context.Context, keys2 []Key, timestamps2 []Timestamp) {
+	f := func(ctx2 context.Context, keys2 []storageType.Key, timestamps2 []storageType.Timestamp) {
 		for i := 0; i < len(keys2); i++ {
 			err := s.DeleteRow(ctx2, keys2[i], timestamps2[i])
 			errCh <- err
@@ -291,21 +296,21 @@ func (s *minioDriver) DeleteRows(ctx context.Context, keys []Key, timestamps []T
 	return nil
 }
 
-func (s *minioDriver) PutLog(ctx context.Context, key Key, value Value, timestamp Timestamp, channel int) error {
-	logKey := LogEncode(key, timestamp, channel)
+func (s *MinioDriver) PutLog(ctx context.Context, key storageType.Key, value storageType.Value, timestamp storageType.Timestamp, channel int) error {
+	logKey := codec.LogEncode(key, timestamp, channel)
 	err := s.driver.Put(ctx, logKey, value)
 	return err
 }
 
-func (s *minioDriver) GetLog(ctx context.Context, start Timestamp, end Timestamp, channels []int) ([]Value, error) {
+func (s *MinioDriver) GetLog(ctx context.Context, start storageType.Timestamp, end storageType.Timestamp, channels []int) ([]storageType.Value, error) {
 	keys, values, err := s.driver.GetByPrefix(ctx, []byte("log_"), false)
 	if err != nil {
 		return nil, err
 	}
 
-	var resultValues []Value
+	var resultValues []storageType.Value
 	for i, key := range keys {
-		_, ts, channel, err := LogDecode(string(key))
+		_, ts, channel, err := codec.LogDecode(string(key))
 		if err != nil {
 			return nil, err
 		}
@@ -321,32 +326,32 @@ func (s *minioDriver) GetLog(ctx context.Context, start Timestamp, end Timestamp
 	return resultValues, nil
 }
 
-func (s *minioDriver) GetSegmentIndex(ctx context.Context, segment string) (SegmentIndex, error) {
+func (s *MinioDriver) GetSegmentIndex(ctx context.Context, segment string) (storageType.SegmentIndex, error) {
 
-	return s.driver.Get(ctx, SegmentEncode(segment, "index"))
+	return s.driver.Get(ctx, codec.SegmentEncode(segment, "index"))
 }
 
-func (s *minioDriver) PutSegmentIndex(ctx context.Context, segment string, index SegmentIndex) error {
+func (s *MinioDriver) PutSegmentIndex(ctx context.Context, segment string, index storageType.SegmentIndex) error {
 
-	return s.driver.Put(ctx, SegmentEncode(segment, "index"), index)
+	return s.driver.Put(ctx, codec.SegmentEncode(segment, "index"), index)
 }
 
-func (s *minioDriver) DeleteSegmentIndex(ctx context.Context, segment string) error {
+func (s *MinioDriver) DeleteSegmentIndex(ctx context.Context, segment string) error {
 
-	return s.driver.Delete(ctx, SegmentEncode(segment, "index"))
+	return s.driver.Delete(ctx, codec.SegmentEncode(segment, "index"))
 }
 
-func (s *minioDriver) GetSegmentDL(ctx context.Context, segment string) (SegmentDL, error) {
+func (s *MinioDriver) GetSegmentDL(ctx context.Context, segment string) (storageType.SegmentDL, error) {
 
-	return s.driver.Get(ctx, SegmentEncode(segment, "DL"))
+	return s.driver.Get(ctx, codec.SegmentEncode(segment, "DL"))
 }
 
-func (s *minioDriver) PutSegmentDL(ctx context.Context, segment string, log SegmentDL) error {
+func (s *MinioDriver) PutSegmentDL(ctx context.Context, segment string, log storageType.SegmentDL) error {
 
-	return s.driver.Put(ctx, SegmentEncode(segment, "DL"), log)
+	return s.driver.Put(ctx, codec.SegmentEncode(segment, "DL"), log)
 }
 
-func (s *minioDriver) DeleteSegmentDL(ctx context.Context, segment string) error {
+func (s *MinioDriver) DeleteSegmentDL(ctx context.Context, segment string) error {
 
-	return s.driver.Delete(ctx, SegmentEncode(segment, "DL"))
+	return s.driver.Delete(ctx, codec.SegmentEncode(segment, "DL"))
 }
