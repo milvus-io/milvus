@@ -109,7 +109,7 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(field_name, entities, top_k, nq)
         data = client.search(collection, query)
         res = data['result']
-        assert data['num'] == nq
+        assert data['nq'] == nq
         assert len(res) == nq
         assert len(res[0]) == top_k
         assert float(res[0][0]['distance']) <= epsilon
@@ -138,7 +138,7 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
         data = client.search(collection, query, fields=[default_int_field_name])
         res = data['result']
-        assert data['num'] == default_nq
+        assert data['nq'] == default_nq
         assert len(res) == default_nq
         assert len(res[0]) == default_top_k
         assert default_int_field_name in res[0][0]['entity'].keys()
@@ -174,7 +174,7 @@ class TestSearchBase:
         assert 0 == client.count_collection(collection)
         data = client.search(collection, default_query)
         res = data['result']
-        assert data['num'] == 0
+        assert data['nq'] == 0
         assert len(res) == 0
 
     @pytest.fixture(
@@ -240,7 +240,7 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(default_binary_vec_field_name, binary_entities, default_top_k,default_nq, metric_type='JACCARD')
         data = client.search(binary_collection, query)
         res = data['result']
-        assert data['num'] == default_nq
+        assert data['nq'] == default_nq
         assert len(res) == default_nq
         assert len(res[0]) == default_top_k
         assert float(res[0][0]['distance']) <= epsilon
