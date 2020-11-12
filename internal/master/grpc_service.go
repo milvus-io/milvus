@@ -2,7 +2,6 @@ package master
 
 import (
 	"context"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -19,13 +18,14 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
+		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Enqueue failed",
@@ -34,9 +34,10 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
+		err := errors.New("WaitToFinish failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "create collection failed",
+			Reason:    "WaitToFinish failed",
 		}, err
 	}
 
@@ -50,12 +51,12 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
@@ -83,13 +84,13 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		hasCollection: false,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return &servicepb.BoolResponse{
@@ -126,13 +127,13 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		description: nil,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return t.(*describeCollectionTask).description, err
@@ -152,13 +153,13 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		stringListResponse: nil,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return t.(*showCollectionsTask).stringListResponse, err
@@ -179,12 +180,12 @@ func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreateParti
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
@@ -212,12 +213,12 @@ func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartition
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
@@ -245,13 +246,13 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		hasPartition: false,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return &servicepb.BoolResponse{
@@ -288,13 +289,13 @@ func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribeP
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		description: nil,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return t.(*describePartitionTask).description, err
@@ -314,13 +315,13 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 		req: in,
 		baseTask: baseTask{
 			kvBase: s.kvBase,
-			mt:     s.mt,
-			cv:     make(chan error),
+			mt:     &s.mt,
+			cv:     make(chan int),
 		},
 		stringListResponse: nil,
 	}
 
-	var err = s.scheduler.Enqueue(t)
+	var err = s.scheduler.Enqueue(&t)
 	if err != nil {
 		err := errors.New("Enqueue failed")
 		return t.(*showPartitionTask).stringListResponse, err
@@ -339,7 +340,7 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 
 func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequest) (*internalpb.TsoResponse, error) {
 	count := request.GetCount()
-	ts, err := tso.Alloc(count)
+	ts, err := s.tsoAllocator.GenerateTSO(count)
 
 	if err != nil {
 		return &internalpb.TsoResponse{

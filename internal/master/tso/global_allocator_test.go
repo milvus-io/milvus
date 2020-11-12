@@ -1,21 +1,18 @@
 package tso
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var GTsoAllocator Allocator
 
 func TestMain(m *testing.M) {
-	conf.LoadConfig("config.yaml")
-	GTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
-
+	GTsoAllocator = NewGlobalTSOAllocator("timestamp", mockkv.NewEtcdKV())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -31,7 +28,7 @@ func TestGlobalTSOAllocator_GenerateTSO(t *testing.T) {
 	startTs, err := GTsoAllocator.GenerateTSO(perCount)
 	assert.Nil(t, err)
 	lastPhysical, lastLogical := tsoutil.ParseTS(startTs)
-	for i := 0; i < count; i++ {
+	for i:=0;i < count; i++{
 		ts, _ := GTsoAllocator.GenerateTSO(perCount)
 		physical, logical := tsoutil.ParseTS(ts)
 		if lastPhysical == physical {
@@ -44,7 +41,7 @@ func TestGlobalTSOAllocator_GenerateTSO(t *testing.T) {
 
 func TestGlobalTSOAllocator_SetTSO(t *testing.T) {
 	curTime := time.Now()
-	nextTime := curTime.Add(2 * time.Second)
+	nextTime := curTime.Add(2 * time.Second )
 	physical := nextTime.UnixNano() / int64(time.Millisecond)
 	logical := int64(0)
 	err := GTsoAllocator.SetTSO(tsoutil.ComposeTS(physical, logical))

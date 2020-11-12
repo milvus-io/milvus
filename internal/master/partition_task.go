@@ -59,6 +59,7 @@ func (t *createPartitionTask) Ts() (Timestamp, error) {
 
 func (t *createPartitionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -66,6 +67,7 @@ func (t *createPartitionTask) Execute() error {
 	collectionName := partitionName.CollectionName
 	collectionMeta, err := t.mt.GetCollectionByName(collectionName)
 	if err != nil {
+		_ = t.Notify()
 		return err
 	}
 
@@ -73,15 +75,18 @@ func (t *createPartitionTask) Execute() error {
 
 	collectionJson, err := json.Marshal(&collectionMeta)
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("marshal collection failed")
 	}
 
 	collectionId := collectionMeta.Id
 	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("save collection failed")
 	}
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -103,6 +108,7 @@ func (t *dropPartitionTask) Ts() (Timestamp, error) {
 
 func (t *dropPartitionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -110,6 +116,7 @@ func (t *dropPartitionTask) Execute() error {
 	collectionName := partitionName.CollectionName
 	collectionMeta, err := t.mt.GetCollectionByName(collectionName)
 	if err != nil {
+		_ = t.Notify()
 		return err
 	}
 
@@ -120,15 +127,18 @@ func (t *dropPartitionTask) Execute() error {
 
 	collectionJson, err := json.Marshal(&collectionMeta)
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("marshal collection failed")
 	}
 
 	collectionId := collectionMeta.Id
 	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("save collection failed")
 	}
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -150,6 +160,7 @@ func (t *hasPartitionTask) Ts() (Timestamp, error) {
 
 func (t *hasPartitionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -162,6 +173,7 @@ func (t *hasPartitionTask) Execute() error {
 
 	t.hasPartition = t.mt.HasPartition(collectionMeta.Id, partitionName.Tag)
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -183,6 +195,7 @@ func (t *describePartitionTask) Ts() (Timestamp, error) {
 
 func (t *describePartitionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -197,6 +210,7 @@ func (t *describePartitionTask) Execute() error {
 
 	t.description = &description
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -218,6 +232,7 @@ func (t *showPartitionTask) Ts() (Timestamp, error) {
 
 func (t *showPartitionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -237,5 +252,6 @@ func (t *showPartitionTask) Execute() error {
 
 	t.stringListResponse = &stringListResponse
 
+	_ = t.Notify()
 	return nil
 }

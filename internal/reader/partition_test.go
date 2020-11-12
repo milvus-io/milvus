@@ -1,88 +1,57 @@
 package reader
 
-import (
-	"context"
-	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"testing"
-)
-
-func TestPartition_Segments(t *testing.T) {
-	ctx := context.Background()
-	pulsarUrl := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarUrl)
-
-	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name: "collection0",
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
-
-	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
-
-	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
-	assert.Equal(t, len(node.container.collections), 1)
-
-	for _, tag := range collectionMeta.PartitionTags {
-		_, err := node.container.addPartition(collection, tag)
-		assert.NoError(t, err)
-	}
-
-	partitions := collection.Partitions()
-	assert.Equal(t, len(collectionMeta.PartitionTags), len(*partitions))
-
-	targetPartition := (*partitions)[0]
-
-	const segmentNum = 3
-	for i:= 0; i < segmentNum; i++ {
-		_, err := node.container.addSegment(collection, targetPartition, UniqueID(i))
-		assert.NoError(t, err)
-	}
-
-	segments := targetPartition.Segments()
-	assert.Equal(t, segmentNum, len(*segments))
-}
-
-func TestPartition_newPartition(t *testing.T) {
-	partitionTag := "default"
-	partition := newPartition(partitionTag)
-	assert.Equal(t, partition.partitionTag, partitionTag)
-}
+//func TestPartition_NewSegment(t *testing.T) {
+//	ctx := context.Background()
+//	pulsarUrl := "pulsar://localhost:6650"
+//	node := NewQueryNode(ctx, 0, pulsarUrl)
+//
+//	var collection = node.newCollection(0, "collection0", "")
+//	var partition = collection.newPartition("partition0")
+//
+//	var segment = partition.newSegment(0)
+//	node.SegmentsMap[int64(0)] = segment
+//
+//	assert.Equal(t, collection.CollectionName, "collection0")
+//	assert.Equal(t, collection.CollectionID, int64(0))
+//	assert.Equal(t, partition.partitionTag, "partition0")
+//	assert.Equal(t, node.Collections[0].Partitions[0].Segments[0].SegmentID, int64(0))
+//
+//	assert.Equal(t, len(collection.Partitions), 1)
+//	assert.Equal(t, len(node.Collections), 1)
+//	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 1)
+//
+//	assert.Equal(t, segment.SegmentID, int64(0))
+//	assert.Equal(t, node.foundSegmentBySegmentID(int64(0)), true)
+//}
+//
+//func TestPartition_DeleteSegment(t *testing.T) {
+//	// 1. Construct node, collection, partition and segment
+//	ctx := context.Background()
+//	pulsarUrl := "pulsar://localhost:6650"
+//	node := NewQueryNode(ctx, 0, pulsarUrl)
+//
+//	var collection = node.newCollection(0, "collection0", "")
+//	var partition = collection.newPartition("partition0")
+//
+//	var segment = partition.newSegment(0)
+//	node.SegmentsMap[int64(0)] = segment
+//
+//	assert.Equal(t, collection.CollectionName, "collection0")
+//	assert.Equal(t, collection.CollectionID, int64(0))
+//	assert.Equal(t, partition.partitionTag, "partition0")
+//	assert.Equal(t, node.Collections[0].Partitions[0].Segments[0].SegmentID, int64(0))
+//
+//	assert.Equal(t, len(collection.Partitions), 1)
+//	assert.Equal(t, len(node.Collections), 1)
+//	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 1)
+//
+//	assert.Equal(t, segment.SegmentID, int64(0))
+//
+//	// 2. Destruct collection, partition and segment
+//	partition.deleteSegment(node, segment)
+//
+//	assert.Equal(t, len(collection.Partitions), 1)
+//	assert.Equal(t, len(node.Collections), 1)
+//	assert.Equal(t, len(node.Collections[0].Partitions[0].Segments), 0)
+//	assert.Equal(t, node.foundSegmentBySegmentID(int64(0)), false)
+//}

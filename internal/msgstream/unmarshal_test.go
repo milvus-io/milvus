@@ -3,7 +3,6 @@ package msgstream
 import (
 	"context"
 	"fmt"
-	"log"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -48,10 +47,7 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()
 
-	err := inputStream.Produce(&msgPack)
-	if err != nil {
-		log.Fatalf("produce error = %v", err)
-	}
+	inputStream.Produce(&msgPack)
 	receiveCount := 0
 	for {
 		result := (*outputStream).Consume()

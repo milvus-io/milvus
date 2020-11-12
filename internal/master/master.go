@@ -3,20 +3,18 @@ package master
 import (
 	"context"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"log"
 	"math/rand"
 	"net"
+	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/master/tso"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
@@ -25,6 +23,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -44,6 +43,9 @@ type Master struct {
 	//grpc server
 	grpcServer *grpc.Server
 
+	// for tso.
+	tsoAllocator tso.Allocator
+
 	// pulsar client
 	pc *informer.PulsarClient
 
@@ -52,50 +54,46 @@ type Master struct {
 
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
-	mt        *metaTable
+	mt        metaTable
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
 }
 
-func newKVBase(kv_root string, etcdAddr []string) *kv.EtcdKV {
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   etcdAddr,
+func newTSOKVBase(subPath string) * kv.EtcdKV{
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+	client, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	kvBase := kv.NewEtcdKV(cli, kv_root)
+	return kv.NewEtcdKV(client, path.Join(conf.Config.Etcd.Rootpath, subPath))
+}
+
+func newKVBase() *kv.EtcdKV {
+	etcdAddr := conf.Config.Etcd.Address
+	etcdAddr += ":"
+	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
+	cli, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{etcdAddr},
+		DialTimeout: 5 * time.Second,
+	})
+	kvBase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
 	return kvBase
 }
 
-func Init() {
-	rand.Seed(time.Now().UnixNano())
-	id.Init()
-	tso.Init()
-}
-
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, kv_root_path string, meta_root_path, tso_root_path string, etcdAddr []string) (*Master, error) {
+func CreateServer(ctx context.Context) (*Master, error) {
 	rand.Seed(time.Now().UnixNano())
-	Init()
-
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
-	if err != nil {
-		return nil, err
-	}
-	etcdkv := kv.NewEtcdKV(etcdClient, meta_root_path)
-	metakv, err := NewMetaTable(etcdkv)
-	if err != nil {
-		return nil, err
-	}
-
+	id.InitGlobalIdAllocator("idTimestamp", newTSOKVBase("gid"))
 	m := &Master{
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
-		kvBase:         newKVBase(kv_root_path, etcdAddr),
-		scheduler:      NewDDRequestScheduler(),
-		mt:             metakv,
+		kvBase:         newKVBase(),
 		ssChan:         make(chan internalpb.SegmentStatistics, 10),
 		pc:             informer.NewPulsarClient(),
+		tsoAllocator: tso.NewGlobalTSOAllocator("timestamp", newTSOKVBase("tso")),
 	}
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
@@ -153,13 +151,13 @@ func (s *Master) IsClosed() bool {
 }
 
 // Run runs the pd server.
-func (s *Master) Run(grpcPort int64) error {
+func (s *Master) Run() error {
 
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
 
-	s.startServerLoop(s.ctx, grpcPort)
+	s.startServerLoop(s.ctx)
 
 	return nil
 }
@@ -174,28 +172,18 @@ func (s *Master) LoopContext() context.Context {
 	return s.serverLoopCtx
 }
 
-func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) {
+func (s *Master) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
+	s.serverLoopWg.Add(3)
 	//go s.Se
-
-	s.serverLoopWg.Add(1)
-	go s.grpcLoop(grpcPort)
-
-	//s.serverLoopWg.Add(1)
-	//go s.pulsarLoop()
-
-	s.serverLoopWg.Add(1)
-	go s.tasksExecutionLoop()
-
-	s.serverLoopWg.Add(1)
+	go s.grpcLoop()
+	go s.pulsarLoop()
 	go s.segmentStatisticsLoop()
-
 }
 
 func (s *Master) stopServerLoop() {
-	if s.grpcServer != nil {
+	if s.grpcServer != nil{
 		s.grpcServer.GracefulStop()
-		log.Printf("server is cloded, exit grpc server")
 	}
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
@@ -206,11 +194,11 @@ func (s *Master) StartTimestamp() int64 {
 	return s.startTimestamp
 }
 
-func (s *Master) grpcLoop(grpcPort int64) {
+func (s *Master) grpcLoop() {
 	defer s.serverLoopWg.Done()
 
 	defaultGRPCPort := ":"
-	defaultGRPCPort += strconv.FormatInt(grpcPort, 10)
+	defaultGRPCPort += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
 	lis, err := net.Listen("tcp", defaultGRPCPort)
 	if err != nil {
 		log.Printf("failed to listen: %v", err)
@@ -257,7 +245,7 @@ func (s *Master) pulsarLoop() {
 			s.ssChan <- m
 			consumer.Ack(msg)
 		case <-ctx.Done():
-			log.Print("server is closed, exit pulsar loop")
+			log.Print("server is closed, exit etcd leader loop")
 			return
 		}
 	}
@@ -270,16 +258,18 @@ func (s *Master) tasksExecutionLoop() {
 	for {
 		select {
 		case task := <-s.scheduler.reqQueue:
-			timeStamp, err := (task).Ts()
+			timeStamp, err := (*task).Ts()
 			if err != nil {
 				log.Println(err)
 			} else {
 				if timeStamp < s.scheduler.scheduleTimeStamp {
-					task.Notify(errors.Errorf("input timestamp = %d, schduler timestamp = %d", timeStamp, s.scheduler.scheduleTimeStamp))
+					_ = (*task).NotifyTimeout()
 				} else {
 					s.scheduler.scheduleTimeStamp = timeStamp
-					err = task.Execute()
-					task.Notify(err)
+					err := (*task).Execute()
+					if err != nil {
+						log.Println("request execution failed caused by error:", err)
+					}
 				}
 			}
 		case <-ctx.Done():
@@ -300,7 +290,7 @@ func (s *Master) segmentStatisticsLoop() {
 		case ss := <-s.ssChan:
 			controller.ComputeCloseTime(ss, s.kvBase)
 		case <-ctx.Done():
-			log.Print("server is closed, exit segment statistics loop")
+			log.Print("server is closed, exit etcd leader loop")
 			return
 		}
 	}

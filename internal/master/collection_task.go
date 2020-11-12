@@ -1,11 +1,11 @@
 package master
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -60,41 +60,53 @@ func (t *createCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return Timestamp(t.req.Timestamp), nil
 }
 
 func (t *createCollectionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
 	var schema schemapb.CollectionSchema
-	err := proto.UnmarshalMerge(t.req.Schema.Value, &schema)
+	err := json.Unmarshal(t.req.Schema.Value, &schema)
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("unmarshal CollectionSchema failed")
 	}
 
-	collectionId, err := allocGlobalId()
-	if err != nil {
-		return err
-	}
-
-	ts, err := t.Ts()
-	if err != nil {
-		return err
-	}
+	// TODO: allocate collection id
+	var collectionId UniqueID = 0
+	// TODO: allocate timestamp
+	var collectionCreateTime Timestamp = 0
 
 	collection := etcdpb.CollectionMeta{
 		Id:         collectionId,
 		Schema:     &schema,
-		CreateTime: ts,
+		CreateTime: collectionCreateTime,
 		// TODO: initial segment?
 		SegmentIds: make([]UniqueID, 0),
 		// TODO: initial partition?
 		PartitionTags: make([]string, 0),
 	}
 
-	return t.mt.AddCollection(&collection)
+	collectionJson, err := json.Marshal(&collection)
+	if err != nil {
+		_ = t.Notify()
+		return errors.New("marshal collection failed")
+	}
+
+	err = (*t.kvBase).Save(collectionMetaPrefix+strconv.FormatInt(collectionId, 10), string(collectionJson))
+	if err != nil {
+		_ = t.Notify()
+		return errors.New("save collection failed")
+	}
+
+	t.mt.collId2Meta[collectionId] = collection
+
+	_ = t.Notify()
+	return nil
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -115,12 +127,14 @@ func (t *dropCollectionTask) Ts() (Timestamp, error) {
 
 func (t *dropCollectionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
 	collectionName := t.req.CollectionName.CollectionName
 	collectionMeta, err := t.mt.GetCollectionByName(collectionName)
 	if err != nil {
+		_ = t.Notify()
 		return err
 	}
 
@@ -128,11 +142,13 @@ func (t *dropCollectionTask) Execute() error {
 
 	err = (*t.kvBase).Remove(collectionMetaPrefix + strconv.FormatInt(collectionId, 10))
 	if err != nil {
-		return err
+		_ = t.Notify()
+		return errors.New("save collection failed")
 	}
 
 	delete(t.mt.collId2Meta, collectionId)
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -154,6 +170,7 @@ func (t *hasCollectionTask) Ts() (Timestamp, error) {
 
 func (t *hasCollectionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -163,6 +180,7 @@ func (t *hasCollectionTask) Execute() error {
 		t.hasCollection = true
 	}
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -184,12 +202,14 @@ func (t *describeCollectionTask) Ts() (Timestamp, error) {
 
 func (t *describeCollectionTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
 	collectionName := t.req.CollectionName
 	collection, err := t.mt.GetCollectionByName(collectionName.CollectionName)
 	if err != nil {
+		_ = t.Notify()
 		return err
 	}
 
@@ -202,6 +222,7 @@ func (t *describeCollectionTask) Execute() error {
 
 	t.description = &description
 
+	_ = t.Notify()
 	return nil
 }
 
@@ -223,6 +244,7 @@ func (t *showCollectionsTask) Ts() (Timestamp, error) {
 
 func (t *showCollectionsTask) Execute() error {
 	if t.req == nil {
+		_ = t.Notify()
 		return errors.New("null request")
 	}
 
@@ -240,5 +262,6 @@ func (t *showCollectionsTask) Execute() error {
 
 	t.stringListResponse = &stringListResponse
 
+	_ = t.Notify()
 	return nil
 }

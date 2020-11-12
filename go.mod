@@ -9,6 +9,7 @@ require (
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
+	github.com/gogo/protobuf v1.3.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.3.2
 	github.com/google/btree v1.0.0

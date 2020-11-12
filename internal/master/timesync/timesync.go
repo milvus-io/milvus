@@ -3,261 +3,213 @@ package timesync
 import (
 	"context"
 	"log"
-	"math"
+	"sort"
+	"strconv"
+	"sync"
+	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/conf"
+
+	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-type (
-	softTimeTickBarrier struct {
-		peer2LastTt   map[UniqueID]Timestamp
-		minTtInterval Timestamp
-		lastTt        Timestamp
-		outTt         chan Timestamp
-		ttStream      ms.MsgStream
-		ctx           context.Context
-		closeCh       chan struct{} // close goroutinue in Start()
-		closed        bool
+const stopReadFlagId int64 = -1
+
+type TimeTickReader struct {
+	pulsarClient pulsar.Client
+
+	timeTickConsumer pulsar.Consumer
+	readerProducer   []pulsar.Producer
+
+	interval    int64
+	proxyIdList []UniqueID
+
+	timeTickPeerProxy map[UniqueID]Timestamp
+	ctx               context.Context
+}
+
+func (r *TimeTickReader) Start() {
+	go r.readTimeTick()
+	go r.timeSync()
+
+}
+
+func (r *TimeTickReader) Close() {
+	if r.timeTickConsumer != nil {
+		r.timeTickConsumer.Close()
 	}
 
-	hardTimeTickBarrier struct {
-		peer2Tt  map[UniqueID]Timestamp
-		outTt    chan Timestamp
-		ttStream ms.MsgStream
-		ctx      context.Context
-		closeCh  chan struct{} // close goroutinue in Start()
-		closed   bool
+	for i := 0; i < len(r.readerProducer); i++ {
+		if r.readerProducer[i] != nil {
+			r.readerProducer[i].Close()
+		}
 	}
-)
+	if r.pulsarClient != nil {
+		r.pulsarClient.Close()
+	}
+}
 
-func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
-	isEmpty := true
+func (r *TimeTickReader) timeSync() {
+	ctx := r.ctx
 	for {
-
-		if ttBarrier.closed {
-			return 0, errors.Errorf("[GetTimeTick] closed.")
-		}
-
 		select {
-		case ts := <-ttBarrier.outTt:
-			isEmpty = false
-			ttBarrier.lastTt = ts
-
+		case <-ctx.Done():
+			return
 		default:
-			if isEmpty {
-				continue
+			time.Sleep(time.Millisecond * time.Duration(r.interval))
+			var minTimeStamp Timestamp
+			for _, minTimeStamp = range r.timeTickPeerProxy {
+				break
 			}
-			return ttBarrier.lastTt, nil
-		}
-	}
-}
-
-func (ttBarrier *softTimeTickBarrier) Start() error {
-	ttBarrier.closeCh = make(chan struct{})
-	go func() {
-		for {
-			select {
-
-			case <-ttBarrier.closeCh:
-				log.Printf("[TtBarrierStart] closed\n")
-				return
-
-			case <-ttBarrier.ctx.Done():
-				log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
-				ttBarrier.closed = true
-				return
-
-			case ttmsgs := <-ttBarrier.ttStream.Chan():
-				if len(ttmsgs.Msgs) > 0 {
-					for _, timetickmsg := range ttmsgs.Msgs {
-						ttmsg := (*timetickmsg).(*ms.TimeTickMsg)
-						oldT, ok := ttBarrier.peer2LastTt[ttmsg.PeerId]
-						log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerId, ttmsg.Timestamp)
-
-						if !ok {
-							log.Printf("[softTimeTickBarrier] Warning: peerId %d not exist\n", ttmsg.PeerId)
-							continue
-						}
-
-						if ttmsg.Timestamp > oldT {
-							ttBarrier.peer2LastTt[ttmsg.PeerId] = ttmsg.Timestamp
-
-							// get a legal Timestamp
-							ts := ttBarrier.minTimestamp()
-
-							if ttBarrier.lastTt != 0 && ttBarrier.minTtInterval > ts-ttBarrier.lastTt {
-								continue
-							}
-
-							ttBarrier.outTt <- ts
-						}
-					}
+			for _, ts := range r.timeTickPeerProxy {
+				if ts < minTimeStamp {
+					minTimeStamp = ts
 				}
-
-			default:
+			}
+			//send timestamp flag to reader channel
+			msg := internalpb.TimeTickMsg{
+				Timestamp: minTimeStamp,
+				MsgType:   internalpb.MsgType_kTimeTick,
+			}
+			payload, err := proto.Marshal(&msg)
+			if err != nil {
+				//TODO log error
+				log.Printf("Marshal InsertOrDeleteMsg flag error %v", err)
+			} else {
+				wg := sync.WaitGroup{}
+				wg.Add(len(r.readerProducer))
+				for index := range r.readerProducer {
+					go r.sendEOFMsg(ctx, &pulsar.ProducerMessage{Payload: payload}, index, &wg)
+				}
+				wg.Wait()
 			}
 		}
-	}()
-	return nil
+	}
 }
 
-func NewSoftTimeTickBarrier(ctx context.Context,
-	ttStream *ms.MsgStream,
-	peerIds []UniqueID,
-	minTtInterval Timestamp) *softTimeTickBarrier {
-
-	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is emtpy!\n")
-		return nil
-	}
-
-	sttbarrier := softTimeTickBarrier{}
-	sttbarrier.minTtInterval = minTtInterval
-	sttbarrier.ttStream = *ttStream
-	sttbarrier.outTt = make(chan Timestamp, 1024)
-	sttbarrier.ctx = ctx
-	sttbarrier.closed = false
-
-	sttbarrier.peer2LastTt = make(map[UniqueID]Timestamp)
-	for _, id := range peerIds {
-		sttbarrier.peer2LastTt[id] = Timestamp(0)
-	}
-	if len(peerIds) != len(sttbarrier.peer2LastTt) {
-		log.Printf("[NewSoftTimeTickBarrier] Warning: there are duplicate peerIds!\n")
-	}
-
-	return &sttbarrier
-}
-
-func (ttBarrier *softTimeTickBarrier) Close() {
-
-	if ttBarrier.closeCh != nil {
-		ttBarrier.closeCh <- struct{}{}
-	}
-
-	ttBarrier.closed = true
-}
-
-func (ttBarrier *softTimeTickBarrier) minTimestamp() Timestamp {
-	tempMin := Timestamp(math.MaxUint64)
-	for _, tt := range ttBarrier.peer2LastTt {
-		if tt < tempMin {
-			tempMin = tt
-		}
-	}
-	return tempMin
-}
-
-func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
+func (r *TimeTickReader) readTimeTick() {
 	for {
-
-		if ttBarrier.closed {
-			return 0, errors.Errorf("[GetTimeTick] closed.")
-		}
-
 		select {
-		case ts := <-ttBarrier.outTt:
-			return ts, nil
-		default:
-		}
-	}
-}
-
-func (ttBarrier *hardTimeTickBarrier) Start() error {
-	ttBarrier.closeCh = make(chan struct{})
-
-	go func() {
-		// Last timestamp synchronized
-		state := Timestamp(0)
-		for {
-			select {
-
-			case <-ttBarrier.closeCh:
-				log.Printf("[TtBarrierStart] closed\n")
-				return
-
-			case <-ttBarrier.ctx.Done():
-				log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
-				ttBarrier.closed = true
-				return
-
-			case ttmsgs := <-ttBarrier.ttStream.Chan():
-				if len(ttmsgs.Msgs) > 0 {
-					for _, timetickmsg := range ttmsgs.Msgs {
-
-						// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
-						// that `ttmsg.Timestamp > oldT`
-						ttmsg := (*timetickmsg).(*ms.TimeTickMsg)
-						log.Printf("[hardTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerId, ttmsg.Timestamp)
-
-						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerId]
-						if !ok {
-							log.Printf("[hardTimeTickBarrier] Warning: peerId %d not exist\n", ttmsg.PeerId)
-							continue
-						}
-
-						if oldT > state {
-							log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-								ttmsg.PeerId, ttmsg.Timestamp)
-						}
-
-						ttBarrier.peer2Tt[ttmsg.PeerId] = ttmsg.Timestamp
-
-						newState := ttBarrier.minTimestamp()
-						if newState > state {
-							ttBarrier.outTt <- newState
-							state = newState
-						}
-					}
-				}
-			default:
+		case <-r.ctx.Done():
+			return
+		case cm, ok := <-r.timeTickConsumer.Chan():
+			if ok == false {
+				log.Printf("timesync consumer closed")
 			}
+
+			msg := cm.Message
+			var tsm internalpb.TimeTickMsg
+			if err := proto.Unmarshal(msg.Payload(), &tsm); err != nil {
+				log.Printf("UnMarshal timetick flag error  %v", err)
+			}
+
+			r.timeTickPeerProxy[tsm.PeerId] = tsm.Timestamp
+			r.timeTickConsumer.AckID(msg.ID())
 		}
-	}()
-	return nil
+	}
 }
 
-func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
-	tempMin := Timestamp(math.MaxUint64)
-	for _, tt := range ttBarrier.peer2Tt {
-		if tt < tempMin {
-			tempMin = tt
+func (r *TimeTickReader) sendEOFMsg(ctx context.Context, msg *pulsar.ProducerMessage, index int, wg *sync.WaitGroup) {
+	if _, err := r.readerProducer[index].Send(ctx, msg); err != nil {
+		log.Printf("Send timesync flag error %v", err)
+	}
+	wg.Done()
+}
+
+func TimeTickService() {
+	timeTickTopic := "timeTick"
+	timeTickSubName := "master"
+	readTopics := make([]string, 0)
+	for i := conf.Config.Reader.TopicStart; i < conf.Config.Reader.TopicEnd; i++ {
+		str := "InsertOrDelete-"
+		str = str + strconv.Itoa(i)
+		readTopics = append(readTopics, str)
+	}
+
+	proxyIdList := conf.Config.Master.ProxyIdList
+	timeTickReader := newTimeTickReader(context.Background(), timeTickTopic, timeTickSubName, readTopics, proxyIdList)
+	timeTickReader.Start()
+}
+
+func newTimeTickReader(
+	ctx context.Context,
+	timeTickTopic string,
+	timeTickSubName string,
+	readTopics []string,
+	proxyIdList []UniqueID,
+) *TimeTickReader {
+	pulsarAddr := "pulsar://"
+	pulsarAddr += conf.Config.Pulsar.Address
+	pulsarAddr += ":"
+	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	interval := int64(conf.Config.Timesync.Interval)
+
+	//check if proxyId has duplication
+	if len(proxyIdList) == 0 {
+		log.Printf("proxy id list is empty")
+	}
+	if len(proxyIdList) > 1 {
+		sort.Slice(proxyIdList, func(i int, j int) bool { return proxyIdList[i] < proxyIdList[j] })
+	}
+	for i := 1; i < len(proxyIdList); i++ {
+		if proxyIdList[i] == proxyIdList[i-1] {
+			log.Printf("there are two proxies have the same id = %d", proxyIdList[i])
 		}
 	}
-	return tempMin
-}
+	r := TimeTickReader{}
+	r.interval = interval
+	r.proxyIdList = proxyIdList
+	readerQueueSize := conf.Config.Reader.ReaderQueueSize
 
-func NewHardTimeTickBarrier(ctx context.Context,
-	ttStream *ms.MsgStream,
-	peerIds []UniqueID) *hardTimeTickBarrier {
-
-	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is emtpy!")
-		return nil
+	//check if read topic is empty
+	if len(readTopics) == 0 {
+		log.Printf("read topic is empyt")
+	}
+	//set default value
+	if readerQueueSize == 0 {
+		readerQueueSize = 1024
 	}
 
-	sttbarrier := hardTimeTickBarrier{}
-	sttbarrier.ttStream = *ttStream
-	sttbarrier.outTt = make(chan Timestamp, 1024)
-	sttbarrier.ctx = ctx
-	sttbarrier.closed = false
+	r.timeTickPeerProxy = make(map[UniqueID]Timestamp)
+	r.ctx = ctx
 
-	sttbarrier.peer2Tt = make(map[UniqueID]Timestamp)
-	for _, id := range peerIds {
-		sttbarrier.peer2Tt[id] = Timestamp(0)
-	}
-	if len(peerIds) != len(sttbarrier.peer2Tt) {
-		log.Printf("[NewSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
+	var client pulsar.Client
+	var err error
+	if conf.Config.Pulsar.Authentication {
+		client, err = pulsar.NewClient(pulsar.ClientOptions{
+			URL:            pulsarAddr,
+			Authentication: pulsar.NewAuthenticationToken(conf.Config.Pulsar.Token),
+		})
+	} else {
+		client, err = pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddr})
 	}
 
-	return &sttbarrier
-}
-
-func (ttBarrier *hardTimeTickBarrier) Close() {
-	if ttBarrier.closeCh != nil {
-		ttBarrier.closeCh <- struct{}{}
+	if err != nil {
+		log.Printf("connect pulsar failed, %v", err)
 	}
-	ttBarrier.closed = true
-	return
+	r.pulsarClient = client
+
+	timeSyncChan := make(chan pulsar.ConsumerMessage, len(r.proxyIdList))
+	if r.timeTickConsumer, err = r.pulsarClient.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       timeTickTopic,
+		SubscriptionName:            timeTickSubName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+		MessageChannel:              timeSyncChan,
+	}); err != nil {
+		log.Printf("failed to subscribe topic %s, error = %v", timeTickTopic, err)
+	}
+
+	r.readerProducer = make([]pulsar.Producer, 0, len(readTopics))
+	for i := 0; i < len(readTopics); i++ {
+		rp, err := r.pulsarClient.CreateProducer(pulsar.ProducerOptions{Topic: readTopics[i]})
+		if err != nil {
+			log.Printf("failed to create reader producer %s, error = %v", readTopics[i], err)
+		}
+		r.readerProducer = append(r.readerProducer, rp)
+	}
+
+	return &r
 }

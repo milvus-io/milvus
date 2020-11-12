@@ -36,19 +36,8 @@ type GlobalTSOAllocator struct {
 	tso *timestampOracle
 }
 
-var allocator *GlobalTSOAllocator
-
-func Init() {
-	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
-}
-
-func InitGlobalTsoAllocator(key string, base kv.KVBase) {
-	allocator = NewGlobalTSOAllocator(key, base)
-	allocator.Initialize()
-}
-
 // NewGlobalTSOAllocator creates a new global TSO allocator.
-func NewGlobalTSOAllocator(key string, kvBase kv.KVBase) *GlobalTSOAllocator {
+func NewGlobalTSOAllocator(key string, kvBase kv.KVBase) Allocator {
 
 	var saveInterval time.Duration = 3 * time.Second
 	return &GlobalTSOAllocator{
@@ -63,7 +52,7 @@ func NewGlobalTSOAllocator(key string, kvBase kv.KVBase) *GlobalTSOAllocator {
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize() error {
-	return gta.tso.InitTimestamp()
+	return gta.tso.SyncTimestamp()
 }
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
@@ -108,33 +97,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 	return 0, errors.New("can not get timestamp")
 }
 
-func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
-	//return gta.tso.SyncTimestamp()
-	start, err := gta.GenerateTSO(count)
-	if err != nil {
-		return typeutil.ZeroTimestamp, err
-	}
-	//ret := make([]typeutil.Timestamp, count)
-	//for i:=uint32(0); i < count; i++{
-	//	ret[i] = start + uint64(i)
-	//}
-	return start, err
-}
-
-func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
-	return gta.GenerateTSO(1)
-}
-
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tso.ResetTimestamp()
-}
-
-func AllocOne() (typeutil.Timestamp, error) {
-	return allocator.AllocOne()
-}
-
-// Reset is used to reset the TSO allocator.
-func Alloc(count uint32) (typeutil.Timestamp, error) {
-	return allocator.Alloc(count)
 }
