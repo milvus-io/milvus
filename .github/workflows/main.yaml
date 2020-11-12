@@ -13,7 +13,6 @@ on:
       - docker-compose.yml
       - Makefile
       - '!**.md'
-      - '!**_test.go'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -24,7 +23,6 @@ on:
       - docker-compose.yml
       - Makefile
       - '!**.md'
-      - '!**_test.go'
 
 jobs:
   ubuntu:
