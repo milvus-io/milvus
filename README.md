@@ -60,30 +60,6 @@ Contributions are welcomed and greatly appreciated. Please read our [contributio
 
 We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and public discussions, please join our community.
 
-## Join us for Hacktoberfest
-![Hacktoberfestlogo](https://user-images.githubusercontent.com/58837504/94657904-b4b6e580-0334-11eb-85e0-89740b8b9dd5.png)
-
-:octocat: Happy Hacktober! Let’s do something great one Pull Request at a time!
-In the whole October you can contribute to the open source project and get some cool T-shirts/swags. Milvus community is happy to join and celebrate open source 
-by preparing our own swags for you to claim. 
-
-### 💡 What is Hacktoberfest
-Hacktoberfest is a month-long celebration of open source software in partnership with Github. Learn more: [Hacktoberfest](https://hacktoberfest.digitalocean.com/)
-
-### ✨ How to participate
--  Hacktoberfest is open to everyone in our global community. Whether you’re an experienced contributor or looking for projects to contribute to for the first time, you’re welcome to participate.
--  Pull requests can be made in any GitHub-hosted repositories/projects. As long as the project is public and GitHub-hosted, your pull requests will count toward your participation.
--  You can sign up anytime between October 1 and October 31. Just be sure to sign up on the official Hacktoberfest website for your pull requests to count.
-
-### ✔️ Participation rule
-To get the swags you must make four pull requests (PRs) between October 1–31 in any time zone, any repo is welcome but we encourage you to look for issues tagged with Hacktoberfest.
-If a maintainer reports your pull request as spam, it will not be counted toward your participation in Hacktoberfest. If a maintainer reports behavior that’s not in line with the project’s code of conduct, you will be ineligible to participate. 
-
-### :gift:  Milvus swags and how to claim them 
--  At least 2 PRs (max 30 swags).
--  Swags include： Milvus T-shirt, stickers and USB cable.
--  You will get a form when you file a PR.
-
 ## Join our community
 
 :heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
