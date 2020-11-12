@@ -17,7 +17,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	// fmt.Println("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in serviceTimeNode, input length = ", len(in))
+		log.Println("Invalid operate message input in serviceTimeNode")
 		// TODO: add error handling
 	}
 

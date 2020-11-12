@@ -1216,25 +1216,28 @@ type TimeTickBarrier interface {
 }
 
 type timeSyncMsgProducer struct {
-  proxyTtBarrier TimeTickBarrier // softTimeTickBarrier
-  WriteNodeTtBarrier TimeTickBarrier //hardTimeTickBarrier
+  proxyTtBarrier TimeTickBarrier
+  //softTimeTickBarrier
+  writeNodeTtBarrier TimeTickBarrier
+  //hardTimeTickBarrier
   
-  dmSyncStream *MsgStream // insert & delete
-  k2sSyncStream *MsgStream
+  dmSyncStream MsgStream // insert & delete
+  k2sSyncStream MsgStream
   
   ctx context.Context
+  cancel context.CancelFunc
 }
+func NewTimeSyncMsgProducer(ctx context.Context) (*timeSyncMsgProducer, error)
 
-func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
-func (syncMsgProducer *timeSyncMsgProducer) SetWriteNodeTtStreams(WriteNodeTt *MsgStream, writeNodeIds []UniqueId)
+func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtBarrier(proxyTtBarrier TimeTickBarrier) {
+func (syncMsgProducer *timeSyncMsgProducer) SetWriteNodeTtBarrier(writeNodeTtBarrier TimeTickBarrier) {
 
-func (syncMsgProducer *timeSyncMsgProducer) SetDmSyncStream(dmSyncStream *MsgStream)
-func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSyncStream *MsgStream)
+func (syncMsgProducer *timeSyncMsgProducer) SetDmSyncStream(dmSyncStream MsgStream)
+func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSyncStream MsgStream)
 
 func (syncMsgProducer *timeSyncMsgProducer) Start() error
-func (syncMsgProducer *timeSyncMsgProducer) Close() error
+func (syncMsgProducer *timeSyncMsgProducer) Close()
 
-func newTimeSyncMsgProducer(ctx context.Context) *timeSyncMsgProducer error
  ```
 
 

@@ -66,10 +66,11 @@ func (fg *TimeTickedFlowGraph) Start() {
 	wg.Wait()
 }
 
-func (fg *TimeTickedFlowGraph) Close() {
+func (fg *TimeTickedFlowGraph) Close() error {
 	for _, v := range fg.nodeCtx {
 		v.Close()
 	}
+	return nil
 }
 
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
