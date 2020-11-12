@@ -84,7 +84,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-//-------------------------------------------------------------------------------------- preprocess functions
+//-------------------------------------------------------------------------------------- preDm functions
 func (s *Segment) segmentPreInsert(numOfRecords int) int64 {
 	/*
 		long int
