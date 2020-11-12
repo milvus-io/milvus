@@ -230,6 +230,21 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, metric_type="l1")
         assert not client.search(collection, query)
 
+    def test_search_with_empty_partition(self, client, collection):
+        """
+        target: test search function with empty partition
+        method: create collection and insert entities, then create partition and search with partition
+        expected: empty result
+        """
+        entities, ids = init_data(client, collection)
+        client.create_partition(collection, default_tag)
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
+        data = client.search(collection, query, partition_tags=default_tag)
+        res = data['result']
+        assert data['nq'] == default_nq
+        assert len(res) == default_nq
+        assert len(res[0]) == 0
+
     def test_search_binary_flat(self, client, binary_collection):
         """
         target: test basic search function on binary collection
