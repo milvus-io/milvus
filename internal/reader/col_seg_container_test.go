@@ -410,7 +410,7 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 		targetPartition, err := node.container.addPartition(collection, tag)
 		assert.NoError(t, err)
 		assert.Equal(t, targetPartition.partitionTag, "default")
-		partition, err := node.container.getPartitionByTag(tag)
+		partition, err := node.container.getPartitionByTag(collectionMeta.Schema.Name, tag)
 		assert.NoError(t, err)
 		assert.NotNil(t, partition)
 		assert.Equal(t, partition.partitionTag, "default")
