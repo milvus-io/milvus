@@ -24,7 +24,7 @@ type QueryNode struct {
 
 	tSafe Timestamp
 
-	container *container
+	container *ColSegContainer
 
 	dataSyncService *dataSyncService
 	metaService     *metaService
@@ -36,11 +36,6 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *Qu
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
-	var container container = &colSegContainer{
-		collections: collections,
-		segments:    segmentsMap,
-	}
-
 	return &QueryNode{
 		ctx: ctx,
 
@@ -49,7 +44,10 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *Qu
 
 		tSafe: 0,
 
-		container: &container,
+		container: &ColSegContainer{
+			collections: collections,
+			segments:    segmentsMap,
+		},
 
 		dataSyncService: nil,
 		metaService:     nil,
@@ -60,7 +58,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *Qu
 
 func (node *QueryNode) Start() {
 	node.dataSyncService = newDataSyncService(node.ctx, node, node.pulsarURL)
-	node.searchService = newSearchService(node.ctx, node, node.pulsarURL)
+	node.searchService = newSearchService(node.ctx, node.container, node.pulsarURL)
 	node.metaService = newMetaService(node.ctx, node.container)
 	node.statsService = newStatsService(node.ctx, node.container, node.pulsarURL)
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -18,125 +17,6 @@ func TestColSegContainer_addCollection(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name: collectionName,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            UniqueID(0),
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
-
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
-
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
-}
-
-func TestColSegContainer_removeCollection(t *testing.T) {
-	ctx := context.Background()
-	pulsarURL := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarURL)
-
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	fieldVec := schemapb.FieldSchema{
-		Name:     "vec",
-		DataType: schemapb.DataType_VECTOR_FLOAT,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "16",
-			},
-		},
-	}
-
-	fieldInt := schemapb.FieldSchema{
-		Name:     "age",
-		DataType: schemapb.DataType_INT32,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "1",
-			},
-		},
-	}
-
-	schema := schemapb.CollectionSchema{
-		Name: collectionName,
-		Fields: []*schemapb.FieldSchema{
-			&fieldVec, &fieldInt,
-		},
-	}
-
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
-	}
-
-	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
-
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
-
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
-
-	err = (*node.container).removeCollection(collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, (*node.container).getCollectionNum(), 0)
-}
-
-func TestColSegContainer_getCollectionByID(t *testing.T) {
-	ctx := context.Background()
-	pulsarURL := "pulsar://localhost:6650"
-	node := NewQueryNode(ctx, 0, pulsarURL)
-
-	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -177,17 +57,121 @@ func TestColSegContainer_getCollectionByID(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
+}
 
-	targetCollection, err := (*node.container).getCollectionByID(UniqueID(0))
+func TestColSegContainer_removeCollection(t *testing.T) {
+	ctx := context.Background()
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+
+	fieldVec := schemapb.FieldSchema{
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name: "collection0",
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
+
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, len(node.container.collections), 1)
+
+	err := node.container.removeCollection(collection)
+	assert.NoError(t, err)
+	assert.Equal(t, len(node.container.collections), 0)
+}
+
+func TestColSegContainer_getCollectionByID(t *testing.T) {
+	ctx := context.Background()
+	pulsarURL := "pulsar://localhost:6650"
+	node := NewQueryNode(ctx, 0, pulsarURL)
+
+	fieldVec := schemapb.FieldSchema{
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name: "collection0",
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
+
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, len(node.container.collections), 1)
+
+	targetCollection, err := node.container.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
@@ -199,7 +183,6 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -240,17 +223,13 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
 
-	targetCollection, err := (*node.container).getCollectionByName("collection0")
+	targetCollection, err := node.container.getCollectionByName("collection0")
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
@@ -263,8 +242,6 @@ func TestColSegContainer_addPartition(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -295,7 +272,7 @@ func TestColSegContainer_addPartition(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -305,22 +282,16 @@ func TestColSegContainer_addPartition(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
-		err := (*node.container).addPartition(collectionID, tag)
+		targetPartition, err := node.container.addPartition(collection, tag)
 		assert.NoError(t, err)
-		partition, err := (*node.container).getPartitionByTag(collectionID, tag)
-		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, "default")
+		assert.Equal(t, targetPartition.partitionTag, "default")
 	}
 }
 
@@ -329,9 +300,6 @@ func TestColSegContainer_removePartition(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	partitionTag := "default"
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -362,33 +330,27 @@ func TestColSegContainer_removePartition(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{partitionTag},
+		PartitionTags: []string{"default"},
 	}
 
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
-		err := (*node.container).addPartition(collectionID, tag)
+		targetPartition, err := node.container.addPartition(collection, tag)
 		assert.NoError(t, err)
-		partition, err := (*node.container).getPartitionByTag(collectionID, tag)
-		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, partitionTag)
-		err = (*node.container).removePartition(collectionID, partitionTag)
+		assert.Equal(t, targetPartition.partitionTag, "default")
+		err = node.container.removePartition(targetPartition)
 		assert.NoError(t, err)
 	}
 }
@@ -398,8 +360,6 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -430,7 +390,7 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -440,23 +400,20 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
-		err := (*node.container).addPartition(collectionID, tag)
+		targetPartition, err := node.container.addPartition(collection, tag)
 		assert.NoError(t, err)
-		partition, err := (*node.container).getPartitionByTag(collectionID, tag)
+		assert.Equal(t, targetPartition.partitionTag, "default")
+		partition, err := node.container.getPartitionByTag(collectionMeta.Schema.Name, tag)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, "default")
 		assert.NotNil(t, partition)
+		assert.Equal(t, partition.partitionTag, "default")
 	}
 }
 
@@ -466,8 +423,6 @@ func TestColSegContainer_addSegment(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -498,7 +453,7 @@ func TestColSegContainer_addSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -508,24 +463,18 @@ func TestColSegContainer_addSegment(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
 
-	err = (*node.container).addPartition(collectionID, collectionMeta.PartitionTags[0])
+	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := (*node.container).addSegment(UniqueID(i), collectionMeta.PartitionTags[0], collectionID)
-		assert.NoError(t, err)
-		targetSeg, err := (*node.container).getSegmentByID(UniqueID(i))
+		targetSeg, err := node.container.addSegment(collection, partition, UniqueID(i))
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
 	}
@@ -536,8 +485,6 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -568,7 +515,7 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -578,27 +525,21 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
 
-	err = (*node.container).addPartition(collectionID, collectionMeta.PartitionTags[0])
+	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := (*node.container).addSegment(UniqueID(i), collectionMeta.PartitionTags[0], collectionID)
-		assert.NoError(t, err)
-		targetSeg, err := (*node.container).getSegmentByID(UniqueID(i))
+		targetSeg, err := node.container.addSegment(collection, partition, UniqueID(i))
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-		err = (*node.container).removeSegment(UniqueID(i))
+		err = node.container.removeSegment(targetSeg)
 		assert.NoError(t, err)
 	}
 }
@@ -608,8 +549,6 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -640,7 +579,7 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -650,26 +589,23 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
 
-	err = (*node.container).addPartition(collectionID, collectionMeta.PartitionTags[0])
+	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := (*node.container).addSegment(UniqueID(i), collectionMeta.PartitionTags[0], collectionID)
-		assert.NoError(t, err)
-		targetSeg, err := (*node.container).getSegmentByID(UniqueID(i))
+		targetSeg, err := node.container.addSegment(collection, partition, UniqueID(i))
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
+		seg, err := node.container.getSegmentByID(UniqueID(i))
+		assert.NoError(t, err)
+		assert.Equal(t, seg.segmentID, UniqueID(i))
 	}
 }
 
@@ -678,8 +614,6 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 	pulsarURL := "pulsar://localhost:6650"
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -710,7 +644,7 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
 		SegmentIDs:    []UniqueID{0},
@@ -720,29 +654,23 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
-	assert.NoError(t, err)
+	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
-	collection, err := (*node.container).getCollectionByName(collectionName)
-	assert.NoError(t, err)
-
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, (*node.container).getCollectionNum(), 1)
+	assert.Equal(t, len(node.container.collections), 1)
 
-	err = (*node.container).addPartition(collectionID, collectionMeta.PartitionTags[0])
+	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := (*node.container).addSegment(UniqueID(i), collectionMeta.PartitionTags[0], collectionID)
-		assert.NoError(t, err)
-		targetSeg, err := (*node.container).getSegmentByID(UniqueID(i))
+		targetSeg, err := node.container.addSegment(collection, partition, UniqueID(i))
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-		hasSeg := (*node.container).hasSegment(UniqueID(i))
+		hasSeg := node.container.hasSegment(UniqueID(i))
 		assert.Equal(t, hasSeg, true)
-		hasSeg = (*node.container).hasSegment(UniqueID(i + 100))
+		hasSeg = node.container.hasSegment(UniqueID(i + 100))
 		assert.Equal(t, hasSeg, false)
 	}
 }
