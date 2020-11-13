@@ -51,7 +51,7 @@ func newRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, err
 		keys := hashKeys[i]
 
 		timestampLen := len(insertRequest.Timestamps)
-		rowIDLen := len(insertRequest.RowIds)
+		rowIDLen := len(insertRequest.RowIDs)
 		rowDataLen := len(insertRequest.RowData)
 		keysLen := len(keys)
 
@@ -67,14 +67,14 @@ func newRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, err
 
 			sliceRequest := internalPb.InsertRequest{
 				MsgType:        internalPb.MsgType_kInsert,
-				ReqId:          insertRequest.ReqId,
+				ReqID:          insertRequest.ReqID,
 				CollectionName: insertRequest.CollectionName,
 				PartitionTag:   insertRequest.PartitionTag,
-				SegmentId:      insertRequest.SegmentId,
-				ChannelId:      insertRequest.ChannelId,
-				ProxyId:        insertRequest.ProxyId,
+				SegmentID:      insertRequest.SegmentID,
+				ChannelID:      insertRequest.ChannelID,
+				ProxyID:        insertRequest.ProxyID,
 				Timestamps:     []uint64{insertRequest.Timestamps[index]},
-				RowIds:         []int64{insertRequest.RowIds[index]},
+				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonPb.Blob{insertRequest.RowData[index]},
 			}
 
@@ -97,14 +97,14 @@ func getMsg(reqID UniqueID, hashValue int32) *TsMsg {
 	}
 	insertRequest := internalPb.InsertRequest{
 		MsgType:        internalPb.MsgType_kInsert,
-		ReqId:          reqID,
+		ReqID:          reqID,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",
-		SegmentId:      1,
-		ChannelId:      1,
-		ProxyId:        1,
+		SegmentID:      1,
+		ChannelID:      1,
+		ProxyID:        1,
 		Timestamps:     []Timestamp{1},
-		RowIds:         []int64{1},
+		RowIDs:         []int64{1},
 		RowData:        []*commonPb.Blob{{}},
 	}
 	insertMsg := InsertMsg{

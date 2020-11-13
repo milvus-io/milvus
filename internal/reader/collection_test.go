@@ -46,10 +46,10 @@ func TestCollection_Partitions(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -59,7 +59,7 @@ func TestCollection_Partitions(t *testing.T) {
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	for _, tag := range collectionMeta.PartitionTags {
@@ -102,10 +102,10 @@ func TestCollection_newCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -114,7 +114,7 @@ func TestCollection_newCollection(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 }
 
 func TestCollection_deleteCollection(t *testing.T) {
@@ -148,10 +148,10 @@ func TestCollection_deleteCollection(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -160,7 +160,7 @@ func TestCollection_deleteCollection(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	deleteCollection(collection)
 }

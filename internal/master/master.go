@@ -252,7 +252,7 @@ func (s *Master) pulsarLoop() {
 			var m internalpb.SegmentStats
 			proto.Unmarshal(msg.Payload(), &m)
 			fmt.Printf("Received message msgId: %#v -- content: '%d'\n",
-				msg.ID(), m.SegmentId)
+				msg.ID(), m.SegmentID)
 			s.ssChan <- m
 			consumer.Ack(msg)
 		case <-ctx.Done():

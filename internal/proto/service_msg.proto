@@ -151,7 +151,7 @@ message Score {
  * @brief Entities hit by query
  */
 message Hits {
-    repeated int64 ids = 1;
+    repeated int64 IDs = 1;
     repeated common.Blob row_data = 2;
     repeated Score scores = 3;
 }

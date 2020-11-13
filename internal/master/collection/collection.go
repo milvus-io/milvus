@@ -50,10 +50,10 @@ func GrpcMarshal(c *Collection) *Collection {
 	}
 	pbSchema.Fields = schemaSlice
 	grpcCollection := &etcdpb.CollectionMeta{
-		Id:            c.ID,
+		ID:            c.ID,
 		Schema:        pbSchema,
 		CreateTime:    c.CreateTime,
-		SegmentIds:    c.SegmentIDs,
+		SegmentIDs:    c.SegmentIDs,
 		PartitionTags: c.PartitionTags,
 	}
 	out := proto.MarshalTextString(grpcCollection)

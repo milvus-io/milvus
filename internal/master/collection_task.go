@@ -84,11 +84,11 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	collection := etcdpb.CollectionMeta{
-		Id:         collectionID,
+		ID:         collectionID,
 		Schema:     &schema,
 		CreateTime: ts,
 		// TODO: initial segment?
-		SegmentIds: make([]UniqueID, 0),
+		SegmentIDs: make([]UniqueID, 0),
 		// TODO: initial partition?
 		PartitionTags: make([]string, 0),
 	}
@@ -123,7 +123,7 @@ func (t *dropCollectionTask) Execute() error {
 		return err
 	}
 
-	collectionID := collectionMeta.Id
+	collectionID := collectionMeta.ID
 
 	return t.mt.DeleteCollection(collectionID)
 }

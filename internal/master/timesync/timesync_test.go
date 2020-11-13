@@ -21,7 +21,7 @@ func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) *ms
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
-		PeerId:    peerID,
+		PeerID:    peerID,
 		Timestamp: timeStamp,
 	}
 	timeTickMsg := &ms.TimeTickMsg{

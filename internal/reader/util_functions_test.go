@@ -40,7 +40,7 @@ package reader
 //		key2SegMsg := msgPb.Key2SegMsg{
 //			Uid:       int64(i),
 //			Timestamp: uint64(i + 1000),
-//			SegmentId: []int64{int64(i)},
+//			SegmentID: []int64{int64(i)},
 //		}
 //		node.messageClient.Key2SegMsg = append(node.messageClient.Key2SegMsg, &key2SegMsg)
 //	}

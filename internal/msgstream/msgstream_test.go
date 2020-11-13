@@ -37,14 +37,14 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kInsert:
 		insertRequest := internalPb.InsertRequest{
 			MsgType:        internalPb.MsgType_kInsert,
-			ReqId:          reqID,
+			ReqID:          reqID,
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
-			SegmentId:      1,
-			ChannelId:      1,
-			ProxyId:        1,
+			SegmentID:      1,
+			ChannelID:      1,
+			ProxyID:        1,
 			Timestamps:     []Timestamp{1},
-			RowIds:         []int64{1},
+			RowIDs:         []int64{1},
 			RowData:        []*commonPb.Blob{{}},
 		}
 		insertMsg := &InsertMsg{
@@ -55,10 +55,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kDelete:
 		deleteRequest := internalPb.DeleteRequest{
 			MsgType:        internalPb.MsgType_kDelete,
-			ReqId:          reqID,
+			ReqID:          reqID,
 			CollectionName: "Collection",
-			ChannelId:      1,
-			ProxyId:        1,
+			ChannelID:      1,
+			ProxyID:        1,
 			Timestamps:     []Timestamp{1},
 			PrimaryKeys:    []IntPrimaryKey{1},
 		}
@@ -70,10 +70,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kSearch:
 		searchRequest := internalPb.SearchRequest{
 			MsgType:         internalPb.MsgType_kSearch,
-			ReqId:           reqID,
-			ProxyId:         1,
+			ReqID:           reqID,
+			ProxyID:         1,
 			Timestamp:       1,
-			ResultChannelId: 1,
+			ResultChannelID: 1,
 		}
 		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
@@ -84,11 +84,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 		searchResult := internalPb.SearchResult{
 			MsgType:         internalPb.MsgType_kSearchResult,
 			Status:          &commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS},
-			ReqId:           reqID,
-			ProxyId:         1,
-			QueryNodeId:     1,
+			ReqID:           reqID,
+			ProxyID:         1,
+			QueryNodeID:     1,
 			Timestamp:       1,
-			ResultChannelId: 1,
+			ResultChannelID: 1,
 		}
 		searchResultMsg := &SearchResultMsg{
 			BaseMsg:      baseMsg,
@@ -98,7 +98,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 	case internalPb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
 			MsgType:   internalPb.MsgType_kTimeTick,
-			PeerId:    reqID,
+			PeerID:    reqID,
 			Timestamp: 1,
 		}
 		timeTickMsg := &TimeTickMsg{
@@ -119,7 +119,7 @@ func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) *TsMsg {
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
-		PeerId:    reqID,
+		PeerID:    reqID,
 		Timestamp: time,
 	}
 	timeTickMsg := &TimeTickMsg{
@@ -357,14 +357,14 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 
 	insertRequest := internalPb.InsertRequest{
 		MsgType:        internalPb.MsgType_kInsert,
-		ReqId:          1,
+		ReqID:          1,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",
-		SegmentId:      1,
-		ChannelId:      1,
-		ProxyId:        1,
+		SegmentID:      1,
+		ChannelID:      1,
+		ProxyID:        1,
 		Timestamps:     []Timestamp{1, 1},
-		RowIds:         []int64{1, 3},
+		RowIDs:         []int64{1, 3},
 		RowData:        []*commonPb.Blob{{}, {}},
 	}
 	insertMsg := &InsertMsg{
@@ -410,10 +410,10 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 
 	deleteRequest := internalPb.DeleteRequest{
 		MsgType:        internalPb.MsgType_kDelete,
-		ReqId:          1,
+		ReqID:          1,
 		CollectionName: "Collection",
-		ChannelId:      1,
-		ProxyId:        1,
+		ChannelID:      1,
+		ProxyID:        1,
 		Timestamps:     []Timestamp{1, 1},
 		PrimaryKeys:    []int64{1, 3},
 	}
@@ -460,7 +460,7 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 
 	timeTickRequest := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
-		PeerId:    int64(1),
+		PeerID:    int64(1),
 		Timestamp: uint64(1),
 	}
 	timeTick := &TimeTickMsg{

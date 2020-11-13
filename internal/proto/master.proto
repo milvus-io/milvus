@@ -90,5 +90,5 @@ service Master {
 
 
     rpc AllocTimestamp(internal.TsoRequest) returns (internal.TsoResponse) {}
-    rpc AllocId(internal.IdRequest) returns (internal.IdResponse) {}
+    rpc AllocID(internal.IDRequest) returns (internal.IDResponse) {}
 }

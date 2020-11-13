@@ -163,7 +163,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 
 	// TODO: what if seg == nil? We need to notify master and return rpc request failed
 	if seg != nil {
-		var col, err = mService.container.getCollectionByID(seg.CollectionId)
+		var col, err = mService.container.getCollectionByID(seg.CollectionID)
 		if err != nil {
 			log.Println(err)
 			return
@@ -175,7 +175,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 				return
 			}
 			if partition != nil {
-				_, err = mService.container.addSegment(col, partition, seg.SegmentId)
+				_, err = mService.container.addSegment(col, partition, seg.SegmentID)
 				if err != nil {
 					log.Println(err)
 					return
@@ -206,7 +206,7 @@ func (mService *metaService) processSegmentModify(id string, value string) {
 	}
 
 	if seg != nil {
-		targetSegment, err := mService.container.getSegmentByID(seg.SegmentId)
+		targetSegment, err := mService.container.getSegmentByID(seg.SegmentID)
 		if err != nil {
 			log.Println(err)
 			return

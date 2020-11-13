@@ -532,7 +532,7 @@ const char descriptor_table_protodef_service_5fmsg_2eproto[] PROTOBUF_SECTION_VA
   "us\0221\n\004name\030\002 \001(\0132#.milvus.proto.service."
   "PartitionName\0225\n\nstatistics\030\003 \003(\0132!.milv"
   "us.proto.common.KeyValuePair\"$\n\005Score\022\013\n"
-  "\003tag\030\001 \001(\t\022\016\n\006values\030\002 \003(\002\"m\n\004Hits\022\013\n\003id"
+  "\003tag\030\001 \001(\t\022\016\n\006values\030\002 \003(\002\"m\n\004Hits\022\013\n\003ID"
   "s\030\001 \003(\003\022+\n\010row_data\030\002 \003(\0132\031.milvus.proto"
   ".common.Blob\022+\n\006scores\030\003 \003(\0132\033.milvus.pr"
   "oto.service.Score\"d\n\013QueryResult\022+\n\006stat"
@@ -5598,7 +5598,7 @@ const char* Hits::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::inter
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // repeated int64 ids = 1;
+      // repeated int64 IDs = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
           ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_ids(), ptr, ctx);
@@ -5662,7 +5662,7 @@ bool Hits::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // repeated int64 ids = 1;
+      // repeated int64 IDs = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (10 & 0xFF)) {
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
@@ -5727,7 +5727,7 @@ void Hits::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // repeated int64 ids = 1;
+  // repeated int64 IDs = 1;
   if (this->ids_size() > 0) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(1, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
     output->WriteVarint32(_ids_cached_byte_size_.load(
@@ -5769,7 +5769,7 @@ void Hits::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // repeated int64 ids = 1;
+  // repeated int64 IDs = 1;
   if (this->ids_size() > 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
       1,
@@ -5819,7 +5819,7 @@ size_t Hits::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated int64 ids = 1;
+  // repeated int64 IDs = 1;
   {
     size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       Int64Size(this->ids_);

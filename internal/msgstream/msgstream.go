@@ -395,7 +395,7 @@ func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 		keys := hashKeys[i]
 
 		timestampLen := len(insertRequest.Timestamps)
-		rowIDLen := len(insertRequest.RowIds)
+		rowIDLen := len(insertRequest.RowIDs)
 		rowDataLen := len(insertRequest.RowData)
 		keysLen := len(keys)
 
@@ -411,14 +411,14 @@ func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 
 			sliceRequest := internalPb.InsertRequest{
 				MsgType:        internalPb.MsgType_kInsert,
-				ReqId:          insertRequest.ReqId,
+				ReqID:          insertRequest.ReqID,
 				CollectionName: insertRequest.CollectionName,
 				PartitionTag:   insertRequest.PartitionTag,
-				SegmentId:      insertRequest.SegmentId,
-				ChannelId:      insertRequest.ChannelId,
-				ProxyId:        insertRequest.ProxyId,
+				SegmentID:      insertRequest.SegmentID,
+				ChannelID:      insertRequest.ChannelID,
+				ProxyID:        insertRequest.ProxyID,
 				Timestamps:     []uint64{insertRequest.Timestamps[index]},
-				RowIds:         []int64{insertRequest.RowIds[index]},
+				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonPb.Blob{insertRequest.RowData[index]},
 			}
 
@@ -458,10 +458,10 @@ func deleteRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 
 			sliceRequest := internalPb.DeleteRequest{
 				MsgType:        internalPb.MsgType_kDelete,
-				ReqId:          deleteRequest.ReqId,
+				ReqID:          deleteRequest.ReqID,
 				CollectionName: deleteRequest.CollectionName,
-				ChannelId:      deleteRequest.ChannelId,
-				ProxyId:        deleteRequest.ProxyId,
+				ChannelID:      deleteRequest.ChannelID,
+				ProxyID:        deleteRequest.ProxyID,
 				Timestamps:     []uint64{deleteRequest.Timestamps[index]},
 				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
 			}

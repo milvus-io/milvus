@@ -64,7 +64,7 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 			}
 			timeTickResult := internalPb.TimeTickMsg{
 				MsgType:   internalPb.MsgType_kTimeTick,
-				PeerId:    0,
+				PeerID:    0,
 				Timestamp: timetick,
 			}
 			timeTickMsg := &ms.TimeTickMsg{

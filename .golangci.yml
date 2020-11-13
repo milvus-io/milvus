@@ -6,7 +6,6 @@ run:
     - docs
     - scripts
     - internal/core
-    - internal/proto
 
 linters-settings:
   golint:
@@ -34,7 +33,6 @@ issues:
     - should be of the form
     - should not use dot imports
     - which can be annoying to use
-    - AllocId
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly
 

@@ -111,7 +111,7 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 	//	if !ok {
 	//		return errors.New("invalid request type = " + string((*msg).Type()))
 	//	}
-	//	var clientID = searchMsg.ProxyId
+	//	var clientID = searchMsg.ProxyID
 	//	var searchTimestamp = searchMsg.Timestamp
 	//
 	//	// ServiceTimeSync update by TimeSync, which is get from proxy.
@@ -189,8 +189,8 @@ func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 	//		},
 	//		Entities:  &entities,
 	//		Distances: make([]float32, 0),
-	//		QueryId:   searchMsg.ReqId,
-	//		ProxyId:   clientID,
+	//		QueryId:   searchMsg.ReqID,
+	//		ProxyID:   clientID,
 	//	}
 	//	for _, rTmp := range resultsTmp {
 	//		for _, res := range rTmp {

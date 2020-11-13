@@ -46,10 +46,10 @@ func TestSegment_newSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -58,7 +58,7 @@ func TestSegment_newSegment(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -96,10 +96,10 @@ func TestSegment_deleteSegment(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -108,7 +108,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -149,10 +149,10 @@ func TestSegment_getRowCount(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -161,7 +161,7 @@ func TestSegment_getRowCount(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -231,10 +231,10 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -243,7 +243,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -320,10 +320,10 @@ func TestSegment_getMemSize(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -332,7 +332,7 @@ func TestSegment_getMemSize(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -403,10 +403,10 @@ func TestSegment_segmentInsert(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -415,7 +415,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -482,10 +482,10 @@ func TestSegment_segmentDelete(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -494,7 +494,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -648,10 +648,10 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -660,7 +660,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -721,10 +721,10 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -733,7 +733,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 
 	collection := newCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)

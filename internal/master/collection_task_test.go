@@ -44,7 +44,7 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	sch := schemapb.CollectionSchema{
 		Name:        "col1",
 		Description: "test collection",
-		AutoId:      false,
+		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
 			{
 				Name:        "col1_f1",
@@ -103,9 +103,9 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 
 	req := internalpb.CreateCollectionRequest{
 		MsgType:   internalpb.MsgType_kCreateCollection,
-		ReqId:     1,
+		ReqID:     1,
 		Timestamp: 11,
-		ProxyId:   1,
+		ProxyID:   1,
 		Schema:    &commonpb.Blob{Value: schemaBytes},
 	}
 	log.Printf("... [Create] collection col1\n")
@@ -115,10 +115,10 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
-	t.Logf("collection id = %d", collMeta.Id)
+	t.Logf("collection id = %d", collMeta.ID)
 	assert.Equal(t, collMeta.CreateTime, uint64(11))
 	assert.Equal(t, collMeta.Schema.Name, "col1")
-	assert.Equal(t, collMeta.Schema.AutoId, false)
+	assert.Equal(t, collMeta.Schema.AutoID, false)
 	assert.Equal(t, len(collMeta.Schema.Fields), 2)
 	assert.Equal(t, collMeta.Schema.Fields[0].Name, "col1_f1")
 	assert.Equal(t, collMeta.Schema.Fields[1].Name, "col1_f2")
@@ -157,9 +157,9 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 
 	reqDrop := internalpb.DropCollectionRequest{
 		MsgType:        internalpb.MsgType_kDropCollection,
-		ReqId:          1,
+		ReqID:          1,
 		Timestamp:      11,
-		ProxyId:        1,
+		ProxyID:        1,
 		CollectionName: &ser,
 	}
 

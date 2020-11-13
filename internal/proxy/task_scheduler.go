@@ -130,19 +130,19 @@ type DqTaskQueue struct {
 func (queue *DdTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
-	// TODO: set Ts, ReqId, ProxyId
+	// TODO: set Ts, ReqID, ProxyID
 	queue.AddUnissuedTask(t)
 	return nil
 }
 
 func (queue *DmTaskQueue) Enqueue(t task) error {
-	// TODO: set Ts, ReqId, ProxyId
+	// TODO: set Ts, ReqID, ProxyID
 	queue.AddUnissuedTask(t)
 	return nil
 }
 
 func (queue *DqTaskQueue) Enqueue(t task) error {
-	// TODO: set Ts, ReqId, ProxyId
+	// TODO: set Ts, ReqID, ProxyID
 	queue.AddUnissuedTask(t)
 	return nil
 }

@@ -68,10 +68,10 @@ func TestManipulationService_Start(t *testing.T) {
 	}
 
 	collectionMeta := etcdpb.CollectionMeta{
-		Id:            UniqueID(0),
+		ID:            UniqueID(0),
 		Schema:        &schema,
 		CreateTime:    Timestamp(0),
-		SegmentIds:    []UniqueID{0},
+		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
 
@@ -80,7 +80,7 @@ func TestManipulationService_Start(t *testing.T) {
 
 	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
-	assert.Equal(t, collection.meta.Id, UniqueID(0))
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, len(node.container.collections), 1)
 
 	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
@@ -130,14 +130,14 @@ func TestManipulationService_Start(t *testing.T) {
 			},
 			InsertRequest: internalPb.InsertRequest{
 				MsgType:        internalPb.MsgType_kInsert,
-				ReqId:          int64(0),
+				ReqID:          int64(0),
 				CollectionName: "collection0",
 				PartitionTag:   "default",
-				SegmentId:      int64(0),
-				ChannelId:      int64(0),
-				ProxyId:        int64(0),
+				SegmentID:      int64(0),
+				ChannelID:      int64(0),
+				ProxyID:        int64(0),
 				Timestamps:     []uint64{uint64(i + 1000), uint64(i + 1000)},
-				RowIds:         []int64{int64(i), int64(i)},
+				RowIDs:         []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 					{Value: rawData},
