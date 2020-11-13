@@ -29,6 +29,26 @@ func TestGet(t *testing.T) {
 	assert.Equal(t, entities[0].Entity[utils.DefaultFieldFloatName], utils.DefaultFloatValues[0])
 }
 
+func TestGetEntityFields(t *testing.T)  {
+	client, name := Collection(true, milvus.VECTORFLOAT)
+	insertParam := milvus.InsertParam{
+		name,
+		GenDefaultFieldValues(milvus.VECTORFLOAT),
+		nil,
+		""}
+	ids, status, _ := client.Insert(insertParam)
+	assert.Equal(t, status.Ok(), true)
+	assert.Equal(t, len(ids), utils.DefaultNb)
+	client.Flush([]string{name})
+	getIds := []int64{ids[0]}
+	fields := []string{utils.DefaultFieldFloatName}
+	entities, status, _ := client.GetEntityByID(name, fields, getIds)
+	t.Log(entities)
+	t.Log(status)
+	assert.Equal(t, status.Ok(), true)
+	assert.Equal(t, entities[0].Entity[utils.DefaultFieldFloatName], utils.DefaultFloatValues[0])
+}
+
 func TestGetBinary(t *testing.T) {
 	client, name := Collection(true, milvus.VECTORBINARY)
 	insertParam := milvus.InsertParam{

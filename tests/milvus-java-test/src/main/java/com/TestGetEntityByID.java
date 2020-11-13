@@ -22,11 +22,30 @@ public class TestGetEntityByID {
     List<Long> ids = client.insert(insertParam);
     client.flush(collectionName);
     Map<Long, Map<String, Object>> resEntities =
-        client.getEntityByID(collectionName, ids.subList(0, get_length));
+            client.getEntityByID(collectionName, ids.subList(0, get_length));
     for (int i = 0; i < get_length; i++) {
       Map<String, Object> fieldsMap = resEntities.get(ids.get(i));
       assert (fieldsMap.get("float_vector").equals(Constants.vectors.get(i)));
     }
+  }
+
+  @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+  public void testGetEntityByIdWithFields(MilvusClient client, String collectionName) {
+    int get_length = 2;
+    InsertParam insertParam = Utils.genInsertParam(collectionName);
+    List<Long> ids = client.insert(insertParam);
+    List<String> fields = new ArrayList();
+    fields.add(Constants.intFieldName);
+    client.flush(collectionName);
+    Assert.assertEquals(ids.size(), Constants.nb);
+    Map<Long, Map<String, Object>> resEntities =
+            client.getEntityByID(collectionName, ids.subList(0, get_length), fields);
+    Assert.assertEquals(resEntities.size(), get_length);
+    for (int i = 0; i < get_length; i++) {
+      Map<String, Object> fieldsMap = resEntities.get(ids.get(i));
+      assert (fieldsMap.get(Constants.intFieldName).equals(Constants.defaultEntities.get(Constants.intFieldName)));
+    }
+    System.out.println(resEntities);
   }
 
   @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -38,16 +57,16 @@ public class TestGetEntityByID {
     Map<Long, Map<String, Object>> resEntities = client.getEntityByID(collectionName, getIds);
     Assert.assertEquals(resEntities.size(), getIds.size() - 1);
     Assert.assertEquals(
-        resEntities.get(getIds.get(0)).get(Constants.floatVectorFieldName),
-        Constants.vectors.get(0));
+            resEntities.get(getIds.get(0)).get(Constants.floatVectorFieldName),
+            Constants.vectors.get(0));
   }
 
   @Test(
-      dataProvider = "ConnectInstance",
-      dataProviderClass = MainClass.class,
-      expectedExceptions = ServerSideMilvusException.class)
+          dataProvider = "ConnectInstance",
+          dataProviderClass = MainClass.class,
+          expectedExceptions = ServerSideMilvusException.class)
   public void testGetEntityByIdCollectionNameNotExisted(
-      MilvusClient client, String collectionName) {
+          MilvusClient client, String collectionName) {
     String newCollection = "not_existed";
     Map<Long, Map<String, Object>> resEntities = client.getEntityByID(newCollection, get_ids);
   }
@@ -71,19 +90,19 @@ public class TestGetEntityByID {
       floatValues.add((float) i);
     }
     InsertParam insertParam =
-        InsertParam.create(collectionName)
-            .addField(Constants.intFieldName, DataType.INT64, intValues)
-            .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
-            .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
+            InsertParam.create(collectionName)
+                    .addField(Constants.intFieldName, DataType.INT64, intValues)
+                    .addField(Constants.floatFieldName, DataType.FLOAT, floatValues)
+                    .addVectorField(Constants.binaryVectorFieldName, DataType.VECTOR_BINARY, vectors);
     List<Long> ids = client.insert(insertParam);
     client.flush(collectionName);
     Map<Long, Map<String, Object>> resEntities =
-        client.getEntityByID(collectionName, ids.subList(0, get_length));
+            client.getEntityByID(collectionName, ids.subList(0, get_length));
     for (int i = 0; i < get_length; i++) {
       assert (resEntities
-          .get(ids.get(i))
-          .get(Constants.binaryVectorFieldName)
-          .equals(vectors.get(i)));
+              .get(ids.get(i))
+              .get(Constants.binaryVectorFieldName)
+              .equals(vectors.get(i)));
     }
   }
 
@@ -93,7 +112,7 @@ public class TestGetEntityByID {
     client.deleteEntityByID(collectionName, Collections.singletonList(ids.get(0)));
     client.flush(collectionName);
     Map<Long, Map<String, Object>> resEntities =
-        client.getEntityByID(collectionName, ids.subList(0, 1));
+            client.getEntityByID(collectionName, ids.subList(0, 1));
     Assert.assertEquals(resEntities.size(), 0);
   }
 

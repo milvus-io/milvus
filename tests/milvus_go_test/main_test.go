@@ -34,10 +34,9 @@ func init() {
 }
 
 func GetClient() milvus.MilvusClient {
-	var grpcClient milvus.Milvusclient
-	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
-	err := client.Connect(connectParam)
+	client, err := milvus.NewMilvusClient(connectParam)
+	//err := client.Connect(connectParam)
 	if err != nil {
 		fmt.Println("Connect failed")
 		return nil

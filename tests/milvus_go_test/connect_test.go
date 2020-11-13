@@ -2,25 +2,21 @@ package main
 
 import (
 	"fmt"
-	"testing"
-
 	"github.com/milvus-io/milvus-sdk-go/milvus"
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 func TestConnect(t *testing.T) {
-	var grpcClient milvus.Milvusclient
-	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
-	err := client.Connect(connectParam)
+	client, err := milvus.NewMilvusClient(connectParam)
+	t.Log(client.IsConnected())
 	assert.Nil(t, err)
 }
 
 func TestConnectRepeat(t *testing.T) {
-	var grpcClient milvus.Milvusclient
-	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
-	err := client.Connect(connectParam)
+	client, err := milvus.NewMilvusClient(connectParam)
 	assert.Nil(t, err)
 	err1 := client.Connect(connectParam)
 	assert.Nil(t, err1)
@@ -43,12 +39,11 @@ func GenInvalidConnectArgs() map[string]int64 {
 }
 
 func TestConnectInvalidConnectArgs(t *testing.T) {
-	var grpcClient milvus.Milvusclient
-	client := milvus.NewMilvusClient(grpcClient.Instance)
 	args := GenInvalidConnectArgs()
 	for host := range args {
 		connectParam := milvus.ConnectParam{IPAddress: host, Port: args[host]}
-		err := client.Connect(connectParam)
+		client, err := milvus.NewMilvusClient(connectParam)
+		t.Log(client.IsConnected())
 		assert.NotNil(t, err)
 		fmt.Println(err)
 	}
