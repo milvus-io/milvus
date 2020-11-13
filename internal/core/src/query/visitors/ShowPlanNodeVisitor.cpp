@@ -19,6 +19,7 @@ class ShowPlanNodeVisitorImpl : PlanNodeVisitor {
         node.accept(*this);
         assert(ret_.has_value());
         auto ret = std::move(ret_);
+        ret_ = std::nullopt;
         return std::move(ret.value());
     }
 
@@ -40,11 +41,9 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     assert(!ret_);
     auto& info = node.query_info_;
     Json json_body{
-        {"node_type", "FloatVectorANNS"},    //
-        {"metric_type", info.metric_type_},  //
-        // {"dim", info.dim_},                      //
+        {"node_type", "FloatVectorANNS"},            //
+        {"metric_type", info.metric_type_},          //
         {"field_id_", info.field_id_},               //
-        {"num_queries", info.num_queries_},          //
         {"topK", info.topK_},                        //
         {"search_params", info.search_params_},      //
         {"placeholder_tag", node.placeholder_tag_},  //
@@ -52,7 +51,7 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     if (node.predicate_.has_value()) {
         PanicInfo("unimplemented");
     } else {
-        json_body["predicate"] = "nullopt";
+        json_body["predicate"] = "None";
     }
     ret_ = json_body;
 }

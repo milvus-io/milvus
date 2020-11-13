@@ -13,7 +13,7 @@ std::unique_ptr<Plan>
 CreatePlan(const std::string& dsl);
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const char* placeholder_group_blob);
+ParsePlaceholderGroup(const std::string& placeholder_group_blob);
 
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);
@@ -24,3 +24,5 @@ int64_t
 GetTopK(const Plan*);
 
 }  // namespace milvus::query
+
+#include "PlanImpl.h"

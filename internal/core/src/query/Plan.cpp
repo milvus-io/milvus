@@ -23,7 +23,7 @@ CreateVec(const std::string& field_name, const json& vec_info) {
 
 static std::unique_ptr<Plan>
 CreatePlanImplNaive(const std::string& dsl_str) {
-    auto plan = std::unique_ptr<Plan>();
+    auto plan = std::make_unique<Plan>();
     auto dsl = nlohmann::json::parse(dsl_str);
     nlohmann::json vec_pack;
 
@@ -36,17 +36,19 @@ CreatePlanImplNaive(const std::string& dsl_str) {
                 auto key = iter.key();
                 auto& body = iter.value();
                 plan->plan_node_ = CreateVec(key, body);
+                return plan;
             }
         }
+        PanicInfo("Unsupported DSL: vector node not detected");
     } else if (bool_dsl.contains("vector")) {
         auto iter = bool_dsl["vector"].begin();
         auto key = iter.key();
         auto& body = iter.value();
         plan->plan_node_ = CreateVec(key, body);
+        return plan;
     } else {
         PanicInfo("Unsupported DSL: vector node not detected");
     }
-    return plan;
 }
 
 void
@@ -55,6 +57,7 @@ CheckNull(const Json& json) {
 }
 
 class PlanParser {
+ public:
     void
     ParseBoolBody(const Json& dsl) {
         CheckNull(dsl);
@@ -74,6 +77,8 @@ class PlanParser {
         }
         PanicInfo("unimplemented");
     }
+
+ private:
 };
 
 std::unique_ptr<Plan>
@@ -83,11 +88,12 @@ CreatePlan(const std::string& dsl_str) {
 }
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const char* placeholder_group_blob) {
+ParsePlaceholderGroup(const std::string& blob) {
     namespace ser = milvus::proto::service;
-    auto result = std::unique_ptr<PlaceholderGroup>();
+    auto result = std::make_unique<PlaceholderGroup>();
     ser::PlaceholderGroup ph_group;
-    GOOGLE_PROTOBUF_PARSER_ASSERT(ph_group.ParseFromString(placeholder_group_blob));
+    auto ok = ph_group.ParseFromString(blob);
+    Assert(ok);
     for (auto& info : ph_group.placeholders()) {
         Placeholder element;
         element.tag_ = info.tag();
