@@ -1,10 +1,8 @@
 package master
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
-	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -68,21 +66,7 @@ func (t *createPartitionTask) Execute() error {
 	if err != nil {
 		return err
 	}
-
-	collectionMeta.PartitionTags = append(collectionMeta.PartitionTags, partitionName.Tag)
-
-	collectionJSON, err := json.Marshal(&collectionMeta)
-	if err != nil {
-		return err
-	}
-
-	collectionID := collectionMeta.ID
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.mt.AddPartition(collectionMeta.ID, partitionName.Tag)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -98,7 +82,7 @@ func (t *dropPartitionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *dropPartitionTask) Execute() error {
@@ -109,27 +93,12 @@ func (t *dropPartitionTask) Execute() error {
 	partitionName := t.req.PartitionName
 	collectionName := partitionName.CollectionName
 	collectionMeta, err := t.mt.GetCollectionByName(collectionName)
+
 	if err != nil {
 		return err
 	}
 
-	err = t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
-	if err != nil {
-		return err
-	}
-
-	collectionJSON, err := json.Marshal(&collectionMeta)
-	if err != nil {
-		return err
-	}
-
-	collectionID := collectionMeta.ID
-	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -145,7 +114,7 @@ func (t *hasPartitionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *hasPartitionTask) Execute() error {

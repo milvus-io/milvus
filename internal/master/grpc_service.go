@@ -178,20 +178,18 @@ func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreateParti
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Enqueue failed",
-		}, err
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "WaitToFinish failed",
-		}, err
+		}, nil
 	}
 
 	return &commonpb.Status{
@@ -211,20 +209,18 @@ func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartition
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Enqueue failed",
-		}, err
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "WaitToFinish failed",
-		}, err
+		}, nil
 	}
 
 	return &commonpb.Status{
@@ -245,26 +241,24 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
 		return &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "Enqueue failed",
 			},
 			Value: t.(*hasPartitionTask).hasPartition,
-		}, err
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
 		return &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "WaitToFinish failed",
 			},
 			Value: t.(*hasPartitionTask).hasPartition,
-		}, err
+		}, nil
 	}
 
 	return &servicepb.BoolResponse{
@@ -288,14 +282,26 @@ func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribeP
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
-		return t.(*describePartitionTask).description, err
+		return &servicepb.PartitionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "Enqueue failed",
+			},
+			Name:       in.PartitionName,
+			Statistics: nil,
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
-		return t.(*describePartitionTask).description, err
+		return &servicepb.PartitionDescription{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "WaitToFinish failed",
+			},
+			Name:       in.PartitionName,
+			Statistics: nil,
+		}, nil
 	}
 
 	return t.(*describePartitionTask).description, nil

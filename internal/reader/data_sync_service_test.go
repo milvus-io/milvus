@@ -9,12 +9,12 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 const ctxTimeInMillisecond = 2000
@@ -38,6 +38,7 @@ func TestManipulationService_Start(t *testing.T) {
 	node := NewQueryNode(ctx, 0, pulsarURL)
 
 	// init meta
+	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
 		Name:     "vec",
 		DataType: schemapb.DataType_VECTOR_FLOAT,
@@ -61,7 +62,7 @@ func TestManipulationService_Start(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name: "collection0",
+		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -78,18 +79,21 @@ func TestManipulationService_Start(t *testing.T) {
 	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	var collection = node.container.addCollection(&collectionMeta, collectionMetaBlob)
+	var err = (*node.container).addCollection(&collectionMeta, collectionMetaBlob)
+	assert.NoError(t, err)
+
+	collection, err := (*node.container).getCollectionByName(collectionName)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.meta.Schema.Name, "collection0")
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
-	assert.Equal(t, len(node.container.collections), 1)
+	assert.Equal(t, (*node.container).getCollectionNum(), 1)
 
-	partition, err := node.container.addPartition(collection, collectionMeta.PartitionTags[0])
+	err = (*node.container).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	segmentID := UniqueID(0)
-	targetSeg, err := node.container.addSegment(collection, partition, segmentID)
+	err = (*node.container).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
 	assert.NoError(t, err)
-	assert.Equal(t, targetSeg.segmentID, segmentID)
 
 	// test data generate
 	const msgLength = 10

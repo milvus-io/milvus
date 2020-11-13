@@ -12,38 +12,79 @@ package reader
 */
 import "C"
 import (
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 )
 
+type container interface {
+	// collection
+	getCollectionNum() int
+	addCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) error
+	removeCollection(collectionID UniqueID) error
+	getCollectionByID(collectionID UniqueID) (*Collection, error)
+	getCollectionByName(collectionName string) (*Collection, error)
+
+	// partition
+	// Partition tags in different collections are not unique,
+	// so partition api should specify the target collection.
+	addPartition(collectionID UniqueID, partitionTag string) error
+	removePartition(collectionID UniqueID, partitionTag string) error
+	getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error)
+
+	// segment
+	getSegmentNum() int
+	getSegmentStatistics() *internalpb.QueryNodeSegStats
+	addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error
+	removeSegment(segmentID UniqueID) error
+	getSegmentByID(segmentID UniqueID) (*Segment, error)
+	hasSegment(segmentID UniqueID) bool
+}
+
 // TODO: rename
-type ColSegContainer struct {
+type colSegContainer struct {
+	mu          sync.RWMutex
 	collections []*Collection
 	segments    map[UniqueID]*Segment
 }
 
 //----------------------------------------------------------------------------------------------------- collection
-func (container *ColSegContainer) addCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) *Collection {
+func (container *colSegContainer) getCollectionNum() int {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
+	return len(container.collections)
+}
+
+func (container *colSegContainer) addCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) error {
+	container.mu.Lock()
+	defer container.mu.Unlock()
+
 	var newCollection = newCollection(collMeta, collMetaBlob)
 	container.collections = append(container.collections, newCollection)
 
-	return newCollection
+	return nil
 }
 
-func (container *ColSegContainer) removeCollection(collection *Collection) error {
-	if collection == nil {
-		return errors.New("null collection")
+func (container *colSegContainer) removeCollection(collectionID UniqueID) error {
+	collection, err := container.getCollectionByID(collectionID)
+
+	container.mu.Lock()
+	defer container.mu.Unlock()
+
+	if err != nil {
+		return err
 	}
 
 	deleteCollection(collection)
 
-	collectionID := collection.ID()
 	tmpCollections := make([]*Collection, 0)
 	for _, col := range container.collections {
 		if col.ID() == collectionID {
-			for _, p := range *collection.Partitions() {
+			for _, p := range *col.Partitions() {
 				for _, s := range *p.Segments() {
 					delete(container.segments, s.ID())
 				}
@@ -57,7 +98,10 @@ func (container *ColSegContainer) removeCollection(collection *Collection) error
 	return nil
 }
 
-func (container *ColSegContainer) getCollectionByID(collectionID int64) (*Collection, error) {
+func (container *colSegContainer) getCollectionByID(collectionID UniqueID) (*Collection, error) {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
 	for _, collection := range container.collections {
 		if collection.ID() == collectionID {
 			return collection, nil
@@ -67,7 +111,10 @@ func (container *ColSegContainer) getCollectionByID(collectionID int64) (*Collec
 	return nil, errors.New("cannot find collection, id = " + strconv.FormatInt(collectionID, 10))
 }
 
-func (container *ColSegContainer) getCollectionByName(collectionName string) (*Collection, error) {
+func (container *colSegContainer) getCollectionByName(collectionName string) (*Collection, error) {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
 	for _, collection := range container.collections {
 		if collection.Name() == collectionName {
 			return collection, nil
@@ -78,60 +125,55 @@ func (container *ColSegContainer) getCollectionByName(collectionName string) (*C
 }
 
 //----------------------------------------------------------------------------------------------------- partition
-func (container *ColSegContainer) addPartition(collection *Collection, partitionTag string) (*Partition, error) {
-	if collection == nil {
-		return nil, errors.New("null collection")
+func (container *colSegContainer) addPartition(collectionID UniqueID, partitionTag string) error {
+	collection, err := container.getCollectionByID(collectionID)
+	if err != nil {
+		return err
 	}
+
+	container.mu.Lock()
+	defer container.mu.Unlock()
 
 	var newPartition = newPartition(partitionTag)
 
-	for _, col := range container.collections {
-		if col.Name() == collection.Name() {
-			*col.Partitions() = append(*col.Partitions(), newPartition)
-			return newPartition, nil
-		}
-	}
-
-	return nil, errors.New("cannot find collection, name = " + collection.Name())
+	*collection.Partitions() = append(*collection.Partitions(), newPartition)
+	return nil
 }
 
-func (container *ColSegContainer) removePartition(partition *Partition) error {
-	if partition == nil {
-		return errors.New("null partition")
+func (container *colSegContainer) removePartition(collectionID UniqueID, partitionTag string) error {
+	collection, err := container.getCollectionByID(collectionID)
+	if err != nil {
+		return err
 	}
 
-	var targetCollection *Collection
+	container.mu.Lock()
+	defer container.mu.Unlock()
+
 	var tmpPartitions = make([]*Partition, 0)
-	var hasPartition = false
-
-	for _, col := range container.collections {
-		for _, p := range *col.Partitions() {
-			if p.Tag() == partition.partitionTag {
-				targetCollection = col
-				hasPartition = true
-				for _, s := range *p.Segments() {
-					delete(container.segments, s.ID())
-				}
-			} else {
-				tmpPartitions = append(tmpPartitions, p)
+	for _, p := range *collection.Partitions() {
+		if p.Tag() == partitionTag {
+			for _, s := range *p.Segments() {
+				delete(container.segments, s.ID())
 			}
+		} else {
+			tmpPartitions = append(tmpPartitions, p)
 		}
 	}
 
-	if hasPartition && targetCollection != nil {
-		*targetCollection.Partitions() = tmpPartitions
-		return nil
-	}
-
-	return errors.New("cannot found partition, tag = " + partition.Tag())
+	*collection.Partitions() = tmpPartitions
+	return nil
 }
 
-func (container *ColSegContainer) getPartitionByTag(collectionName string, partitionTag string) (*Partition, error) {
-	targetCollection, err := container.getCollectionByName(collectionName)
+func (container *colSegContainer) getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error) {
+	collection, err := container.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range *targetCollection.Partitions() {
+
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
+	for _, p := range *collection.Partitions() {
 		if p.Tag() == partitionTag {
 			return p, nil
 		}
@@ -141,60 +183,90 @@ func (container *ColSegContainer) getPartitionByTag(collectionName string, parti
 }
 
 //----------------------------------------------------------------------------------------------------- segment
-func (container *ColSegContainer) addSegment(collection *Collection, partition *Partition, segmentID int64) (*Segment, error) {
-	if collection == nil {
-		return nil, errors.New("null collection")
-	}
+func (container *colSegContainer) getSegmentNum() int {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
 
-	if partition == nil {
-		return nil, errors.New("null partition")
-	}
-
-	var newSegment = newSegment(collection, segmentID)
-	container.segments[segmentID] = newSegment
-
-	for _, col := range container.collections {
-		if col.ID() == collection.ID() {
-			for _, p := range *col.Partitions() {
-				if p.Tag() == partition.Tag() {
-					*p.Segments() = append(*p.Segments(), newSegment)
-					return newSegment, nil
-				}
-			}
-		}
-	}
-
-	return nil, errors.New("cannot find collection or segment")
+	return len(container.segments)
 }
 
-func (container *ColSegContainer) removeSegment(segment *Segment) error {
+func (container *colSegContainer) getSegmentStatistics() *internalpb.QueryNodeSegStats {
+	var statisticData = make([]*internalpb.SegmentStats, 0)
+
+	for segmentID, segment := range container.segments {
+		currentMemSize := segment.getMemSize()
+		segment.lastMemSize = currentMemSize
+		segmentNumOfRows := segment.getRowCount()
+
+		stat := internalpb.SegmentStats{
+			SegmentID:        segmentID,
+			MemorySize:       currentMemSize,
+			NumRows:          segmentNumOfRows,
+			RecentlyModified: segment.recentlyModified,
+		}
+
+		statisticData = append(statisticData, &stat)
+	}
+
+	return &internalpb.QueryNodeSegStats{
+		MsgType:  internalpb.MsgType_kQueryNodeSegStats,
+		SegStats: statisticData,
+	}
+}
+
+func (container *colSegContainer) addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error {
+	collection, err := container.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+
+	partition, err := container.getPartitionByTag(collectionID, partitionTag)
+	if err != nil {
+		return err
+	}
+
+	container.mu.Lock()
+	defer container.mu.Unlock()
+
+	var newSegment = newSegment(collection, segmentID)
+
+	container.segments[segmentID] = newSegment
+	*partition.Segments() = append(*partition.Segments(), newSegment)
+
+	return nil
+}
+
+func (container *colSegContainer) removeSegment(segmentID UniqueID) error {
+	container.mu.Lock()
+	defer container.mu.Unlock()
+
 	var targetPartition *Partition
-	var tmpSegments = make([]*Segment, 0)
-	var hasSegment = false
+	var segmentIndex = -1
 
 	for _, col := range container.collections {
 		for _, p := range *col.Partitions() {
-			for _, s := range *p.Segments() {
-				if s.ID() == segment.ID() {
+			for i, s := range *p.Segments() {
+				if s.ID() == segmentID {
 					targetPartition = p
-					hasSegment = true
-					delete(container.segments, segment.ID())
-				} else {
-					tmpSegments = append(tmpSegments, s)
+					segmentIndex = i
 				}
 			}
 		}
 	}
 
-	if hasSegment && targetPartition != nil {
-		*targetPartition.Segments() = tmpSegments
-		return nil
+	delete(container.segments, segmentID)
+
+	if targetPartition != nil && segmentIndex > 0 {
+		targetPartition.segments = append(targetPartition.segments[:segmentIndex], targetPartition.segments[segmentIndex+1:]...)
 	}
 
-	return errors.New("cannot found segment, id = " + strconv.FormatInt(segment.ID(), 10))
+	return nil
 }
 
-func (container *ColSegContainer) getSegmentByID(segmentID int64) (*Segment, error) {
+func (container *colSegContainer) getSegmentByID(segmentID UniqueID) (*Segment, error) {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
 	targetSegment, ok := container.segments[segmentID]
 
 	if !ok {
@@ -204,7 +276,10 @@ func (container *ColSegContainer) getSegmentByID(segmentID int64) (*Segment, err
 	return targetSegment, nil
 }
 
-func (container *ColSegContainer) hasSegment(segmentID int64) bool {
+func (container *colSegContainer) hasSegment(segmentID UniqueID) bool {
+	container.mu.RLock()
+	defer container.mu.RUnlock()
+
 	_, ok := container.segments[segmentID]
 
 	return ok

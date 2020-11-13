@@ -25,20 +25,13 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
 	echo "The unittest folder does not exist!"
     exit 1
   fi
-
-  ${UNITTEST_DIR}/all_tests
-  if [ $? -ne 0 ]; then
-      echo ${UNITTEST_DIR}/all_tests "run failed"
-      exit 1
-  fi
-   
-  #for test in `ls ${UNITTEST_DIR}`; do
-  #  echo $test " running..."
-  #  # run unittest
-  #  ${UNITTEST_DIR}/${test}
-  #  if [ $? -ne 0 ]; then
-  #      echo ${UNITTEST_DIR}/${test} "run failed"
-  #      exit 1
-  #  fi
-  #done
+  for test in `ls ${UNITTEST_DIR}`; do
+    echo $test " running..."
+    # run unittest
+    ${UNITTEST_DIR}/${test}
+    if [ $? -ne 0 ]; then
+        echo ${UNITTEST_DIR}/${test} "run failed"
+        exit 1
+    fi
+  done
 done

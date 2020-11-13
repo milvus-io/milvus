@@ -14,7 +14,7 @@ type searchService struct {
 	ctx       context.Context
 	pulsarURL string
 
-	container *ColSegContainer
+	node *QueryNode
 
 	searchMsgStream       *msgstream.MsgStream
 	searchResultMsgStream *msgstream.MsgStream
@@ -33,13 +33,13 @@ type SearchResult struct {
 	ResultDistances []float32
 }
 
-func newSearchService(ctx context.Context, container *ColSegContainer, pulsarURL string) *searchService {
+func newSearchService(ctx context.Context, node *QueryNode, pulsarURL string) *searchService {
 
 	return &searchService{
 		ctx:       ctx,
 		pulsarURL: pulsarURL,
 
-		container: container,
+		node: node,
 
 		searchMsgStream:       nil,
 		searchResultMsgStream: nil,
