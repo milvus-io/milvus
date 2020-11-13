@@ -60,7 +60,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
+		mt.tenantID2Meta[tenantMeta.Id] = tenantMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("proxy")
@@ -74,7 +74,7 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
+		mt.proxyID2Meta[proxyMeta.Id] = proxyMeta
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("collection")
@@ -88,8 +88,8 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		mt.collID2Meta[collectionMeta.ID] = collectionMeta
-		mt.collName2ID[collectionMeta.Schema.Name] = collectionMeta.ID
+		mt.collID2Meta[collectionMeta.Id] = collectionMeta
+		mt.collName2ID[collectionMeta.Schema.Name] = collectionMeta.Id
 	}
 
 	_, values, err = mt.client.LoadWithPrefix("segment")
@@ -115,9 +115,9 @@ func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 	if err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.ID] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.ID
-	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
+	mt.collID2Meta[coll.Id] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.Id
+	return mt.client.Save("/collection/"+strconv.FormatInt(coll.Id, 10), string(collBytes))
 }
 
 // mt.ddLock.Lock() before call this function
@@ -156,7 +156,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 		return err
 	}
 
-	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collStrs)
+	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(collStrs)
 
 	for _, segID := range segIDs {
 		_, ok := mt.segID2Meta[segID]
@@ -166,7 +166,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 		}
 	}
 
-	mt.collID2Meta[coll.ID] = *coll
+	mt.collID2Meta[coll.Id] = *coll
 
 	return mt.client.MultiSaveAndRemove(kvs, segIDStrs)
 }
@@ -178,10 +178,10 @@ func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg
 	if err != nil {
 		return err
 	}
-	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collBytes)
+	kvs["/collection/"+strconv.FormatInt(coll.Id, 10)] = string(collBytes)
 
-	mt.collID2Meta[coll.ID] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.ID
+	mt.collID2Meta[coll.Id] = *coll
+	mt.collName2ID[coll.Schema.Name] = coll.Id
 
 	segBytes, err := proto.Marshal(seg)
 	if err != nil {

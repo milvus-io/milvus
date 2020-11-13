@@ -76,7 +76,7 @@ func (t *createPartitionTask) Execute() error {
 		return err
 	}
 
-	collectionID := collectionMeta.ID
+	collectionID := collectionMeta.Id
 	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
 	if err != nil {
 		return err
@@ -113,7 +113,7 @@ func (t *dropPartitionTask) Execute() error {
 		return err
 	}
 
-	err = t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
+	err = t.mt.DeletePartition(collectionMeta.Id, partitionName.Tag)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (t *dropPartitionTask) Execute() error {
 		return err
 	}
 
-	collectionID := collectionMeta.ID
+	collectionID := collectionMeta.Id
 	err = (*t.kvBase).Save(partitionMetaPrefix+strconv.FormatInt(collectionID, 10), string(collectionJSON))
 	if err != nil {
 		return err
@@ -160,7 +160,7 @@ func (t *hasPartitionTask) Execute() error {
 		return err
 	}
 
-	t.hasPartition = t.mt.HasPartition(collectionMeta.ID, partitionName.Tag)
+	t.hasPartition = t.mt.HasPartition(collectionMeta.Id, partitionName.Tag)
 
 	return nil
 }

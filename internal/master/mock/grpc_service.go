@@ -102,7 +102,7 @@ func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*i
 
 	response := &internalpb.IdResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		ID:     ts,
+		Id:     ts,
 		Count:  count,
 	}
 

@@ -5,11 +5,10 @@ package etcdpb
 
 import (
 	fmt "fmt"
-	math "math"
-
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	schemapb "github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	math "math"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -24,7 +23,7 @@ var _ = math.Inf
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
 type TenantMeta struct {
-	ID                   int64    `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                   int64    `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	NumQueryNodes        int64    `protobuf:"varint,2,opt,name=num_query_nodes,json=numQueryNodes,proto3" json:"num_query_nodes,omitempty"`
 	InsertChannelIds     []string `protobuf:"bytes,3,rep,name=insert_channel_ids,json=insertChannelIds,proto3" json:"insert_channel_ids,omitempty"`
 	QueryChannelId       string   `protobuf:"bytes,4,opt,name=query_channel_id,json=queryChannelId,proto3" json:"query_channel_id,omitempty"`
@@ -60,7 +59,7 @@ var xxx_messageInfo_TenantMeta proto.InternalMessageInfo
 
 func (m *TenantMeta) GetId() int64 {
 	if m != nil {
-		return m.ID
+		return m.Id
 	}
 	return 0
 }
@@ -87,7 +86,7 @@ func (m *TenantMeta) GetQueryChannelId() string {
 }
 
 type ProxyMeta struct {
-	ID                   int64             `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                   int64             `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Address              *commonpb.Address `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
 	ResultChannelIds     []string          `protobuf:"bytes,3,rep,name=result_channel_ids,json=resultChannelIds,proto3" json:"result_channel_ids,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
@@ -122,7 +121,7 @@ var xxx_messageInfo_ProxyMeta proto.InternalMessageInfo
 
 func (m *ProxyMeta) GetId() int64 {
 	if m != nil {
-		return m.ID
+		return m.Id
 	}
 	return 0
 }
@@ -142,7 +141,7 @@ func (m *ProxyMeta) GetResultChannelIds() []string {
 }
 
 type CollectionMeta struct {
-	ID                   int64                      `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                   int64                      `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Schema               *schemapb.CollectionSchema `protobuf:"bytes,2,opt,name=schema,proto3" json:"schema,omitempty"`
 	CreateTime           uint64                     `protobuf:"varint,3,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	SegmentIds           []int64                    `protobuf:"varint,4,rep,packed,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"`
@@ -179,7 +178,7 @@ var xxx_messageInfo_CollectionMeta proto.InternalMessageInfo
 
 func (m *CollectionMeta) GetId() int64 {
 	if m != nil {
-		return m.ID
+		return m.Id
 	}
 	return 0
 }
@@ -214,7 +213,7 @@ func (m *CollectionMeta) GetPartitionTags() []string {
 
 type SegmentMeta struct {
 	SegmentId            int64    `protobuf:"varint,1,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`
-	CollectionId         int64    `protobuf:"varint,2,opt,name=collection_id,json=collectionID,proto3" json:"collection_id,omitempty"`
+	CollectionId         int64    `protobuf:"varint,2,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
 	PartitionTag         string   `protobuf:"bytes,3,opt,name=partition_tag,json=partitionTag,proto3" json:"partition_tag,omitempty"`
 	ChannelStart         int32    `protobuf:"varint,4,opt,name=channel_start,json=channelStart,proto3" json:"channel_start,omitempty"`
 	ChannelEnd           int32    `protobuf:"varint,5,opt,name=channel_end,json=channelEnd,proto3" json:"channel_end,omitempty"`

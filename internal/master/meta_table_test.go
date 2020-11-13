@@ -28,7 +28,7 @@ func TestMetaTable_Collection(t *testing.T) {
 	defer meta.client.Close()
 
 	colMeta := pb.CollectionMeta{
-		ID: 100,
+		Id: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -37,7 +37,7 @@ func TestMetaTable_Collection(t *testing.T) {
 		PartitionTags: []string{},
 	}
 	colMeta2 := pb.CollectionMeta{
-		ID: 50,
+		Id: 50,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -46,7 +46,7 @@ func TestMetaTable_Collection(t *testing.T) {
 		PartitionTags: []string{},
 	}
 	colMeta3 := pb.CollectionMeta{
-		ID: 30,
+		Id: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -55,7 +55,7 @@ func TestMetaTable_Collection(t *testing.T) {
 		PartitionTags: []string{},
 	}
 	colMeta4 := pb.CollectionMeta{
-		ID: 30,
+		Id: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -64,7 +64,7 @@ func TestMetaTable_Collection(t *testing.T) {
 		PartitionTags: []string{},
 	}
 	colMeta5 := pb.CollectionMeta{
-		ID: 30,
+		Id: 30,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll2",
 		},
@@ -97,11 +97,11 @@ func TestMetaTable_Collection(t *testing.T) {
 	assert.NotNil(t, err)
 	err = meta.AddCollection(&colMeta5)
 	assert.NotNil(t, err)
-	hasCollection := meta.HasCollection(colMeta.ID)
+	hasCollection := meta.HasCollection(colMeta.Id)
 	assert.True(t, hasCollection)
-	err = meta.AddPartition(colMeta.ID, "p1")
+	err = meta.AddPartition(colMeta.Id, "p1")
 	assert.Nil(t, err)
-	err = meta.AddPartition(colMeta.ID, "p2")
+	err = meta.AddPartition(colMeta.Id, "p2")
 	assert.Nil(t, err)
 	err = meta.AddSegment(&segID1)
 	assert.Nil(t, err)
@@ -112,9 +112,9 @@ func TestMetaTable_Collection(t *testing.T) {
 	getColMeta, err := meta.GetCollectionByName(colMeta.Schema.Name)
 	assert.Nil(t, err)
 	assert.Equal(t, 3, len(getColMeta.SegmentIds))
-	err = meta.DeleteCollection(colMeta.ID)
+	err = meta.DeleteCollection(colMeta.Id)
 	assert.Nil(t, err)
-	hasCollection = meta.HasCollection(colMeta.ID)
+	hasCollection = meta.HasCollection(colMeta.Id)
 	assert.False(t, hasCollection)
 	_, err = meta.GetSegmentByID(segID1.SegmentId)
 	assert.NotNil(t, err)
@@ -132,7 +132,7 @@ func TestMetaTable_Collection(t *testing.T) {
 	assert.Equal(t, 1, len(meta.collID2Meta))
 	assert.Equal(t, 0, len(meta.segID2Meta))
 
-	err = meta.DeleteCollection(colMeta3.ID)
+	err = meta.DeleteCollection(colMeta3.Id)
 	assert.Nil(t, err)
 }
 
@@ -151,7 +151,7 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	defer meta.client.Close()
 
 	colMeta := pb.CollectionMeta{
-		ID: 100,
+		Id: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -176,9 +176,9 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	}
 	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddPartition(colMeta.ID, "p1")
+	err = meta.AddPartition(colMeta.Id, "p1")
 	assert.Nil(t, err)
-	err = meta.AddPartition(colMeta.ID, "p2")
+	err = meta.AddPartition(colMeta.Id, "p2")
 	assert.Nil(t, err)
 	err = meta.AddSegment(&segID1)
 	assert.Nil(t, err)
@@ -196,9 +196,9 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(afterCollMeta.PartitionTags))
 	assert.Equal(t, 1, len(afterCollMeta.SegmentIds))
-	hasPartition := meta.HasPartition(colMeta.ID, "p1")
+	hasPartition := meta.HasPartition(colMeta.Id, "p1")
 	assert.False(t, hasPartition)
-	hasPartition = meta.HasPartition(colMeta.ID, "p2")
+	hasPartition = meta.HasPartition(colMeta.Id, "p2")
 	assert.True(t, hasPartition)
 	_, err = meta.GetSegmentByID(segID1.SegmentId)
 	assert.NotNil(t, err)
@@ -239,7 +239,7 @@ func TestMetaTable_Segment(t *testing.T) {
 	assert.Nil(t, err)
 
 	colMeta := pb.CollectionMeta{
-		ID: 100,
+		Id: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name: "coll1",
 		},
@@ -254,7 +254,7 @@ func TestMetaTable_Segment(t *testing.T) {
 	}
 	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddPartition(colMeta.ID, "p1")
+	err = meta.AddPartition(colMeta.Id, "p1")
 	assert.Nil(t, err)
 	err = meta.AddSegment(&segMeta)
 	assert.Nil(t, err)

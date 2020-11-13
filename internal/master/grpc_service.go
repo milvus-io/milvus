@@ -57,20 +57,18 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "Enqueue failed",
-		}, err
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "WaitToFinish failed",
-		}, err
+		}, nil
 	}
 
 	return &commonpb.Status{
@@ -89,36 +87,29 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 		hasCollection: false,
 	}
 
+	st := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+	}
+
+	response := &servicepb.BoolResponse{
+		Status: st,
+		Value:  t.(*hasCollectionTask).hasCollection,
+	}
+
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
-		return &servicepb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "Enqueue failed",
-			},
-			Value: t.(*hasCollectionTask).hasCollection,
-		}, err
+		st.Reason = "Enqueue failed"
+		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
-		return &servicepb.BoolResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "WaitToFinish failed",
-			},
-			Value: t.(*hasCollectionTask).hasCollection,
-		}, err
+		st.Reason = "WaitToFinish failed"
+		return response, nil
 	}
 
-	return &servicepb.BoolResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-		Value: t.(*hasCollectionTask).hasCollection,
-	}, nil
+	st.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error) {
@@ -368,7 +359,7 @@ func (s *Master) AllocId(ctx context.Context, request *internalpb.IdRequest) (*i
 
 	response := &internalpb.IdResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		ID:     ts,
+		Id:     ts,
 		Count:  count,
 	}
 
