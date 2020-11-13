@@ -14,10 +14,10 @@ import (
 type statsService struct {
 	ctx       context.Context
 	msgStream *msgstream.PulsarMsgStream
-	container *ColSegContainer
+	container *container
 }
 
-func newStatsService(ctx context.Context, container *ColSegContainer, pulsarAddress string) *statsService {
+func newStatsService(ctx context.Context, container *container, pulsarAddress string) *statsService {
 	// TODO: add pulsar message stream init
 
 	return &statsService{
@@ -41,29 +41,13 @@ func (sService *statsService) start() {
 }
 
 func (sService *statsService) sendSegmentStatistic() {
-	var statisticData = make([]internalpb.SegmentStats, 0)
-
-	for segmentID, segment := range sService.container.segments {
-		currentMemSize := segment.getMemSize()
-		segment.lastMemSize = currentMemSize
-
-		segmentNumOfRows := segment.getRowCount()
-
-		stat := internalpb.SegmentStats{
-			// TODO: set master pb's segment id type from uint64 to int64
-			SegmentID:  segmentID,
-			MemorySize: currentMemSize,
-			NumRows:    segmentNumOfRows,
-		}
-
-		statisticData = append(statisticData, stat)
-	}
+	var statisticData = (*sService.container).getSegmentStatistics()
 
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
-	sService.publicStatistic(&statisticData)
+	sService.publicStatistic(statisticData)
 }
 
-func (sService *statsService) publicStatistic(statistic *[]internalpb.SegmentStats) {
+func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSegStats) {
 	// TODO: publish statistic
 }
