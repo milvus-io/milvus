@@ -291,7 +291,7 @@ class MilvusClient(object):
             "fields": fields,
             "partition_tags": partition_tags
         }
-        logging.getLogger().info(search_params)
+        # logging.getLogger().info(search_params)
         try:
             status, data = r.get_with_body(search_params)
             if status:

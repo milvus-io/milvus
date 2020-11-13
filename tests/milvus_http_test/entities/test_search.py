@@ -174,8 +174,8 @@ class TestSearchBase:
         assert 0 == client.count_collection(collection)
         data = client.search(collection, default_query)
         res = data['result']
-        assert data['nq'] == 0
-        assert len(res) == 0
+        assert data['nq'] == default_nq
+        assert res[0] == None
 
     @pytest.fixture(
         scope="function",
@@ -210,7 +210,7 @@ class TestSearchBase:
         expected: status not ok and url `/collections/xxx/entities` return correct
         """
         entities, ids = init_data(client, collection)
-        must_param = {"vector": {field_name: {"topk": default_top_k, "query": [[]], "params": {"nprobe": 10}}}}
+        must_param = {"vector": {field_name: {"topk": default_top_k, "query": [[[]]], "params": {"nprobe": 10}}}}
         must_param["vector"][field_name]["metric_type"] = 'L2'
         query = {
             "bool": {
