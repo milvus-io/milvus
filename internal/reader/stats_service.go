@@ -41,7 +41,7 @@ func (sService *statsService) start() {
 }
 
 func (sService *statsService) sendSegmentStatistic() {
-	var statisticData = make([]internalpb.SegmentStatistics, 0)
+	var statisticData = make([]internalpb.SegmentStats, 0)
 
 	for segmentID, segment := range sService.container.segments {
 		currentMemSize := segment.getMemSize()
@@ -49,7 +49,7 @@ func (sService *statsService) sendSegmentStatistic() {
 
 		segmentNumOfRows := segment.getRowCount()
 
-		stat := internalpb.SegmentStatistics{
+		stat := internalpb.SegmentStats{
 			// TODO: set master pb's segment id type from uint64 to int64
 			SegmentId:  segmentID,
 			MemorySize: currentMemSize,
@@ -64,6 +64,6 @@ func (sService *statsService) sendSegmentStatistic() {
 	sService.publicStatistic(&statisticData)
 }
 
-func (sService *statsService) publicStatistic(statistic *[]internalpb.SegmentStatistics) {
+func (sService *statsService) publicStatistic(statistic *[]internalpb.SegmentStats) {
 	// TODO: publish statistic
 }

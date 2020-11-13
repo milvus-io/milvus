@@ -115,7 +115,7 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
-	t.Logf("collection id = %d", collMeta.ID)
+	t.Logf("collection id = %d", collMeta.Id)
 	assert.Equal(t, collMeta.CreateTime, uint64(11))
 	assert.Equal(t, collMeta.Schema.Name, "col1")
 	assert.Equal(t, collMeta.Schema.AutoId, false)

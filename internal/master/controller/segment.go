@@ -14,7 +14,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func ComputeCloseTime(ss internalpb.SegmentStatistics, kvbase *kv.EtcdKV) error {
+func ComputeCloseTime(ss internalpb.SegmentStats, kvbase *kv.EtcdKV) error {
 	if int(ss.MemorySize) > int(conf.Config.Master.SegmentThreshole*0.8) {
 		currentTime := time.Now()
 		//memRate := int(ss.MemoryRate)

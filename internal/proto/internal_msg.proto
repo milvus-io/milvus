@@ -32,6 +32,7 @@ enum MsgType {
 
     /* System Control */
     kTimeTick = 1200;
+    kQueryNodeSegStats = 1201;
 }
 
 enum PeerRole {
@@ -227,9 +228,15 @@ message Key2SegMsg {
     repeated Key2Seg key2seg = 2;
 }
 
+message SegmentStats {
+    int64 segment_id = 1;
+    int64 memory_size = 2;
+    int64 num_rows = 3;
+    bool recently_modified = 4;
+}
 
-message SegmentStatistics {
-  int64 segment_id = 1;
-  int64 memory_size = 2;
-  int64 num_rows = 3;
+message QueryNodeSegStats {
+    MsgType msg_type = 1;
+    int64 peer_id = 2;
+    repeated SegmentStats seg_stats = 3;
 }

@@ -26,9 +26,9 @@ func newKvBase() *kv.EtcdKV {
 
 func TestComputeClosetTime(t *testing.T) {
 	kvbase := newKvBase()
-	var news internalpb.SegmentStatistics
+	var news internalpb.SegmentStats
 	for i := 0; i < 10; i++ {
-		news = internalpb.SegmentStatistics{
+		news = internalpb.SegmentStats{
 			SegmentId:  UniqueID(6875940398055133887),
 			MemorySize: int64(i * 1000),
 		}
