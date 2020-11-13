@@ -113,6 +113,37 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
+	reqHasCollection := internalpb.HasCollectionRequest{
+		MsgType:   internalpb.MsgType_kHasCollection,
+		ReqID:     1,
+		Timestamp: 11,
+		ProxyID:   1,
+		CollectionName: &servicepb.CollectionName{
+			CollectionName: "col1",
+		},
+	}
+
+	// HasCollection "col1" is true
+	log.Printf("... [Has] collection col1\n")
+	boolResp, err := cli.HasCollection(ctx, &reqHasCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, true, boolResp.Value)
+	assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	// HasCollection "colNotExist" is false
+	reqHasCollection.CollectionName.CollectionName = "colNotExist"
+	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, boolResp.Value, false)
+	assert.Equal(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	// HasCollection error
+	reqHasCollection.Timestamp = Timestamp(10)
+	reqHasCollection.CollectionName.CollectionName = "col1"
+	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
+	assert.Nil(t, err)
+	assert.NotEqual(t, boolResp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
 	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
 	t.Logf("collection id = %d", collMeta.ID)
@@ -150,8 +181,8 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	st, err = cli.CreateCollection(ctx, &req)
 	assert.Nil(t, err)
 	assert.NotEqual(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
-	// ------------------------------DropCollectionTask---------------------------
 
+	// ------------------------------DropCollectionTask---------------------------
 	log.Printf("... [Drop] collection col1\n")
 	ser := servicepb.CollectionName{CollectionName: "col1"}
 
@@ -163,12 +194,21 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 		CollectionName: &ser,
 	}
 
+	// DropCollection
 	st, err = cli.DropCollection(ctx, &reqDrop)
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
 	collMeta, err = svr.mt.GetCollectionByName(sch.Name)
 	assert.NotNil(t, err)
+
+	// HasCollection "col1" is false
+	reqHasCollection.Timestamp = Timestamp(11)
+	reqHasCollection.CollectionName.CollectionName = "col1"
+	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, false, boolResp.Value)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, boolResp.Status.ErrorCode)
 
 	// Drop again
 	st, err = cli.DropCollection(ctx, &reqDrop)
@@ -181,6 +221,11 @@ func TestMaster_CreateCollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 	log.Printf(st.Reason)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	boolResp, err = cli.HasCollection(ctx, &reqHasCollection)
+	assert.Nil(t, err)
+	assert.Equal(t, true, boolResp.Value)
+	assert.Equal(t, commonpb.ErrorCode_SUCCESS, boolResp.Status.ErrorCode)
 
 	svr.Close()
 }
