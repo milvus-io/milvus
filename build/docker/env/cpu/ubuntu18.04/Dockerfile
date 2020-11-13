@@ -38,13 +38,31 @@ ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
 RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
-    mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH" && \
-    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
+    go get github.com/golang/protobuf/protoc-gen-go@v1.3.2 && chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
-# Set permissions on /etc/passwd and /home to allow arbitrary users to write
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server gdb gdbserver && \
+    apt-get remove --purge -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Taken from - https://docs.docker.com/engine/examples/running_ssh_service/#environment-variables
+
+RUN mkdir /var/run/sshd && echo 'root:root' | chpasswd && \
+    useradd -u 2000 -ms /bin/bash debugger && echo 'debugger:milvus' | chpasswd
+
+# SSH login fix. Otherwise user is kicked off after login
+RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
+
+ENV NOTVISIBLE "in users profile"
+RUN echo "export VISIBLE=now" >> /etc/profile
+
+# 22 for ssh server. 7777 for gdb server.
+EXPOSE 22 7777
+
 COPY --chown=0:0 build/docker/env/entrypoint.sh /
-RUN mkdir -p /home/user && chgrp -R 0 /home && chmod -R g=u /etc/passwd /etc/group /home && chmod +x /entrypoint.sh
 
-ENV HOME=/home/user
-ENTRYPOINT [ "/entrypoint.sh" ]
+RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
+
+ENTRYPOINT [ "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]
