@@ -335,6 +335,8 @@ TEST_F(SnapshotTest, ConCurrentCollectionOperation) {
 }
 
 TEST_F(SnapshotTest, PartitionTest) {
+    fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+    fiu_enable("snapshot.policy.duration_10ms", 1, nullptr, 0);
     std::string collection_name("c1");
     LSN_TYPE lsn = 1;
     auto ss = CreateCollection(collection_name, ++lsn);
@@ -429,6 +431,9 @@ TEST_F(SnapshotTest, PartitionTest) {
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(curr_ss->NumberOfPartitions(), total_partition_num - i - 1);
     }
+
+    fiu_disable("snapshot.policy.w_cluster");
+    fiu_disable("snapshot.policy.duration_10ms");
 }
 
 TEST_F(SnapshotTest, PartitionTest2) {
@@ -456,6 +461,99 @@ TEST_F(SnapshotTest, PartitionTest2) {
 
     status = cp_op->Push();
     ASSERT_FALSE(status.ok()) << status.ToString();
+}
+
+TEST_F(SnapshotTest, SnapshotPolicyTest) {
+    ScopedSnapshotT ss;
+    auto build_env = [&](const std::string& collection_name, int ms) {
+        LSN_TYPE lsn = 1;
+        ss = CreateCollection(collection_name, ++lsn);
+        ASSERT_TRUE(ss);
+
+        SegmentFileContext sf_context;
+        SFContextBuilder(sf_context, ss);
+
+        auto& partitions = ss->GetResources<Partition>();
+        auto total_row_cnt = 0;
+        for (auto& kv : partitions) {
+            auto num = RandomInt(10, 10);
+            for (auto i = 0; i < num; ++i) {
+                auto row_cnt = RandomInt(100, 100);
+                ASSERT_TRUE(CreateSegment(ss, kv.first, ++lsn, sf_context, row_cnt).ok());
+                total_row_cnt += row_cnt;
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+            }
+        };
+
+        auto status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+        ASSERT_TRUE(status.ok());
+    };
+
+    // Test case:
+    // cluster: disable
+    // stale_snapshots_count: 0
+    // Check the num of snapshot should be 1
+    {
+        build_env("c1", 1);
+        int num;
+        auto status = Snapshots::GetInstance().NumOfSnapshot("c1", num);
+        ASSERT_TRUE(status.ok());
+        /* std::cout << "-------------------------------------------------------" << std::endl; */
+        /* std::cout << "c1 has " << num << " snapshots" << std::endl; */
+        ASSERT_EQ(num, 1);
+    }
+    // Test case:
+    // cluster: disable
+    // stale_snapshots_count: 4
+    // Check the num of snapshot should be 5
+    {
+        fiu_enable("snapshot.policy.stale_count_4", 1, nullptr, 0);
+        build_env("c2", 1);
+        int num;
+        auto status = Snapshots::GetInstance().NumOfSnapshot("c2", num);
+        ASSERT_TRUE(status.ok());
+        /* std::cout << "-------------------------------------------------------" << std::endl; */
+        /* std::cout << "c2 has " << num << " snapshots" << std::endl; */
+        ASSERT_EQ(num, 5);
+        fiu_disable("snapshot.policy.stale_count_4");
+    }
+    // Test case:
+    // cluster: enable
+    // role: ClusterRole::RW
+    // stale_snapshots_duration: 50ms
+    // Check the num of snapshot should be 3
+    {
+        fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+        fiu_enable("snapshot.policy.duration_50ms", 1, nullptr, 0);
+        build_env("c3", 30);
+        int num;
+        auto status = Snapshots::GetInstance().NumOfSnapshot("c3", num);
+        ASSERT_TRUE(status.ok());
+        /* std::cout << "-------------------------------------------------------" << std::endl; */
+        /* std::cout << "c3 has " << num << " snapshots" << std::endl; */
+        ASSERT_EQ(num, 3);
+        fiu_disable("snapshot.policy.w_cluster");
+        fiu_disable("snapshot.policy.duration_50ms");
+    }
+    // Test case:
+    // cluster: enable
+    // role: ClusterRole::RW
+    // stale_snapshots_duration: 100ms
+    // Check the num of snapshot should be 4
+    {
+        fiu_enable("snapshot.policy.w_cluster", 1, nullptr, 0);
+        fiu_enable("snapshot.policy.duration_100ms", 1, nullptr, 0);
+        build_env("c4", 30);
+        int num;
+        auto status = Snapshots::GetInstance().NumOfSnapshot("c4", num);
+        ASSERT_TRUE(status.ok());
+        /* std::cout << "-------------------------------------------------------" << std::endl; */
+        /* std::cout << "c4 has " << num << " snapshots" << std::endl; */
+
+        ASSERT_EQ(num, 4);
+        fiu_disable("snapshot.policy.w_cluster");
+        fiu_disable("snapshot.policy.duration_100ms");
+    }
 }
 
 TEST_F(SnapshotTest, DropSegmentTest){

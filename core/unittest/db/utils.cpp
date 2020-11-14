@@ -146,6 +146,8 @@ SnapshotTest::SetUp() {
 void
 SnapshotTest::TearDown() {
     BaseTest::SnapshotStop();
+    auto path = "/tmp/milvus_ss/db";
+    std::experimental::filesystem::remove_all(path);
     BaseTest::TearDown();
 }
 

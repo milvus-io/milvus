@@ -60,6 +60,11 @@ class Snapshots {
     DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_id, const LSN_TYPE& lsn);
 
     Status
+    NumOfSnapshot(const std::string& collection_name, int& num) const;
+    /* int */
+    /* NumOfSnapshot(ID_TYPE collection_id) const; */
+
+    Status
     Reset();
 
     Status Init(StorePtr);
