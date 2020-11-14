@@ -7,7 +7,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -15,8 +14,6 @@ import (
 )
 
 type Timestamp = typeutil.Timestamp
-
-const collectionMetaPrefix = "collection/"
 
 type createCollectionTask struct {
 	baseTask
@@ -211,19 +208,12 @@ func (t *showCollectionsTask) Execute() error {
 		return errors.New("null request")
 	}
 
-	collections := make([]string, 0)
-	for _, collection := range t.mt.collID2Meta {
-		collections = append(collections, collection.Schema.Name)
+	colls, err := t.mt.ListCollections()
+	if err != nil {
+		return err
 	}
 
-	stringListResponse := servicepb.StringListResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-		Values: collections,
-	}
-
-	t.stringListResponse = &stringListResponse
+	t.stringListResponse.Values = colls
 
 	return nil
 }

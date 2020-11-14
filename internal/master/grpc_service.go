@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -158,19 +157,30 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 		stringListResponse: nil,
 	}
 
+	response := &servicepb.StringListResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "",
+		},
+		Values: nil,
+	}
+
+	t.(*showCollectionsTask).stringListResponse = response
+
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
-		return t.(*showCollectionsTask).stringListResponse, err
+		response.Status.Reason = "Enqueue filed: " + err.Error()
+		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
-		return t.(*showCollectionsTask).stringListResponse, err
+		response.Status.Reason = "Show Collections failed: " + err.Error()
+		return response, nil
 	}
 
-	return t.(*showCollectionsTask).stringListResponse, nil
+	response.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 //////////////////////////////////////////////////////////////////////////
