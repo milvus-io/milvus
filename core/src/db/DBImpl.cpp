@@ -953,9 +953,12 @@ DBImpl::StartMetricTask() {
 
     server::Metrics::GetInstance().GpuCacheUsageGaugeSet();
     /* SS TODO */
-    // uint64_t size;
-    // Size(size);
-    // server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+    size_t size;
+    auto status = GetDataSize(size);
+    if (!status.ok()) {
+        LOG_ENGINE_WARNING_ << "Get data size failed: " << status.message();
+    }
+    server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
     server::Metrics::GetInstance().CPUUsagePercentSet();
     server::Metrics::GetInstance().RAMUsagePercentSet();
     server::Metrics::GetInstance().GPUPercentGaugeSet();
