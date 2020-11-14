@@ -57,10 +57,18 @@ func (gia *GlobalIDAllocator) AllocOne() (UniqueID, error) {
 	return idStart, nil
 }
 
+func (gia *GlobalIDAllocator) UpdateID() error {
+	return gia.allocator.UpdateTSO()
+}
+
 func AllocOne() (UniqueID, error) {
 	return allocator.AllocOne()
 }
 
 func Alloc(count uint32) (UniqueID, UniqueID, error) {
 	return allocator.Alloc(count)
+}
+
+func UpdateID() error {
+	return allocator.UpdateID()
 }
