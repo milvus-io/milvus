@@ -185,14 +185,7 @@ func (t *describeCollectionTask) Execute() error {
 		return err
 	}
 
-	description := servicepb.CollectionDescription{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-		Schema: collection.Schema,
-	}
-
-	t.description = &description
+	t.description.Schema = collection.Schema
 
 	return nil
 }

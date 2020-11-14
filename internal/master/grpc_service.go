@@ -24,25 +24,24 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 		},
 	}
 
+	response := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+	}
+
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Enqueue failed",
-		}, nil
+		response.Reason = "Enqueue failed: " + err.Error()
+		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "create collection failed",
-		}, nil
+		response.Reason = "Create collection failed: " + err.Error()
+		return response, nil
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, nil
+	response.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollectionRequest) (*commonpb.Status, error) {
@@ -55,25 +54,24 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 		},
 	}
 
+	response := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+	}
+
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Enqueue failed",
-		}, nil
+		response.Reason = "Enqueue failed: " + err.Error()
+		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "WaitToFinish failed",
-		}, nil
+		response.Reason = "Drop collection failed: " + err.Error()
+		return response, nil
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-	}, nil
+	response.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollectionRequest) (*servicepb.BoolResponse, error) {
@@ -98,13 +96,13 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		st.Reason = "Enqueue failed"
+		st.Reason = "Enqueue failed: " + err.Error()
 		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		st.Reason = "WaitToFinish failed"
+		st.Reason = "Has collection failed: " + err.Error()
 		return response, nil
 	}
 
@@ -124,19 +122,29 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 		description: nil,
 	}
 
+	response := &servicepb.CollectionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+		Schema: nil,
+	}
+
+	t.(*describeCollectionTask).description = response
+
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
-		return t.(*describeCollectionTask).description, err
+		response.Status.Reason = "Enqueue failed: " + err.Error()
+		return response, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
-		return t.(*describeCollectionTask).description, err
+		response.Status.Reason = "Describe collection failed: " + err.Error()
+		return response, nil
 	}
 
-	return t.(*describeCollectionTask).description, nil
+	response.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return response, nil
 }
 
 func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error) {
@@ -320,14 +328,24 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		err := errors.New("Enqueue failed")
-		return t.(*showPartitionTask).stringListResponse, err
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "Enqueue failed",
+			},
+			Values: nil,
+		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		err := errors.New("WaitToFinish failed")
-		return t.(*showPartitionTask).stringListResponse, err
+		return &servicepb.StringListResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "WaitToFinish failed",
+			},
+			Values: nil,
+		}, nil
 	}
 
 	return t.(*showPartitionTask).stringListResponse, nil

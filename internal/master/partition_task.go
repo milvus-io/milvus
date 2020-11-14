@@ -147,7 +147,7 @@ func (t *describePartitionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *describePartitionTask) Execute() error {
@@ -161,7 +161,8 @@ func (t *describePartitionTask) Execute() error {
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		Name: partitionName,
+		Name:       partitionName,
+		Statistics: nil,
 	}
 
 	t.description = &description
@@ -182,7 +183,7 @@ func (t *showPartitionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return Timestamp(t.req.Timestamp), nil
+	return t.req.Timestamp, nil
 }
 
 func (t *showPartitionTask) Execute() error {
