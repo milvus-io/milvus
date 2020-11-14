@@ -36,7 +36,6 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-cache"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures ubuntu
-docker-compose build ubuntu
 docker-compose run --rm -u "$uid:$gid" ubuntu "$@"
 
 popd
