@@ -71,6 +71,8 @@ struct ServerConfig {
     struct General {
         String timezone;
         String meta_uri;
+        Integer stale_snapshots_count;
+        Integer stale_snapshots_duration;
     } general;
 
     struct Network {

@@ -17,8 +17,11 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions)
-    : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) {
+/* SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions) */
+/*     : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) { */
+/* } */
+SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, GCHandler gc_handler)
+    : collection_id_(collection_id), policy_(policy), gc_handler_(gc_handler) {
 }
 
 SnapshotHolder::~SnapshotHolder() {
@@ -106,6 +109,12 @@ SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
     return status;
 }
 
+int
+SnapshotHolder::NumOfSnapshot() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return active_.size();
+}
+
 bool
 SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
     auto collection = ss->GetCollection();
@@ -153,7 +162,10 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
         }
 
         active_[id] = ss;
-        if (active_.size() <= num_versions_) {
+        /* if (active_.size() <= num_versions_) { */
+        /*     return status; */
+        /* } */
+        if (!policy_->ShouldEject(active_)) {
             return status;
         }
 

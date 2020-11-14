@@ -16,6 +16,7 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
 #include "value/config/ServerConfig.h"
 
@@ -71,6 +72,14 @@ Snapshots::DropPartition(const ID_TYPE& collection_id, const ID_TYPE& partition_
 }
 
 Status
+Snapshots::NumOfSnapshot(const std::string& collection_name, int& num) const {
+    SnapshotHolderPtr holder;
+    STATUS_CHECK(GetHolder(collection_name, holder));
+    num = holder->NumOfSnapshot();
+    return Status::OK();
+}
+
+Status
 Snapshots::LoadSnapshot(StorePtr store, ScopedSnapshotT& ss, ID_TYPE collection_id, ID_TYPE id, bool scoped) {
     SnapshotHolderPtr holder;
     STATUS_CHECK(LoadHolder(store, collection_id, holder));
@@ -120,7 +129,9 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
         emsg << "Snapshots::LoadNoLock: No collection commit is found for collection " << collection_id;
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
-    holder = std::make_shared<SnapshotHolder>(collection_id,
+
+    auto policy = SnapshotPolicyFactory::Build(config);
+    holder = std::make_shared<SnapshotHolder>(collection_id, policy,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
         holder->Add(store, c_c_id);
