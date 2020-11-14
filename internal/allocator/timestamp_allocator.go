@@ -59,6 +59,7 @@ func (ta *TimestampAllocator) syncTs() {
 		Count:  ta.countPerRPC,
 	}
 	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
+	log.Printf("resp: %v", resp)
 
 	cancel()
 	if err != nil {

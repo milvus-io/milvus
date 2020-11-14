@@ -76,7 +76,6 @@ func Init() {
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, kvRootPath string, metaRootPath, tsoRootPath string, etcdAddr []string) (*Master, error) {
-	rand.Seed(time.Now().UnixNano())
 	Init()
 
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
@@ -140,6 +139,10 @@ func (s *Master) Close() {
 // IsClosed checks whether server is closed or not.
 func (s *Master) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
+}
+
+func (s *Master) IsServing() bool {
+	return !s.IsClosed()
 }
 
 // Run runs the pd server.
