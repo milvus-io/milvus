@@ -287,6 +287,17 @@ func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionM
 	return &col, nil
 }
 
+func (mt *metaTable) ListCollections() ([]string, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	colls := make([]string, 0, len(mt.collName2ID))
+	for name := range mt.collName2ID {
+		colls = append(colls, name)
+	}
+	return colls, nil
+}
+
 func (mt *metaTable) AddPartition(collID UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
