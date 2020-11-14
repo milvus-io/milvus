@@ -6,19 +6,18 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
-	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
-	"github.com/zilliztech/milvus-distributed/internal/master/id"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/kv/mockkv"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/kvutil"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 // Server is the pd server.
@@ -36,7 +35,7 @@ type Master struct {
 	// for tso.
 	tsoAllocator tso.Allocator
 
-	kvBase kv.Base
+	kvBase kvutil.Base
 
 	// error chans
 	grpcErr chan error
@@ -183,9 +182,15 @@ func (s *Master) checkReady(ctx context.Context, targetCh chan error) {
 
 func (s *Master) grpcLoop() {
 	defer s.serverLoopWg.Done()
-	masterAddr := conf.Config.Etcd.Address
-	masterAddr += ":"
-	masterAddr += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
+	masterAddr, err := gparams.GParams.Load("master.address")
+	if err != nil {
+		panic(err)
+	}
+	masterPort, err := gparams.GParams.Load("master.port")
+	if err != nil {
+		panic(err)
+	}
+	masterAddr = masterAddr + ":" + masterPort
 	lis, err := net.Listen("tcp", masterAddr)
 	if err != nil {
 		log.Printf("failed to listen: %v", err)

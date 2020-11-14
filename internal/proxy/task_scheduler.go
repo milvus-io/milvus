@@ -3,73 +3,113 @@ package proxy
 import (
 	"container/list"
 	"context"
+	"errors"
 	"log"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 )
 
+type TaskQueue interface {
+	utChan() <-chan int
+	utEmpty() bool
+	utFull() bool
+	addUnissuedTask(t task) error
+	FrontUnissuedTask() task
+	PopUnissuedTask() task
+	AddActiveTask(t task)
+	PopActiveTask(ts Timestamp) task
+	getTaskByReqID(reqID UniqueID) task
+	TaskDoneTest(ts Timestamp) bool
+	Enqueue(t task) error
+}
+
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[Timestamp]task
 	utLock        sync.Mutex
 	atLock        sync.Mutex
+
+	// maxTaskNum should keep still
+	maxTaskNum int64
+
+	utBufChan chan int // to block scheduler
 }
 
-func (queue *BaseTaskQueue) Empty() bool {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-	return queue.unissuedTasks.Len() <= 0 && len(queue.activeTasks) <= 0
+func (queue *BaseTaskQueue) utChan() <-chan int {
+	return queue.utBufChan
 }
 
-func (queue *BaseTaskQueue) AddUnissuedTask(t task) {
+func (queue *BaseTaskQueue) utEmpty() bool {
+	return queue.unissuedTasks.Len() == 0
+}
+
+func (queue *BaseTaskQueue) utFull() bool {
+	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
+}
+
+func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
+
+	if queue.utFull() {
+		return errors.New("task queue is full")
+	}
 	queue.unissuedTasks.PushBack(t)
+	queue.utBufChan <- 1
+	return nil
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
+
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("sorry, but the unissued task list is empty!")
+		log.Panic("sorry, but the unissued task list is empty!")
 		return nil
 	}
+
 	return queue.unissuedTasks.Front().Value.(task)
 }
 
 func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
+
 	if queue.unissuedTasks.Len() <= 0 {
 		log.Fatal("sorry, but the unissued task list is empty!")
 		return nil
 	}
+
 	ft := queue.unissuedTasks.Front()
-	return queue.unissuedTasks.Remove(ft).(task)
+	queue.unissuedTasks.Remove(ft)
+
+	return ft.Value.(task)
 }
 
 func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
+
 	ts := t.EndTs()
 	_, ok := queue.activeTasks[ts]
 	if ok {
 		log.Fatalf("task with timestamp %v already in active task list!", ts)
 	}
+
 	queue.activeTasks[ts] = t
 }
 
 func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Lock()
+
 	t, ok := queue.activeTasks[ts]
 	if ok {
 		delete(queue.activeTasks, ts)
 		return t
 	}
+
 	log.Fatalf("sorry, but the timestamp %d was not found in the active task list!", ts)
 	return nil
 }
@@ -114,6 +154,11 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	return true
 }
 
+func (queue *BaseTaskQueue) Enqueue(t task) error {
+	// TODO: set Ts, ReqId, ProxyId
+	return queue.addUnissuedTask(t)
+}
+
 type DdTaskQueue struct {
 	BaseTaskQueue
 	lock sync.Mutex
@@ -128,23 +173,13 @@ type DqTaskQueue struct {
 }
 
 func (queue *DdTaskQueue) Enqueue(t task) error {
+
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
-	// TODO: set Ts, ReqID, ProxyID
-	queue.AddUnissuedTask(t)
-	return nil
-}
 
-func (queue *DmTaskQueue) Enqueue(t task) error {
-	// TODO: set Ts, ReqID, ProxyID
-	queue.AddUnissuedTask(t)
-	return nil
-}
+	// TODO: set Ts, ReqId, ProxyId
+	return queue.addUnissuedTask(t)
 
-func (queue *DqTaskQueue) Enqueue(t task) error {
-	// TODO: set Ts, ReqID, ProxyID
-	queue.AddUnissuedTask(t)
-	return nil
 }
 
 func NewDdTaskQueue() *DdTaskQueue {
@@ -152,6 +187,8 @@ func NewDdTaskQueue() *DdTaskQueue {
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
+			maxTaskNum:    1024,
+			utBufChan:     make(chan int, 1024),
 		},
 	}
 }
@@ -161,6 +198,8 @@ func NewDmTaskQueue() *DmTaskQueue {
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
+			maxTaskNum:    1024,
+			utBufChan:     make(chan int, 1024),
 		},
 	}
 }
@@ -170,14 +209,16 @@ func NewDqTaskQueue() *DqTaskQueue {
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
+			maxTaskNum:    1024,
+			utBufChan:     make(chan int, 1024),
 		},
 	}
 }
 
 type TaskScheduler struct {
-	DdQueue *DdTaskQueue
-	DmQueue *DmTaskQueue
-	DqQueue *DqTaskQueue
+	DdQueue TaskQueue
+	DmQueue TaskQueue
+	DqQueue TaskQueue
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *allocator.TimestampAllocator
@@ -229,116 +270,82 @@ func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task {
 	return nil
 }
 
+func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
+
+	err := t.PreExecute()
+
+	defer func() {
+		t.Notify(err)
+	}()
+	if err != nil {
+		return
+	}
+
+	q.AddActiveTask(t)
+	defer q.PopActiveTask(t.EndTs())
+
+	err = t.Execute()
+	if err != nil {
+		log.Printf("execute definition task failed, error = %v", err)
+		return
+	}
+	err = t.PostExecute()
+}
+
 func (sched *TaskScheduler) definitionLoop() {
 	defer sched.wg.Done()
-	defer sched.cancel()
-
 	for {
-		if sched.DdQueue.Empty() {
-			continue
-		}
-
-		//sched.DdQueue.atLock.Lock()
-		t := sched.scheduleDdTask()
-
-		err := t.PreExecute()
-		if err != nil {
+		select {
+		case <-sched.ctx.Done():
 			return
+		case <-sched.DdQueue.utChan():
+			if !sched.DdQueue.utEmpty() {
+				t := sched.scheduleDdTask()
+				sched.processTask(t, sched.DdQueue)
+			}
 		}
-		err = t.Execute()
-		if err != nil {
-			log.Printf("execute definition task failed, error = %v", err)
-		}
-		t.Notify(err)
-
-		sched.DdQueue.AddActiveTask(t)
-
-		t.WaitToFinish()
-		t.PostExecute()
-
-		sched.DdQueue.PopActiveTask(t.EndTs())
 	}
 }
 
 func (sched *TaskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
-	defer sched.cancel()
-
 	for {
-		if sched.DmQueue.Empty() {
-			continue
-		}
-
-		sched.DmQueue.atLock.Lock()
-		t := sched.scheduleDmTask()
-
-		if err := t.PreExecute(); err != nil {
+		select {
+		case <-sched.ctx.Done():
 			return
-		}
-
-		go func() {
-			err := t.Execute()
-			if err != nil {
-				log.Printf("execute manipulation task failed, error = %v", err)
+		case <-sched.DmQueue.utChan():
+			if !sched.DmQueue.utEmpty() {
+				t := sched.scheduleDmTask()
+				go sched.processTask(t, sched.DmQueue)
 			}
-			t.Notify(err)
-		}()
-
-		sched.DmQueue.AddActiveTask(t)
-		sched.DmQueue.atLock.Unlock()
-
-		go func() {
-			t.WaitToFinish()
-			t.PostExecute()
-
-			// remove from active list
-			sched.DmQueue.PopActiveTask(t.EndTs())
-		}()
+		}
 	}
 }
 
 func (sched *TaskScheduler) queryLoop() {
 	defer sched.wg.Done()
-	defer sched.cancel()
 
 	for {
-		if sched.DqQueue.Empty() {
-			continue
-		}
-
-		sched.DqQueue.atLock.Lock()
-		t := sched.scheduleDqTask()
-
-		if err := t.PreExecute(); err != nil {
+		select {
+		case <-sched.ctx.Done():
 			return
-		}
-
-		go func() {
-			err := t.Execute()
-			if err != nil {
-				log.Printf("execute query task failed, error = %v", err)
+		case <-sched.DqQueue.utChan():
+			if !sched.DqQueue.utEmpty() {
+				t := sched.scheduleDqTask()
+				go sched.processTask(t, sched.DqQueue)
 			}
-			t.Notify(err)
-		}()
-
-		sched.DqQueue.AddActiveTask(t)
-		sched.DqQueue.atLock.Unlock()
-
-		go func() {
-			t.WaitToFinish()
-			t.PostExecute()
-
-			// remove from active list
-			sched.DqQueue.PopActiveTask(t.EndTs())
-		}()
+		}
 	}
 }
 
 func (sched *TaskScheduler) Start() error {
-	sched.wg.Add(3)
-
+	sched.wg.Add(1)
 	go sched.definitionLoop()
+
+	sched.wg.Add(1)
 	go sched.manipulationLoop()
+
+	sched.wg.Add(1)
 	go sched.queryLoop()
 
 	return nil

@@ -31,6 +31,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
+	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.6.1
 	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b
 	github.com/yahoo/athenz v1.9.16 // indirect

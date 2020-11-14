@@ -1,11 +1,7 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
-#include "utils/Json.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentBase.h"
 #include "PlanNodeVisitor.h"
-
 namespace milvus::query {
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:

@@ -223,7 +223,6 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
 Status
 SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
                                        const float* query_data,
-                                       int64_t num_queries,
                                        Timestamp timestamp,
                                        QueryResult& results) {
     // step 1: binary search to find the barrier of the snapshot
@@ -248,6 +247,7 @@ SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
     auto topK = info.topK_;
+    auto num_queries = info.num_queries_;
     auto total_count = topK * num_queries;
     // TODO: optimize
 
@@ -321,6 +321,7 @@ SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timesta
     int64_t inferred_dim = query_info->query_raw_data.size() / query_info->num_queries;
     // TODO
     query::QueryInfo info{
+        query_info->num_queries,
         query_info->topK,
         query_info->field_name,
         "L2",
@@ -328,8 +329,7 @@ SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timesta
             {"nprobe", 10},
         },
     };
-    auto num_queries = query_info->num_queries;
-    return QueryBruteForceImpl(info, query_info->query_raw_data.data(), num_queries, timestamp, result);
+    return QueryBruteForceImpl(info, query_info->query_raw_data.data(), timestamp, result);
 }
 
 Status
@@ -453,15 +453,14 @@ SegmentSmallIndex::GetMemoryUsageInBytes() {
 }
 
 Status
-SegmentSmallIndex::Search(const query::Plan* plan,
+SegmentSmallIndex::Search(const query::Plan* Plan,
                           const query::PlaceholderGroup** placeholder_groups,
                           const Timestamp* timestamps,
                           int num_groups,
                           QueryResult& results) {
     Assert(num_groups == 1);
     query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
-    results = visitor.get_moved_result(*plan->plan_node_);
-    return Status::OK();
+    PanicInfo("unimplemented");
 }
 
 }  // namespace milvus::segcore

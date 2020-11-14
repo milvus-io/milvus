@@ -12,9 +12,9 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
@@ -31,10 +31,19 @@ type metaService struct {
 }
 
 func newMetaService(ctx context.Context, container *container) *metaService {
-	ETCDAddr := "http://"
-	ETCDAddr += conf.Config.Etcd.Address
-	ETCDPort := conf.Config.Etcd.Port
-	ETCDAddr = ETCDAddr + ":" + strconv.FormatInt(int64(ETCDPort), 10)
+	ETCDAddr, err := gparams.GParams.Load("etcd.address")
+	if err != nil {
+		panic(err)
+	}
+	ETCDPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+	ETCDAddr = "http://" + ETCDAddr + ":" + ETCDPort
+	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
 
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{ETCDAddr},
@@ -43,7 +52,7 @@ func newMetaService(ctx context.Context, container *container) *metaService {
 
 	return &metaService{
 		ctx:       ctx,
-		kvBase:    kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath),
+		kvBase:    kv.NewEtcdKV(cli, ETCDRootPath),
 		container: container,
 	}
 }
@@ -74,17 +83,29 @@ func (mService *metaService) start() {
 }
 
 func GetCollectionObjID(key string) string {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
+	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjID(key string) string {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
+	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, CollectionPrefix) + "/"
+	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
 
@@ -92,7 +113,11 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	prefix := path.Join(conf.Config.Etcd.Rootpath, SegmentPrefix) + "/"
+	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
 
@@ -105,8 +130,24 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *etcdpb.SegmentMeta) b
 		return false
 	}
 
-	var queryNodeChannelStart = conf.Config.Reader.TopicStart
-	var queryNodeChannelEnd = conf.Config.Reader.TopicEnd
+	readerTopicStart, err := gparams.GParams.Load("reader.topicstart")
+	if err != nil {
+		panic(err)
+	}
+	TopicStart, err := strconv.Atoi(readerTopicStart)
+	if err != nil {
+		panic(err)
+	}
+	readerTopicEnd, err := gparams.GParams.Load("reader.topicend")
+	if err != nil {
+		panic(err)
+	}
+	TopicEnd, err := strconv.Atoi(readerTopicEnd)
+	if err != nil {
+		panic(err)
+	}
+	var queryNodeChannelStart = TopicStart
+	var queryNodeChannelEnd = TopicEnd
 
 	if segment.ChannelStart >= int32(queryNodeChannelStart) && segment.ChannelEnd <= int32(queryNodeChannelEnd) {
 		return true

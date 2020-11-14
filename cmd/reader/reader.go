@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/reader"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 func main() {
@@ -22,7 +21,11 @@ func main() {
 	flag.Parse()
 	// flag.Usage()
 	fmt.Println("yaml file: ", yamlFile)
-	conf.LoadConfig(yamlFile)
+
+	err := gparams.GParams.LoadYaml(yamlFile)
+	if err != nil {
+		panic(err)
+	}
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -36,11 +39,9 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-
-	pulsarAddr := "pulsar://"
-	pulsarAddr += conf.Config.Pulsar.Address
-	pulsarAddr += ":"
-	pulsarAddr += strconv.FormatInt(int64(conf.Config.Pulsar.Port), 10)
+	pulsarAddr, _ := gparams.GParams.Load("pulsar.address")
+	pulsarPort, _ := gparams.GParams.Load("pulsar.port")
+	pulsarAddr += ":" + pulsarPort
 	reader.StartQueryNode(ctx, pulsarAddr)
 
 	switch sig {

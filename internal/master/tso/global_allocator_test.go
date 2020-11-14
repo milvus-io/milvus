@@ -7,14 +7,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var GTsoAllocator Allocator
 
 func TestMain(m *testing.M) {
-	conf.LoadConfig("config.yaml")
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
 	GTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
 
 	exitCode := m.Run()

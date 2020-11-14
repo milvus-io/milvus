@@ -48,10 +48,8 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     auto segment = dynamic_cast<segcore::SegmentSmallIndex*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
-    auto& ph = placeholder_group_.at(0);
-    auto src_data = ph.get_blob<float>();
-    auto num_queries = ph.num_of_queries_;
-    segment->QueryBruteForceImpl(node.query_info_, src_data, num_queries, timestamp_, ret);
+    auto src_data = placeholder_group_.at(0).get_blob<float>();
+    segment->QueryBruteForceImpl(node.query_info_, src_data, timestamp_, ret);
     ret_ = ret;
 }
 

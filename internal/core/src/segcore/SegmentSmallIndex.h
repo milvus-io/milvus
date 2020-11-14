@@ -143,7 +143,6 @@ class SegmentSmallIndex : public SegmentBase {
     Status
     QueryBruteForceImpl(const query::QueryInfo& info,
                         const float* query_data,
-                        int64_t num_queries,
                         Timestamp timestamp,
                         QueryResult& results);
 

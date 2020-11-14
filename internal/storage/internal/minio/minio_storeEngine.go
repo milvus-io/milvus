@@ -6,11 +6,8 @@ import (
 	"io"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
-
-var bucketName = conf.Config.Writer.Bucket
 
 type minioStore struct {
 	client *minio.Client

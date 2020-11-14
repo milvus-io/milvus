@@ -21,7 +21,6 @@ ENDFOREACH(proto_file)
 add_library(milvus_proto STATIC
 	${MILVUS_PROTO_SRCS}
         )
-message(${MILVUS_PROTO_SRCS})
 
 target_link_libraries(milvus_proto
 	libprotobuf

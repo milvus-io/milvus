@@ -9,7 +9,6 @@ set(MILVUS_TEST_FILES
         test_c_api.cpp
         test_indexing.cpp
         test_query.cpp
-        test_expr.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}

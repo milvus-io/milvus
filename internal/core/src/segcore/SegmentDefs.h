@@ -50,36 +50,6 @@ field_sizeof(DataType data_type, int dim = 1) {
     }
 }
 
-// TODO: use magic_enum when available
-inline std::string
-datatype_name(DataType data_type) {
-    switch (data_type) {
-        case DataType::BOOL:
-            return "bool";
-        case DataType::DOUBLE:
-            return "double";
-        case DataType::FLOAT:
-            return "float";
-        case DataType::INT8:
-            return "int8_t";
-        case DataType::INT16:
-            return "int16_t";
-        case DataType::INT32:
-            return "int32_t";
-        case DataType::INT64:
-            return "int64_t";
-        case DataType::VECTOR_FLOAT:
-            return "vector_float";
-        case DataType::VECTOR_BINARY: {
-            return "vector_binary";
-        }
-        default: {
-            auto err_msg = "Unsupported DataType(" + std::to_string((int)data_type) + ")";
-            PanicInfo(err_msg);
-        }
-    }
-}
-
 inline bool
 field_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY || datatype == DataType::VECTOR_FLOAT;

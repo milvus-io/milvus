@@ -1,26 +1,34 @@
 package controller
 
 import (
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func newKvBase() *kv.EtcdKV {
-	//etcdAddr := conf.Config.Etcd.Address
-	//etcdAddr += ":"
-	//etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	etcdAddr := "127.0.0.1:" + strconv.Itoa(int(conf.Config.Etcd.Port))
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+	etcdAddr := "127.0.0.1:" + etcdPort
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	kvbase := kv.NewEtcdKV(cli, conf.Config.Etcd.Rootpath)
+	etcdRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	kvbase := kv.NewEtcdKV(cli, etcdRootPath)
 	return kvbase
 }
 

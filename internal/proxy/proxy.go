@@ -5,8 +5,11 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"google.golang.org/grpc"
 
@@ -51,10 +54,30 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		proxyLoopCtx:    ctx1,
 		proxyLoopCancel: cancel,
 	}
+
+	// TODO: use config instead
+	pulsarAddress := "pulsar://localhost:6650"
 	bufSize := int64(1000)
+	manipulationChannels := []string{"manipulation"}
+	queryChannels := []string{"query"}
+	queryResultChannels := []string{"QueryResult"}
+	queryResultSubName := "QueryResultSubject"
+	unmarshal := msgstream.NewUnmarshalDispatcher()
+
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.manipulationMsgStream.SetPulsarCient(pulsarAddress)
+	p.manipulationMsgStream.CreatePulsarProducers(manipulationChannels)
+
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryMsgStream.SetPulsarCient(pulsarAddress)
+	p.queryMsgStream.CreatePulsarProducers(queryChannels)
+
 	p.queryResultMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryResultMsgStream.SetPulsarCient(pulsarAddress)
+	p.queryResultMsgStream.CreatePulsarConsumers(queryResultChannels,
+		queryResultSubName,
+		unmarshal,
+		bufSize)
 
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx)
 
@@ -111,7 +134,7 @@ func (p *Proxy) grpcLoop() {
 	defer p.proxyLoopWg.Done()
 
 	// TODO: use address in config instead
-	lis, err := net.Listen("tcp", "5053")
+	lis, err := net.Listen("tcp", ":5053")
 	if err != nil {
 		log.Fatalf("Proxy grpc server fatal error=%v", err)
 	}
@@ -124,16 +147,18 @@ func (p *Proxy) grpcLoop() {
 }
 
 func (p *Proxy) connectMaster() error {
-	log.Printf("Connected to master, master_addr=%s", "127.0.0.1:5053")
+	masterHost := conf.Config.Master.Address
+	masterPort := conf.Config.Master.Port
+	masterAddr := masterHost + ":" + strconv.FormatInt(int64(masterPort), 10)
+	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, "127.0.0.1:5053", grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, masterAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Printf("Connect to master failed, error= %v", err)
+		log.Printf("Proxy connect to master failed, error= %v", err)
 		return err
 	}
-	log.Printf("Connected to master, master_addr=%s", "127.0.0.1:5053")
+	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
 	p.masterConn = conn
 	p.masterClient = masterpb.NewMasterClient(conn)
 	return nil
@@ -141,28 +166,39 @@ func (p *Proxy) connectMaster() error {
 
 func (p *Proxy) queryResultLoop() {
 	defer p.proxyLoopWg.Done()
+	defer p.proxyLoopCancel()
 
 	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
 
 	for {
-		msgPack := p.queryResultMsgStream.Consume()
-		if msgPack == nil {
-			continue
-		}
-		tsMsg := msgPack.Msgs[0]
-		searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
-		reqID := searchResultMsg.GetReqID()
-		_, ok := queryResultBuf[reqID]
-		if !ok {
-			queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
-		}
-		queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
-		if len(queryResultBuf[reqID]) == 4 {
-			// TODO: use the number of query node instead
-			t := p.taskSch.getTaskByReqID(reqID)
-			qt := t.(*QueryTask)
-			qt.resultBuf <- queryResultBuf[reqID]
-			delete(queryResultBuf, reqID)
+		select {
+		case msgPack, ok := <-p.queryResultMsgStream.Chan():
+			if !ok {
+				log.Print("buf chan closed")
+				return
+			}
+			log.Print("Consume message from query result stream...")
+			if msgPack == nil {
+				continue
+			}
+			tsMsg := msgPack.Msgs[0]
+			searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
+			reqID := searchResultMsg.GetReqID()
+			_, ok = queryResultBuf[reqID]
+			if !ok {
+				queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
+			}
+			queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+			if len(queryResultBuf[reqID]) == 4 {
+				// TODO: use the number of query node instead
+				t := p.taskSch.getTaskByReqID(reqID)
+				qt := t.(*QueryTask)
+				qt.resultBuf <- queryResultBuf[reqID]
+				delete(queryResultBuf, reqID)
+			}
+		case <-p.proxyLoopCtx.Done():
+			log.Print("proxy server is closed ...")
+			return
 		}
 	}
 }
@@ -189,10 +225,15 @@ func (p *Proxy) stopProxyLoop() {
 		p.grpcServer.GracefulStop()
 	}
 	p.tsoAllocator.Close()
+
 	p.idAllocator.Close()
+
 	p.taskSch.Close()
+
 	p.manipulationMsgStream.Close()
+
 	p.queryMsgStream.Close()
+
 	p.queryResultMsgStream.Close()
 
 	p.proxyLoopWg.Wait()

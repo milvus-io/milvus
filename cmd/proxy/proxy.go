@@ -8,10 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go.uber.org/zap"
-
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proxy"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -20,7 +19,11 @@ func main() {
 	flag.Parse()
 	flag.Usage()
 	log.Println("yaml file: ", yamlFile)
-	conf.LoadConfig(yamlFile)
+
+	err := gparams.GParams.LoadYaml(yamlFile)
+	if err != nil {
+		panic(err)
+	}
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())

@@ -2,26 +2,31 @@ package master
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
 
 func TestMaster_CreateCollection(t *testing.T) {
-	conf.LoadConfig("config.yaml")
+	err := gparams.GParams.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdPort := strconv.Itoa(int(conf.Config.Etcd.Port))
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
 	etcdAddr := "127.0.0.1:" + etcdPort
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
