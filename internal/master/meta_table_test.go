@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -105,7 +106,10 @@ func TestMetaTable_Collection(t *testing.T) {
 
 	collsName, err := meta.ListCollections()
 	assert.Nil(t, err)
-	assert.Equal(t, collsName, []string{"coll1", "coll2"})
+	assert.Equal(t, len(collsName), 2)
+	e1 := reflect.DeepEqual(collsName, []string{"coll1", "coll2"})
+	e2 := reflect.DeepEqual(collsName, []string{"coll2", "coll1"})
+	assert.True(t, e1 || e2)
 
 	hasCollection := meta.HasCollection(colMeta.ID)
 	assert.True(t, hasCollection)
