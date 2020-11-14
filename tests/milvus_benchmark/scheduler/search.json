@@ -1,9 +1,9 @@
 [
     {
-        "server": "eros",
+        "server": "athena",
         "suite_params": [
             {
-                "suite": "debug.yaml",
+                "suite": "011_cpu_search_sift1b.yaml",
                 "image_type": "cpu"
             }
         ]

@@ -6,5 +6,7 @@ logs/
 __pycache__/
 venv
 .idea
+nohup.out
 
-suites/
+*.swp
+*.swo

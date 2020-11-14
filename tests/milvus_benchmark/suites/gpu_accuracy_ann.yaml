@@ -2,11 +2,11 @@ ann_accuracy:
   collections:
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: true
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1
@@ -22,15 +22,15 @@ ann_accuracy:
       top_ks: [10]
       nqs: [10000]
       search_params:
-        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 16384]
 
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: true
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1
@@ -51,11 +51,11 @@ ann_accuracy:
 
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: true
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1
@@ -96,15 +96,15 @@ ann_accuracy:
       top_ks: [10]
       nqs: [10000]
       search_params:
-        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 16384]
 
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: true
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1
@@ -125,11 +125,11 @@ ann_accuracy:
 
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: false
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1
@@ -149,11 +149,11 @@ ann_accuracy:
 
     -
       server:
-        cache_config.cpu_cache_capacity: 16
+        cache_config.cpu_cache_capacity: 16GB
         engine_config.use_blas_threshold: 1100
         engine_config.gpu_search_threshold: 1
         gpu_resource_config.enable: false
-        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.cache_capacity: 4GB
         gpu_resource_config.search_resources:
           - gpu0
           - gpu1

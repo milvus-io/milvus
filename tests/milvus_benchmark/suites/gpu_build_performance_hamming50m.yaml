@@ -1,0 +1,36 @@
+build_performance:
+  collections:
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/hamming_50m_128_512_hamming_ivf
+        cache_config.cpu_cache_capacity: 16
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: hamming_50m_128_512_hamming
+      index_type: ivf_flat
+      nlist: 2048
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_gpu/hamming_50m_128_512_hamming_flat
+        cache_config.cpu_cache_capacity: 16
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: hamming_50m_128_512_hamming
+      index_type: flat
+      nlist: 2048

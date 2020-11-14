@@ -6,17 +6,21 @@ pipeline {
     }
 
     parameters{
-        string defaultValue: 'master', description: 'server image version', name: 'IMAGE_VERSION', trim: true
-        string defaultValue: '080_data.json', description: 'test suite config yaml', name: 'CONFIG_FILE', trim: true
+        string defaultValue: '0.11.1', description: 'server image version', name: 'IMAGE_VERSION', trim: true
+        choice choices: ['single', 'shards'], description: 'server deploy mode', name: 'DEPLOY_MODE'
+        string defaultValue: '011_data.json', description: 'test suite config yaml', name: 'CONFIG_FILE', trim: true
+        string defaultValue: 'shards.json', description: 'shards test suite config yaml', name: 'SHARDS_CONFIG_FILE', trim: true
         string defaultValue: '09509e53-9125-4f5d-9ce8-42855987ad67', description: 'git credentials', name: 'GIT_USER', trim: true
     }
 
     environment {
         HELM_URL = "https://github.com/milvus-io/milvus-helm.git"
-        HELM_BRANCH = "master"
+        HELM_BRANCH = "0.11.0"
         TEST_URL = "git@192.168.1.105:Test/milvus_benchmark.git"
-        TEST_BRANCH = "master"
+        TEST_BRANCH = "0.11.1"
         TEST_LIB_URL = "http://192.168.1.105:6060/Test/milvus_metrics.git"
+        HELM_RELEASE_NAME = "milvus-benchmark-test-${env.BUILD_NUMBER}"
+        HELM_SHARDS_RELEASE_NAME = "milvus-shards-benchmark-test-${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -35,7 +39,7 @@ pipeline {
                         spec:
                           containers:
                           - name: milvus-test-env
-                            image: registry.zilliz.com/milvus/milvus-test-env:v0.2
+                            image: registry.zilliz.com/milvus/milvus-test-env:v0.3
                             command:
                             - cat
                             tty: true
@@ -93,11 +97,13 @@ pipeline {
 
                 stage("Deploy Test") {
                     steps {
-                        gitlabCommitStatus(name: 'Deploy Test') {
-                            container('milvus-test-env') {
-                                script {
-                                    print "In Deploy Test Stage"
+                        container('milvus-test-env') {
+                            script {
+                                print "In Deploy Test Stage"
+                                if ("${params.DEPLOY_MODE}" == "single") {
                                     load "${env.WORKSPACE}/ci/jenkinsfile/deploy_test.groovy"
+                                } else {
+                                    load "${env.WORKSPACE}/ci/jenkinsfile/deploy_shards_test.groovy"
                                 }
                             }
                         }
@@ -106,10 +112,12 @@ pipeline {
 
                 stage ("Cleanup Env") {
                     steps {
-                        gitlabCommitStatus(name: 'Cleanup Env') {
-                            container('milvus-test-env') {
-                                script {
+                        container('milvus-test-env') {
+                            script {
+                                if ("${params.DEPLOY_MODE}" == "single") {
                                     load "${env.WORKSPACE}/ci/jenkinsfile/cleanup.groovy"
+                                } else {
+                                    load "${env.WORKSPACE}/ci/jenkinsfile/cleanupShards.groovy"
                                 }
                             }
                         }
@@ -117,13 +125,6 @@ pipeline {
                 }
             }
             post {
-                always {
-                    container('milvus-test-env') {
-                        script {
-                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup.groovy"
-                        }
-                    }
-                }
                 success {
                     script {
                         echo "Milvus benchmark test success !"

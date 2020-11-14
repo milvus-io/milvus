@@ -1,10 +1,9 @@
 [
     {
-        "server": "poseidon",
         "suite_params": [
             {
-                "suite": "insert_performance.yaml",
-                "image_type": "gpu"
+                "suite": "080_insert_performance.yaml",
+                "image_type": "cpu"
             }
         ]
     }

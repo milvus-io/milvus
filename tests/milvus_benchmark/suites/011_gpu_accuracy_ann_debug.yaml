@@ -1,0 +1,25 @@
+ann_accuracy:
+  collections:
+    -
+      server:
+        cache_config.cpu_cache_capacity: 16GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      source_file: /test/milvus/ann_hdf5/sift-128-euclidean.hdf5
+      collection_name: sift_128_euclidean
+      segment_row_limits: [100000]
+      index_types: ['ivf_sq8']
+      index_params:
+        nlist: [16384]
+      top_ks: [10]
+      nqs: [10000]
+      search_params:
+        nprobe: [1, 512]

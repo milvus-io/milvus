@@ -1,9 +1,9 @@
 [
     {
-        "server": "athena",
+        "server": "eros",
         "suite_params": [
             {
-                "suite": "debug_build.yaml",
+                "suite": "011_gpu_build_sift1b.yaml",
                 "image_type": "gpu"
             }
         ]
