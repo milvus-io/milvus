@@ -19,6 +19,7 @@
 
 #include "db/utils.h"
 #include "db/snapshot/HandlerFactory.h"
+#include "db/snapshot/CacheRepo.h"
 
 Status
 GetFirstCollectionID(ID_TYPE& result_id) {
@@ -39,6 +40,70 @@ TEST_F(SnapshotTest, ResourcesTest) {
 
     auto nprobe_real = p_field.GetParams().at("nprobe").get<int>();
     ASSERT_EQ(nprobe, nprobe_real);
+}
+
+TEST_F(SnapshotTest, CacheTest) {
+    struct Student {
+        int age;
+        std::string name;
+        int id;
+    };
+    using StudentPtr = std::shared_ptr<Student>;
+
+    using Cache = milvus::engine::snapshot::CacheRepo<StudentPtr, int, int>;
+    std::set<int> expect_indice;
+    int index;
+    for (auto i=0; i<20; ++i)
+    {
+        index = RandomInt(0, 10);
+        auto repo = Cache::MutableRepo(index);
+        ASSERT_EQ(repo->Index(), index);
+        expect_indice.insert(index);
+    }
+    ASSERT_EQ(Cache::IndexSize(), expect_indice.size());
+
+    {
+        auto prev_index_size = Cache::IndexSize();
+        Cache::Clear(index);
+        ASSERT_EQ(Cache::IndexSize(), prev_index_size - 1);
+    }
+    {
+        Cache::Clear();
+        ASSERT_EQ(Cache::IndexSize(), 0);
+    }
+    {
+        auto repo = Cache::MutableRepo(index);
+        ASSERT_TRUE(repo);
+        StudentPtr st1 = std::make_shared<Student>();
+        st1->name = "XJY";
+        st1->age = 5;
+        st1->id = 1;
+        StudentPtr st2 = std::make_shared<Student>();
+        st1->name = "KX";
+        st1->age = 6;
+        st1->id = 2;
+
+        auto key1 = st1->id;
+        repo->Cache(key1, st1);
+        ASSERT_EQ(repo->KeyCount(), 1);
+
+        auto key2 = st2->id;
+        repo->Cache(key2, st2);
+        ASSERT_EQ(repo->KeyCount(), 2);
+
+        decltype(st1) st;
+        decltype(key1) non_exist_key = 10000000;
+        auto status = repo->MutableData(non_exist_key, st);
+        ASSERT_FALSE(status.ok());
+
+        status = repo->MutableData(key1, st);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(st->id, st1->id);
+
+        status = repo->MutableData(key2, st);
+        ASSERT_TRUE(status.ok());
+        ASSERT_EQ(st->id, st2->id);
+    }
 }
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {
