@@ -9,7 +9,9 @@
 #pragma once
 // Generated File
 // DO NOT EDIT
+@@extra_inc@@
 #include "@@base_visitor@@.h"
+
 namespace @@namespace@@ {
 class @@visitor_name@@ : @@base_visitor@@ {
  public:

@@ -14,7 +14,7 @@ def gen_file(rootfile, template, output, **kwargs):
 
 
 def extract_extra_body(visitor_info, query_path):
-    pattern = re.compile("class(.*){\n((.|\n)*?)\n};", re.MULTILINE)
+    pattern = re.compile(r"class(.*){\n((.|\n)*?)\n};", re.MULTILINE)
 
     for node, visitors in visitor_info.items():
         for visitor in visitors:
@@ -22,11 +22,24 @@ def extract_extra_body(visitor_info, query_path):
             vis_file = query_path + "visitors/" + vis_name + ".cpp"
             body = ' public:'
 
+            inc_pattern_str = r'^(#include(.|\n)*)\n#include "query/generated/{}.h"'.format(vis_name)
+            inc_pattern = re.compile(inc_pattern_str, re.MULTILINE)
+
             if os.path.exists(vis_file):
-                infos = pattern.findall(readfile(vis_file))
+                content = readfile(vis_file)
+                infos = pattern.findall(content)
+                assert len(infos) <= 1
                 if len(infos) == 1:
                     name, body, _ = infos[0]
+                
+                extra_inc_infos = inc_pattern.findall(content)
+                assert(len(extra_inc_infos) <= 1)
+                print(extra_inc_infos)
+                if len(extra_inc_infos) == 1:
+                    extra_inc_body, _ = extra_inc_infos[0]
+            
             visitor["ctor_and_member"] = body
+            visitor["extra_inc"] = extra_inc_body
 
 if __name__ == "__main__":
     query_path = "../../internal/core/src/query/"

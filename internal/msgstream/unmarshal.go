@@ -30,12 +30,14 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	searchMsg := SearchMsg{}
 	searchResultMsg := SearchResultMsg{}
 	timeTickMsg := TimeTickMsg{}
+	queryNodeSegStatsMsg := QueryNodeSegStatsMsg{}
 	dispatcher.tempMap = make(map[internalPb.MsgType]UnmarshalFunc)
 	dispatcher.tempMap[internalPb.MsgType_kInsert] = insertMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kDelete] = deleteMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kSearch] = searchMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kSearchResult] = searchResultMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kTimeTick] = timeTickMsg.Unmarshal
+	dispatcher.tempMap[internalPb.MsgType_kQueryNodeSegStats] = queryNodeSegStatsMsg.Unmarshal
 }
 
 func NewUnmarshalDispatcher() *UnmarshalDispatcher {

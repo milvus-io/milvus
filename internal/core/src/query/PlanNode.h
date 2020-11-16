@@ -28,7 +28,6 @@ struct PlanNode {
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct QueryInfo {
-    int64_t num_queries_;
     int64_t topK_;
     FieldId field_id_;
     std::string metric_type_;  // TODO: use enum

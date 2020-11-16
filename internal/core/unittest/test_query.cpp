@@ -6,6 +6,8 @@
 #include "query/generated/PlanNodeVisitor.h"
 #include "test_utils/DataGen.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
 
 TEST(Query, Naive) {
     SUCCEED();
@@ -58,7 +60,6 @@ TEST(Query, ShowExecutor) {
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
     info.metric_type_ = "L2";
-    info.num_queries_ = 10;
     info.topK_ = 20;
     info.field_id_ = "fakevec";
     node->predicate_ = std::nullopt;
@@ -66,6 +67,87 @@ TEST(Query, ShowExecutor) {
     PlanNodePtr base(node.release());
     auto res = show_visitor.call_child(*base);
     auto dup = res;
-    dup["data"] = "...collased...";
     std::cout << dup.dump(4);
+}
+
+TEST(Query, DSL) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    ShowPlanNodeVisitor shower;
+
+    std::string dsl_string = R"(
+{
+    "bool": {
+        "must": [
+            {
+                "vector": {
+                    "Vec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+    auto plan = CreatePlan(dsl_string);
+    auto res = shower.call_child(*plan->plan_node_);
+    std::cout << res.dump(4) << std::endl;
+
+    std::string dsl_string2 = R"(
+{
+    "bool": {
+        "vector": {
+            "Vec": {
+                "metric_type": "L2",
+                "params": {
+                    "nprobe": 10
+                },
+                "query": "$0",
+                "topk": 10
+            }
+        }
+    }
+})";
+    auto plan2 = CreatePlan(dsl_string2);
+    auto res2 = shower.call_child(*plan2->plan_node_);
+    std::cout << res2.dump(4) << std::endl;
+    ASSERT_EQ(res, res2);
+}
+
+TEST(Query, ParsePlaceholderGroup) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    namespace ser = milvus::proto::service;
+    int num_queries = 10;
+    int dim = 16;
+    std::default_random_engine e;
+    std::normal_distribution<double> dis(0, 1);
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    for(int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for(int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    auto blob = raw_group.SerializeAsString();
+    //ser::PlaceholderGroup new_group;
+    //new_group.ParseFromString()
+    auto fuck = ParsePlaceholderGroup(blob);
+    int x = 1+1;
+}
+
+
+TEST(Query, Exec) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
 }
