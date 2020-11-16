@@ -1,5 +1,5 @@
 #pragma once
-#include "SegmentDefs.h"
+#include "common/Schema.h"
 #include "ConcurrentVector.h"
 #include "AckResponder.h"
 

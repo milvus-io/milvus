@@ -37,8 +37,8 @@ type GlobalTSOAllocator struct {
 
 var allocator *GlobalTSOAllocator
 
-func Init(etcdAddr []string, rootPath string) {
-	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "tso"))
+func Init() {
+	InitGlobalTsoAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
 }
 
 func InitGlobalTsoAllocator(key string, base kvutil.Base) {

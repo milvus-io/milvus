@@ -3,9 +3,8 @@
 
 #include "IndexMeta.h"
 #include "utils/Types.h"
-#include "segcore/SegmentDefs.h"
-// #include "knowhere/index/Index.h"
-// #include "knowhere/index/IndexType.h"
+#include "common/Schema.h"
+
 #include "query/deprecated/GeneralQuery.h"
 #include "query/Plan.h"
 
@@ -14,6 +13,11 @@ namespace segcore {
 // using engine::DataChunk;
 // using engine::DataChunkPtr;
 using engine::QueryResult;
+struct RowBasedRawData {
+    void* raw_data;      // schema
+    int sizeof_per_row;  // alignment
+    int64_t count;
+};
 
 int
 TestABI();

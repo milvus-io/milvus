@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
-#include "query/Parser.h"
+#include "query/deprecated/Parser.h"
 #include "query/Expr.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExprVisitor.h"
 #include "query/generated/PlanNodeVisitor.h"
 #include "test_utils/DataGen.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
+using namespace milvus;
 
 TEST(Expr, Naive) {
     SUCCEED();

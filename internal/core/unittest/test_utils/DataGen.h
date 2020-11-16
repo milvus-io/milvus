@@ -1,5 +1,5 @@
 #pragma once
-#include "segcore/SegmentDefs.h"
+#include "common/Schema.h"
 #include <random>
 #include <memory>
 #include <cstring>

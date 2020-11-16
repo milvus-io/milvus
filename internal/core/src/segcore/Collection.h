@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SegmentDefs.h"
+#include "common/Schema.h"
 #include "IndexMeta.h"
 
 namespace milvus::segcore {

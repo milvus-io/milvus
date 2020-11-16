@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string_view>
+#include "common/Schema.h"
 
 namespace milvus::query {
 // NOTE: APIs for C wrapper
@@ -10,10 +11,10 @@ struct Plan;
 struct PlaceholderGroup;
 
 std::unique_ptr<Plan>
-CreatePlan(const std::string& dsl);
+CreatePlan(const Schema& schema, const std::string& dsl);
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const std::string& placeholder_group_blob);
+ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blob);
 
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);

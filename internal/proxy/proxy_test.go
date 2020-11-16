@@ -41,8 +41,9 @@ func startMaster(ctx context.Context) {
 	rootPath := conf.Config.Etcd.Rootpath
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
+	tsoRootPath := path.Join(rootPath, "timestamp")
 
-	svr, err := master.CreateServer(ctx, kvRootPath, metaRootPath, []string{etcdAddr})
+	svr, err := master.CreateServer(ctx, kvRootPath, metaRootPath, tsoRootPath, []string{etcdAddr})
 	masterServer = svr
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))

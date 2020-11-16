@@ -6,7 +6,6 @@ set(MILVUS_QUERY_SRCS
         visitors/ShowPlanNodeVisitor.cpp
         visitors/ExecPlanNodeVisitor.cpp
         visitors/ShowExprVisitor.cpp
-        Parser.cpp
         Plan.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})

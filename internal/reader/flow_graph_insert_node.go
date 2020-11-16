@@ -56,20 +56,6 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
 		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
-
-		// check if segment exists, if not, create this segment
-		if !(*iNode.container).hasSegment(task.SegmentID) {
-			collection, err := (*iNode.container).getCollectionByName(task.CollectionName)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			err = (*iNode.container).addSegment(task.SegmentID, task.PartitionTag, collection.ID())
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-		}
 	}
 
 	// 2. do preInsert

@@ -2,9 +2,9 @@
 //
 //#include <shared_mutex>
 //
-//#include "SegmentDefs.h"
+//#include "common/Schema.h"
 // #include "segcore/SegmentBase.h"
-#include "segcore/SegmentDefs.h"
+#include "common/Schema.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/common/Config.h"
 #include <map>

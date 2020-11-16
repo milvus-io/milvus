@@ -17,9 +17,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 
  public:
     using RetType = segcore::QueryResult;
-    ExecPlanNodeVisitor(segcore::SegmentBase& segment,
-                        segcore::Timestamp timestamp,
-                        const PlaceholderGroup& placeholder_group)
+    ExecPlanNodeVisitor(segcore::SegmentBase& segment, Timestamp timestamp, const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
     // using RetType = nlohmann::json;
@@ -37,7 +35,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
  private:
     // std::optional<RetType> ret_;
     segcore::SegmentBase& segment_;
-    segcore::Timestamp timestamp_;
+    Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
     std::optional<RetType> ret_;

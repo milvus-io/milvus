@@ -9,7 +9,7 @@
 namespace milvus::query {
 
 static std::unique_ptr<VectorPlanNode>
-CreateVec(const std::string& field_name, const json& vec_info) {
+CreateVecNode(const std::string& field_name, const Json& vec_info) {
     // TODO add binary info
     auto vec_node = std::make_unique<FloatVectorANNS>();
     auto topK = vec_info["topk"];
@@ -35,7 +35,7 @@ CreatePlanImplNaive(const std::string& dsl_str) {
                 auto iter = pack["vector"].begin();
                 auto key = iter.key();
                 auto& body = iter.value();
-                plan->plan_node_ = CreateVec(key, body);
+                plan->plan_node_ = CreateVecNode(key, body);
                 return plan;
             }
         }
@@ -44,11 +44,16 @@ CreatePlanImplNaive(const std::string& dsl_str) {
         auto iter = bool_dsl["vector"].begin();
         auto key = iter.key();
         auto& body = iter.value();
-        plan->plan_node_ = CreateVec(key, body);
+        plan->plan_node_ = CreateVecNode(key, body);
         return plan;
     } else {
         PanicInfo("Unsupported DSL: vector node not detected");
     }
+}
+
+static std::unique_ptr<Plan>
+CreateRangeNode(const Json& range_group) {
+    return nullptr;
 }
 
 void
@@ -82,13 +87,15 @@ class PlanParser {
 };
 
 std::unique_ptr<Plan>
-CreatePlan(const std::string& dsl_str) {
+CreatePlan(const Schema& schema, const std::string& dsl_str) {
+    (void)schema;
     auto plan = CreatePlanImplNaive(dsl_str);
     return plan;
 }
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const std::string& blob) {
+ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
+    (void)plan;
     namespace ser = milvus::proto::service;
     auto result = std::make_unique<PlaceholderGroup>();
     ser::PlaceholderGroup ph_group;

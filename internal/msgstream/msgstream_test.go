@@ -106,16 +106,6 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			TimeTickMsg: timeTickResult,
 		}
 		tsMsg = timeTickMsg
-	case internalPb.MsgType_kQueryNodeSegStats:
-		queryNodeSegStats := internalPb.QueryNodeSegStats{
-			MsgType: internalPb.MsgType_kQueryNodeSegStats,
-			PeerID:  reqID,
-		}
-		queryNodeSegStatsMsg := &QueryNodeSegStatsMsg{
-			BaseMsg:           baseMsg,
-			QueryNodeSegStats: queryNodeSegStats,
-		}
-		tsMsg = queryNodeSegStatsMsg
 	}
 	return &tsMsg
 }
@@ -462,11 +452,24 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
 
+	baseMsg := BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []int32{1},
+	}
+
+	timeTickRequest := internalPb.TimeTickMsg{
+		MsgType:   internalPb.MsgType_kTimeTick,
+		PeerID:    int64(1),
+		Timestamp: uint64(1),
+	}
+	timeTick := &TimeTickMsg{
+		BaseMsg:     baseMsg,
+		TimeTickMsg: timeTickRequest,
+	}
+	var tsMsg TsMsg = timeTick
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 2, 2))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kQueryNodeSegStats, 4, 4))
+	msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarCient(pulsarAddress)

@@ -28,7 +28,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	}
 
 	// update service time
-	stNode.node.tSafe.setTSafe(serviceTimeMsg.timeRange.timestampMax)
+	stNode.node.tSafe = serviceTimeMsg.timeRange.timestampMax
 	return nil
 }
 
