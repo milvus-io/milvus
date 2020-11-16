@@ -182,7 +182,7 @@ class Store : public std::enable_shared_from_this<Store> {
     Status
     RemoveResource(ID_TYPE id) {
         auto rc_ctx_p =
-            ResourceContextBuilder<ResourceT>().SetTable(ResourceT::Name).SetOp(meta::oDelete).SetID(id).CreatePtr();
+            ResourceContextBuilder<ResourceT>(meta::oDelete).SetTable(ResourceT::Name).SetID(id).CreatePtr();
 
         int64_t result_id;
         return adapter_->Execute<ResourceT>(rc_ctx_p, result_id);
@@ -226,7 +226,7 @@ class Store : public std::enable_shared_from_this<Store> {
     Status
     CreateResource(ResourceT&& resource, typename ResourceT::Ptr& return_v) {
         auto res_p = std::make_shared<ResourceT>(resource);
-        auto res_ctx_p = ResourceContextBuilder<ResourceT>().SetOp(meta::oAdd).SetResource(res_p).CreatePtr();
+        auto res_ctx_p = ResourceContextBuilder<ResourceT>(meta::oAdd).SetResource(res_p).CreatePtr();
 
         int64_t result_id;
         auto status = adapter_->Execute<ResourceT>(res_ctx_p, result_id);
@@ -379,18 +379,14 @@ class Store : public std::enable_shared_from_this<Store> {
             if (record.type() == typeid(std::shared_ptr<Collection>)) {
                 const auto& r = std::any_cast<std::shared_ptr<Collection>>(record);
                 r->Activate();
-                auto t_c_p = ResourceContextBuilder<Collection>()
-                                 .SetOp(meta::oUpdate)
-                                 .SetResource(r)
-                                 .AddAttr(meta::F_STATE)
-                                 .CreatePtr();
+                auto t_c_p =
+                    ResourceContextBuilder<Collection>(meta::oUpdate).SetResource(r).AddAttr(meta::F_STATE).CreatePtr();
 
                 adapter_->Execute<Collection>(t_c_p, result_id);
             } else if (record.type() == typeid(std::shared_ptr<CollectionCommit>)) {
                 const auto& r = std::any_cast<std::shared_ptr<CollectionCommit>>(record);
                 r->Activate();
-                auto t_cc_p = ResourceContextBuilder<CollectionCommit>()
-                                  .SetOp(meta::oUpdate)
+                auto t_cc_p = ResourceContextBuilder<CollectionCommit>(meta::oUpdate)
                                   .SetResource(r)
                                   .AddAttr(meta::F_STATE)
                                   .CreatePtr();

@@ -72,6 +72,7 @@ struct IterateHandler : public std::enable_shared_from_this<IterateHandler<T>> {
 
 using CollectionIterator = IterateHandler<Collection>;
 using PartitionIterator = IterateHandler<Partition>;
+using PartitionCommitIterator = IterateHandler<PartitionCommit>;
 using SegmentCommitIterator = IterateHandler<SegmentCommit>;
 using SegmentIterator = IterateHandler<Segment>;
 using SegmentFileIterator = IterateHandler<SegmentFile>;
