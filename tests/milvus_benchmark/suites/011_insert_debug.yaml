@@ -1,0 +1,89 @@
+insert_performance:
+  collections:
+    # - 
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_011/binary_50m_4000000_512_jaccard
+    #     cache_config.cpu_cache_capacity: 8GB
+    #     engine_config.use_blas_threshold: 1100
+    #     engine_config.gpu_search_threshold: 1
+    #     gpu_resource_config.enable: false
+    #     gpu_resource_config.cache_capacity: 4GB
+    #     gpu_resource_config.search_resources:
+    #       - gpu0
+    #     gpu_resource_config.build_index_resources:
+    #       - gpu0
+    #   collection_name: binary_50m_4000000_512_jaccard
+    #   ni_per: 100000
+    #   build_index: false
+    #   index_type: bin_flat
+    #   index_param:
+    #     nlist: 2048
+
+    # -
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_011/sift_10m_2000000_128_ip
+    #     cache_config.cpu_cache_capacity: 4GB
+    #     engine_config.use_blas_threshold: 1100
+    #     engine_config.gpu_search_threshold: 1
+    #     gpu_resource_config.enable: true
+    #     gpu_resource_config.cache_capacity: 4GB
+    #     gpu_resource_config.search_resources:
+    #       - gpu0
+    #       - gpu1
+    #     gpu_resource_config.build_index_resources:
+    #       - gpu0
+    #       - gpu1
+    #     wal_enable: true
+    #   collection_name: sift_10m_2000000_128_ip
+    #   ni_per: 100000
+    #   build_index: false
+    #   index_type: ivf_sq8
+    #   index_param:
+    #     nlist: 1024
+    # -
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_011/sift_50m_4000000_128_l2
+    #     cache_config.cpu_cache_capacity: 4GB
+    #     engine_config.use_blas_threshold: 1100
+    #     engine_config.gpu_search_threshold: 1
+    #     gpu_resource_config.enable: true
+    #     gpu_resource_config.cache_capacity: 4GB
+    #     gpu_resource_config.search_resources:
+    #       - gpu0
+    #       - gpu1
+    #     gpu_resource_config.build_index_resources:
+    #       - gpu0
+    #       - gpu1
+    #     wal_enable: true
+    #   collection_name: sift_50m_4000000_128_l2
+    #   ni_per: 50000
+    #   build_index: false
+    #   index_type: ivf_sq8
+    #   index_param:
+    #     nlist: 1024
+
+    # -
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_011/sift_1b_4000000_128_l2_debug4
+    #     cache_config.cpu_cache_capacity: 32GB
+    #     wal_enable: false
+    #   collection_name: sift_1b_4000000_128_l2
+    #   ni_per: 100000
+    #   # flush: no
+    #   build_index: false
+    #   index_type: ivf_sq8
+    #   index_param:
+    #     nlist: 16384
+
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_1b_4000000_128_l2_debug5
+      #cache_config.cpu_cache_capacity: 32GB
+      wal_enable: true
+      collection_name: sift_1b_4000000_128_l2
+      ni_per: 100000
+      # flush: no
+      build_index: false
+      index_type: ivf_sq8
+      index_param:
+        nlist: 16384

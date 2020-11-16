@@ -1,9 +1,9 @@
 [
     {
-        "server": "poseidon",
+        "server": "athena",
         "suite_params": [
             {
-                "suite": "cpu_search_performance_jaccard.yaml",
+                "suite": "011_cpu_search_binary.yaml",
                 "image_type": "cpu"
             }
         ]

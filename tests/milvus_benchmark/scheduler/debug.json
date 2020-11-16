@@ -3,8 +3,8 @@
         "server": "poseidon",
         "suite_params": [
             {
-                "suite": "debug.yaml",
-                "image_type": "gpu"
+                "suite": "clean.yaml",
+                "image_type": "cpu"
             }
         ]
     }
