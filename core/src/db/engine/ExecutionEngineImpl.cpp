@@ -302,19 +302,6 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             filter_list = bitset;
         }
 
-        // TODO(yhz): The black list is obtain from deleted docs above,
-        // there is no need to get blacklist from index.
-        //        list = vec_index->GetBlacklist();
-        //        if (list != nullptr) {
-        //            if (filter_list != nullptr) {
-        //                list = (*list) | (*filter_list);
-        //            }
-        //        } else {
-        //            if (filter_list != nullptr) {
-        //                list = filter_list;
-        //            }
-        //        }
-
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
             vector_param->nq = vector_param->query_vector.float_data.size() / vec_index->Dim();
@@ -782,18 +769,15 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
     std::shared_ptr<std::vector<idx_t>> uids;
-//    ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {
         dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
         uids = from_index->GetUids();
-//        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                               bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
-//        blacklist = bin_from_index->GetBlacklist();
     }
 
     try {
@@ -812,7 +796,6 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 #endif
 
     new_index->SetUids(uids);
-//    new_index->SetBlacklist(blacklist);
 
     return Status::OK();
 }

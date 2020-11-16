@@ -39,7 +39,7 @@ DeletedDocs::GetDeletedDocs() const {
 //    return name_;
 //}
 const faiss::ConcurrentBitsetPtr
-DeletedDocs::GetBlacklist()  const {
+DeletedDocs::GetBlacklist() const {
     return bitset_;
 }
 

@@ -294,8 +294,7 @@ main() {
 
     printf("----------------search xq with delete------------\n");
     {  // search xq with delete
-        index.SetBlacklist(bitset);
-        auto res = index.Query(query_dataset, query_conf);
+        auto res = index.Query(query_dataset, query_conf, bitset);
         auto I = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
         printf("I=\n");

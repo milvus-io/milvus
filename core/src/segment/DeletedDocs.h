@@ -42,7 +42,7 @@ class DeletedDocs : public cache::DataObj {
     //    GetName() const;
 
     const faiss::ConcurrentBitsetPtr
-    GetBlacklist()  const;
+    GetBlacklist() const;
 
     void
     GenBlacklist(size_t size);
