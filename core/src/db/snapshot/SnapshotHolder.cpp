@@ -17,9 +17,9 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
-/* SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions) */
-/*     : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) { */
-/* } */
+std::vector<GCHandler> SnapshotHolder::g_hookers_;
+std::mutex SnapshotHolder::g_mutex_;
+
 SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, GCHandler gc_handler)
     : collection_id_(collection_id), policy_(policy), gc_handler_(gc_handler) {
 }

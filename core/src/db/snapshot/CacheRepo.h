@@ -119,20 +119,6 @@ CacheRepo<T, IndexT, KeyT>::ToString(bool index_only) {
 
     for (auto& [index, repo] : root_repo_) {
         ss << repo->ObjectToString(index_only, blk_indent) << ",\n";
-        /* ss << blk_indent << "{\n"; */
-        /* ss << inner_indent << "Index=" << index << ", \n"; */
-        /* ss << inner_indent << "KeyCount=" << repo->KeyCount() << ",\n"; */
-        /* if (index_only) { */
-        /*     continue; */
-        /* } */
-        /* ss << inner_indent << "Repo={\n"; */
-        /* for (auto& [key, data] : repo->data_repo_) { */
-        /*     ss << repo_indent << "{\n"; */
-        /*     ss << repo_blk_indent << "Key=" << key << "\n"; */
-        /*     ss << repo_indent << "}\n"; */
-        /* } */
-        /* ss << inner_indent << "}\n"; */
-        /* ss << blk_indent << "}\n"; */
     }
     ss << indent << "}\n";
     ss << "}";

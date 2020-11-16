@@ -52,6 +52,22 @@ class SnapshotHolder {
     bool
     IsActive(Snapshot::Ptr& ss);
 
+    static void
+    RegisterHooker(GCHandler hooker) {
+        std::unique_lock<std::mutex> lock(g_mutex_);
+        g_hookers_.push_back(hooker);
+        std::cout << "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY " << g_hookers_.size() << std::endl;
+    }
+
+    static void
+    ExecuteHookers(Snapshot::Ptr ss) {
+        std::unique_lock<std::mutex> lock(g_mutex_);
+        std::cout << "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ " << g_hookers_.size() << std::endl;
+        for (auto& hooker : g_hookers_) {
+            hooker(ss);
+        }
+    }
+
     ~SnapshotHolder();
 
  private:
@@ -62,6 +78,7 @@ class SnapshotHolder {
 
     void
     ReadyForRelease(Snapshot::Ptr ss) {
+        SnapshotHolder::ExecuteHookers(ss);
         if (gc_handler_) {
             gc_handler_(ss);
         }
@@ -76,6 +93,9 @@ class SnapshotHolder {
     /* size_t num_versions_ = 1; */
     SnapshotPolicyPtr policy_;
     GCHandler gc_handler_;
+
+    static std::vector<GCHandler> g_hookers_;
+    static std::mutex g_mutex_;
 };
 
 using SnapshotHolderPtr = std::shared_ptr<SnapshotHolder>;

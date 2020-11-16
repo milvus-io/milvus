@@ -14,6 +14,7 @@
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
 #include "db/snapshot/Snapshots.h"
+#include "db/snapshot/SnapshotCacheRepo.h"
 #include "value/config/ServerConfig.h"
 
 #include <sstream>
@@ -210,6 +211,8 @@ SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
 SegmentVisitor::Ptr
 SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
                       const snapshot::SegmentFile::VecT& segment_files) {
+    static snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::HookRegistar registar;
+
     if (!ss || !segment) {
         return nullptr;
     }
@@ -238,12 +241,21 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& 
 
 SegmentVisitor::Ptr
 SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id) {
+    static snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::HookRegistar registar;
     if (!ss) {
         return nullptr;
     }
     auto segment = ss->GetResource<snapshot::Segment>(segment_id);
     if (!segment) {
         return nullptr;
+    }
+
+    auto repo = snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::Cache::MutableRepo(ss->GetID());
+    SegmentVisitorPtr data;
+    auto status = repo->MutableData(segment->GetID(), data);
+    std::cout << status.message() << std::endl;
+    if (status.ok()) {
+        return data;
     }
 
     auto visitor = std::make_shared<SegmentVisitor>(ss);
@@ -261,6 +273,8 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id
 
     auto iterator = std::make_shared<snapshot::FieldIterator>(ss, executor);
     iterator->Iterate();
+    repo->Cache(segment->GetID(), visitor);
+    std::cout << snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::Cache::ToString(false) << std::endl;
 
     return visitor;
 }
