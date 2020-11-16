@@ -208,10 +208,15 @@ SegmentFieldVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segme
     return visitor;
 }
 
+void
+SegmentVisitor::RegisterExternalCache() {
+    static snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::HookRegistar registar;
+}
+
 SegmentVisitor::Ptr
 SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
                       const snapshot::SegmentFile::VecT& segment_files) {
-    static snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::HookRegistar registar;
+    RegisterExternalCache();
 
     if (!ss || !segment) {
         return nullptr;
@@ -241,7 +246,8 @@ SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& 
 
 SegmentVisitor::Ptr
 SegmentVisitor::Build(snapshot::ScopedSnapshotT ss, snapshot::ID_TYPE segment_id) {
-    static snapshot::SnapshotHolderCacheHelper<SegmentVisitorPtr>::HookRegistar registar;
+    RegisterExternalCache();
+
     if (!ss) {
         return nullptr;
     }

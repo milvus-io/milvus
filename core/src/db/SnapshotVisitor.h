@@ -143,6 +143,9 @@ class SegmentVisitor {
     Build(snapshot::ScopedSnapshotT ss, const snapshot::SegmentPtr& segment,
           const snapshot::SegmentFile::VecT& segment_files);
 
+    static void
+    RegisterExternalCache();
+
     explicit SegmentVisitor(snapshot::ScopedSnapshotT ss);
 
     const IdMapT&

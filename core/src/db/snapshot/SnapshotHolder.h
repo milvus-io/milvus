@@ -56,13 +56,11 @@ class SnapshotHolder {
     RegisterHooker(GCHandler hooker) {
         std::unique_lock<std::mutex> lock(g_mutex_);
         g_hookers_.push_back(hooker);
-        std::cout << "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY " << g_hookers_.size() << std::endl;
     }
 
     static void
     ExecuteHookers(Snapshot::Ptr ss) {
         std::unique_lock<std::mutex> lock(g_mutex_);
-        std::cout << "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ " << g_hookers_.size() << std::endl;
         for (auto& hooker : g_hookers_) {
             hooker(ss);
         }
