@@ -27,8 +27,8 @@
 namespace milvus {
 namespace engine {
 
-struct SegmentsToSearchCollector : public snapshot::SegmentCommitIterator {
-    using ResourceT = snapshot::SegmentCommit;
+struct SegmentsToSearchCollector : public snapshot::PartitionCommitIterator {
+    using ResourceT = snapshot::PartitionCommit;
     using BaseT = snapshot::IterateHandler<ResourceT>;
     SegmentsToSearchCollector(snapshot::ScopedSnapshotT ss, const std::vector<std::string>& partitions,
                               snapshot::IDS_TYPE& segment_ids);
