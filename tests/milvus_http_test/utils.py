@@ -184,7 +184,7 @@ def gen_binary_vectors(num, dim):
     for i in range(num):
         raw_vector = [random.randint(0, 1) for i in range(dim)]
         raw_vectors.append(raw_vector)
-        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
+        binary_vectors.append(np.packbits(raw_vector, axis=-1).tolist())
     return raw_vectors, binary_vectors
 
 
@@ -253,7 +253,7 @@ def gen_default_fields(auto_id=True, binary=False):
         field = {"name": default_float_vec_field_name, "type": "VECTOR_FLOAT",
                  "params": {"dim": default_dim}}
     else:
-        field = {"name": default_binary_vec_field_name, "type": "BINARY_FLOAT",
+        field = {"name": default_binary_vec_field_name, "type": "VECTOR_BINARY",
                  "params": {"dim": default_dim}}
     fields.append(field)
     default_fields = {
@@ -284,7 +284,7 @@ def gen_binary_entities(nb):
         entity = {
             default_int_field_name: i,
             default_float_field_name: float(i),
-            default_binary_vec_field_name: vectors
+            default_binary_vec_field_name: vectors[i]
         }
         entities.append(entity)
     return raw_vectors, entities
@@ -313,19 +313,20 @@ def assert_equal_entity(a, b):
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
                       metric_type="L2", replace_vecs=None):
     if rand_vector is True:
-        dimension = len(entities[0][default_float_vec_field_name][0])
+        dimension = len(entities[0][field_name][0])
         query_vectors = gen_vectors(nq, dimension)
     else:
-        query_vectors = list(map(lambda x: x[default_float_vec_field_name], entities[:nq]))
+        query_vectors = list(map(lambda x: x[field_name], entities[:nq]))
     if replace_vecs:
         query_vectors = replace_vecs
-    must_param = {"vector": {field_name: {"topk": top_k, "values": query_vectors, "params": search_params}}}
+    must_param = {"vector": {field_name: {"topk": top_k, "query": query_vectors, "params": search_params}}}
     must_param["vector"][field_name]["metric_type"] = metric_type
     query = {
         "bool": {
             "must": [must_param]
         }
     }
+    # logging.getLogger().info(len(query_vectors[0]))
     return query, query_vectors
 
 

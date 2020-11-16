@@ -24,6 +24,7 @@ def init_data(client, collection, nb=default_nb, partition_tags=None, auto_id=Tr
         else:
             ids = client.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
     client.flush([collection])
+    assert client.count_collection(collection) == nb
     return insert_entities, ids
 
 
@@ -47,6 +48,7 @@ def init_binary_data(client, collection, nb=default_nb, partition_tags=None, aut
         else:
             ids = client.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_tag=partition_tags)
     client.flush([collection])
+    assert client.count_collection(collection) == nb
     return insert_raw_vectors, insert_entities, ids
 
 
@@ -107,7 +109,7 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(field_name, entities, top_k, nq)
         data = client.search(collection, query)
         res = data['result']
-        assert data['num'] == nq
+        assert data['nq'] == nq
         assert len(res) == nq
         assert len(res[0]) == top_k
         assert float(res[0][0]['distance']) <= epsilon
@@ -136,7 +138,7 @@ class TestSearchBase:
         query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
         data = client.search(collection, query, fields=[default_int_field_name])
         res = data['result']
-        assert data['num'] == default_nq
+        assert data['nq'] == default_nq
         assert len(res) == default_nq
         assert len(res[0]) == default_top_k
         assert default_int_field_name in res[0][0]['entity'].keys()
@@ -172,8 +174,8 @@ class TestSearchBase:
         assert 0 == client.count_collection(collection)
         data = client.search(collection, default_query)
         res = data['result']
-        assert data['num'] == 0
-        assert len(res) == 0
+        assert data['nq'] == default_nq
+        assert res[0] == None
 
     @pytest.fixture(
         scope="function",
@@ -208,7 +210,7 @@ class TestSearchBase:
         expected: status not ok and url `/collections/xxx/entities` return correct
         """
         entities, ids = init_data(client, collection)
-        must_param = {"vector": {field_name: {"topk": default_top_k, "query": [[]], "params": {"nprobe": 10}}}}
+        must_param = {"vector": {field_name: {"topk": default_top_k, "query": [[[]]], "params": {"nprobe": 10}}}}
         must_param["vector"][field_name]["metric_type"] = 'L2'
         query = {
             "bool": {
@@ -219,17 +221,41 @@ class TestSearchBase:
 
     # TODO
     def test_search_with_invalid_metric_type(self, client, collection):
+        """
+        target: test search function with invalid metric type
+        method:
+        expected:
+        """
         entities, ids = init_data(client, collection)
-        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, metric_type="l2")
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, metric_type="l1")
         assert not client.search(collection, query)
 
-    # TODO
+    def test_search_with_empty_partition(self, client, collection):
+        """
+        target: test search function with empty partition
+        method: create collection and insert entities, then create partition and search with partition
+        expected: empty result
+        """
+        entities, ids = init_data(client, collection)
+        client.create_partition(collection, default_tag)
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
+        data = client.search(collection, query, partition_tags=default_tag)
+        res = data['result']
+        assert data['nq'] == default_nq
+        assert len(res) == default_nq
+        assert len(res[0]) == 0
+
     def test_search_binary_flat(self, client, binary_collection):
-        raw_vectors, binary_entities, ids = init_data(client, binary_collection)
-        query, query_vectors = gen_query_vectors(field_name, binary_entities, default_top_k, default_nq)
+        """
+        target: test basic search function on binary collection
+        method: call search function with binary query vectors
+        expected:
+        """
+        raw_vectors, binary_entities, ids = init_binary_data(client, binary_collection)
+        query, query_vectors = gen_query_vectors(default_binary_vec_field_name, binary_entities, default_top_k,default_nq, metric_type='JACCARD')
         data = client.search(binary_collection, query)
         res = data['result']
-        assert data['num'] == default_nq
+        assert data['nq'] == default_nq
         assert len(res) == default_nq
         assert len(res[0]) == default_top_k
         assert float(res[0][0]['distance']) <= epsilon

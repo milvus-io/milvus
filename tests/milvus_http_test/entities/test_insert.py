@@ -156,3 +156,10 @@ class TestInsertID:
         res_flush = client.flush([id_collection])
         count = client.count_collection(id_collection)
         assert count == 1
+
+    def test_insert_binary_collection(self, client, binary_collection):
+        binary_entities = copy.deepcopy(default_binary_entities)
+        assert client.insert(binary_collection, binary_entities)
+        client.flush([binary_collection])
+        count = client.count_collection(binary_collection)
+        assert count == default_nb

@@ -283,13 +283,15 @@ class MilvusClient(object):
             if field["field_name"] == field_name:
                 return field["index_params"]
 
-    def search(self, collection_name, query_expr, fields=None):
+    def search(self, collection_name, query_expr, fields=None, partition_tags=None):
         url = self._url+url_collections+'/'+str(collection_name)+'/entities'
         r = Request(url)
         search_params = {
             "query": query_expr,
-            "fields": fields
+            "fields": fields,
+            "partition_tags": partition_tags
         }
+        # logging.getLogger().info(search_params)
         try:
             status, data = r.get_with_body(search_params)
             if status:
