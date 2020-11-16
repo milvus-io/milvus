@@ -151,6 +151,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		return errors.New("Insert failed, error code = " + strconv.Itoa(int(status)))
 	}
 
+	s.recentlyModified = true
 	return nil
 }
 

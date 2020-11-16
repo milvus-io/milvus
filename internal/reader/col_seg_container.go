@@ -206,6 +206,7 @@ func (container *colSegContainer) getSegmentStatistics() *internalpb.QueryNodeSe
 		}
 
 		statisticData = append(statisticData, &stat)
+		segment.recentlyModified = false
 	}
 
 	return &internalpb.QueryNodeSegStats{

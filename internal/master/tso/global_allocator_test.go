@@ -18,7 +18,13 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	GTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase("tso"))
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+	etcdAddr := "127.0.0.1:" + etcdPort
+
+	GTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
 
 	exitCode := m.Run()
 	os.Exit(exitCode)

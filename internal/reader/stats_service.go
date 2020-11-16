@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -13,35 +14,55 @@ import (
 
 type statsService struct {
 	ctx       context.Context
-	msgStream *msgstream.PulsarMsgStream
+	pulsarURL string
+
+	msgStream *msgstream.MsgStream
+
 	container *container
 }
 
-func newStatsService(ctx context.Context, container *container, pulsarAddress string) *statsService {
-	// TODO: add pulsar message stream init
+func newStatsService(ctx context.Context, container *container, pulsarURL string) *statsService {
 
 	return &statsService{
 		ctx:       ctx,
+		pulsarURL: pulsarURL,
+		msgStream: nil,
 		container: container,
 	}
 }
 
 func (sService *statsService) start() {
-	sleepMillisecondTime := 1000
+	const (
+		receiveBufSize       = 1024
+		sleepMillisecondTime = 1000
+	)
+
+	// start pulsar
+	producerChannels := []string{"statistic"}
+
+	statsStream := msgstream.NewPulsarMsgStream(sService.ctx, receiveBufSize)
+	statsStream.SetPulsarCient(sService.pulsarURL)
+	statsStream.CreatePulsarProducers(producerChannels)
+
+	var statsMsgStream msgstream.MsgStream = statsStream
+
+	sService.msgStream = &statsMsgStream
+	(*sService.msgStream).Start()
+
+	// start service
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
 	for {
 		select {
 		case <-sService.ctx.Done():
 			return
-		default:
-			time.Sleep(time.Duration(sleepMillisecondTime) * time.Millisecond)
+		case <-time.After(sleepMillisecondTime * time.Millisecond):
 			sService.sendSegmentStatistic()
 		}
 	}
 }
 
 func (sService *statsService) sendSegmentStatistic() {
-	var statisticData = (*sService.container).getSegmentStatistics()
+	statisticData := (*sService.container).getSegmentStatistics()
 
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
@@ -49,5 +70,15 @@ func (sService *statsService) sendSegmentStatistic() {
 }
 
 func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSegStats) {
-	// TODO: publish statistic
+	var msg msgstream.TsMsg = &msgstream.QueryNodeSegStatsMsg{
+		QueryNodeSegStats: *statistic,
+	}
+
+	var msgPack = msgstream.MsgPack{
+		Msgs: []*msgstream.TsMsg{&msg},
+	}
+	err := (*sService.msgStream).Produce(&msgPack)
+	if err != nil {
+		log.Println(err)
+	}
 }

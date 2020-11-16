@@ -36,7 +36,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	_, err = etcdCli.Delete(ctx, "/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", "/test/root/meta/tso", []string{etcdAddr})
+	svr, err := CreateServer(ctx, "/test/root/kv", "/test/root/meta", []string{etcdAddr})
 	assert.Nil(t, err)
 	err = svr.Run(10002)
 	assert.Nil(t, err)
