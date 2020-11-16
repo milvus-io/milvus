@@ -23,8 +23,7 @@
 #include "cache/DataObj.h"
 #include "db/Types.h"
 
-namespace milvus {
-namespace segment {
+namespace milvus::segment {
 
 class DeletedDocs : public cache::DataObj {
  public:
@@ -41,6 +40,12 @@ class DeletedDocs : public cache::DataObj {
     //    // TODO
     //    const std::string&
     //    GetName() const;
+
+    const faiss::ConcurrentBitsetPtr
+    GetBlacklist()  const;
+
+    void
+    GenBlacklist(size_t size);
 
     size_t
     GetCount() const;
@@ -62,11 +67,10 @@ class DeletedDocs : public cache::DataObj {
 
  private:
     std::vector<engine::offset_t> deleted_doc_offsets_;
-    //    faiss::ConcurrentBitsetPtr bitset_;
+    faiss::ConcurrentBitsetPtr bitset_;
     //    const std::string name_ = "deleted_docs";
 };
 
 using DeletedDocsPtr = std::shared_ptr<DeletedDocs>;
 
-}  // namespace segment
-}  // namespace milvus
+}  // namespace milvus::segment

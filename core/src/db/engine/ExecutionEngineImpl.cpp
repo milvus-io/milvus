@@ -45,8 +45,7 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -786,18 +785,18 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
     std::shared_ptr<std::vector<idx_t>> uids;
-    ConCurrentBitsetPtr blacklist;
+//    ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {
         dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
         uids = from_index->GetUids();
-        blacklist = from_index->GetBlacklist();
+//        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                               bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
-        blacklist = bin_from_index->GetBlacklist();
+//        blacklist = bin_from_index->GetBlacklist();
     }
 
     try {
@@ -816,10 +815,9 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 #endif
 
     new_index->SetUids(uids);
-    new_index->SetBlacklist(blacklist);
+//    new_index->SetBlacklist(blacklist);
 
     return Status::OK();
 }
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine
