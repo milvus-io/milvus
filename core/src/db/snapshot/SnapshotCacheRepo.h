@@ -36,10 +36,10 @@ class SnapshotHolderCacheHelper {
 template <typename T>
 void
 SnapshotHolderCacheHelper<T>::Hooker(Snapshot::Ptr ss) {
-    std::cout << "Clear SS-" << ss->GetID() << std::endl;
-    std::cout << "PRE INDEX_SIZE=" << Cache::IndexSize() << std::endl;
+    /* std::cout << "Clear SS-" << ss->GetID() << std::endl; */
+    /* std::cout << "PRE INDEX_SIZE=" << Cache::IndexSize() << std::endl; */
     Cache::Clear(ss->GetID());
-    std::cout << "POST INDEX_SIZE=" << Cache::IndexSize() << std::endl;
+    /* std::cout << "POST INDEX_SIZE=" << Cache::IndexSize() << std::endl; */
 }
 
 }  // namespace snapshot

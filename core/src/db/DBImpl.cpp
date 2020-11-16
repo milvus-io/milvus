@@ -90,6 +90,8 @@ DBImpl::SetAvailable(bool available) {
 ////////////////////////////////////////////////////////////////////////////////
 Status
 DBImpl::Start() {
+    SegmentVisitor::RegisterExternalCache();
+
     if (ServiceAvailable()) {
         return Status::OK();
     }
@@ -130,6 +132,8 @@ DBImpl::Start() {
 
 Status
 DBImpl::Stop() {
+    SegmentVisitor::ClearExternalCache();
+
     if (!ServiceAvailable()) {
         return Status::OK();
     }

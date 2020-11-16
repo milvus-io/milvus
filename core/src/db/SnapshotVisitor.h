@@ -145,6 +145,8 @@ class SegmentVisitor {
 
     static void
     RegisterExternalCache();
+    static void
+    ClearExternalCache();
 
     explicit SegmentVisitor(snapshot::ScopedSnapshotT ss);
 
