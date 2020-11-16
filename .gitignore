@@ -9,8 +9,6 @@ core/thirdparty/knowhere_build
 .ycm_extra_conf.py
 core/compile_commands.json
 */.clangd/*
-pkg
-src
 __pycache__
 
 # vscode generated files
