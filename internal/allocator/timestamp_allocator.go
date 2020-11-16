@@ -76,7 +76,8 @@ func (ta *TimestampAllocator) processFunc(req request) {
 		return
 	}
 	tsoRequest := req.(*tsoRequest)
-	tsoRequest.timestamp = 1
+	tsoRequest.timestamp = ta.lastTsBegin
+	ta.lastTsBegin++
 	fmt.Println("process tso")
 }
 

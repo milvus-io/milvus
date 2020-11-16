@@ -17,7 +17,14 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	GIdAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase("gid"))
+
+	etcdPort, err := gparams.GParams.Load("etcd.port")
+	if err != nil {
+		panic(err)
+	}
+	etcdAddr := "127.0.0.1:" + etcdPort
+
+	GIdAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

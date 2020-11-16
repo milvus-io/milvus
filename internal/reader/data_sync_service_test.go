@@ -17,9 +17,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
-const ctxTimeInMillisecond = 2000
-const closeWithDeadline = true
-
 // NOTE: start pulsar before test
 func TestManipulationService_Start(t *testing.T) {
 	var ctx context.Context

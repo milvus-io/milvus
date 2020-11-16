@@ -1,6 +1,8 @@
 package master
 
-import "math/rand"
+import (
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+)
 
 type ddRequestScheduler struct {
 	reqQueue          chan task
@@ -21,7 +23,6 @@ func (rs *ddRequestScheduler) Enqueue(task task) error {
 	return nil
 }
 
-//TODO, allocGlobalID
 func allocGlobalID() (UniqueID, error) {
-	return rand.Int63(), nil
+	return id.AllocOne()
 }

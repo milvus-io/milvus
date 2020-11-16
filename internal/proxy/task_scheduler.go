@@ -34,6 +34,8 @@ type BaseTaskQueue struct {
 	maxTaskNum int64
 
 	utBufChan chan int // to block scheduler
+
+	sched *TaskScheduler
 }
 
 func (queue *BaseTaskQueue) utChan() <-chan int {
@@ -156,6 +158,9 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	// TODO: set Ts, ReqId, ProxyId
+	ts, _ := queue.sched.tsoAllocator.AllocOne()
+	log.Printf("allocate timestamp: %v", ts)
+	t.SetTs(ts)
 	return queue.addUnissuedTask(t)
 }
 
@@ -178,39 +183,44 @@ func (queue *DdTaskQueue) Enqueue(t task) error {
 	defer queue.lock.Unlock()
 
 	// TODO: set Ts, ReqId, ProxyId
+	ts, _ := queue.sched.tsoAllocator.AllocOne()
+	t.SetTs(ts)
 	return queue.addUnissuedTask(t)
 
 }
 
-func NewDdTaskQueue() *DdTaskQueue {
+func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {
 	return &DdTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
+			sched:         sched,
 		},
 	}
 }
 
-func NewDmTaskQueue() *DmTaskQueue {
+func NewDmTaskQueue(sched *TaskScheduler) *DmTaskQueue {
 	return &DmTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
+			sched:         sched,
 		},
 	}
 }
 
-func NewDqTaskQueue() *DqTaskQueue {
+func NewDqTaskQueue(sched *TaskScheduler) *DqTaskQueue {
 	return &DqTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
 			activeTasks:   make(map[Timestamp]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
+			sched:         sched,
 		},
 	}
 }
@@ -233,14 +243,14 @@ func NewTaskScheduler(ctx context.Context,
 	tsoAllocator *allocator.TimestampAllocator) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		DdQueue:      NewDdTaskQueue(),
-		DmQueue:      NewDmTaskQueue(),
-		DqQueue:      NewDqTaskQueue(),
 		idAllocator:  idAllocator,
 		tsoAllocator: tsoAllocator,
 		ctx:          ctx1,
 		cancel:       cancel,
 	}
+	s.DdQueue = NewDdTaskQueue(s)
+	s.DmQueue = NewDmTaskQueue(s)
+	s.DqQueue = NewDqTaskQueue(s)
 
 	return s, nil
 }
@@ -276,19 +286,25 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
+		log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
 		return
 	}
 
 	q.AddActiveTask(t)
-	defer q.PopActiveTask(t.EndTs())
+	log.Printf("query task add to active list ...")
+	defer func() {
+		q.PopActiveTask(t.EndTs())
+		log.Printf("pop from active list ...")
+	}()
 
 	err = t.Execute()
 	if err != nil {
 		log.Printf("execute definition task failed, error = %v", err)
 		return
 	}
+	log.Printf("scheduler task done ...")
 	err = t.PostExecute()
 }
 
@@ -330,9 +346,12 @@ func (sched *TaskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.DqQueue.utChan():
+			log.Print("scheduler receive query request ...")
 			if !sched.DqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
 				go sched.processTask(t, sched.DqQueue)
+			} else {
+				log.Print("query queue is empty ...")
 			}
 		}
 	}
