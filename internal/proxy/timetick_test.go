@@ -28,8 +28,11 @@ func TestTimeTick_Start(t *testing.T) {
 func TestTimeTick_Start2(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-
-	tsoAllocator, err := allocator.NewTimestampAllocator(ctx)
+	masterAddr, err := Params.MasterAddress()
+	if err != nil {
+		panic(err)
+	}
+	tsoAllocator, err := allocator.NewTimestampAllocator(ctx, masterAddr)
 	assert.Nil(t, err)
 	err = tsoAllocator.Start()
 	assert.Nil(t, err)

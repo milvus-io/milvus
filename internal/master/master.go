@@ -21,10 +21,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/master/controller"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
 	"github.com/zilliztech/milvus-distributed/internal/master/informer"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 // Server is the pd server.
@@ -72,15 +72,25 @@ func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 	return kvBase
 }
 
-func Init(etcdAddr []string, rootPath string) {
+func Init() {
 	rand.Seed(time.Now().UnixNano())
-	id.Init(etcdAddr, rootPath)
-	tso.Init(etcdAddr, rootPath)
+	masterParams.Params.InitParamTable()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
+	if err != nil {
+		panic(err)
+	}
+	rootPath, err := masterParams.Params.EtcdRootPath()
+	if err != nil {
+		panic(err)
+	}
+	id.Init([]string{etcdAddr}, rootPath)
+	tso.Init([]string{etcdAddr}, rootPath)
+
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, kvRootPath, metaRootPath string, etcdAddr []string) (*Master, error) {
-	Init(etcdAddr, kvRootPath)
+	//Init(etcdAddr, kvRootPath)
 
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
 	if err != nil {
@@ -272,13 +282,8 @@ func (s *Master) pulsarLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 
-	pulsarTopic, err := gparams.GParams.Load("master.pulsartopic")
-	if err != nil {
-		panic(err)
-	}
-
 	consumer, err := s.pc.Client.Subscribe(pulsar.ConsumerOptions{
-		Topic:            pulsarTopic,
+		Topic:            masterParams.Params.PulsarToic(),
 		SubscriptionName: "my-sub",
 		Type:             pulsar.Shared,
 	})

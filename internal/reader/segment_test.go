@@ -6,12 +6,10 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/stretchr/testify/assert"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor

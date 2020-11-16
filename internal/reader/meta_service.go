@@ -14,7 +14,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
@@ -31,16 +30,12 @@ type metaService struct {
 }
 
 func newMetaService(ctx context.Context, container *container) *metaService {
-	ETCDAddr, err := gparams.GParams.Load("etcd.address")
+	ETCDAddr, err := Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
-	ETCDPort, err := gparams.GParams.Load("etcd.port")
-	if err != nil {
-		panic(err)
-	}
-	ETCDAddr = "http://" + ETCDAddr + ":" + ETCDPort
-	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+
+	ETCDRootPath, err := Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -83,7 +78,7 @@ func (mService *metaService) start() {
 }
 
 func GetCollectionObjID(key string) string {
-	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	ETCDRootPath, err := Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +87,7 @@ func GetCollectionObjID(key string) string {
 }
 
 func GetSegmentObjID(key string) string {
-	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	ETCDRootPath, err := Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -101,7 +96,7 @@ func GetSegmentObjID(key string) string {
 }
 
 func isCollectionObj(key string) bool {
-	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	ETCDRootPath, err := Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +108,7 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	ETCDRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	ETCDRootPath, err := Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -130,24 +125,9 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *etcdpb.SegmentMeta) b
 		return false
 	}
 
-	readerTopicStart, err := gparams.GParams.Load("reader.topicstart")
-	if err != nil {
-		panic(err)
-	}
-	TopicStart, err := strconv.Atoi(readerTopicStart)
-	if err != nil {
-		panic(err)
-	}
-	readerTopicEnd, err := gparams.GParams.Load("reader.topicend")
-	if err != nil {
-		panic(err)
-	}
-	TopicEnd, err := strconv.Atoi(readerTopicEnd)
-	if err != nil {
-		panic(err)
-	}
-	var queryNodeChannelStart = TopicStart
-	var queryNodeChannelEnd = TopicEnd
+	Params.Init()
+	var queryNodeChannelStart = Params.TopicStart()
+	var queryNodeChannelEnd = Params.TopicEnd()
 
 	if segment.ChannelStart >= int32(queryNodeChannelStart) && segment.ChannelEnd <= int32(queryNodeChannelEnd) {
 		return true

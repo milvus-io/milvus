@@ -1,8 +1,8 @@
 package id
 
 import (
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/tso"
-	"github.com/zilliztech/milvus-distributed/internal/util/kvutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -20,12 +20,12 @@ func Init(etcdAddr []string, rootPath string) {
 	InitGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(etcdAddr, rootPath, "gid"))
 }
 
-func InitGlobalIDAllocator(key string, base kvutil.Base) {
+func InitGlobalIDAllocator(key string, base kv.Base) {
 	allocator = NewGlobalIDAllocator(key, base)
 	allocator.Initialize()
 }
 
-func NewGlobalIDAllocator(key string, base kvutil.Base) *GlobalIDAllocator {
+func NewGlobalIDAllocator(key string, base kv.Base) *GlobalIDAllocator {
 	return &GlobalIDAllocator{
 		allocator: tso.NewGlobalTSOAllocator(key, base),
 	}

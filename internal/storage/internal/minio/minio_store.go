@@ -7,7 +7,6 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zilliztech/milvus-distributed/internal/storage/internal/minio/codec"
 	storageType "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 type MinioDriver struct {
@@ -16,21 +15,15 @@ type MinioDriver struct {
 
 var bucketName string
 
-func NewMinioDriver(ctx context.Context) (*MinioDriver, error) {
+func NewMinioDriver(ctx context.Context, option storageType.Option) (*MinioDriver, error) {
 	// to-do read conf
 	var endPoint = "localhost:9000"
 	var accessKeyID = "testminio"
 	var secretAccessKey = "testminio"
 	var useSSL = false
 
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	bucketName, err := gparams.GParams.Load("writer.bucket")
-	if err != nil {
-		panic(err)
-	}
+	bucketName := option.BucketName
+
 	minioClient, err := minio.New(endPoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,

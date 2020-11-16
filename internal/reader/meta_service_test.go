@@ -6,22 +6,16 @@ import (
 	"testing"
 	"time"
 
-	gParams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
-
 	"github.com/golang/protobuf/proto"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestMetaService_start(t *testing.T) {
 	var ctx context.Context
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
+	Params.Init()
 
 	if closeWithDeadline {
 		var cancel context.CancelFunc
@@ -41,10 +35,7 @@ func TestMetaService_start(t *testing.T) {
 }
 
 func TestMetaService_getCollectionObjId(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var key = "/collection/collection0"
 	var collectionObjID1 = GetCollectionObjID(key)
@@ -58,10 +49,7 @@ func TestMetaService_getCollectionObjId(t *testing.T) {
 }
 
 func TestMetaService_getSegmentObjId(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var key = "/segment/segment0"
 	var segmentObjID1 = GetSegmentObjID(key)
@@ -75,10 +63,7 @@ func TestMetaService_getSegmentObjId(t *testing.T) {
 }
 
 func TestMetaService_isCollectionObj(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var key = "by-dev/collection/collection0"
 	var b1 = isCollectionObj(key)
@@ -92,10 +77,7 @@ func TestMetaService_isCollectionObj(t *testing.T) {
 }
 
 func TestMetaService_isSegmentObj(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var key = "by-dev/segment/segment0"
 	var b1 = isSegmentObj(key)
@@ -109,10 +91,7 @@ func TestMetaService_isSegmentObj(t *testing.T) {
 }
 
 func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var s = etcdpb.SegmentMeta{
 		SegmentID:    UniqueID(0),
@@ -201,7 +180,7 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 }
 
 func TestMetaService_processCollectionCreate(t *testing.T) {
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -247,10 +226,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -323,10 +299,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 }
 
 func TestMetaService_processCreate(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -383,10 +356,7 @@ func TestMetaService_processCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentModify(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -470,10 +440,7 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 }
 
 func TestMetaService_processCollectionModify(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -547,10 +514,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 }
 
 func TestMetaService_processModify(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -649,10 +613,7 @@ func TestMetaService_processModify(t *testing.T) {
 }
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -728,10 +689,7 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 }
 
 func TestMetaService_processCollectionDelete(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -780,10 +738,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 }
 
 func TestMetaService_processDelete(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
@@ -847,10 +802,7 @@ func TestMetaService_processDelete(t *testing.T) {
 }
 
 func TestMetaService_processResp(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var ctx context.Context
 	if closeWithDeadline {
@@ -878,10 +830,7 @@ func TestMetaService_processResp(t *testing.T) {
 }
 
 func TestMetaService_loadCollections(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var ctx context.Context
 	if closeWithDeadline {
@@ -903,10 +852,7 @@ func TestMetaService_loadCollections(t *testing.T) {
 }
 
 func TestMetaService_loadSegments(t *testing.T) {
-	err := gParams.GParams.LoadYaml("config.yaml")
-	assert.NoError(t, err)
-
-	conf.LoadConfig("config.yaml")
+	Params.Init()
 
 	var ctx context.Context
 	if closeWithDeadline {

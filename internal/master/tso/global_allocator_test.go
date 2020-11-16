@@ -7,23 +7,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 )
 
 var GTsoAllocator Allocator
 
 func TestMain(m *testing.M) {
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
-	if err != nil {
-		panic(err)
-	}
-	etcdAddr := "127.0.0.1:" + etcdPort
+	masterParams.Params.Init()
 
+	etcdAddr, err := masterParams.Params.EtcdAddress()
+	if err != nil {
+		panic(err)
+	}
 	GTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
 
 	exitCode := m.Run()

@@ -10,25 +10,25 @@ import (
 	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
-func NewStore(ctx context.Context, driver storagetype.DriverType) (storagetype.Store, error) {
+func NewStore(ctx context.Context, option storagetype.Option) (storagetype.Store, error) {
 	var err error
 	var store storagetype.Store
-	switch driver {
+	switch option.Type {
 	case storagetype.TIKVDriver:
-		store, err = tikvDriver.NewTikvStore(ctx)
+		store, err = tikvDriver.NewTikvStore(ctx, option)
 		if err != nil {
 			panic(err.Error())
 		}
 		return store, nil
 	case storagetype.MinIODriver:
-		store, err = minIODriver.NewMinioDriver(ctx)
+		store, err = minIODriver.NewMinioDriver(ctx, option)
 		if err != nil {
 			//panic(err.Error())
 			return nil, err
 		}
 		return store, nil
 	case storagetype.S3DRIVER:
-		store, err = S3Driver.NewS3Driver(ctx)
+		store, err = S3Driver.NewS3Driver(ctx, option)
 		if err != nil {
 			//panic(err.Error())
 			return nil, err

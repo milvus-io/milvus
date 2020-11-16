@@ -4,14 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/conf"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type Timestamp = typeutil.Timestamp
@@ -27,12 +23,7 @@ type TimestampAllocator struct {
 	lastTsEnd   Timestamp
 }
 
-func NewTimestampAllocator(ctx context.Context) (*TimestampAllocator, error) {
-
-	masterAddr := conf.Config.Etcd.Address
-	masterAddr += ":"
-	masterAddr += strconv.FormatInt(int64(conf.Config.Master.Port), 10)
-
+func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &TimestampAllocator{
 		Allocator: Allocator{reqs: make(chan request, maxMergeRequests),

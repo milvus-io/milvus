@@ -14,14 +14,13 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 	"github.com/zilliztech/milvus-distributed/internal/master"
+	masterParam "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
 
 var ctx context.Context
@@ -37,10 +36,14 @@ var masterServer *master.Master
 var testNum = 10
 
 func startMaster(ctx context.Context) {
-	etcdAddr := conf.Config.Etcd.Address
-	etcdAddr += ":"
-	etcdAddr += strconv.FormatInt(int64(conf.Config.Etcd.Port), 10)
-	rootPath := conf.Config.Etcd.Rootpath
+	etcdAddr, err := Params.EtcdAddress()
+	if err != nil {
+		panic(err)
+	}
+	rootPath, err := Params.EtcdRootPath()
+	if err != nil {
+		panic(err)
+	}
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
 
@@ -49,8 +52,8 @@ func startMaster(ctx context.Context) {
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
-
-	if err := svr.Run(int64(conf.Config.Master.Port)); err != nil {
+	masterParam.Params.InitParamTable()
+	if err := svr.Run(int64(masterParam.Params.Port())); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 
@@ -73,11 +76,7 @@ func startProxy(ctx context.Context) {
 }
 
 func setup() {
-	conf.LoadConfig("config.yaml")
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
+	Params.Init()
 	ctx, cancel = context.WithCancel(context.Background())
 
 	startMaster(ctx)

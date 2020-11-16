@@ -5,21 +5,14 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 )
 
 func NewPulsarClient() *PulsarClient {
-	pulsarAddr, err := gparams.GParams.Load("pulsar.address")
-	if err != nil {
-		panic(err)
-	}
-	pulsarPort, err := gparams.GParams.Load("pulsar.port")
-	if err != nil {
-		panic(err)
-	}
-	pulsarAddr = "pulsar://" + pulsarAddr + ":" + pulsarPort
+	pulsarAddress, _ := masterParams.Params.PulsarAddress()
+	pulsarAddress = "pulsar://" + pulsarAddress
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL:               pulsarAddr,
+		URL:               pulsarAddress,
 		OperationTimeout:  30 * time.Second,
 		ConnectionTimeout: 30 * time.Second,
 	})

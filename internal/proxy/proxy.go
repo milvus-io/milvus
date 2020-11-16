@@ -5,11 +5,8 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"strconv"
 	"sync"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/conf"
 
 	"google.golang.org/grpc"
 
@@ -47,6 +44,10 @@ type Proxy struct {
 	closeCallbacks []func()
 }
 
+func Init() {
+	Params.InitParamTable()
+}
+
 func CreateProxy(ctx context.Context) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
@@ -79,14 +80,18 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		unmarshal,
 		bufSize)
 
-	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx)
+	masterAddr, err := Params.MasterAddress()
+	if err != nil {
+		panic(err)
+	}
+	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)
 
 	if err != nil {
 		return nil, err
 	}
 	p.idAllocator = idAllocator
 
-	tsoAllocator, err := allocator.NewTimestampAllocator(p.proxyLoopCtx)
+	tsoAllocator, err := allocator.NewTimestampAllocator(p.proxyLoopCtx, masterAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +152,10 @@ func (p *Proxy) grpcLoop() {
 }
 
 func (p *Proxy) connectMaster() error {
-	masterHost := conf.Config.Master.Address
-	masterPort := conf.Config.Master.Port
-	masterAddr := masterHost + ":" + strconv.FormatInt(int64(masterPort), 10)
+	masterAddr, err := Params.MasterAddress()
+	if err != nil {
+		panic(err)
+	}
 	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

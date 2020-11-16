@@ -2,28 +2,17 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/internal/proxy"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.uber.org/zap"
 )
 
 func main() {
-	var yamlFile string
-	flag.StringVar(&yamlFile, "yaml", "", "yaml file")
-	flag.Parse()
-	flag.Usage()
-	log.Println("yaml file: ", yamlFile)
-
-	err := gparams.GParams.LoadYaml(yamlFile)
-	if err != nil {
-		panic(err)
-	}
+	proxy.Init()
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())

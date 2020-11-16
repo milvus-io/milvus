@@ -5,26 +5,24 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
 func newKvBase() *kv.EtcdKV {
-	err := gparams.GParams.LoadYaml("config.yaml")
+	masterParams.Params.Init()
+
+	etcdAddr, err := masterParams.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
-	etcdPort, err := gparams.GParams.Load("etcd.port")
-	if err != nil {
-		panic(err)
-	}
-	etcdAddr := "127.0.0.1:" + etcdPort
+
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{etcdAddr},
 		DialTimeout: 5 * time.Second,
 	})
-	etcdRootPath, err := gparams.GParams.Load("etcd.rootpath")
+	etcdRootPath, err := masterParams.Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}

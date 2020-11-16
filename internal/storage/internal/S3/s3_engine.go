@@ -3,17 +3,13 @@ package s3driver
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	. "github.com/zilliztech/milvus-distributed/internal/storage/type"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 )
-
-var bucketName string
 
 type S3Store struct {
 	client *s3.S3
@@ -22,15 +18,6 @@ type S3Store struct {
 func NewS3Store(config aws.Config) (*S3Store, error) {
 	sess := session.Must(session.NewSession(&config))
 	service := s3.New(sess)
-	err := gparams.GParams.LoadYaml("config.yaml")
-	if err != nil {
-		panic(err)
-	}
-	bucketName, err := gparams.GParams.Load("writer.bucket")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(bucketName)
 
 	return &S3Store{
 		client: service,

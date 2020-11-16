@@ -13,8 +13,12 @@ type S3Driver struct {
 	driver *S3Store
 }
 
-func NewS3Driver(ctx context.Context) (*S3Driver, error) {
+var bucketName string
+
+func NewS3Driver(ctx context.Context, option Option) (*S3Driver, error) {
 	// to-do read conf
+
+	bucketName = option.BucketName
 
 	S3Client, err := NewS3Store(aws.Config{
 		Region: aws.String(endpoints.CnNorthwest1RegionID)})

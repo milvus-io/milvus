@@ -8,9 +8,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/master/collection"
 	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/master/segment"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	gparams "github.com/zilliztech/milvus-distributed/internal/util/paramtableutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -66,11 +66,7 @@ func WriteCollection2Datastore(collectionMeta *schemapb.CollectionSchema, kvbase
 		time.Now(), fieldMetas, []UniqueID{sID},
 		[]string{"default"})
 	cm := collection.GrpcMarshal(&c)
-	pulsarTopicNum, err := gparams.GParams.Load("pulsar.topicnum")
-	if err != nil {
-		panic(err)
-	}
-	topicNum, err := strconv.Atoi(pulsarTopicNum)
+	topicNum, err := masterParams.Params.TopicNum()
 	if err != nil {
 		panic(err)
 	}

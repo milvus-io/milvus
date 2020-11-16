@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	storagetype "github.com/zilliztech/milvus-distributed/internal/storage/type"
 )
 
+var option = storagetype.Option{BucketName: "zilliz-hz"}
 var ctx = context.Background()
-var client, err = NewS3Driver(ctx)
+var client, err = NewS3Driver(ctx, option)
 
 func TestS3Driver_PutRowAndGetRow(t *testing.T) {
 	err = client.PutRow(ctx, []byte("bar"), []byte("abcdefghijklmnoopqrstuvwxyz"), "SegmentA", 1)
