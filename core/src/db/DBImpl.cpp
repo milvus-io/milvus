@@ -658,6 +658,9 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         return Status{DB_ERROR, "BinaryQuery is null"};
     }
 
+    auto vector_param = query_ptr->vectors.begin()->second;
+    milvus::server::CollectQueryMetrics metrics(vector_param->query_vector.vector_count);
+
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
 
@@ -951,9 +954,12 @@ DBImpl::StartMetricTask() {
 
     server::Metrics::GetInstance().GpuCacheUsageGaugeSet();
     /* SS TODO */
-    // uint64_t size;
-    // Size(size);
-    // server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+    size_t size;
+    auto status = GetDataSize(size);
+    if (!status.ok()) {
+        LOG_ENGINE_WARNING_ << "Get data size failed: " << status.message();
+    }
+    server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
     server::Metrics::GetInstance().CPUUsagePercentSet();
     server::Metrics::GetInstance().RAMUsagePercentSet();
     server::Metrics::GetInstance().GPUPercentGaugeSet();
