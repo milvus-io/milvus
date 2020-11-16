@@ -45,9 +45,11 @@ DeletedDocs::GetBlacklist()  const {
 
 void
 DeletedDocs::GenBlacklist(size_t size) {
-    bitset_ = std::make_shared<faiss::ConcurrentBitset>(size);
-    for (auto& offset : deleted_doc_offsets_) {
-        bitset_->set(offset);
+    if (size > 0) {
+        bitset_ = std::make_shared<faiss::ConcurrentBitset>(size);
+        for (auto& offset : deleted_doc_offsets_) {
+            bitset_->set(offset);
+        }
     }
 }
 

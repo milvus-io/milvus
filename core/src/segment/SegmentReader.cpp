@@ -161,6 +161,10 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        if (raw_visitor->GetFile() == nullptr) {
+            std::string emsg = "File of field " + field_name + " is not found";
+            return Status(DB_FILE_NOT_FOUND, emsg);
+        }
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
@@ -679,6 +683,7 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
+            deleted_docs_ptr->GenBlacklist(GetRowCount());
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
             deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);
