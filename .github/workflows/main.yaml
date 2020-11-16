@@ -9,6 +9,7 @@ on:
       - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
+      - 'build/**'
       - '.github/workflows/main.yaml'
       - '.env'
       - docker-compose.yml
@@ -20,6 +21,7 @@ on:
       - 'scripts/**'
       - 'internal/**'
       - 'cmd/**'
+      - 'build/**'
       - '.github/workflows/main.yaml'
       - '.env'
       - docker-compose.yml
