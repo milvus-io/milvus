@@ -104,6 +104,7 @@ TEST_F(SnapshotTest, CacheTest) {
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(st->id, st2->id);
     }
+    std::cout << Cache::ToString(false) << std::endl;
 }
 
 TEST_F(SnapshotTest, ReferenceProxyTest) {

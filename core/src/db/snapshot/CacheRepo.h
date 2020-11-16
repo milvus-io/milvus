@@ -15,6 +15,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <sstream>
+#include <string>
 #include "utils/Status.h"
 
 namespace milvus {
@@ -35,6 +36,8 @@ class CacheRepo {
     Clear(const IndexT& index);
     static size_t
     IndexSize();
+    static std::string
+    ToString(bool index_only = true);
 
     void
     Cache(const KeyT& key, const T& data);
@@ -45,6 +48,8 @@ class CacheRepo {
     KeyCount() const;
     const IndexT&
     Index() const;
+    std::string
+    ObjectToString(bool meta_only = true, const std::string& start_indent = "") const;
 
     virtual ~CacheRepo();
 
@@ -94,6 +99,73 @@ size_t
 CacheRepo<T, IndexT, KeyT>::IndexSize() {
     std::shared_lock<std::shared_timed_mutex> lock(index_mutex_);
     return root_repo_.size();
+}
+
+template <typename T, typename IndexT, typename KeyT>
+std::string
+CacheRepo<T, IndexT, KeyT>::ToString(bool index_only) {
+    std::stringstream ss;
+    std::string indent = "  ";
+    ss << "CacheRepo<T=" << typeid(T).name() << ", ";
+    ss << "IndexT=" << typeid(IndexT).name() << ", ";
+    ss << "KeyT=" << typeid(KeyT).name() << "> {\n";
+    ss << indent << "IndexSize=" << IndexSize() << ",\n";
+    ss << indent << "Repos={\n";
+    std::string blk_indent = indent + indent;
+    std::string inner_indent = blk_indent + indent;
+    std::string repo_indent = inner_indent + indent;
+    std::string repo_blk_indent = repo_indent + indent;
+    std::shared_lock<std::shared_timed_mutex> lock(index_mutex_);
+
+    for (auto& [index, repo] : root_repo_) {
+        ss << repo->ObjectToString(index_only, blk_indent) << ",\n";
+        /* ss << blk_indent << "{\n"; */
+        /* ss << inner_indent << "Index=" << index << ", \n"; */
+        /* ss << inner_indent << "KeyCount=" << repo->KeyCount() << ",\n"; */
+        /* if (index_only) { */
+        /*     continue; */
+        /* } */
+        /* ss << inner_indent << "Repo={\n"; */
+        /* for (auto& [key, data] : repo->data_repo_) { */
+        /*     ss << repo_indent << "{\n"; */
+        /*     ss << repo_blk_indent << "Key=" << key << "\n"; */
+        /*     ss << repo_indent << "}\n"; */
+        /* } */
+        /* ss << inner_indent << "}\n"; */
+        /* ss << blk_indent << "}\n"; */
+    }
+    ss << indent << "}\n";
+    ss << "}";
+    return ss.str();
+}
+
+template <typename T, typename IndexT, typename KeyT>
+std::string
+CacheRepo<T, IndexT, KeyT>::ObjectToString(bool meta_only, const std::string& start_indent) const {
+    std::string indent = "  ";
+    std::string inner_indent = start_indent + indent;
+    std::string repo_indent = inner_indent + indent;
+    std::string repo_blk_indent = repo_indent + indent;
+    std::stringstream ss;
+    ss << start_indent << "{\n";
+
+    ss << inner_indent << "Index=" << index_ << ", \n";
+    ss << inner_indent << "KeyCount=" << KeyCount() << ",\n";
+    if (meta_only) {
+        ss << start_indent << "}\n";
+        return ss.str();
+    }
+    ss << inner_indent << "Repo={\n";
+    for (auto& [key, data] : data_repo_) {
+        ss << repo_indent << "{\n";
+        ss << repo_blk_indent << "Key=" << key << "\n";
+        ss << repo_indent << "},\n";
+    }
+    ss << inner_indent << "}\n";
+
+    ss << start_indent << "}";
+
+    return ss.str();
 }
 
 template <typename T, typename IndexT, typename KeyT>
