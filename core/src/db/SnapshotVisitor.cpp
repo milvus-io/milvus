@@ -13,8 +13,8 @@
 #include "db/SnapshotHandlers.h"
 #include "db/SnapshotUtils.h"
 #include "db/Types.h"
+#include "db/snapshot/SnapshotHolderCacheHelper.h"
 #include "db/snapshot/Snapshots.h"
-#include "db/snapshot/SnapshotCacheRepo.h"
 #include "value/config/ServerConfig.h"
 
 #include <sstream>

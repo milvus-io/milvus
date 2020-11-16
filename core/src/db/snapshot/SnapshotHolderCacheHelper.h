@@ -21,16 +21,16 @@ namespace snapshot {
 template <typename T>
 class SnapshotHolderCacheHelper {
  public:
-     using Cache = CacheRepo<T, ID_TYPE, ID_TYPE>;
-     using ThisT = SnapshotHolderCacheHelper<T>;
-     struct HookRegistar {
+    using Cache = CacheRepo<T, ID_TYPE, ID_TYPE>;
+    using ThisT = SnapshotHolderCacheHelper<T>;
+    struct HookRegistar {
         HookRegistar() {
             SnapshotHolder::RegisterHooker(ThisT::Hooker);
         }
-     };
+    };
 
-     static void
-     Hooker(Snapshot::Ptr ss);
+    static void
+    Hooker(Snapshot::Ptr ss);
 };
 
 template <typename T>
