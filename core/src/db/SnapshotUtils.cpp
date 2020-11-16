@@ -289,6 +289,25 @@ GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info) {
 }
 
 Status
+GetDataSize(size_t& data_size) {
+    std::vector<std::string> names;
+    STATUS_CHECK(snapshot::Snapshots::GetInstance().GetCollectionNames(names));
+    data_size = 0;
+    for (const auto& collection_name : names) {
+        snapshot::ScopedSnapshotT ss;
+        STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, collection_name));
+
+        auto partition_names = ss->GetPartitionNames();
+        for (auto& name : partition_names) {
+            auto partition = ss->GetPartition(name);
+            auto partition_commit = ss->GetPartitionCommitByPartitionId(partition->GetID());
+            data_size += partition_commit->GetSize();
+        }
+    }
+    return Status::OK();
+}
+
+Status
 GetSegmentRowLimit(const std::string& collection_name, int64_t& segment_row_limit) {
     snapshot::ScopedSnapshotT latest_ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(latest_ss, collection_name));
