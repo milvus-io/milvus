@@ -20,9 +20,9 @@ services:
     environment:
       <<: *ccache
     volumes: &ubuntu-volumes
-      - .:/milvus-distributed:delegated
+      - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-cache:/ccache:delegated
-    working_dir: "/milvus-distributed"
+    working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "
         make build-cpp && make verifiers && make unittest"
@@ -40,7 +40,7 @@ services:
     environment:
       <<: *ccache
     volumes:
-      - .:/milvus-distributed:delegated
+      - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-cache:/ccache:delegated
     container_name: debugger
