@@ -293,10 +293,10 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         if (deleted_docs_ptr) {
             auto& del_docs = deleted_docs_ptr->GetDeletedDocs();
             auto del_bitset = deleted_docs_ptr->GetBlacklist();
-            if (bitset != nullptr) {
+            if (bitset != nullptr && del_bitset != nullptr) {
                 filter_list = (*bitset) | (*del_bitset);
             } else {
-                filter_list = del_bitset;
+                filter_list = (bitset != nullptr) ? bitset : del_bitset;
             }
         } else {
             filter_list = bitset;
