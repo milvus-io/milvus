@@ -70,7 +70,7 @@ struct RangeQuery {
 using RangeQueryPtr = std::shared_ptr<RangeQuery>;
 
 struct VectorRecord {
-    size_t vector_count;
+    size_t vector_count = 0;
     std::vector<float> float_data;
     std::vector<uint8_t> binary_data;
 };
