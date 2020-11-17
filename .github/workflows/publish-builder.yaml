@@ -37,10 +37,15 @@ jobs:
       - name: Get version from system time after release step
         id: extracter
         run: echo "::set-output name=version::$(date +%Y%m%d-%H%M%S)"
+      - name: Docker Pull
+        shell: bash
+        run: |
+          DATE_VERSION=latest docker-compose pull --ignore-pull-failures ubuntu
       - name: Docker Build
         shell: bash
         run: |
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
+          DATE_VERSION=latest docker-compose build ubuntu
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'zilliztech/milvus-distributed'
         continue-on-error: true
@@ -49,3 +54,4 @@ jobs:
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push ubuntu
+          DATE_VERSION=latest docker-compose push ubuntu

@@ -37,12 +37,9 @@ services:
     security_opt: # options needed for gdb debugging
       - seccomp:unconfined
       - apparmor:unconfined
-    environment:
-      <<: *ccache
     volumes:
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-cache:/ccache:delegated
     container_name: debugger
     entrypoint: ["/usr/sbin/sshd", "-D"]
     ports:
