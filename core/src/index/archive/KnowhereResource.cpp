@@ -66,22 +66,6 @@ KnowhereResource::Initialize() {
         return Status(KNOWHERE_UNEXPECTED_ERROR, "FAISS hook fail, CPU not supported!");
     }
 
-    // engine config
-    int64_t omp_thread = config.engine.omp_thread_num();
-
-    if (omp_thread > 0) {
-        omp_set_num_threads(omp_thread);
-        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
-    } else {
-        int64_t sys_thread_cnt = 8;
-        if (milvus::server::GetSystemAvailableThreads(sys_thread_cnt)) {
-            // use half of the available threads
-            omp_thread = (sys_thread_cnt >> 1);
-            omp_set_num_threads(omp_thread);
-            LOG_SERVER_DEBUG_ << "Set openmp thread number: " << omp_thread;
-        }
-    }
-
     // init faiss global variable
     int64_t use_blas_threshold = config.engine.use_blas_threshold();
     faiss::distance_compute_blas_threshold = use_blas_threshold;
