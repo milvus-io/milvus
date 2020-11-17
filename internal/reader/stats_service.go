@@ -13,21 +13,17 @@ import (
 )
 
 type statsService struct {
-	ctx       context.Context
-	pulsarURL string
-
-	msgStream *msgstream.MsgStream
-
-	container *container
+	ctx         context.Context
+	statsStream *msgstream.MsgStream
+	replica     *collectionReplica
 }
 
-func newStatsService(ctx context.Context, container *container, pulsarURL string) *statsService {
+func newStatsService(ctx context.Context, replica *collectionReplica) *statsService {
 
 	return &statsService{
-		ctx:       ctx,
-		pulsarURL: pulsarURL,
-		msgStream: nil,
-		container: container,
+		ctx:         ctx,
+		statsStream: nil,
+		replica:     replica,
 	}
 }
 
@@ -38,16 +34,20 @@ func (sService *statsService) start() {
 	)
 
 	// start pulsar
+	msgStreamURL, err := Params.PulsarAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
 	producerChannels := []string{"statistic"}
 
 	statsStream := msgstream.NewPulsarMsgStream(sService.ctx, receiveBufSize)
-	statsStream.SetPulsarCient(sService.pulsarURL)
+	statsStream.SetPulsarCient(msgStreamURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	sService.msgStream = &statsMsgStream
-	(*sService.msgStream).Start()
+	sService.statsStream = &statsMsgStream
+	(*sService.statsStream).Start()
 
 	// start service
 	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
@@ -62,7 +62,7 @@ func (sService *statsService) start() {
 }
 
 func (sService *statsService) sendSegmentStatistic() {
-	statisticData := (*sService.container).getSegmentStatistics()
+	statisticData := (*sService.replica).getSegmentStatistics()
 
 	// fmt.Println("Publish segment statistic")
 	// fmt.Println(statisticData)
@@ -80,7 +80,7 @@ func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSeg
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	err := (*sService.msgStream).Produce(&msgPack)
+	err := (*sService.statsStream).Produce(&msgPack)
 	if err != nil {
 		log.Println(err)
 	}
