@@ -390,20 +390,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             return Status(DB_ERROR, "Field is not vector type");
         }
 
-        // load deleted doc
-        int64_t row_count = GetRowCount();
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
-        segment::DeletedDocsPtr deleted_docs_ptr;
-        LoadDeletedDocs(deleted_docs_ptr);
-        if (deleted_docs_ptr != nullptr) {
-            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-            if (!deleted_docs.empty()) {
-                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(row_count);
-                for (auto& offset : deleted_docs) {
-                    concurrent_bitset_ptr->set(offset);
-                }
-            }
-        }
         recorder.RecordSection("prepare");
 
         knowhere::BinarySet index_data;
@@ -433,6 +419,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 std::shared_ptr<std::vector<int64_t>> uids_ptr = std::make_shared<std::vector<int64_t>>();
                 STATUS_CHECK(LoadUids(*uids_ptr));
 
+                int64_t row_count = GetRowCount();
                 auto dataset = knowhere::GenDataset(row_count, dimension, raw->data_.data());
 
                 // construct IDMAP index
@@ -448,7 +435,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 index_ptr->Train(knowhere::DatasetPtr(), conf);
                 index_ptr->AddWithoutIds(dataset, conf);
                 index_ptr->SetUids(uids_ptr);
-                index_ptr->SetBlacklist(concurrent_bitset_ptr);
                 segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
@@ -508,7 +494,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(LoadUids(*uids_ptr));
 
         index_ptr->SetUids(uids_ptr);
-        index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
         cache::CpuCacheMgr::GetInstance().InsertItem(index_file_path, index_ptr);  // put into cache
