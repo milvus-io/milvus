@@ -71,9 +71,7 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 				BaseMsg:     baseMsg,
 				TimeTickMsg: timeTickResult,
 			}
-			var tsMsg ms.TsMsg
-			tsMsg = timeTickMsg
-			msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
+			msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 			err = stream.Broadcast(&msgPack)
 			if err != nil {
 				return err

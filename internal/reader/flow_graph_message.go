@@ -9,7 +9,7 @@ type Msg = flowgraph.Msg
 type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 type key2SegMsg struct {
-	tsMessages []*msgstream.TsMsg
+	tsMessages []msgstream.TsMsg
 	timeRange  TimeRange
 }
 

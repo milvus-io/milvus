@@ -21,10 +21,10 @@ type IntPrimaryKey = typeutil.IntPrimaryKey
 type MsgPack struct {
 	BeginTs Timestamp
 	EndTs   Timestamp
-	Msgs    []*TsMsg
+	Msgs    []TsMsg
 }
 
-type RepackFunc func(msgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
+type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 
 type MsgStream interface {
 	Start()
@@ -138,7 +138,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	}
 	reBucketValues := make([][]int32, len(tsMsgs))
 	for channelID, tsMsg := range tsMsgs {
-		hashValues := (*tsMsg).HashKeys()
+		hashValues := tsMsg.HashKeys()
 		bucketValues := make([]int32, len(hashValues))
 		for index, hashValue := range hashValues {
 			bucketValues[index] = hashValue % int32(len(ms.producers))
@@ -151,7 +151,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	if ms.repackFunc != nil {
 		result, err = ms.repackFunc(tsMsgs, reBucketValues)
 	} else {
-		msgType := (*tsMsgs[0]).Type()
+		msgType := (tsMsgs[0]).Type()
 		switch msgType {
 		case internalPb.MsgType_kInsert:
 			result, err = insertRepackFunc(tsMsgs, reBucketValues)
@@ -166,7 +166,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	}
 	for k, v := range result {
 		for i := 0; i < len(v.Msgs); i++ {
-			mb, err := (*v.Msgs[i]).Marshal(v.Msgs[i])
+			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
 				return err
 			}
@@ -184,7 +184,7 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 	producerLen := len(ms.producers)
 	for _, v := range msgPack.Msgs {
-		mb, err := (*v).Marshal(v)
+		mb, err := v.Marshal(v)
 		if err != nil {
 			return err
 		}
@@ -223,7 +223,7 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			tsMsgList := make([]*TsMsg, 0)
+			tsMsgList := make([]TsMsg, 0)
 			for i := 0; i < len(ms.consumers); i++ {
 				consumerChan := (*ms.consumers[i]).Chan()
 				chanLen := len(consumerChan)
@@ -263,8 +263,8 @@ func (ms *PulsarMsgStream) Chan() <-chan *MsgPack {
 
 type PulsarTtMsgStream struct {
 	PulsarMsgStream
-	inputBuf      []*TsMsg
-	unsolvedBuf   []*TsMsg
+	inputBuf      []TsMsg
+	unsolvedBuf   []TsMsg
 	lastTimeStamp Timestamp
 }
 
@@ -290,8 +290,8 @@ func (ms *PulsarTtMsgStream) Start() {
 
 func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.unsolvedBuf = make([]*TsMsg, 0)
-	ms.inputBuf = make([]*TsMsg, 0)
+	ms.unsolvedBuf = make([]TsMsg, 0)
+	ms.inputBuf = make([]TsMsg, 0)
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -310,11 +310,11 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 				log.Printf("All timeTick's timestamps are inconsistent")
 			}
 
-			timeTickBuf := make([]*TsMsg, 0)
+			timeTickBuf := make([]TsMsg, 0)
 			ms.inputBuf = append(ms.inputBuf, ms.unsolvedBuf...)
 			ms.unsolvedBuf = ms.unsolvedBuf[:0]
 			for _, v := range ms.inputBuf {
-				if (*v).EndTs() <= timeStamp {
+				if v.EndTs() <= timeStamp {
 					timeTickBuf = append(timeTickBuf, v)
 				} else {
 					ms.unsolvedBuf = append(ms.unsolvedBuf, v)
@@ -362,7 +362,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
 			if headerMsg.MsgType == internalPb.MsgType_kTimeTick {
-				eofMsgMap[channelIndex] = (*tsMsg).(*TimeTickMsg).Timestamp
+				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Timestamp
 				return
 			}
 			mu.Lock()
@@ -385,13 +385,13 @@ func checkTimeTickMsg(msg map[int]Timestamp) (Timestamp, bool) {
 	return 0, false
 }
 
-func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+func insertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
-		if (*request).Type() != internalPb.MsgType_kInsert {
+		if request.Type() != internalPb.MsgType_kInsert {
 			return nil, errors.New(string("msg's must be Insert"))
 		}
-		insertRequest := (*request).(*InsertMsg)
+		insertRequest := request.(*InsertMsg)
 		keys := hashKeys[i]
 
 		timestampLen := len(insertRequest.Timestamps)
@@ -422,23 +422,22 @@ func insertRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 				RowData:        []*commonPb.Blob{insertRequest.RowData[index]},
 			}
 
-			var msg TsMsg = &InsertMsg{
+			insertMsg := &InsertMsg{
 				InsertRequest: sliceRequest,
 			}
-
-			result[key].Msgs = append(result[key].Msgs, &msg)
+			result[key].Msgs = append(result[key].Msgs, insertMsg)
 		}
 	}
 	return result, nil
 }
 
-func deleteRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+func deleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
-		if (*request).Type() != internalPb.MsgType_kDelete {
+		if request.Type() != internalPb.MsgType_kDelete {
 			return nil, errors.New(string("msg's must be Delete"))
 		}
-		deleteRequest := (*request).(*DeleteMsg)
+		deleteRequest := request.(*DeleteMsg)
 		keys := hashKeys[i]
 
 		timestampLen := len(deleteRequest.Timestamps)
@@ -466,17 +465,16 @@ func deleteRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 				PrimaryKeys:    []int64{deleteRequest.PrimaryKeys[index]},
 			}
 
-			var msg TsMsg = &DeleteMsg{
+			deleteMsg := &DeleteMsg{
 				DeleteRequest: sliceRequest,
 			}
-
-			result[key].Msgs = append(result[key].Msgs, &msg)
+			result[key].Msgs = append(result[key].Msgs, deleteMsg)
 		}
 	}
 	return result, nil
 }
 
-func defaultRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+func defaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
 		keys := hashKeys[i]
@@ -489,7 +487,6 @@ func defaultRepackFunc(tsMsgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack,
 			msgPack := MsgPack{}
 			result[key] = &msgPack
 		}
-
 		result[key].Msgs = append(result[key].Msgs, request)
 	}
 	return result, nil

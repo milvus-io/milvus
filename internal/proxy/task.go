@@ -66,9 +66,9 @@ func (it *InsertTask) Execute() error {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: it.BeginTs(),
 		EndTs:   it.EndTs(),
-		Msgs:    make([]*msgstream.TsMsg, 1),
+		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	msgPack.Msgs[0] = &tsMsg
+	msgPack.Msgs[0] = tsMsg
 	err := it.manipulationMsgStream.Produce(msgPack)
 	it.result = &servicepb.IntegerRangeResponse{
 		Status: &commonpb.Status{
@@ -281,9 +281,9 @@ func (qt *QueryTask) Execute() error {
 	msgPack := &msgstream.MsgPack{
 		BeginTs: qt.Timestamp,
 		EndTs:   qt.Timestamp,
-		Msgs:    make([]*msgstream.TsMsg, 1),
+		Msgs:    make([]msgstream.TsMsg, 1),
 	}
-	msgPack.Msgs[0] = &tsMsg
+	msgPack.Msgs[0] = tsMsg
 	qt.queryMsgStream.Produce(msgPack)
 	return nil
 }

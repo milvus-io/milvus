@@ -10,17 +10,16 @@ import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func newInsertMsgUnmarshal(input []byte) (*TsMsg, error) {
+func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 	fmt.Println("use func newInsertMsgUnmarshal unmarshal")
-
 	if err != nil {
 		return nil, err
 	}
-	var tsMsg TsMsg = insertMsg
-	return &tsMsg, nil
+
+	return insertMsg, nil
 }
 
 func TestStream_unmarshal_Insert(t *testing.T) {
@@ -59,7 +58,7 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 			msgs := result.Msgs
 			for _, v := range msgs {
 				receiveCount++
-				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v, "msg tag: ")
+				fmt.Println("msg type: ", v.Type(), ", msg value: ", v, "msg tag: ")
 			}
 		}
 		if receiveCount >= len(msgPack.Msgs) {

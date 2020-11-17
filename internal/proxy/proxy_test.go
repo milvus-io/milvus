@@ -297,10 +297,9 @@ func TestProxy_Search(t *testing.T) {
 						},
 					}
 					msgPack := &msgstream.MsgPack{
-						Msgs: make([]*msgstream.TsMsg, 1),
+						Msgs: make([]msgstream.TsMsg, 1),
 					}
-					var tsMsg msgstream.TsMsg = searchResultMsg
-					msgPack.Msgs[0] = &tsMsg
+					msgPack.Msgs[0] = searchResultMsg
 					queryResultMsgStream.Produce(msgPack)
 				}
 				i++

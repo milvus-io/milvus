@@ -28,7 +28,7 @@ func (plan *Plan) GetTopK() int64 {
 	return int64(topK)
 }
 
-func (plan *Plan) DeletePlan() {
+func (plan *Plan) Delete() {
 	C.DeletePlan(plan.cPlan)
 }
 
@@ -49,6 +49,6 @@ func (pg *PlaceholderGroup) GetNumOfQuery() int64 {
 	return int64(numQueries)
 }
 
-func (pg *PlaceholderGroup) DeletePlaceholderGroup() {
+func (pg *PlaceholderGroup) Delete() {
 	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
 }

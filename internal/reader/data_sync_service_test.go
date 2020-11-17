@@ -121,7 +121,7 @@ func TestManipulationService_Start(t *testing.T) {
 	}
 
 	// messages generate
-	insertMessages := make([]*msgstream.TsMsg, 0)
+	insertMessages := make([]msgstream.TsMsg, 0)
 	for i := 0; i < msgLength; i++ {
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
@@ -145,7 +145,7 @@ func TestManipulationService_Start(t *testing.T) {
 				},
 			},
 		}
-		insertMessages = append(insertMessages, &msg)
+		insertMessages = append(insertMessages, msg)
 	}
 
 	msgPack := msgstream.MsgPack{

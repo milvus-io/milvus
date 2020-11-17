@@ -187,7 +187,7 @@ func (p *Proxy) queryResultLoop() {
 				continue
 			}
 			tsMsg := msgPack.Msgs[0]
-			searchResultMsg, _ := (*tsMsg).(*msgstream.SearchResultMsg)
+			searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
 			reqID := searchResultMsg.GetReqID()
 			_, ok = queryResultBuf[reqID]
 			if !ok {

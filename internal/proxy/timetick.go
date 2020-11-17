@@ -74,14 +74,14 @@ func (tt *timeTick) tick() error {
 		return nil
 	}
 	msgPack := msgstream.MsgPack{}
-	var timeTickMsg msgstream.TsMsg = &msgstream.TimeTickMsg{
+	timeTickMsg := &msgstream.TimeTickMsg{
 		TimeTickMsg: internalpb.TimeTickMsg{
 			MsgType:   internalpb.MsgType_kTimeTick,
 			PeerID:    tt.peerID,
 			Timestamp: tt.currentTick,
 		},
 	}
-	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	tt.tickMsgStream.Produce(&msgPack)
 	tt.lastTick = tt.currentTick
 	return nil

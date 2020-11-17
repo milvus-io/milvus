@@ -10,7 +10,7 @@ import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func repackFunc(msgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
+func repackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
 	for i, request := range msgs {
 		keys := hashKeys[i]
@@ -26,8 +26,7 @@ func repackFunc(msgs []*TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	return result, nil
 }
 
-func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
-	var tsMsg TsMsg
+func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -51,7 +50,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:       baseMsg,
 			InsertRequest: insertRequest,
 		}
-		tsMsg = insertMsg
+		return insertMsg
 	case internalPb.MsgType_kDelete:
 		deleteRequest := internalPb.DeleteRequest{
 			MsgType:        internalPb.MsgType_kDelete,
@@ -66,7 +65,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:       baseMsg,
 			DeleteRequest: deleteRequest,
 		}
-		tsMsg = deleteMsg
+		return deleteMsg
 	case internalPb.MsgType_kSearch:
 		searchRequest := internalPb.SearchRequest{
 			MsgType:         internalPb.MsgType_kSearch,
@@ -79,7 +78,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:       baseMsg,
 			SearchRequest: searchRequest,
 		}
-		tsMsg = searchMsg
+		return searchMsg
 	case internalPb.MsgType_kSearchResult:
 		searchResult := internalPb.SearchResult{
 			MsgType:         internalPb.MsgType_kSearchResult,
@@ -94,7 +93,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:      baseMsg,
 			SearchResult: searchResult,
 		}
-		tsMsg = searchResultMsg
+		return searchResultMsg
 	case internalPb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
 			MsgType:   internalPb.MsgType_kTimeTick,
@@ -105,7 +104,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:     baseMsg,
 			TimeTickMsg: timeTickResult,
 		}
-		tsMsg = timeTickMsg
+		return timeTickMsg
 	case internalPb.MsgType_kQueryNodeSegStats:
 		queryNodeSegStats := internalPb.QueryNodeSegStats{
 			MsgType: internalPb.MsgType_kQueryNodeSegStats,
@@ -115,13 +114,12 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) *TsMsg {
 			BaseMsg:           baseMsg,
 			QueryNodeSegStats: queryNodeSegStats,
 		}
-		tsMsg = queryNodeSegStatsMsg
+		return queryNodeSegStatsMsg
 	}
-	return &tsMsg
+	return nil
 }
 
-func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) *TsMsg {
-	var tsMsg TsMsg
+func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -136,8 +134,7 @@ func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) *TsMsg {
 		BaseMsg:     baseMsg,
 		TimeTickMsg: timeTickResult,
 	}
-	tsMsg = timeTickMsg
-	return &tsMsg
+	return timeTickMsg
 }
 
 func initPulsarStream(pulsarAddress string,
@@ -202,7 +199,7 @@ func receiveMsg(outputStream *MsgStream, msgCount int) {
 			msgs := result.Msgs
 			for _, v := range msgs {
 				receiveCount++
-				fmt.Println("msg type: ", (*v).Type(), ", msg value: ", *v)
+				fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
 			}
 		}
 		if receiveCount >= msgCount {
@@ -381,9 +378,9 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		BaseMsg:       baseMsg,
 		InsertRequest: insertRequest,
 	}
-	var tsMsg TsMsg = insertMsg
+
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
+	msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarCient(pulsarAddress)
@@ -431,9 +428,9 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		BaseMsg:       baseMsg,
 		DeleteRequest: deleteRequest,
 	}
-	var tsMsg TsMsg = deleteMsg
+
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
+	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarCient(pulsarAddress)

@@ -12,8 +12,8 @@ type TsMsg interface {
 	EndTs() Timestamp
 	Type() MsgType
 	HashKeys() []int32
-	Marshal(*TsMsg) ([]byte, error)
-	Unmarshal([]byte) (*TsMsg, error)
+	Marshal(TsMsg) ([]byte, error)
+	Unmarshal([]byte) (TsMsg, error)
 }
 
 type BaseMsg struct {
@@ -44,8 +44,8 @@ func (it *InsertMsg) Type() MsgType {
 	return it.MsgType
 }
 
-func (it *InsertMsg) Marshal(input *TsMsg) ([]byte, error) {
-	insertMsg := (*input).(*InsertMsg)
+func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
+	insertMsg := input.(*InsertMsg)
 	insertRequest := &insertMsg.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
 	if err != nil {
@@ -54,7 +54,7 @@ func (it *InsertMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (it *InsertMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
 	insertRequest := internalPb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	if err != nil {
@@ -75,8 +75,7 @@ func (it *InsertMsg) Unmarshal(input []byte) (*TsMsg, error) {
 		}
 	}
 
-	var tsMsg TsMsg = insertMsg
-	return &tsMsg, nil
+	return insertMsg, nil
 }
 
 /////////////////////////////////////////Delete//////////////////////////////////////////
@@ -89,8 +88,8 @@ func (dt *DeleteMsg) Type() MsgType {
 	return dt.MsgType
 }
 
-func (dt *DeleteMsg) Marshal(input *TsMsg) ([]byte, error) {
-	deleteTask := (*input).(*DeleteMsg)
+func (dt *DeleteMsg) Marshal(input TsMsg) ([]byte, error) {
+	deleteTask := input.(*DeleteMsg)
 	deleteRequest := &deleteTask.DeleteRequest
 	mb, err := proto.Marshal(deleteRequest)
 	if err != nil {
@@ -99,7 +98,7 @@ func (dt *DeleteMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (dt *DeleteMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (dt *DeleteMsg) Unmarshal(input []byte) (TsMsg, error) {
 	deleteRequest := internalPb.DeleteRequest{}
 	err := proto.Unmarshal(input, &deleteRequest)
 	if err != nil {
@@ -120,8 +119,7 @@ func (dt *DeleteMsg) Unmarshal(input []byte) (*TsMsg, error) {
 		}
 	}
 
-	var tsMsg TsMsg = deleteMsg
-	return &tsMsg, nil
+	return deleteMsg, nil
 }
 
 /////////////////////////////////////////Search//////////////////////////////////////////
@@ -134,8 +132,8 @@ func (st *SearchMsg) Type() MsgType {
 	return st.MsgType
 }
 
-func (st *SearchMsg) Marshal(input *TsMsg) ([]byte, error) {
-	searchTask := (*input).(*SearchMsg)
+func (st *SearchMsg) Marshal(input TsMsg) ([]byte, error) {
+	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
 	mb, err := proto.Marshal(searchRequest)
 	if err != nil {
@@ -144,7 +142,7 @@ func (st *SearchMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (st *SearchMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (st *SearchMsg) Unmarshal(input []byte) (TsMsg, error) {
 	searchRequest := internalPb.SearchRequest{}
 	err := proto.Unmarshal(input, &searchRequest)
 	if err != nil {
@@ -154,8 +152,7 @@ func (st *SearchMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	searchMsg.BeginTimestamp = searchMsg.Timestamp
 	searchMsg.EndTimestamp = searchMsg.Timestamp
 
-	var tsMsg TsMsg = searchMsg
-	return &tsMsg, nil
+	return searchMsg, nil
 }
 
 /////////////////////////////////////////SearchResult//////////////////////////////////////////
@@ -168,8 +165,8 @@ func (srt *SearchResultMsg) Type() MsgType {
 	return srt.MsgType
 }
 
-func (srt *SearchResultMsg) Marshal(input *TsMsg) ([]byte, error) {
-	searchResultTask := (*input).(*SearchResultMsg)
+func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
+	searchResultTask := input.(*SearchResultMsg)
 	searchResultRequest := &searchResultTask.SearchResult
 	mb, err := proto.Marshal(searchResultRequest)
 	if err != nil {
@@ -178,7 +175,7 @@ func (srt *SearchResultMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (srt *SearchResultMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (srt *SearchResultMsg) Unmarshal(input []byte) (TsMsg, error) {
 	searchResultRequest := internalPb.SearchResult{}
 	err := proto.Unmarshal(input, &searchResultRequest)
 	if err != nil {
@@ -188,8 +185,7 @@ func (srt *SearchResultMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	searchResultMsg.BeginTimestamp = searchResultMsg.Timestamp
 	searchResultMsg.EndTimestamp = searchResultMsg.Timestamp
 
-	var tsMsg TsMsg = searchResultMsg
-	return &tsMsg, nil
+	return searchResultMsg, nil
 }
 
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
@@ -202,8 +198,8 @@ func (tst *TimeTickMsg) Type() MsgType {
 	return tst.MsgType
 }
 
-func (tst *TimeTickMsg) Marshal(input *TsMsg) ([]byte, error) {
-	timeTickTask := (*input).(*TimeTickMsg)
+func (tst *TimeTickMsg) Marshal(input TsMsg) ([]byte, error) {
+	timeTickTask := input.(*TimeTickMsg)
 	timeTick := &timeTickTask.TimeTickMsg
 	mb, err := proto.Marshal(timeTick)
 	if err != nil {
@@ -212,7 +208,7 @@ func (tst *TimeTickMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (tst *TimeTickMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
 	timeTickMsg := internalPb.TimeTickMsg{}
 	err := proto.Unmarshal(input, &timeTickMsg)
 	if err != nil {
@@ -222,8 +218,7 @@ func (tst *TimeTickMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	timeTick.BeginTimestamp = timeTick.Timestamp
 	timeTick.EndTimestamp = timeTick.Timestamp
 
-	var tsMsg TsMsg = timeTick
-	return &tsMsg, nil
+	return timeTick, nil
 }
 
 /////////////////////////////////////////QueryNodeSegStats//////////////////////////////////////////
@@ -236,8 +231,8 @@ func (qs *QueryNodeSegStatsMsg) Type() MsgType {
 	return qs.MsgType
 }
 
-func (qs *QueryNodeSegStatsMsg) Marshal(input *TsMsg) ([]byte, error) {
-	queryNodeSegStatsTask := (*input).(*QueryNodeSegStatsMsg)
+func (qs *QueryNodeSegStatsMsg) Marshal(input TsMsg) ([]byte, error) {
+	queryNodeSegStatsTask := input.(*QueryNodeSegStatsMsg)
 	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeSegStats
 	mb, err := proto.Marshal(queryNodeSegStats)
 	if err != nil {
@@ -246,7 +241,7 @@ func (qs *QueryNodeSegStatsMsg) Marshal(input *TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (qs *QueryNodeSegStatsMsg) Unmarshal(input []byte) (*TsMsg, error) {
+func (qs *QueryNodeSegStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
 	queryNodeSegStats := internalPb.QueryNodeSegStats{}
 	err := proto.Unmarshal(input, &queryNodeSegStats)
 	if err != nil {
@@ -254,8 +249,7 @@ func (qs *QueryNodeSegStatsMsg) Unmarshal(input []byte) (*TsMsg, error) {
 	}
 	queryNodeSegStatsMsg := &QueryNodeSegStatsMsg{QueryNodeSegStats: queryNodeSegStats}
 
-	var tsMsg TsMsg = queryNodeSegStatsMsg
-	return &tsMsg, nil
+	return queryNodeSegStatsMsg, nil
 }
 
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
