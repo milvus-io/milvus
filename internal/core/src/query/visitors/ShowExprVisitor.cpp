@@ -132,10 +132,16 @@ ShowExprVisitor::visit(TermExpr& expr) {
 
 template <typename T>
 static Json
-CondtionExtract(const RangeExpr& expr_raw) {
-    auto expr = dynamic_cast<const TermExprImpl<T>*>(&expr_raw);
+ConditionExtract(const RangeExpr& expr_raw) {
+    auto expr = dynamic_cast<const RangeExprImpl<T>*>(&expr_raw);
     Assert(expr);
-    return Json{expr->terms_};
+    std::map<std::string, T> mapping;
+    for (auto [op, v] : expr->conditions_) {
+        // TODO: use name
+        auto op_name = "op(" + std::to_string((int)op) + ")";
+        mapping[op_name] = v;
+    }
+    return mapping;
 }
 
 void
@@ -145,19 +151,19 @@ ShowExprVisitor::visit(RangeExpr& expr) {
     auto conditions = [&] {
         switch (expr.data_type_) {
             case DataType::BOOL:
-                return CondtionExtract<bool>(expr);
+                return ConditionExtract<bool>(expr);
             case DataType::INT8:
-                return CondtionExtract<int8_t>(expr);
+                return ConditionExtract<int8_t>(expr);
             case DataType::INT16:
-                return CondtionExtract<int16_t>(expr);
+                return ConditionExtract<int16_t>(expr);
             case DataType::INT32:
-                return CondtionExtract<int32_t>(expr);
+                return ConditionExtract<int32_t>(expr);
             case DataType::INT64:
-                return CondtionExtract<int64_t>(expr);
+                return ConditionExtract<int64_t>(expr);
             case DataType::DOUBLE:
-                return CondtionExtract<double>(expr);
+                return ConditionExtract<double>(expr);
             case DataType::FLOAT:
-                return CondtionExtract<float>(expr);
+                return ConditionExtract<float>(expr);
             default:
                 PanicInfo("unsupported type");
         }
@@ -167,5 +173,6 @@ ShowExprVisitor::visit(RangeExpr& expr) {
              {"field_id", expr.field_id_},
              {"data_type", datatype_name(expr.data_type_)},
              {"conditions", std::move(conditions)}};
+    ret_ = res;
 }
 }  // namespace milvus::query

@@ -37,6 +37,7 @@ struct QueryInfo {
 struct VectorPlanNode : PlanNode {
     std::optional<ExprPtr> predicate_;
     QueryInfo query_info_;
+    std::string placeholder_tag_;
 
  public:
     virtual void
@@ -44,16 +45,12 @@ struct VectorPlanNode : PlanNode {
 };
 
 struct FloatVectorANNS : VectorPlanNode {
-    std::string placeholder_tag_;
-
  public:
     void
     accept(PlanNodeVisitor&) override;
 };
 
 struct BinaryVectorANNS : VectorPlanNode {
-    std::string placeholder_tag_;
-
  public:
     void
     accept(PlanNodeVisitor&) override;

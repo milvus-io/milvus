@@ -9,7 +9,6 @@ struct TermExprImpl : TermExpr {
 
 template <typename T>
 struct RangeExprImpl : RangeExpr {
-    enum class OpType { LessThan, LessEqual, GreaterThan, GreaterEqual, Equal, NotEqual };
     std::vector<std::tuple<OpType, T>> conditions_;
 };
 
