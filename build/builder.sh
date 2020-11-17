@@ -18,6 +18,9 @@ if [ "${1-}" = "gdbserver" ]; then
     chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
     docker-compose pull --ignore-pull-failures gdbserver
+    if [ "${CHECK_BUILDER:-}" == "1" ]; then
+        docker-compose build gdbserver
+    fi
     docker-compose up -d gdbserver
     exit 0
 fi
@@ -39,6 +42,9 @@ mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-cache"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures ubuntu
+if [ "${CHECK_BUILDER:-}" == "1" ]; then
+    docker-compose build ubuntu
+fi
 docker-compose run --rm -u "$uid:$gid" ubuntu "$@"
 
 popd

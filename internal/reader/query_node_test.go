@@ -23,6 +23,10 @@ func TestQueryNode_start(t *testing.T) {
 		ctx = context.Background()
 	}
 
-	node := NewQueryNode(ctx, 0)
+	pulsarAddr, err := Params.PulsarAddress()
+	if err != nil {
+		panic(err)
+	}
+	node := NewQueryNode(ctx, 0, "pulsar://"+pulsarAddr)
 	node.Start()
 }

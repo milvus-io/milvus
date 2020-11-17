@@ -73,7 +73,7 @@ func TestMetaTable_Collection(t *testing.T) {
 			Name: "coll2",
 		},
 		CreateTime:    0,
-		SegmentIDs:    []UniqueID{},
+		SegmentIDs:    []UniqueID{1},
 		PartitionTags: []string{"1"},
 	}
 	segID1 := pb.SegmentMeta{
@@ -121,16 +121,11 @@ func TestMetaTable_Collection(t *testing.T) {
 	assert.Nil(t, err)
 	err = meta.AddSegment(&segID3)
 	assert.Nil(t, err)
-	getColMeta, err := meta.GetCollectionByName("coll5")
-	assert.NotNil(t, err)
-	assert.Nil(t, getColMeta)
-	getColMeta, err = meta.GetCollectionByName(colMeta.Schema.Name)
+	getColMeta, err := meta.GetCollectionByName(colMeta.Schema.Name)
 	assert.Nil(t, err)
 	assert.Equal(t, 3, len(getColMeta.SegmentIDs))
 	err = meta.DeleteCollection(colMeta.ID)
 	assert.Nil(t, err)
-	err = meta.DeleteCollection(500)
-	assert.NotNil(t, err)
 	hasCollection = meta.HasCollection(colMeta.ID)
 	assert.False(t, hasCollection)
 	_, err = meta.GetSegmentByID(segID1.SegmentID)
@@ -198,14 +193,10 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	}
 	err = meta.AddCollection(&colMeta)
 	assert.Nil(t, err)
-	err = meta.AddPartition(500, "p1")
-	assert.NotNil(t, err)
 	err = meta.AddPartition(colMeta.ID, "p1")
 	assert.Nil(t, err)
 	err = meta.AddPartition(colMeta.ID, "p2")
 	assert.Nil(t, err)
-	err = meta.AddPartition(colMeta.ID, "p2")
-	assert.NotNil(t, err)
 	err = meta.AddSegment(&segID1)
 	assert.Nil(t, err)
 	err = meta.AddSegment(&segID2)
@@ -218,8 +209,6 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 	assert.Equal(t, 3, len(afterCollMeta.SegmentIDs))
 	err = meta.DeletePartition(100, "p1")
 	assert.Nil(t, err)
-	err = meta.DeletePartition(500, "p1")
-	assert.NotNil(t, err)
 	afterCollMeta, err = meta.GetCollectionByName("coll1")
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(afterCollMeta.PartitionTags))
@@ -296,16 +285,12 @@ func TestMetaTable_Segment(t *testing.T) {
 	assert.Equal(t, &segMeta, getSegMeta)
 	err = meta.CloseSegment(segMeta.SegmentID, Timestamp(11), 111)
 	assert.Nil(t, err)
-	err = meta.CloseSegment(1000, Timestamp(11), 111)
-	assert.NotNil(t, err)
 	getSegMeta, err = meta.GetSegmentByID(segMeta.SegmentID)
 	assert.Nil(t, err)
 	assert.Equal(t, getSegMeta.NumRows, int64(111))
 	assert.Equal(t, getSegMeta.CloseTime, uint64(11))
 	err = meta.DeleteSegment(segMeta.SegmentID)
 	assert.Nil(t, err)
-	err = meta.DeleteSegment(1000)
-	assert.NotNil(t, err)
 	getSegMeta, err = meta.GetSegmentByID(segMeta.SegmentID)
 	assert.Nil(t, getSegMeta)
 	assert.NotNil(t, err)

@@ -59,5 +59,7 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose up -d
       - name: Build and UnitTest
+        env:
+          CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh

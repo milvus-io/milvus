@@ -14,14 +14,18 @@ import "C"
 
 import (
 	"context"
+	"sync"
 )
 
 type QueryNode struct {
 	ctx context.Context
 
 	QueryNodeID uint64
+	pulsarURL   string
 
-	replica *collectionReplica
+	tSafe tSafe
+
+	container *container
 
 	dataSyncService *dataSyncService
 	metaService     *metaService
@@ -29,21 +33,36 @@ type QueryNode struct {
 	statsService    *statsService
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
+type tSafe interface {
+	getTSafe() Timestamp
+	setTSafe(t Timestamp)
+}
+
+type serviceTime struct {
+	tSafeMu sync.Mutex
+	time    Timestamp
+}
+
+func NewQueryNode(ctx context.Context, queryNodeID uint64, pulsarURL string) *QueryNode {
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
-	var replica collectionReplica = &collectionReplicaImpl{
+	var container container = &colSegContainer{
 		collections: collections,
 		segments:    segmentsMap,
 	}
+
+	var tSafe tSafe = &serviceTime{}
 
 	return &QueryNode{
 		ctx: ctx,
 
 		QueryNodeID: queryNodeID,
+		pulsarURL:   pulsarURL,
 
-		replica: &replica,
+		tSafe: tSafe,
+
+		container: &container,
 
 		dataSyncService: nil,
 		metaService:     nil,
@@ -53,10 +72,10 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 }
 
 func (node *QueryNode) Start() {
-	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
-	node.searchService = newSearchService(node.ctx, node.replica)
-	node.metaService = newMetaService(node.ctx, node.replica)
-	node.statsService = newStatsService(node.ctx, node.replica)
+	node.dataSyncService = newDataSyncService(node.ctx, node, node.pulsarURL)
+	node.searchService = newSearchService(node.ctx, node, node.pulsarURL)
+	node.metaService = newMetaService(node.ctx, node.container)
+	node.statsService = newStatsService(node.ctx, node.container, node.pulsarURL)
 
 	go node.dataSyncService.start()
 	// go node.searchService.start()
@@ -66,4 +85,16 @@ func (node *QueryNode) Start() {
 
 func (node *QueryNode) Close() {
 	// TODO: close services
+}
+
+func (st *serviceTime) getTSafe() Timestamp {
+	st.tSafeMu.Lock()
+	defer st.tSafeMu.Unlock()
+	return st.time
+}
+
+func (st *serviceTime) setTSafe(t Timestamp) {
+	st.tSafeMu.Lock()
+	st.time = t
+	st.tSafeMu.Unlock()
 }
