@@ -668,7 +668,11 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
-            deleted_docs_ptr->GenBlacklist(GetRowCount());
+            auto id = segment_visitor_->GetSegment()->GetID();
+            auto sc = segment_visitor_->GetSnapshot()->GetSegmentCommitBySegmentId(id);
+            if (sc) {
+                deleted_docs_ptr->GenBlacklist(sc->GetRowCount());
+            }
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
             deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);

@@ -13,12 +13,12 @@
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
-#include <src/cache/CpuCacheMgr.h>
 #include <algorithm>
 #include <experimental/filesystem>
 #include <set>
 #include <string>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/merge/MergeAdaptiveStrategy.h"
