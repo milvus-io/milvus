@@ -60,6 +60,7 @@ set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
 include( CTest )
 include( BuildUtils )
 include( DefineOptions )
+using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 include( ExternalProject )
 include( FetchContent )
