@@ -1,15 +1,20 @@
 package reader
 
 import (
+	"context"
 	"encoding/binary"
+	"log"
 	"math"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -534,85 +539,132 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-//func TestSegment_segmentSearch(t *testing.T) {
-//	ctx := context.Background()
-//	// 1. Construct node, collection, partition and segment
-//	pulsarURL := "pulsar://localhost:6650"
-//	node := NewQueryNode(ctx, 0, pulsarURL)
-//	var collection = node.newCollection(0, "collection0", "")
-//	var partition = collection.newPartition("partition0")
-//	var segment = partition.newSegment(0)
-//
-//	node.SegmentsMap[int64(0)] = segment
-//
-//	assert.Equal(t, collection.CollectionName, "collection0")
-//	assert.Equal(t, partition.partitionTag, "partition0")
-//	assert.Equal(t, segment.SegmentID, int64(0))
-//	assert.Equal(t, len(node.SegmentsMap), 1)
-//
-//	// 2. Create ids and timestamps
-//	ids := make([]int64, 0)
-//	timestamps := make([]uint64, 0)
-//
-//	// 3. Create records, use schema below:
-//	// schema_tmp->AddField("fakeVec", DataType::VECTOR_FLOAT, 16);
-//	// schema_tmp->AddField("age", DataType::INT32);
-//	const DIM = 16
-//	const N = 100
-//	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-//	var rawData []byte
-//	for _, ele := range vec {
-//		buf := make([]byte, 4)
-//		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
-//		rawData = append(rawData, buf...)
-//	}
-//	bs := make([]byte, 4)
-//	binary.LittleEndian.PutUint32(bs, 1)
-//	rawData = append(rawData, bs...)
-//	var records []*commonpb.Blob
-//	for i := 0; i < N; i++ {
-//		blob := &commonpb.Blob{
-//			Value: rawData,
-//		}
-//		ids = append(ids, int64(i))
-//		timestamps = append(timestamps, uint64(i+1))
-//		records = append(records, blob)
-//	}
-//
-//	// 4. Do PreInsert
-//	var offset = segment.segmentPreInsert(N)
-//	assert.GreaterOrEqual(t, offset, int64(0))
-//
-//	// 5. Do Insert
-//	var err = segment.segmentInsert(offset, &ids, &timestamps, &records)
-//	assert.NoError(t, err)
-//
-//	// 6. Do search
-//	var queryJSON = "{\"field_name\":\"fakevec\",\"num_queries\":1,\"topK\":10}"
-//	var queryRawData = make([]float32, 0)
-//	for i := 0; i < 16; i++ {
-//		queryRawData = append(queryRawData, float32(i))
-//	}
-//	var vectorRecord = msgPb.VectorRowRecord{
-//		FloatData: queryRawData,
-//	}
-//
-//	sService := searchService{}
-//	query := sService.queryJSON2Info(&queryJSON)
-//	var searchRes, searchErr = segment.segmentSearch(query, timestamps[N/2], &vectorRecord)
-//	assert.NoError(t, searchErr)
-//	fmt.Println(searchRes)
-//
-//	// 7. Destruct collection, partition and segment
-//	partition.deleteSegment(node, segment)
-//	collection.deletePartition(node, partition)
-//	node.deleteCollection(collection)
-//
-//	assert.Equal(t, len(node.Collections), 0)
-//	assert.Equal(t, len(node.SegmentsMap), 0)
-//
-//	node.Close()
-//}
+func TestSegment_segmentSearch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fieldVec := schemapb.FieldSchema{
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name: "collection0",
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	collection := newCollection(&collectionMeta, collectionMetaBlob)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+
+	segmentID := UniqueID(0)
+	segment := newSegment(collection, segmentID)
+	assert.Equal(t, segmentID, segment.segmentID)
+
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
+
+	const DIM = 16
+	const N = 3
+	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	var rawData []byte
+	for _, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		rawData = append(rawData, buf...)
+	}
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, 1)
+	rawData = append(rawData, bs...)
+	var records []*commonpb.Blob
+	for i := 0; i < N; i++ {
+		blob := &commonpb.Blob{
+			Value: rawData,
+		}
+		records = append(records, blob)
+	}
+
+	var offset = segment.segmentPreInsert(N)
+	assert.GreaterOrEqual(t, offset, int64(0))
+
+	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
+
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+
+	pulsarURL := "pulsar://localhost:6650"
+	const receiveBufSize = 1024
+	searchProducerChannels := []string{"search"}
+	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchStream.SetPulsarCient(pulsarURL)
+	searchStream.CreatePulsarProducers(searchProducerChannels)
+
+	var searchRawData []byte
+	for _, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		searchRawData = append(searchRawData, buf...)
+	}
+	placeholderValue := servicepb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Values: [][]byte{searchRawData},
+	}
+
+	placeholderGroup := servicepb.PlaceholderGroup{
+		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	}
+
+	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
+	if err != nil {
+		log.Print("marshal placeholderGroup failed")
+	}
+
+	searchTimestamp := Timestamp(1020)
+	cPlan := CreatePlan(*collection, dslString)
+	topK := cPlan.GetTopK()
+	cPlaceholderGroup := ParserPlaceholderGroup(cPlan, placeHolderGroupBlob)
+	placeholderGroups := make([]*PlaceholderGroup, 0)
+	placeholderGroups = append(placeholderGroups, cPlaceholderGroup)
+
+	var numQueries int64 = 0
+	for _, pg := range placeholderGroups {
+		numQueries += pg.GetNumOfQuery()
+	}
+
+	_, err = segment.segmentSearch(cPlan, placeholderGroups, []Timestamp{searchTimestamp}, numQueries, topK)
+	assert.NoError(t, err)
+}
 
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {

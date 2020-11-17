@@ -1,29 +1,27 @@
 package reader
 
+import "C"
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
+	"sort"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	servicePb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type searchService struct {
-	ctx       context.Context
-	pulsarURL string
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	node *QueryNode
-
+	container             container
 	searchMsgStream       *msgstream.MsgStream
 	searchResultMsgStream *msgstream.MsgStream
-}
-
-type queryInfo struct {
-	NumQueries int64  `json:"num_queries"`
-	TopK       int    `json:"topK"`
-	FieldName  string `json:"field_name"`
 }
 
 type ResultEntityIds []UniqueID
@@ -34,199 +32,202 @@ type SearchResult struct {
 }
 
 func newSearchService(ctx context.Context, node *QueryNode, pulsarURL string) *searchService {
-
-	return &searchService{
-		ctx:       ctx,
-		pulsarURL: pulsarURL,
-
-		node: node,
-
-		searchMsgStream:       nil,
-		searchResultMsgStream: nil,
-	}
-}
-
-func (ss *searchService) start() {
 	const (
+		//TODO:: read config file
 		receiveBufSize = 1024
 		pulsarBufSize  = 1024
 	)
 
 	consumeChannels := []string{"search"}
-	consumeSubName := "searchSub"
-
-	searchStream := msgstream.NewPulsarMsgStream(ss.ctx, receiveBufSize)
-	searchStream.SetPulsarCient(ss.pulsarURL)
+	consumeSubName := "subSearch"
+	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchStream.SetPulsarCient(pulsarURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := []string{"searchResult"}
-
-	searchResultStream := msgstream.NewPulsarMsgStream(ss.ctx, receiveBufSize)
-	searchResultStream.SetPulsarCient(ss.pulsarURL)
+	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchResultStream.SetPulsarCient(pulsarURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
+	var outputStream msgstream.MsgStream = searchResultStream
 
-	var searchMsgStream msgstream.MsgStream = searchStream
-	var searchResultMsgStream msgstream.MsgStream = searchResultStream
+	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
+	return &searchService{
+		ctx:    searchServiceCtx,
+		cancel: searchServiceCancel,
 
-	ss.searchMsgStream = &searchMsgStream
-	ss.searchResultMsgStream = &searchResultMsgStream
-
-	(*ss.searchMsgStream).Start()
-
-	for {
-		select {
-		case <-ss.ctx.Done():
-			return
-		default:
-			msgPack := (*ss.searchMsgStream).Consume()
-			// TODO: add serviceTime check
-			err := ss.search(msgPack.Msgs)
-			if err != nil {
-				fmt.Println("search Failed")
-				ss.publishFailedSearchResult()
-			}
-			fmt.Println("Do search done")
-		}
+		container:             *node.container,
+		searchMsgStream:       &inputStream,
+		searchResultMsgStream: &outputStream,
 	}
+}
+
+func (ss *searchService) start() {
+	(*ss.searchMsgStream).Start()
+	(*ss.searchResultMsgStream).Start()
+
+	go func() {
+			for {
+			select {
+			case <-ss.ctx.Done():
+				return
+			default:
+				msgPack := (*ss.searchMsgStream).Consume()
+				if msgPack == nil || len(msgPack.Msgs) <= 0 {
+					continue
+				}
+				// TODO: add serviceTime check
+				err := ss.search(msgPack.Msgs)
+				if err != nil {
+					fmt.Println("search Failed")
+					ss.publishFailedSearchResult()
+				}
+				fmt.Println("Do search done")
+			}
+		}
+	}()
+}
+
+func (ss *searchService) close() {
+	(*ss.searchMsgStream).Close()
+	(*ss.searchResultMsgStream).Close()
+	ss.cancel()
 }
 
 func (ss *searchService) search(searchMessages []*msgstream.TsMsg) error {
 
-	//type SearchResultTmp struct {
-	//	ResultID       int64
-	//	ResultDistance float32
-	//}
-	//
-	//for _, msg := range searchMessages {
-	//	// preprocess
-	//	// msg.dsl compare
-	//
-	//}
-	//
-	//// Traverse all messages in the current messageClient.
-	//// TODO: Do not receive batched search requests
-	//for _, msg := range searchMessages {
-	//	searchMsg, ok := (*msg).(msgstream.SearchTask)
-	//	if !ok {
-	//		return errors.New("invalid request type = " + string((*msg).Type()))
-	//	}
-	//	var clientID = searchMsg.ProxyID
-	//	var searchTimestamp = searchMsg.Timestamp
-	//
-	//	// ServiceTimeSync update by TimeSync, which is get from proxy.
-	//	// Proxy send this timestamp per `conf.Config.Timesync.Interval` milliseconds.
-	//	// However, timestamp of search request (searchTimestamp) is precision time.
-	//	// So the ServiceTimeSync is always less than searchTimestamp.
-	//	// Here, we manually make searchTimestamp's logic time minus `conf.Config.Timesync.Interval` milliseconds.
-	//	// Which means `searchTimestamp.logicTime = searchTimestamp.logicTime - conf.Config.Timesync.Interval`.
-	//	var logicTimestamp = searchTimestamp << 46 >> 46
-	//	searchTimestamp = (searchTimestamp>>18-uint64(conf.Config.Timesync.Interval+600))<<18 + logicTimestamp
-	//
-	//	//var vector = searchMsg.Query
-	//	// We now only the first Json is valid.
-	//	var queryJSON = "searchMsg.SearchRequest.???"
-	//
-	//	// 1. Timestamp check
-	//	// TODO: return or wait? Or adding graceful time
-	//	if searchTimestamp > ss.node.queryNodeTime.ServiceTimeSync {
-	//		errMsg := fmt.Sprint("Invalid query time, timestamp = ", searchTimestamp>>18, ", SearchTimeSync = ", ss.node.queryNodeTime.ServiceTimeSync>>18)
-	//		fmt.Println(errMsg)
-	//		return errors.New(errMsg)
-	//	}
-	//
-	//	// 2. Get query information from query json
-	//	query := ss.queryJSON2Info(&queryJSON)
-	//	// 2d slice for receiving multiple queries's results
-	//	var resultsTmp = make([][]SearchResultTmp, query.NumQueries)
-	//	for i := 0; i < int(query.NumQueries); i++ {
-	//		resultsTmp[i] = make([]SearchResultTmp, 0)
-	//	}
-	//
-	//	// 3. Do search in all segments
-	//	for _, segment := range ss.node.SegmentsMap {
-	//		if segment.getRowCount() <= 0 {
-	//			// Skip empty segment
-	//			continue
-	//		}
-	//
-	//		//fmt.Println("search in segment:", segment.SegmentID, ",segment rows:", segment.getRowCount())
-	//		var res, err = segment.segmentSearch(query, searchTimestamp, nil)
-	//		if err != nil {
-	//			fmt.Println(err.Error())
-	//			return err
-	//		}
-	//
-	//		for i := 0; i < int(query.NumQueries); i++ {
-	//			for j := i * query.TopK; j < (i+1)*query.TopK; j++ {
-	//				resultsTmp[i] = append(resultsTmp[i], SearchResultTmp{
-	//					ResultID:       res.ResultIds[j],
-	//					ResultDistance: res.ResultDistances[j],
-	//				})
-	//			}
-	//		}
-	//	}
-	//
-	//	// 4. Reduce results
-	//	for _, rTmp := range resultsTmp {
-	//		sort.Slice(rTmp, func(i, j int) bool {
-	//			return rTmp[i].ResultDistance < rTmp[j].ResultDistance
-	//		})
-	//	}
-	//
-	//	for _, rTmp := range resultsTmp {
-	//		if len(rTmp) > query.TopK {
-	//			rTmp = rTmp[:query.TopK]
-	//		}
-	//	}
-	//
-	//	var entities = servicePb.Entities{
-	//		Ids: make([]int64, 0),
-	//	}
-	//	var results = servicePb.QueryResult{
-	//		Status: &servicePb.Status{
-	//			ErrorCode: 0,
-	//		},
-	//		Entities:  &entities,
-	//		Distances: make([]float32, 0),
-	//		QueryId:   searchMsg.ReqID,
-	//		ProxyID:   clientID,
-	//	}
-	//	for _, rTmp := range resultsTmp {
-	//		for _, res := range rTmp {
-	//			results.Entities.Ids = append(results.Entities.Ids, res.ResultID)
-	//			results.Distances = append(results.Distances, res.ResultDistance)
-	//			results.Scores = append(results.Distances, float32(0))
-	//		}
-	//	}
-	//	// Send numQueries to RowNum.
-	//	results.RowNum = query.NumQueries
-	//
-	//	// 5. publish result to pulsar
-	//	//fmt.Println(results.Entities.Ids)
-	//	//fmt.Println(results.Distances)
-	//	ss.publishSearchResult(&results)
-	//}
+	type SearchResult struct {
+		ResultID       int64
+		ResultDistance float32
+	}
+	// TODO:: cache map[dsl]plan
+	// TODO: reBatched search requests
+	for _, msg := range searchMessages {
+		searchMsg, ok := (*msg).(*msgstream.SearchMsg)
+		if !ok {
+			return errors.New("invalid request type = " + string((*msg).Type()))
+		}
+
+		searchTimestamp := searchMsg.Timestamp
+
+		// TODO:: add serviceable time
+		var queryBlob = searchMsg.Query.Value
+		query := servicepb.Query{}
+		err := proto.Unmarshal(queryBlob, &query)
+		if err != nil {
+			return errors.New("unmarshal query failed")
+		}
+		collectionName := query.CollectionName
+		partitionTags := query.PartitionTags
+		collection, err := ss.container.getCollectionByName(collectionName)
+		if err != nil {
+			return err
+		}
+		collectionID := collection.ID()
+		dsl := query.Dsl
+		plan := CreatePlan(*collection, dsl)
+		topK := plan.GetTopK()
+		placeHolderGroupBlob := query.PlaceholderGroup
+		group := servicepb.PlaceholderGroup{}
+		err = proto.Unmarshal(placeHolderGroupBlob, &group)
+		if err != nil {
+			return err
+		}
+		placeholderGroup := ParserPlaceholderGroup(plan, placeHolderGroupBlob)
+		placeholderGroups := make([]*PlaceholderGroup, 0)
+		placeholderGroups = append(placeholderGroups, placeholderGroup)
+
+		// 2d slice for receiving multiple queries's results
+		var numQueries int64 = 0
+		for _, pg := range placeholderGroups {
+			numQueries += pg.GetNumOfQuery()
+		}
+		var searchResults = make([][]SearchResult, numQueries)
+		for i := 0; i < int(numQueries); i++ {
+			searchResults[i] = make([]SearchResult, 0)
+		}
+
+		// 3. Do search in all segments
+		for _, partitionTag := range partitionTags {
+			partition, err := ss.container.getPartitionByTag(collectionID, partitionTag)
+			if err != nil {
+				return err
+			}
+			for _, segment := range partition.segments {
+				res, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp}, numQueries, topK)
+				if err != nil {
+					return err
+				}
+				for i := 0; int64(i) < numQueries; i++ {
+					for j := int64(i) * topK; j < int64(i+1)*topK; j++ {
+						searchResults[i] = append(searchResults[i], SearchResult{
+							ResultID:       res.ResultIds[j],
+							ResultDistance: res.ResultDistances[j],
+						})
+					}
+				}
+			}
+		}
+
+		// 4. Reduce results
+		// TODO::reduce in c++ merge_into func
+		for _, temp := range searchResults {
+			sort.Slice(temp, func(i, j int) bool {
+				return temp[i].ResultDistance < temp[j].ResultDistance
+			})
+		}
+
+		for i, tmp := range searchResults {
+			if int64(len(tmp)) > topK {
+				searchResults[i] = searchResults[i][:topK]
+			}
+		}
+
+		hits := make([]*servicepb.Hits, 0)
+		for _, value := range searchResults {
+			hit := servicepb.Hits{}
+			score := servicepb.Score{}
+			for j := 0; int64(j) < topK; j++ {
+				hit.IDs = append(hit.IDs, value[j].ResultID)
+				score.Values = append(score.Values, value[j].ResultDistance)
+			}
+			hit.Scores = append(hit.Scores, &score)
+			hits = append(hits, &hit)
+		}
+
+		var results = internalpb.SearchResult{
+			MsgType:         internalpb.MsgType_kSearchResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+			ReqID:           searchMsg.ReqID,
+			ProxyID:         searchMsg.ProxyID,
+			QueryNodeID:     searchMsg.ProxyID,
+			Timestamp:       searchTimestamp,
+			ResultChannelID: searchMsg.ResultChannelID,
+			Hits:            hits,
+		}
+
+		var tsMsg msgstream.TsMsg = &msgstream.SearchResultMsg{SearchResult: results}
+		ss.publishSearchResult(&tsMsg)
+	}
 
 	return nil
 }
 
-func (ss *searchService) publishSearchResult(res *servicePb.QueryResult) {
-	//(*inputStream).Produce(&msgPack)
+func (ss *searchService) publishSearchResult(res *msgstream.TsMsg) {
+	msgPack := msgstream.MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, res)
+	(*ss.searchResultMsgStream).Produce(&msgPack)
 }
 
 func (ss *searchService) publishFailedSearchResult() {
-
-}
-
-func (ss *searchService) queryJSON2Info(queryJSON *string) *queryInfo {
-	var query queryInfo
-	var err = json.Unmarshal([]byte(*queryJSON), &query)
-
-	if err != nil {
-		log.Fatal("Unmarshal query json failed")
-		return nil
+	var errorResults = internalpb.SearchResult{
+		MsgType: internalpb.MsgType_kSearchResult,
+		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 	}
 
-	return &query
+	var tsMsg msgstream.TsMsg = &msgstream.SearchResultMsg{SearchResult: errorResults}
+	msgPack := msgstream.MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, &tsMsg)
+	(*ss.searchResultMsgStream).Produce(&msgPack)
 }

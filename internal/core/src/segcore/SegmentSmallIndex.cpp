@@ -287,6 +287,9 @@ SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
 
     // step 5: convert offset to uids
     for (auto& id : final_uids) {
+        if (id == -1) {
+            continue;
+        }
         id = record_.uids_[id];
     }
 

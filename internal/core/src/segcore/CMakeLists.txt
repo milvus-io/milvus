@@ -11,7 +11,7 @@ set(SEGCORE_FILES
         IndexingEntry.cpp
         InsertRecord.cpp
         Reduce.cpp
-        )
+        plan_c.cpp)
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )
