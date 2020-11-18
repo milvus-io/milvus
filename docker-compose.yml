@@ -25,7 +25,7 @@ services:
     working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "
-        make build-cpp && make verifiers && make unittest"
+        make check-proto-product && make verifiers && make unittest"
 
   gdbserver:
     image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}

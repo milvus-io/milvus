@@ -27,10 +27,22 @@ get-check-deps:
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
+clang-format:
+	@echo "Running $@ check"
+	@(env bash ${PWD}/scripts/run_clang_format.sh internal/core)
+
+generated-proto-go:export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
+generated-proto-go: build-cpp
+	@(env bash $(PWD)/scripts/proto_gen_go.sh)
+
+check-proto-product: generated-proto-go
+	@(env bash $(PWD)/scripts/check_proto_product.sh)
+
 fmt:
 	@echo "Running $@ check"
-	@GO111MODULE=on gofmt -d cmd/
-	@GO111MODULE=on gofmt -d internal/
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh cmd/
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh internal/
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh test/
 
 #TODO: Check code specifications by golangci-lint
 lint:
@@ -46,7 +58,7 @@ ruleguard:
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./test/...
 
-verifiers: get-check-deps fmt lint ruleguard
+verifiers: clang-format get-check-deps fmt lint ruleguard
 
 # Builds various components locally.
 build-go:
