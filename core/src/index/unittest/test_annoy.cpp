@@ -29,6 +29,7 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
     SetUp() override {
         std::cout << "AnnoyTest GetParam" << std::endl;
         IndexType = GetParam();
+        std::cout << "Generate data ..." << std::endl;
         Generate(128, 10000, 10);
         std::cout << "AnnoyTest make shared IndexAnnoy" << std::endl;
         index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
