@@ -45,8 +45,7 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -292,32 +291,16 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         segment::DeletedDocsPtr deleted_docs_ptr;
         segment_reader_->LoadDeletedDocs(deleted_docs_ptr);
         if (deleted_docs_ptr) {
-            faiss::ConcurrentBitsetPtr del_bitset = std::make_shared<faiss::ConcurrentBitset>(entity_count_);
             auto& del_docs = deleted_docs_ptr->GetDeletedDocs();
-            for (auto& offset : del_docs) {
-                del_bitset->set(offset);
-            }
-            if (bitset != nullptr) {
+            auto del_bitset = deleted_docs_ptr->GetBlacklist();
+            if (bitset != nullptr && del_bitset != nullptr) {
                 filter_list = (*bitset) | (*del_bitset);
             } else {
-                filter_list = del_bitset;
+                filter_list = (bitset != nullptr) ? bitset : del_bitset;
             }
         } else {
             filter_list = bitset;
         }
-
-        // TODO(yhz): The black list is obtain from deleted docs above,
-        // there is no need to get blacklist from index.
-        //        list = vec_index->GetBlacklist();
-        //        if (list != nullptr) {
-        //            if (filter_list != nullptr) {
-        //                list = (*list) | (*filter_list);
-        //            }
-        //        } else {
-        //            if (filter_list != nullptr) {
-        //                list = filter_list;
-        //            }
-        //        }
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
         if (!vector_param->query_vector.float_data.empty()) {
@@ -786,18 +769,15 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
     std::shared_ptr<std::vector<idx_t>> uids;
-    ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {
         dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
         uids = from_index->GetUids();
-        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                               bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
-        blacklist = bin_from_index->GetBlacklist();
     }
 
     try {
@@ -816,10 +796,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 #endif
 
     new_index->SetUids(uids);
-    new_index->SetBlacklist(blacklist);
 
     return Status::OK();
 }
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine

@@ -52,7 +52,7 @@ set( UNITTEST_LIBS  sqlite
                     gmock
                     gtest_main
                     gmock_main
-                    libstdc++fs.a
+                    stdc++fs
                     pthread
                     gfortran
                     opentracing::opentracing

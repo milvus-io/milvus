@@ -15,6 +15,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4200 The scalar field information of search result is wrong after some entities deleted
 -   \#4205 Restful API error: When the specified partition is retrieved, the partition_tag is not valid
 -   \#4226 The Prometheus performance metrics sent by Milvus 0.11.0 is not right
+-   \#4242 Fix query hang up at unittest case
 
 ## Feature
 -   \#4163 Update C++ sdk search interface
