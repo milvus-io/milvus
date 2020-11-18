@@ -811,6 +811,19 @@ class WebController : public oatpp::web::server::api::ApiController {
         WebRequestHandler handler = WebRequestHandler();
         OString result = "";
         auto status_dto = handler.GetMetrics(result);
+        std::shared_ptr<OutgoingResponse> response;
+        switch (*(status_dto->code)) {
+            case StatusCode::SUCCESS:
+                response = createResponse(Status::CODE_200, result);
+                break;
+            default:
+                response = createDtoResponse(Status::CODE_400, status_dto);
+        }
+
+        tr.ElapseFromBegin("Done. Status: code = " + std::to_string(*(status_dto->code)) +
+                           ", reason = " + status_dto->message->std_str() + ". Total cost");
+
+        return response;
     }
 
 /**
