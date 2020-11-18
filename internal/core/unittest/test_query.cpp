@@ -133,7 +133,7 @@ TEST(Query, ParsePlaceholderGroup) {
 {
     "bool": {
         "vector": {
-            "fakevec": {
+            "Vec": {
                 "metric_type": "L2",
                 "params": {
                     "nprobe": 10

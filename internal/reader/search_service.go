@@ -46,14 +46,14 @@ func newSearchService(ctx context.Context, replica *collectionReplica) *searchSe
 	consumeChannels := []string{"search"}
 	consumeSubName := "subSearch"
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarCient(msgStreamURL)
+	searchStream.SetPulsarClient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := []string{"searchResult"}
 	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchResultStream.SetPulsarCient(msgStreamURL)
+	searchResultStream.SetPulsarClient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
 

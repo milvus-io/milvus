@@ -21,7 +21,7 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	consumeSubName := "insertSub"
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	insertStream.SetPulsarCient(msgStreamURL)
+	insertStream.SetPulsarClient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 

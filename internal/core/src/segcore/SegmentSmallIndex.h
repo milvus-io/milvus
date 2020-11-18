@@ -46,6 +46,10 @@ namespace milvus::segcore {
 
 class SegmentSmallIndex : public SegmentBase {
  public:
+    virtual ~SegmentSmallIndex() = default;
+
+    // SegmentBase(std::shared_ptr<FieldsInfo> collection);
+
     int64_t
     PreInsert(int64_t size) override;
 
@@ -107,9 +111,6 @@ class SegmentSmallIndex : public SegmentBase {
     GetMemoryUsageInBytes() override;
 
  public:
-    void
-    get_insert_record();
-
     ssize_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
@@ -129,8 +130,7 @@ class SegmentSmallIndex : public SegmentBase {
     friend std::unique_ptr<SegmentBase>
     CreateSegment(SchemaPtr schema);
 
-    explicit SegmentSmallIndex(SchemaPtr schema)
-        : schema_(std::move(schema)), record_(*schema_), indexing_record_(*schema_) {
+    explicit SegmentSmallIndex(SchemaPtr schema) : schema_(schema), record_(*schema_), indexing_record_(*schema_) {
     }
 
  public:

@@ -141,7 +141,7 @@ TEST(CApiTest, SearchTest) {
     auto blob = raw_group.SerializeAsString();
 
     auto plan = CreatePlan(collection, dsl_string);
-    auto placeholderGroup = ParsePlaceholderGroup(plan, blob.data(), blob.length());
+    auto placeholderGroup = ParsePlaceholderGroup(nullptr, blob.data(), blob.length());
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     timestamps.clear();
@@ -228,7 +228,7 @@ TEST(CApiTest, BuildIndexTest) {
     auto blob = raw_group.SerializeAsString();
 
     auto plan = CreatePlan(collection, dsl_string);
-    auto placeholderGroup = ParsePlaceholderGroup(plan, blob.data(), blob.length());
+    auto placeholderGroup = ParsePlaceholderGroup(nullptr, blob.data(), blob.length());
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     timestamps.clear();

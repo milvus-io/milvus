@@ -39,7 +39,7 @@ func (sService *statsService) start() {
 	producerChannels := []string{"statistic"}
 
 	statsStream := msgstream.NewPulsarMsgStream(sService.ctx, receiveBufSize)
-	statsStream.SetPulsarCient(msgStreamURL)
+	statsStream.SetPulsarClient(msgStreamURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream

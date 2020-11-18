@@ -10,10 +10,10 @@
 namespace milvus::query {
 class ShowPlanNodeVisitor : PlanNodeVisitor {
  public:
-    void
+    virtual void
     visit(FloatVectorANNS& node) override;
 
-    void
+    virtual void
     visit(BinaryVectorANNS& node) override;
 
  public:

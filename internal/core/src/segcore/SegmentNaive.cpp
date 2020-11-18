@@ -451,10 +451,10 @@ SegmentNaive::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp ti
 Status
 SegmentNaive::Close() {
     if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
-        PanicInfo("insert not ready");
+        std::runtime_error("insert not ready");
     }
-    if (this->deleted_record_.reserved != this->deleted_record_.ack_responder_.GetAck()) {
-        PanicInfo("delete not ready");
+    if (this->deleted_record_.reserved != this->record_.ack_responder_.GetAck()) {
+        std::runtime_error("delete not ready");
     }
     state_ = SegmentState::Closed;
     return Status::OK();

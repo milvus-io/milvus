@@ -55,7 +55,7 @@ func newTimeTick(ctx context.Context,
 	pulsarAddress = "pulsar://" + pulsarAddress
 
 	producerChannels := []string{"timeTick"}
-	t.tickMsgStream.SetPulsarCient(pulsarAddress)
+	t.tickMsgStream.SetPulsarClient(pulsarAddress)
 	t.tickMsgStream.CreatePulsarProducers(producerChannels)
 	return t
 }
