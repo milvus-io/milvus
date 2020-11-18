@@ -366,6 +366,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     prometheus::Counter& rpc_request_success_total_ = rpc_request_total_.Add({{"outcome", "success"}});
     // TODO
     // prometheus::Counter& rpc_request_fail_total_ = rpc_request_total_.Add({{"outcome", "fail"}});
+
+    prometheus::Family<prometheus::Histogram>& operation_lantency_second_family_ =
+        prometheus::BuildHistogram()
+            .Name("operation_lantency_seconds")
+            .Help("operation_lantency_seconds")
+            .Register(prometheus.registry());
+    prometheus::Histogram& operation_insert_histogram_ = operation_lantency_second_family_.Add(
+        {{"operation", "insert"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
+    prometheus::Histogram& operation_search_histogram_ = operation_lantency_second_family_.Add(
+        {{"operation", "search"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
 };
 
 }  // namespace grpc
