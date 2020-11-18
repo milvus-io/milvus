@@ -30,7 +30,9 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
         std::cout << "AnnoyTest GetParam" << std::endl;
         IndexType = GetParam();
         Generate(128, 10000, 10);
+        std::cout << "AnnoyTest make shared IndexAnnoy" << std::endl;
         index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
+        std::cout << "AnnoyTest generalize conf" << std::endl;
         conf = milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, dim},
             {milvus::knowhere::meta::TOPK, 10},
@@ -53,12 +55,19 @@ TEST_P(AnnoyTest, annoy_basic) {
 
     // null faiss index
     {
+        std::cout << "Index " << IndexType << " Train ..." << std::endl;
         ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
+        std::cout << "Index " << IndexType << " Query ..." << std::endl;
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
+        std::cout << "Index " << IndexType << " Serialize ..." << std::endl;
         ASSERT_ANY_THROW(index_->Serialize(conf));
+        std::cout << "Index " << IndexType << " Add ..." << std::endl;
         ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
+        std::cout << "Index " << IndexType << " AddWithoutIds ..." << std::endl;
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
+        std::cout << "Index " << IndexType << " Count ..." << std::endl;
         ASSERT_ANY_THROW(index_->Count());
+        std::cout << "Index " << IndexType << " Dim ..." << std::endl;
         ASSERT_ANY_THROW(index_->Dim());
     }
 
