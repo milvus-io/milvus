@@ -14,7 +14,6 @@
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/Snapshots.h"
-#include "metrics/Metrics.h"
 #include "segment/SegmentReader.h"
 #include "segment/SegmentWriter.h"
 #include "utils/Log.h"

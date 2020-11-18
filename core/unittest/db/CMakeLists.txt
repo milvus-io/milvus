@@ -35,7 +35,6 @@ add_executable( test_db
 target_link_libraries( test_db  ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
-                                 metrics
                                  value
                                  stdc++
                                  utils

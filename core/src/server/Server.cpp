@@ -20,7 +20,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "index/archive/KnowhereResource.h"
 #include "log/LogMgr.h"
-#include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
@@ -200,9 +199,6 @@ Server::Start() {
         LOG_SERVER_INFO_ << "\n\n"
                          << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
                          << ConfigMgr::GetInstance().Dump();
-
-        server::Metrics::GetInstance().Init();
-        server::SystemInfo::GetInstance().Init();
 
         return StartService();
     } catch (std::exception& ex) {

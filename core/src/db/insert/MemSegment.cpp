@@ -24,7 +24,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "db/wal/WalManager.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "metrics/Metrics.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "value/config/ServerConfig.h"
@@ -84,7 +83,6 @@ MemSegment::Delete(const std::vector<idx_t>& ids, idx_t op_id) {
 Status
 MemSegment::Serialize(snapshot::ScopedSnapshotT& ss, std::shared_ptr<snapshot::MultiSegmentsOperation>& operation) {
     int64_t mem_size = GetCurrentMem();
-    server::CollectSerializeMetrics metrics(mem_size);
 
     // empty segment, nothing to do
     if (actions_.empty()) {

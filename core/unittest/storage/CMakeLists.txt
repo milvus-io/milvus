@@ -29,7 +29,6 @@ target_link_libraries(test_storage
         stdc++
         server
         milvus_engine
-        metrics
         value
         utils
         tracing
