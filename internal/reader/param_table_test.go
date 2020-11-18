@@ -12,56 +12,56 @@ func TestParamTable_Init(t *testing.T) {
 
 func TestParamTable_PulsarAddress(t *testing.T) {
 	Params.Init()
-	address, err := Params.pulsarAddress()
+	address, err := Params.PulsarAddress()
 	assert.NoError(t, err)
 	assert.Equal(t, address, "pulsar://localhost:6650")
 }
 
 func TestParamTable_QueryNodeID(t *testing.T) {
 	Params.Init()
-	id := Params.queryNodeID()
+	id := Params.QueryNodeID()
 	assert.Equal(t, id, 0)
 }
 
 func TestParamTable_TopicStart(t *testing.T) {
 	Params.Init()
-	topicStart := Params.topicStart()
+	topicStart := Params.TopicStart()
 	assert.Equal(t, topicStart, 0)
 }
 
 func TestParamTable_TopicEnd(t *testing.T) {
 	Params.Init()
-	topicEnd := Params.topicEnd()
+	topicEnd := Params.TopicEnd()
 	assert.Equal(t, topicEnd, 128)
 }
 
 func TestParamTable_statsServiceTimeInterval(t *testing.T) {
 	Params.Init()
-	interval := Params.statsPublishInterval()
+	interval := Params.statsServiceTimeInterval()
 	assert.Equal(t, interval, 1000)
 }
 
 func TestParamTable_statsMsgStreamReceiveBufSize(t *testing.T) {
 	Params.Init()
-	bufSize := Params.statsReceiveBufSize()
+	bufSize := Params.statsMsgStreamReceiveBufSize()
 	assert.Equal(t, bufSize, int64(64))
 }
 
 func TestParamTable_dmMsgStreamReceiveBufSize(t *testing.T) {
 	Params.Init()
-	bufSize := Params.dmReceiveBufSize()
+	bufSize := Params.dmMsgStreamReceiveBufSize()
 	assert.Equal(t, bufSize, int64(1024))
 }
 
 func TestParamTable_searchMsgStreamReceiveBufSize(t *testing.T) {
 	Params.Init()
-	bufSize := Params.searchReceiveBufSize()
+	bufSize := Params.searchMsgStreamReceiveBufSize()
 	assert.Equal(t, bufSize, int64(512))
 }
 
 func TestParamTable_searchResultMsgStreamReceiveBufSize(t *testing.T) {
 	Params.Init()
-	bufSize := Params.searchResultReceiveBufSize()
+	bufSize := Params.searchResultMsgStreamReceiveBufSize()
 	assert.Equal(t, bufSize, int64(64))
 }
 
@@ -75,16 +75,4 @@ func TestParamTable_dmPulsarBufSize(t *testing.T) {
 	Params.Init()
 	bufSize := Params.dmPulsarBufSize()
 	assert.Equal(t, bufSize, int64(1024))
-}
-
-func TestParamTable_flowGraphMaxQueueLength(t *testing.T) {
-	Params.Init()
-	length := Params.flowGraphMaxQueueLength()
-	assert.Equal(t, length, int32(1024))
-}
-
-func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
-	Params.Init()
-	maxParallelism := Params.flowGraphMaxParallelism()
-	assert.Equal(t, maxParallelism, int32(1024))
 }

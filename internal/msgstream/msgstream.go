@@ -58,7 +58,7 @@ func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64) *PulsarMsgStr
 	return stream
 }
 
-func (ms *PulsarMsgStream) SetPulsarCient(address string) {
+func (ms *PulsarMsgStream) SetPulsarClient(address string) {
 	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: address})
 	if err != nil {
 		log.Printf("Set pulsar client failed, error = %v", err)

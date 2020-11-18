@@ -9,15 +9,6 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-service:
-  statsServiceTimeInterval: 1000 # milliseconds
-
-msgStream:
-  receiveBufSize: # msgPack chan buffer size
-    statsMsgStream: 64
-    dmMsgStream: 1024
-    searchMsgStream: 512
-    searchResultMsgStream: 64
-  pulsarBufSize: # pulsar chan buffer size
-    search: 512
-    dm: 1024
+flowGraph:
+  maxQueueLength: 1024
+  maxParallelism: 1024

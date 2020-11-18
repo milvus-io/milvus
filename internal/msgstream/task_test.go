@@ -128,13 +128,13 @@ func TestStream_task_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(3, 3))
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
-	inputStream.SetPulsarCient(pulsarAddress)
+	inputStream.SetPulsarClient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	inputStream.SetRepackFunc(newRepackFunc)
 	inputStream.Start()
 
 	outputStream := NewPulsarMsgStream(context.Background(), 100)
-	outputStream.SetPulsarCient(pulsarAddress)
+	outputStream.SetPulsarClient(pulsarAddress)
 	unmarshalDispatcher := NewUnmarshalDispatcher()
 	testTask := InsertTask{}
 	unmarshalDispatcher.AddMsgTemplate(internalPb.MsgType_kInsert, testTask.Unmarshal)
