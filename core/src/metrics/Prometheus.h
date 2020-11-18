@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <sstream>
@@ -19,6 +21,23 @@
 #include <prometheus/text_serializer.h>
 
 namespace milvus {
+
+class ScopedTimer {
+ public:
+    explicit ScopedTimer(std::function<void(double)> callback) : callback_(callback) {
+        start_ = std::chrono::system_clock::now();
+    }
+
+    ~ScopedTimer() {
+        auto end = std::chrono::system_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start_).count();
+        callback_(duration);
+    }
+
+ private:
+    std::function<void(double)> callback_;
+    std::chrono::time_point<std::chrono::system_clock> start_;
+};
 
 class Prometheus {
  public:

@@ -1302,6 +1302,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     auto request_id = GetContext(context)->ReqID();
     CHECK_NULLPTR_RETURN(request);
+    ScopedTimer scoped_timer([this](double lantency) { this->operation_insert_histogram_.Observe(lantency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", request_id.c_str(), __func__);
 
     // By limiting the number of requests processed at the same time,
@@ -1775,6 +1776,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::QueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
+    ScopedTimer scoped_timer([this](double lantency) { this->operation_search_histogram_.Observe(lantency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status;
