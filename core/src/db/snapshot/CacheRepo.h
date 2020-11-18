@@ -22,55 +22,99 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+/**
+ * A two-level cache repository
+ *
+ * Manages caching for T objects
+ * The repository can be divided into sub-repositories by IndexT, and each sub-repo organizes
+ * the T objects in format of Key-Value.
+ */
 template <typename T, typename IndexT, typename KeyT>
 class CacheRepo {
  public:
     using RepoT = CacheRepo<T, IndexT, KeyT>;
     using RepoPtr = std::shared_ptr<RepoT>;
 
+    /*
+     * Get a mutable sub-repositories of specified index.
+     * If there is no specified repo, create a new one and return the new repo
+     * If there is a specified repo, return the repo
+     */
     static RepoPtr
     MutableRepo(const IndexT& index);
+    // Clear all managed repos
     static void
     Clear();
+    // Clear the specified repo
     static void
     Clear(const IndexT& index);
+    // Return the the number of managed repos
     static size_t
     IndexSize();
+    /*
+     * Helper function to dump all repos info as string
+     * @param index_only == true means not show repo info in detail
+     */
     static std::string
     ToString(bool index_only = true);
 
+    /*
+     * Cache data in repo with associated key
+     */
     void
     Cache(const KeyT& key, const T& data);
 
+    /*
+     * Get a mutable data from repo
+     * @param key Specify the key
+     * @param data Store the mutable data
+     * @returns: Return Status(SS_NOT_FOUND_ERROR) if specified key not found. Else return Status::OK
+     */
     Status
     MutableData(const KeyT& key, T& data) const;
+    // Get the count of keys in repo
     size_t
     KeyCount() const;
+
+    // Get the immutable index of the repo
     const IndexT&
     Index() const;
+    /*
+     * Helper function to dump the repo info as string
+     * @param meta_only Config wether or not dump meta data only
+     * @param start_indent Config the start indent
+     */
     std::string
     ObjectToString(bool meta_only = true, const std::string& start_indent = "") const;
 
+    /*
+     * Destructor
+     */
     virtual ~CacheRepo();
 
  private:
-    using Reposity = std::map<IndexT, RepoPtr>;
-    using DataReposity = std::map<KeyT, T>;
+    using Repository = std::map<IndexT, RepoPtr>;
+    using DataRepository = std::map<KeyT, T>;
 
     CacheRepo() = delete;
     explicit CacheRepo(const IndexT& index) : index_(index) {
     }
 
-    DataReposity data_repo_;
+    // data container
+    DataRepository data_repo_;
+    // concurrent operation control on data repo
     mutable std::shared_timed_mutex data_mutex_;
+    // current index
     IndexT index_;
 
-    static Reposity root_repo_;
+    // repo container
+    static Repository root_repo_;
+    // concurrent operation control on repos
     static std::shared_timed_mutex index_mutex_;
 };
 
 template <typename T, typename IndexT, typename KeyT>
-typename CacheRepo<T, IndexT, KeyT>::Reposity CacheRepo<T, IndexT, KeyT>::root_repo_;
+typename CacheRepo<T, IndexT, KeyT>::Repository CacheRepo<T, IndexT, KeyT>::root_repo_;
 
 template <typename T, typename IndexT, typename KeyT>
 std::shared_timed_mutex CacheRepo<T, IndexT, KeyT>::index_mutex_;

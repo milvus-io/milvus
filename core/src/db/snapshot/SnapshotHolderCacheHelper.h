@@ -18,6 +18,19 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+/*
+ * A helper class to associate CacheRepo for SnapshotHolder
+ *
+ * For example we want to cache some objects of T with specified snapshot. We should write the
+ * client-side code as below:
+ * 1. Start program
+ *    Register a new cache repo type:
+ *    ```static SnapshotHolderCacheHelper<T>::HookRegistar registar;```
+ * 2. Run
+ * 3. Stop program
+ *    Clear all repos
+ *    ```SnapshotHolderCacheHelper<T>::Cache::Clear();```
+ */
 template <typename T>
 class SnapshotHolderCacheHelper {
  public:
@@ -29,6 +42,7 @@ class SnapshotHolderCacheHelper {
         }
     };
 
+    // Callback called before SnapshotHolder::ReadyForRelease
     static void
     Hooker(Snapshot::Ptr ss);
 };
