@@ -29,9 +29,7 @@ import (
  * is up-to-date.
  */
 type collectionReplica interface {
-	// tSafe
-	getTSafe() Timestamp
-	setTSafe(t Timestamp)
+	getTSafe() *tSafe
 
 	// collection
 	getCollectionNum() int
@@ -57,25 +55,16 @@ type collectionReplica interface {
 }
 
 type collectionReplicaImpl struct {
-	tSafeMu sync.Mutex
-	tSafe   Timestamp
-
 	mu          sync.RWMutex
 	collections []*Collection
 	segments    map[UniqueID]*Segment
+
+	tSafe *tSafe
 }
 
 //----------------------------------------------------------------------------------------------------- tSafe
-func (colReplica *collectionReplicaImpl) getTSafe() Timestamp {
-	colReplica.tSafeMu.Lock()
-	defer colReplica.tSafeMu.Unlock()
+func (colReplica *collectionReplicaImpl) getTSafe() *tSafe {
 	return colReplica.tSafe
-}
-
-func (colReplica *collectionReplicaImpl) setTSafe(t Timestamp) {
-	colReplica.tSafeMu.Lock()
-	colReplica.tSafe = t
-	colReplica.tSafeMu.Unlock()
 }
 
 //----------------------------------------------------------------------------------------------------- collection

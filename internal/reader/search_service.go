@@ -20,7 +20,9 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	replica               *collectionReplica
+	replica      *collectionReplica
+	tSafeWatcher *tSafeWatcher
+
 	searchMsgStream       *msgstream.MsgStream
 	searchResultMsgStream *msgstream.MsgStream
 }
@@ -63,7 +65,9 @@ func newSearchService(ctx context.Context, replica *collectionReplica) *searchSe
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		replica:               replica,
+		replica:      replica,
+		tSafeWatcher: newTSafeWatcher(),
+
 		searchMsgStream:       &inputStream,
 		searchResultMsgStream: &outputStream,
 	}
@@ -99,6 +103,18 @@ func (ss *searchService) close() {
 	(*ss.searchMsgStream).Close()
 	(*ss.searchResultMsgStream).Close()
 	ss.cancel()
+}
+
+func (ss *searchService) register() {
+	tSafe := (*(ss.replica)).getTSafe()
+	(*tSafe).registerTSafeWatcher(ss.tSafeWatcher)
+}
+
+func (ss *searchService) waitNewTSafe() Timestamp {
+	// block until dataSyncService updating tSafe
+	ss.tSafeWatcher.hasUpdate()
+	timestamp := (*(*ss.replica).getTSafe()).get()
+	return timestamp
 }
 
 func (ss *searchService) search(searchMessages []msgstream.TsMsg) error {

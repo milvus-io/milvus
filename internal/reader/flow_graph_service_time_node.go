@@ -28,7 +28,7 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	}
 
 	// update service time
-	(*stNode.replica).setTSafe(serviceTimeMsg.timeRange.timestampMax)
+	(*(*stNode.replica).getTSafe()).set(serviceTimeMsg.timeRange.timestampMax)
 	return nil
 }
 
