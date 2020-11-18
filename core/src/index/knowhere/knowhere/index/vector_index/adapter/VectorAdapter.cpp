@@ -21,7 +21,7 @@ namespace knowhere {
 
 DatasetPtr
 GenDatasetWithIds(const int64_t nb, const int64_t dim, const void* xb, const int64_t* ids) {
-    std::cout << "VectorAdapter::GenDatasetWithIds make shared Dataset" << std::endl;
+    std::cout << "VectorAdapter::GenDatasetWithIds make shared Dataset." << std::endl;
     auto ret_ds = std::make_shared<Dataset>();
     std::cout << "VectorAdapter::GenDatasetWithIds set " << meta::ROWS << std::endl;
     ret_ds->Set(meta::ROWS, nb);
