@@ -21,6 +21,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 var ctx context.Context
@@ -48,7 +49,23 @@ func startMaster(ctx context.Context) {
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
 
-	svr, err := master.CreateServer(ctx, kvRootPath, metaRootPath, []string{etcdAddr})
+	opt := master.Option{
+		KVRootPath:          kvRootPath,
+		MetaRootPath:        metaRootPath,
+		EtcdAddr:            []string{etcdAddr},
+		PulsarAddr:          "pulsar://localhost:6650",
+		ProxyIDs:            []typeutil.UniqueID{1, 2},
+		PulsarProxyChannels: []string{"proxy1", "proxy2"},
+		PulsarProxySubName:  "proxyTopics",
+		SoftTTBInterval:     300,
+		WriteIDs:            []typeutil.UniqueID{3, 4},
+		PulsarWriteChannels: []string{"write3", "write4"},
+		PulsarWriteSubName:  "writeTopics",
+		PulsarDMChannels:    []string{"dm0", "dm1"},
+		PulsarK2SChannels:   []string{"k2s0", "k2s1"},
+	}
+
+	svr, err := master.CreateServer(ctx, &opt)
 	masterServer = svr
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))

@@ -20,8 +20,25 @@ func main() {
 
 	etcdAddress, _ := masterParams.Params.EtcdAddress()
 	etcdRootPath, _ := masterParams.Params.EtcdRootPath()
+	pulsarAddr, _ := masterParams.Params.PulsarAddress()
 
-	svr, err := master.CreateServer(ctx, etcdRootPath, etcdRootPath, []string{etcdAddress})
+	opt := master.Option{
+		KVRootPath:          etcdRootPath,
+		MetaRootPath:        etcdRootPath,
+		EtcdAddr:            []string{etcdAddress},
+		PulsarAddr:          pulsarAddr,
+		ProxyIDs:            nil,
+		PulsarProxyChannels: nil,
+		PulsarProxySubName:  "",
+		SoftTTBInterval:     0,
+		WriteIDs:            nil,
+		PulsarWriteChannels: nil,
+		PulsarWriteSubName:  "",
+		PulsarDMChannels:    nil,
+		PulsarK2SChannels:   nil,
+	}
+
+	svr, err := master.CreateServer(ctx, &opt)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
