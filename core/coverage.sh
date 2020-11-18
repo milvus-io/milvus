@@ -27,6 +27,10 @@ fi
 
 # run unittest
 for test in `ls ${UNITTEST_DIR}`; do
+    if [[ ${test} == *".log" ]] || [[ ${test} == *".info" ]]; then
+        echo "skip file ${test}"
+        continue
+    fi
     echo $test "running..."
     # run unittest
     ./${UNITTEST_DIR}/${test}

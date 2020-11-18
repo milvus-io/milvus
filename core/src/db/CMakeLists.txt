@@ -28,6 +28,7 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/context    SERVER_CONTEXT_FILES)
 
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/easyloggingpp THIRDPARTY_EASYLOGGINGPP_FILES )
 aux_source_directory( ${MILVUS_THIRDPARTY_SRC}/nlohmann      THIRDPARTY_NLOHMANN_FILES )
@@ -46,6 +47,7 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_TRANSCRIPT_FILES}
                     ${THIRDPARTY_FILES}
                     ${WRAPPER_FILES}
+                    ${SERVER_CONTEXT_FILES}
                     )
 
 
@@ -123,7 +125,6 @@ endif ()
 # **************************** Link Libraries with milvus engine ****************************
 target_link_libraries( milvus_engine
                PUBLIC  knowhere
-                       server
                        segment
                        cache
                        codecs

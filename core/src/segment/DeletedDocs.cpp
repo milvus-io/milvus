@@ -38,6 +38,20 @@ DeletedDocs::GetDeletedDocs() const {
 // DeletedDocs::GetName() const {
 //    return name_;
 //}
+const faiss::ConcurrentBitsetPtr
+DeletedDocs::GetBlacklist() const {
+    return bitset_;
+}
+
+void
+DeletedDocs::GenBlacklist(size_t size) {
+    if (size > 0) {
+        bitset_ = std::make_shared<faiss::ConcurrentBitset>(size);
+        for (auto& offset : deleted_doc_offsets_) {
+            bitset_->set(offset);
+        }
+    }
+}
 
 size_t
 DeletedDocs::GetCount() const {

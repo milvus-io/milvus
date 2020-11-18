@@ -160,7 +160,7 @@ struct AttrsData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
-    uint64_t row_num_;
+    uint64_t row_num_ = 0;
     engine::ResultIds result_ids_;
     engine::ResultDistances result_distances_;
     engine::DataChunkPtr data_chunk_;
