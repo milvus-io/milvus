@@ -157,7 +157,7 @@ func (p *Proxy) connectMaster() error {
 		panic(err)
 	}
 	log.Printf("Proxy connected to master, master_addr=%s", masterAddr)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, err := grpc.DialContext(ctx, masterAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
@@ -198,10 +198,12 @@ func (p *Proxy) queryResultLoop() {
 				// TODO: use the number of query node instead
 				t := p.taskSch.getTaskByReqID(reqID)
 				if t != nil {
-					qt := t.(*QueryTask)
-					log.Printf("address of query task: %p", qt)
-					qt.resultBuf <- queryResultBuf[reqID]
-					delete(queryResultBuf, reqID)
+					qt, ok := t.(*QueryTask)
+					if ok {
+						log.Printf("address of query task: %p", qt)
+						qt.resultBuf <- queryResultBuf[reqID]
+						delete(queryResultBuf, reqID)
+					}
 				} else {
 					log.Printf("task with reqID %v is nil", reqID)
 				}

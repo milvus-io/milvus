@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	reqTimeoutInterval = time.Second * 2
+	reqTimeoutInterval = time.Second * 10
 )
 
 func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.IntegerRangeResponse, error) {
@@ -103,7 +103,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
-		}, err
+		}, nil
 	}
 
 	err = cct.WaitToFinish()
@@ -111,7 +111,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
-		}, err
+		}, nil
 	}
 
 	return cct.result, nil
@@ -196,7 +196,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
-		}, err
+		}, nil
 	}
 
 	err = dct.WaitToFinish()
@@ -204,7 +204,7 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    err.Error(),
-		}, err
+		}, nil
 	}
 
 	return dct.result, nil
@@ -239,7 +239,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	err = hct.WaitToFinish()
@@ -249,7 +249,7 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	return hct.result, nil
@@ -284,7 +284,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	err = dct.WaitToFinish()
@@ -294,7 +294,7 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	return dct.result, nil
@@ -328,7 +328,7 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	err = sct.WaitToFinish()
@@ -338,7 +338,7 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			},
-		}, err
+		}, nil
 	}
 
 	return sct.result, nil

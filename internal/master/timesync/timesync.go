@@ -54,7 +54,7 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 }
 
 func (ttBarrier *softTimeTickBarrier) Start() error {
-	ttBarrier.closeCh = make(chan struct{})
+	ttBarrier.closeCh = make(chan struct{}, 1)
 	go func() {
 		for {
 			select {
@@ -165,7 +165,7 @@ func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 }
 
 func (ttBarrier *hardTimeTickBarrier) Start() error {
-	ttBarrier.closeCh = make(chan struct{})
+	ttBarrier.closeCh = make(chan struct{}, 1)
 
 	go func() {
 		// Last timestamp synchronized
