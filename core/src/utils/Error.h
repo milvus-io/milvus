@@ -112,6 +112,7 @@ constexpr ErrorCode DB_BLOOM_FILTER_ERROR = ToDbErrorCode(9);
 constexpr ErrorCode DB_PARTITION_NOT_FOUND = ToDbErrorCode(10);
 constexpr ErrorCode DB_OUT_OF_STORAGE = ToDbErrorCode(11);
 constexpr ErrorCode DB_META_QUERY_FAILED = ToDbErrorCode(12);
+constexpr ErrorCode DB_FILE_NOT_FOUND = ToDbErrorCode(13);
 
 // knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);

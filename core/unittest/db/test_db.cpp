@@ -13,12 +13,12 @@
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
-#include <src/cache/CpuCacheMgr.h>
 #include <algorithm>
 #include <experimental/filesystem>
 #include <set>
 #include <string>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/merge/MergeAdaptiveStrategy.h"
@@ -233,6 +233,7 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
         for (int64_t j = 0; j < COLLECTION_DIM; j++) vector_record.float_data[COLLECTION_DIM * i + j] = drand48();
         vector_record.float_data[COLLECTION_DIM * i] += i / 2000.;
     }
+    vector_record.vector_count = n;
     vector_query->query_vector = vector_record;
     vector_query->metric_type = "L2";
     vector_query->extra_params = {{"nprobe", 1024}};
