@@ -22,6 +22,7 @@
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "metrics/Prometheus.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
 #include "server/delivery/ReqHandler.h"
@@ -355,6 +356,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     std::condition_variable insert_event_cv_;
     const int64_t max_concurrent_insert_request_size_;
     int64_t max_concurrent_insert_request_size = 0;
+
+    /* prometheus */
+    prometheus::Family<prometheus::Counter>& rpc_request_total_ = prometheus::BuildCounter()
+                                                                      .Name("rpc_request_total")
+                                                                      .Help("the number of rpc request")
+                                                                      .Register(prometheus.registry());
+
+    prometheus::Counter& rpc_request_success_total_ = rpc_request_total_.Add({{"outcome", "success"}});
+    // TODO
+    // prometheus::Counter& rpc_request_fail_total_ = rpc_request_total_.Add({{"outcome", "fail"}});
 };
 
 }  // namespace grpc
