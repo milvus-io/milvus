@@ -96,6 +96,11 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+cpuinfo=`cat /proc/cpuinfo`
+echo -e "\n\n CPU Info \n\n"
+echo ${cpuinfo}
+echo -e "\n\n END CPU Info \n\n"
+
 # run unittest
 for test in `ls ${UNITTEST_DIR}`; do
     if [[ ${test} == *".log" ]] || [[ ${test} == *".info" ]]; then
