@@ -245,6 +245,9 @@ class WebRequestHandler {
     StatusDtoT
     ServerStatus(OString& response_str);
 
+    StatusDtoT
+    GetMetrics(OString& response_str);
+
  public:
     void
     RegisterRequestHandler(const ReqHandler& handler) {

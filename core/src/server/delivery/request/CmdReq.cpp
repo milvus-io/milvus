@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "server/delivery/request/CmdReq.h"
+#include "metrics/Prometheus.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "src/version.h"
@@ -61,6 +62,8 @@ CmdReq::OnExecute() {
     } else if (cmd_ == "get_system_info") {
         // FIXME
         result_ = "not supported yet";
+    } else if (cmd_ == "metrics") {
+        result_ = prometheus.get_metrics();
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
     } else if (cmd_ == "get_milvus_config") {

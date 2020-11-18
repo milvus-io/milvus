@@ -12,8 +12,11 @@
 #pragma once
 
 #include <memory>
+#include <ostream>
+#include <sstream>
 
 #include <prometheus/registry.h>
+#include <prometheus/text_serializer.h>
 
 namespace milvus {
 
@@ -22,6 +25,14 @@ class Prometheus {
     prometheus::Registry&
     registry() {
         return *registry_;
+    }
+
+    std::string
+    get_metrics() {
+        std::ostringstream ss;
+        prometheus::TextSerializer serializer;
+        serializer.Serialize(ss, registry_->Collect());
+        return ss.str();
     }
 
  private:

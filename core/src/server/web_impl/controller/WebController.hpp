@@ -802,6 +802,17 @@ class WebController : public oatpp::web::server::api::ApiController {
         return response;
     }
 
+    ADD_DEFAULT_CORS(Metrics)
+
+    ENDPOINT("GET", "/metrics", Metrics) {
+        TimeRecorder tr(std::string(WEB_LOG_PREFIX) + R"(GET /metrics/)");
+        tr.RecordSection("Received request.");
+
+        WebRequestHandler handler = WebRequestHandler();
+        OString result = "";
+        auto status_dto = handler.GetMetrics(result);
+    }
+
 /**
  *  Finish ENDPOINTs generation ('ApiController' codegen)
  */
