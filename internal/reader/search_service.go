@@ -35,10 +35,10 @@ type SearchResult struct {
 }
 
 func newSearchService(ctx context.Context, replica *collectionReplica) *searchService {
-	receiveBufSize := Params.searchMsgStreamReceiveBufSize()
+	receiveBufSize := Params.searchReceiveBufSize()
 	pulsarBufSize := Params.searchPulsarBufSize()
 
-	msgStreamURL, err := Params.PulsarAddress()
+	msgStreamURL, err := Params.pulsarAddress()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,14 +46,14 @@ func newSearchService(ctx context.Context, replica *collectionReplica) *searchSe
 	consumeChannels := []string{"search"}
 	consumeSubName := "subSearch"
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchStream.SetPulsarClient(msgStreamURL)
+	searchStream.SetPulsarCient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := []string{"searchResult"}
 	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
-	searchResultStream.SetPulsarClient(msgStreamURL)
+	searchResultStream.SetPulsarCient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
 

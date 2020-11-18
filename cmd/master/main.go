@@ -21,35 +21,21 @@ func main() {
 	etcdAddress, _ := masterParams.Params.EtcdAddress()
 	etcdRootPath, _ := masterParams.Params.EtcdRootPath()
 	pulsarAddr, _ := masterParams.Params.PulsarAddress()
-	defaultRecordSize := masterParams.Params.DefaultRecordSize()
-	minimumAssignSize := masterParams.Params.MinimumAssignSize()
-	segmentThreshold := masterParams.Params.SegmentThreshold()
-	segmentExpireDuration := masterParams.Params.SegmentExpireDuration()
-	numOfChannel, _ := masterParams.Params.TopicNum()
-	nodeNum, _ := masterParams.Params.QueryNodeNum()
-	statsChannel := masterParams.Params.StatsChannels()
 
 	opt := master.Option{
-		KVRootPath:            etcdRootPath,
-		MetaRootPath:          etcdRootPath,
-		EtcdAddr:              []string{etcdAddress},
-		PulsarAddr:            pulsarAddr,
-		ProxyIDs:              nil,
-		PulsarProxyChannels:   nil,
-		PulsarProxySubName:    "",
-		SoftTTBInterval:       0,
-		WriteIDs:              nil,
-		PulsarWriteChannels:   nil,
-		PulsarWriteSubName:    "",
-		PulsarDMChannels:      nil,
-		PulsarK2SChannels:     nil,
-		DefaultRecordSize:     defaultRecordSize,
-		MinimumAssignSize:     minimumAssignSize,
-		SegmentThreshold:      segmentThreshold,
-		SegmentExpireDuration: segmentExpireDuration,
-		NumOfChannel:          numOfChannel,
-		NumOfQueryNode:        nodeNum,
-		StatsChannels:         statsChannel,
+		KVRootPath:          etcdRootPath,
+		MetaRootPath:        etcdRootPath,
+		EtcdAddr:            []string{etcdAddress},
+		PulsarAddr:          pulsarAddr,
+		ProxyIDs:            nil,
+		PulsarProxyChannels: nil,
+		PulsarProxySubName:  "",
+		SoftTTBInterval:     0,
+		WriteIDs:            nil,
+		PulsarWriteChannels: nil,
+		PulsarWriteSubName:  "",
+		PulsarDMChannels:    nil,
+		PulsarK2SChannels:   nil,
 	}
 
 	svr, err := master.CreateServer(ctx, &opt)

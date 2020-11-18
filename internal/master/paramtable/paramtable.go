@@ -36,47 +36,10 @@ func (p *ParamTable) PulsarToic() string {
 }
 
 func (p *ParamTable) SegmentThreshold() float64 {
-	threshold, _ := p.Load("master.segmentThreshold")
-	segmentThreshold, err := strconv.ParseFloat(threshold, 32)
+	threshole, _ := p.Load("master.segmentthreshold")
+	segmentThreshole, err := strconv.ParseFloat(threshole, 32)
 	if err != nil {
 		panic(err)
 	}
-	return segmentThreshold
-}
-
-func (p *ParamTable) DefaultRecordSize() int64 {
-	size, _ := p.Load("master.defaultSizePerRecord")
-	res, err := strconv.ParseInt(size, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	return res
-}
-
-func (p *ParamTable) MinimumAssignSize() int64 {
-	size, _ := p.Load("master.minimumAssignSize")
-	res, err := strconv.ParseInt(size, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	return res
-}
-
-func (p *ParamTable) SegmentExpireDuration() int64 {
-	duration, _ := p.Load("master.segmentExpireDuration")
-	res, err := strconv.ParseInt(duration, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	return res
-}
-
-func (p *ParamTable) QueryNodeNum() (int, error) {
-	num, _ := p.Load("master.querynodenum")
-	return strconv.Atoi(num)
-}
-
-func (p *ParamTable) StatsChannels() string {
-	channels, _ := p.Load("master.statsChannels")
-	return channels
+	return segmentThreshole
 }

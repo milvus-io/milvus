@@ -33,12 +33,12 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
-	inputStream.SetPulsarClient(pulsarAddress)
+	inputStream.SetPulsarCient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	inputStream.Start()
 
 	outputStream := NewPulsarMsgStream(context.Background(), 100)
-	outputStream.SetPulsarClient(pulsarAddress)
+	outputStream.SetPulsarCient(pulsarAddress)
 	unmarshalDispatcher := NewUnmarshalDispatcher()
 
 	//add a new unmarshall func for msgType kInsert

@@ -50,26 +50,19 @@ func startMaster(ctx context.Context) {
 	metaRootPath := path.Join(rootPath, "meta")
 
 	opt := master.Option{
-		KVRootPath:            kvRootPath,
-		MetaRootPath:          metaRootPath,
-		EtcdAddr:              []string{etcdAddr},
-		PulsarAddr:            "pulsar://localhost:6650",
-		ProxyIDs:              []typeutil.UniqueID{1, 2},
-		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
-		PulsarProxySubName:    "proxyTopics",
-		SoftTTBInterval:       300,
-		WriteIDs:              []typeutil.UniqueID{3, 4},
-		PulsarWriteChannels:   []string{"write3", "write4"},
-		PulsarWriteSubName:    "writeTopics",
-		PulsarDMChannels:      []string{"dm0", "dm1"},
-		PulsarK2SChannels:     []string{"k2s0", "k2s1"},
-		DefaultRecordSize:     1024,
-		MinimumAssignSize:     1048576,
-		SegmentThreshold:      536870912,
-		SegmentExpireDuration: 2000,
-		NumOfChannel:          5,
-		NumOfQueryNode:        3,
-		StatsChannels:         "statistic",
+		KVRootPath:          kvRootPath,
+		MetaRootPath:        metaRootPath,
+		EtcdAddr:            []string{etcdAddr},
+		PulsarAddr:          "pulsar://localhost:6650",
+		ProxyIDs:            []typeutil.UniqueID{1, 2},
+		PulsarProxyChannels: []string{"proxy1", "proxy2"},
+		PulsarProxySubName:  "proxyTopics",
+		SoftTTBInterval:     300,
+		WriteIDs:            []typeutil.UniqueID{3, 4},
+		PulsarWriteChannels: []string{"write3", "write4"},
+		PulsarWriteSubName:  "writeTopics",
+		PulsarDMChannels:    []string{"dm0", "dm1"},
+		PulsarK2SChannels:   []string{"k2s0", "k2s1"},
 	}
 
 	svr, err := master.CreateServer(ctx, &opt)
@@ -296,7 +289,7 @@ func TestProxy_Search(t *testing.T) {
 		bufSize := 1024
 		queryResultMsgStream := msgstream.NewPulsarMsgStream(ctx, int64(bufSize))
 		pulsarAddress := "pulsar://localhost:6650"
-		queryResultMsgStream.SetPulsarClient(pulsarAddress)
+		queryResultMsgStream.SetPulsarCient(pulsarAddress)
 		assert.NotEqual(t, queryResultMsgStream, nil, "query result message stream should not be nil!")
 		queryResultMsgStream.CreatePulsarProducers(queryResultChannels)
 

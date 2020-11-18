@@ -126,8 +126,8 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *etcdpb.SegmentMeta) b
 	}
 
 	Params.Init()
-	var queryNodeChannelStart = Params.TopicStart()
-	var queryNodeChannelEnd = Params.TopicEnd()
+	var queryNodeChannelStart = Params.topicStart()
+	var queryNodeChannelEnd = Params.topicEnd()
 
 	if segment.ChannelStart >= int32(queryNodeChannelStart) && segment.ChannelEnd <= int32(queryNodeChannelEnd) {
 		return true

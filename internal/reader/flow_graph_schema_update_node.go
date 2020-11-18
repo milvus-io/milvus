@@ -1,7 +1,5 @@
 package reader
 
-import "github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
-
 type schemaUpdateNode struct {
 	BaseNode
 	schemaUpdateMsg schemaUpdateMsg
@@ -16,8 +14,8 @@ func (suNode *schemaUpdateNode) Operate(in []*Msg) []*Msg {
 }
 
 func newSchemaUpdateNode() *schemaUpdateNode {
-	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
-	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+	maxQueueLength := Params.flowGraphMaxQueueLength()
+	maxParallelism := Params.flowGraphMaxParallelism()
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

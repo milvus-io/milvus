@@ -142,7 +142,6 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentMeta, open_time_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentMeta, close_time_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentMeta, num_rows_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentMeta, mem_size_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::etcd::TenantMeta)},
@@ -169,14 +168,13 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "nMeta\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milv"
   "us.proto.schema.CollectionSchema\022\023\n\013crea"
   "te_time\030\003 \001(\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016par"
-  "tition_tags\030\005 \003(\t\"\304\001\n\013SegmentMeta\022\021\n\tseg"
+  "tition_tags\030\005 \003(\t\"\262\001\n\013SegmentMeta\022\021\n\tseg"
   "mentID\030\001 \001(\003\022\024\n\014collectionID\030\002 \001(\003\022\025\n\rpa"
   "rtition_tag\030\003 \001(\t\022\025\n\rchannel_start\030\004 \001(\005"
   "\022\023\n\013channel_end\030\005 \001(\005\022\021\n\topen_time\030\006 \001(\004"
-  "\022\022\n\nclose_time\030\007 \001(\004\022\020\n\010num_rows\030\010 \001(\003\022\020"
-  "\n\010mem_size\030\t \001(\003B@Z>github.com/zilliztec"
-  "h/milvus-distributed/internal/proto/etcd"
-  "pbb\006proto3"
+  "\022\022\n\nclose_time\030\007 \001(\004\022\020\n\010num_rows\030\010 \001(\003B@"
+  "Z>github.com/zilliztech/milvus-distribut"
+  "ed/internal/proto/etcdpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -191,7 +189,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 690,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 672,
   &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 4, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 4, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
@@ -1513,8 +1511,8 @@ SegmentMeta::SegmentMeta(const SegmentMeta& from)
     partition_tag_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_tag_);
   }
   ::memcpy(&segmentid_, &from.segmentid_,
-    static_cast<size_t>(reinterpret_cast<char*>(&mem_size_) -
-    reinterpret_cast<char*>(&segmentid_)) + sizeof(mem_size_));
+    static_cast<size_t>(reinterpret_cast<char*>(&num_rows_) -
+    reinterpret_cast<char*>(&segmentid_)) + sizeof(num_rows_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.etcd.SegmentMeta)
 }
 
@@ -1522,8 +1520,8 @@ void SegmentMeta::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_SegmentMeta_etcd_5fmeta_2eproto.base);
   partition_tag_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segmentid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&mem_size_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(mem_size_));
+      reinterpret_cast<char*>(&num_rows_) -
+      reinterpret_cast<char*>(&segmentid_)) + sizeof(num_rows_));
 }
 
 SegmentMeta::~SegmentMeta() {
@@ -1552,8 +1550,8 @@ void SegmentMeta::Clear() {
 
   partition_tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
   ::memset(&segmentid_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&mem_size_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(mem_size_));
+      reinterpret_cast<char*>(&num_rows_) -
+      reinterpret_cast<char*>(&segmentid_)) + sizeof(num_rows_));
   _internal_metadata_.Clear();
 }
 
@@ -1618,13 +1616,6 @@ const char* SegmentMeta::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
       case 8:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 64)) {
           num_rows_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // int64 mem_size = 9;
-      case 9:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 72)) {
-          mem_size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -1764,19 +1755,6 @@ bool SegmentMeta::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 mem_size = 9;
-      case 9: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (72 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
-                 input, &mem_size_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -1849,11 +1827,6 @@ void SegmentMeta::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(8, this->num_rows(), output);
   }
 
-  // int64 mem_size = 9;
-  if (this->mem_size() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(9, this->mem_size(), output);
-  }
-
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -1911,11 +1884,6 @@ void SegmentMeta::SerializeWithCachedSizes(
   // int64 num_rows = 8;
   if (this->num_rows() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(8, this->num_rows(), target);
-  }
-
-  // int64 mem_size = 9;
-  if (this->mem_size() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(9, this->mem_size(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -1995,13 +1963,6 @@ size_t SegmentMeta::ByteSizeLong() const {
         this->num_rows());
   }
 
-  // int64 mem_size = 9;
-  if (this->mem_size() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
-        this->mem_size());
-  }
-
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
@@ -2054,9 +2015,6 @@ void SegmentMeta::MergeFrom(const SegmentMeta& from) {
   if (from.num_rows() != 0) {
     set_num_rows(from.num_rows());
   }
-  if (from.mem_size() != 0) {
-    set_mem_size(from.mem_size());
-  }
 }
 
 void SegmentMeta::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -2089,7 +2047,6 @@ void SegmentMeta::InternalSwap(SegmentMeta* other) {
   swap(open_time_, other->open_time_);
   swap(close_time_, other->close_time_);
   swap(num_rows_, other->num_rows_);
-  swap(mem_size_, other->mem_size_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata SegmentMeta::GetMetadata() const {

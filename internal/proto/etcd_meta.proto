@@ -38,5 +38,4 @@ message SegmentMeta {
   uint64 open_time=6;
   uint64 close_time=7;
   int64 num_rows=8;
-  int64 mem_size=9;
 }
