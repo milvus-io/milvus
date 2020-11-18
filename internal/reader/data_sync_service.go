@@ -37,6 +37,7 @@ func (dsService *dataSyncService) initNodes() {
 	// TODO: add delete pipeline support
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
+	flowgraph.Params.Init()
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx)
 	var filterDmNode Node = newFilteredDmNode()

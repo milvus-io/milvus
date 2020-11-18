@@ -14,7 +14,7 @@ using Json = nlohmann::json;
 // class definitions
 struct Plan {
  public:
-    Plan(const Schema& schema) : schema_(schema) {
+    explicit Plan(const Schema& schema) : schema_(schema) {
     }
 
  public:

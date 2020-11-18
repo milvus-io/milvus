@@ -48,10 +48,16 @@ if __name__ == "__main__":
     
     node_names = ["Expr", "PlanNode"]
     visitor_info = {
-        'Expr': [{
-            'visitor_name': "ShowExprVisitor",
-            "parameter_name": 'expr',
-        }],
+        'Expr': [
+            {
+                'visitor_name': "ShowExprVisitor",
+                "parameter_name": 'expr',
+            },
+            {
+                'visitor_name': "ExecExprVisitor",
+                "parameter_name": 'expr',
+            },
+        ],
         'PlanNode': [
             {
                 'visitor_name': "ShowPlanNodeVisitor",

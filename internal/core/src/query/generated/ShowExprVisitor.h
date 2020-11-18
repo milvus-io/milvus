@@ -9,16 +9,16 @@
 namespace milvus::query {
 class ShowExprVisitor : ExprVisitor {
  public:
-    virtual void
+    void
     visit(BoolUnaryExpr& expr) override;
 
-    virtual void
+    void
     visit(BoolBinaryExpr& expr) override;
 
-    virtual void
+    void
     visit(TermExpr& expr) override;
 
-    virtual void
+    void
     visit(RangeExpr& expr) override;
 
  public:

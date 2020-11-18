@@ -175,6 +175,9 @@ func receiveResult(ctx context.Context, fg *TimeTickedFlowGraph) (float64, bool)
 }
 
 func TestTimeTickedFlowGraph_Start(t *testing.T) {
+	const MaxQueueLength = 1024
+	const MaxParallelism = 1024
+
 	duration := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), duration)
 	defer cancel()

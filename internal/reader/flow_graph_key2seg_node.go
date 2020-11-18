@@ -1,5 +1,7 @@
 package reader
 
+import "github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+
 type key2SegNode struct {
 	BaseNode
 	key2SegMsg key2SegMsg
@@ -14,6 +16,9 @@ func (ksNode *key2SegNode) Operate(in []*Msg) []*Msg {
 }
 
 func newKey2SegNode() *key2SegNode {
+	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
+	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type filterDmNode struct {
@@ -54,6 +55,9 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 }
 
 func newFilteredDmNode() *filterDmNode {
+	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
+	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)

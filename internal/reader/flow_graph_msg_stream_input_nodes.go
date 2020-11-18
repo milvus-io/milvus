@@ -9,10 +9,8 @@ import (
 )
 
 func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
-	const (
-		receiveBufSize = 1024
-		pulsarBufSize  = 1024
-	)
+	receiveBufSize := Params.dmMsgStreamReceiveBufSize()
+	pulsarBufSize := Params.dmPulsarBufSize()
 
 	msgStreamURL, err := Params.PulsarAddress()
 	if err != nil {

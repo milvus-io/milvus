@@ -28,10 +28,8 @@ func newStatsService(ctx context.Context, replica *collectionReplica) *statsServ
 }
 
 func (sService *statsService) start() {
-	const (
-		receiveBufSize       = 1024
-		sleepMillisecondTime = 1000
-	)
+	sleepTimeInterval := Params.statsServiceTimeInterval()
+	receiveBufSize := Params.statsMsgStreamReceiveBufSize()
 
 	// start pulsar
 	msgStreamURL, err := Params.PulsarAddress()
@@ -50,12 +48,12 @@ func (sService *statsService) start() {
 	(*sService.statsStream).Start()
 
 	// start service
-	fmt.Println("do segments statistic in ", strconv.Itoa(sleepMillisecondTime), "ms")
+	fmt.Println("do segments statistic in ", strconv.Itoa(sleepTimeInterval), "ms")
 	for {
 		select {
 		case <-sService.ctx.Done():
 			return
-		case <-time.After(sleepMillisecondTime * time.Millisecond):
+		case <-time.After(time.Duration(sleepTimeInterval) * time.Millisecond):
 			sService.sendSegmentStatistic()
 		}
 	}
