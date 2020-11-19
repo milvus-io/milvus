@@ -69,6 +69,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
+        auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
+        hnsw_stats->max_level = index_->maxlevel_;
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -94,6 +96,13 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
+        auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
+        hnsw_stats->max_level = index_->maxlevel_;
+        for (auto i = 0; i < index_->element_levels_.size(); ++ i) {
+            if (index_->element_levels_[i] >= hnsw_stats->distribution.size())
+                hnsw_stats->distribution.resize(index_->element_levels_[i] + 1, 0);
+            hnsw_stats->distribution[index_->element_levels_[i]] ++;
+        }
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -147,6 +156,12 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
+    std::vector<hnswlib::Statistics> query_stats;
+    query_stats.reserve(rows);
+    auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
+    if (hnsw_stats->bs_percentage_static < 0) {
+        hnsw_stats->bs_percentage_static = (double)bitset->count_1() / bitset->count();
+    }
 
     index_->setEf(config[IndexParams::ef]);
 
@@ -165,7 +180,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn(single_query, k, compare, bitset);
+        ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
@@ -187,6 +202,21 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         memcpy(p_id + i * k, ids.data(), id_size);
     }
 
+    uint64_t tot_access = 0;
+    uint64_t tot_hit = 0;
+    for (auto i = 0; i < rows; ++ i) {
+        tot_access += query_stats[i].bitset_access_cnt;
+        tot_hit += query_stats[i].bitset_hit_cnt;
+        for (auto j = 0; j < query_stats[i].accessed_points.size(); ++ j) {
+            auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
+            if (tgt == hnsw_stats->access_cnt.end())
+                hnsw_stats->access_cnt[query_stats[i].accessed_points[j]] = 1;
+            else
+                tgt->second += 1;
+        }
+    }
+    hnsw_stats->bs_percentage_dynamic += (double)tot_hit / (double)tot_access;
+    hnsw_stats->bs_percentage_dynamic /= 2.0;
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
