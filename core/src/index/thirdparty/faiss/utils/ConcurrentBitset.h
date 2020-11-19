@@ -14,6 +14,7 @@
 #include <atomic>
 #include <memory>
 #include <string.h>
+#include <stdint.h>
 #include <vector>
 
 namespace faiss {
@@ -197,6 +198,30 @@ class ConcurrentBitset {
     uint8_t*
     mutable_data() {
         return reinterpret_cast<uint8_t*>(bitset_.data());
+    }
+
+    uint64_t
+    count_1() const {
+        uint64_t ret = 0;
+        auto p_data = reinterpret_cast<uint64_t *>(bitset_.data());
+        auto len = size() >> 3;
+        auto remainder = size() % 8;
+        auto popcount8 = [&](uint8 x) -> int{
+            x = (x & 0x55) + ((x >> 1) & 0x55);
+            x = (x & 0x33) + ((x >> 2) & 0x33);
+            x = (x & 0x0F) + ((x >> 4) & 0x0F);
+            return x;
+        };
+        for (auto i = 0; i < len; ++ i) {
+            ret += __builtin_popcountl(*p_data);
+            p_data ++;
+        }
+        auto p_byte = data() + (len << 3);
+        for (auto i = (len << 3); i < size(); ++ i) {
+            ret += popcount8(*p_byte);
+            p_byte ++;
+        }
+        return ret;
     }
 
  private:

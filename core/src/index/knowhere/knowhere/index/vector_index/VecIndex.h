@@ -19,6 +19,7 @@
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
+#include "knowhere/common/Statistics.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
 
@@ -126,6 +127,7 @@ class VecIndex : public Index {
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
+    StatisticsPtr stats = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;
