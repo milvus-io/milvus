@@ -10,19 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <memory>
-#include <set>
-#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "query/BinaryQuery.h"
+#include "query/QueryUtil.h"
 
 namespace milvus {
 namespace query {
 
 BinaryQueryPtr
-ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, uint64_t idx) {
+QueryUtil::ConstructBinTree(std::vector<BooleanQueryPtr>& queries, QueryRelation relation, uint64_t idx) {
     if (idx == queries.size()) {
         return nullptr;
     } else if (idx == queries.size() - 1) {
@@ -40,7 +38,8 @@ ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, u
 }
 
 Status
-ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr binary_query, uint64_t idx) {
+QueryUtil::ConstructLeafBinTree(std::vector<LeafQueryPtr>& leaf_queries, const BinaryQueryPtr& binary_query,
+                                uint64_t idx) {
     if (idx == leaf_queries.size()) {
         return Status::OK();
     }
@@ -63,13 +62,13 @@ ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr bina
 }
 
 Status
-GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
-    if (query->getBooleanQueries().size() == 0) {
+QueryUtil::GenBinaryQuery(const BooleanQueryPtr& query, BinaryQueryPtr& binary_query) {
+    if (query->getBooleanQueries().empty()) {
         if (binary_query->relation == QueryRelation::AND || binary_query->relation == QueryRelation::OR) {
             // Put VectorQuery to the end of leaf queries
             auto query_size = query->getLeafQueries().size();
             for (uint64_t i = 0; i < query_size; ++i) {
-                if (query->getLeafQueries()[i]->vector_placeholder.size() > 0) {
+                if (!(query->getLeafQueries()[i]->vector_placeholder.empty())) {
                     std::swap(query->getLeafQueries()[i], query->getLeafQueries()[0]);
                     break;
                 }
@@ -204,7 +203,7 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
 }
 
 uint64_t
-BinaryQueryHeight(BinaryQueryPtr& binary_query) {
+QueryUtil::BinaryQueryHeight(BinaryQueryPtr& binary_query) {
     if (binary_query == nullptr) {
         return 1;
     }
@@ -218,17 +217,8 @@ BinaryQueryHeight(BinaryQueryPtr& binary_query) {
     return left_height > right_height ? left_height + 1 : right_height + 1;
 }
 
-/**
- * rules:
- * 1. The child node of 'should' and 'must_not' can only be 'term query' and 'range query'.
- * 2. One layer cannot include bool query and leaf query.
- * 3. The direct child node of 'bool' node cannot be 'should' node or 'must_not' node.
- * 4. All filters are pre-filtered(Do structure query first, then use the result to do filtering for vector query).
- *
- */
-
 Status
-rule_1(BooleanQueryPtr& boolean_query, std::vector<BooleanQueryPtr>& paths) {
+QueryUtil::rule_1(BooleanQueryPtr& boolean_query, std::vector<BooleanQueryPtr>& paths) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         paths.push_back(boolean_query);
@@ -256,7 +246,7 @@ rule_1(BooleanQueryPtr& boolean_query, std::vector<BooleanQueryPtr>& paths) {
 }
 
 Status
-rule_2(BooleanQueryPtr& boolean_query) {
+QueryUtil::rule_2(BooleanQueryPtr& boolean_query) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         if (!boolean_query->getBooleanQueries().empty() && !boolean_query->getLeafQueries().empty()) {
@@ -275,7 +265,7 @@ rule_2(BooleanQueryPtr& boolean_query) {
 }
 
 Status
-ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
+QueryUtil::ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         if (boolean_query->getOccur() != Occur::MUST) {
@@ -301,7 +291,7 @@ ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
 }
 
 bool
-ValidateBinaryQuery(BinaryQueryPtr& binary_query) {
+QueryUtil::ValidateBinaryQuery(BinaryQueryPtr& binary_query) {
     uint64_t height = BinaryQueryHeight(binary_query);
     return height > 1;
 }

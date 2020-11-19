@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "query/BinaryQuery.h"
+#include "query/QueryUtil.h"
 #include "server/ValidationUtil.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
@@ -1428,11 +1428,11 @@ GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grp
     DeSerialization(request->general_query(), boolean_query, query_ptr);
 
     auto general_query = std::make_shared<query::GeneralQuery>();
-    query::GenBinaryQuery(boolean_query, general_query->bin);
+    query::QueryUtil::GenBinaryQuery(boolean_query, general_query->bin);
 
     Status status;
 
-    if (!query::ValidateBinaryQuery(general_query->bin)) {
+    if (!query::QueryUtil::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
         SET_RESPONSE(response->mutable_status(), status, context)
         return ::grpc::Status::OK;
@@ -1797,17 +1797,17 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
         return ::grpc::Status::OK;
     }
 
-    status = query::ValidateBooleanQuery(boolean_query);
+    status = query::QueryUtil::ValidateBooleanQuery(boolean_query);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
     }
 
     query::GeneralQueryPtr general_query = std::make_shared<query::GeneralQuery>();
-    query::GenBinaryQuery(boolean_query, general_query->bin);
+    query::QueryUtil::GenBinaryQuery(boolean_query, general_query->bin);
     query_ptr->root = general_query;
 
-    if (!query::ValidateBinaryQuery(general_query->bin)) {
+    if (!query::QueryUtil::ValidateBinaryQuery(general_query->bin)) {
         status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
         SET_RESPONSE(grpc_entity->mutable_status(), status, context);
         return ::grpc::Status::OK;
