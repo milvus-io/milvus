@@ -58,11 +58,6 @@ class Prometheus {
         return ss.str();
     }
 
-    void
-    RegisterCollectable(const std::weak_ptr<prometheus::Collectable>& collectable) {
-        collectables_.push_back(collectable);
-    }
-
  private:
     std::vector<std::weak_ptr<prometheus::Collectable>> collectables_;
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();

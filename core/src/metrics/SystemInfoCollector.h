@@ -16,6 +16,10 @@
 
 #include "metrics/Prometheus.h"
 
+#define GAUGE(name, description)                  \
+    prometheus::Family<prometheus::Gauge>& name = \
+        prometheus::BuildGauge().Name(cluster_name + #name).Help(description).Register(prometheus.registry());
+
 namespace milvus {
 
 class SystemInfoCollector {
@@ -55,6 +59,30 @@ class SystemInfoCollector {
                                                        .Help("cpu_utilization_ratio")
                                                        .Register(prometheus.registry());
     Gauge& cpu_utilization_ratio_ = cpu_utilization_ratio_family_.Add({});
+
+    Family<Gauge>& cpu_tempearature_family_ =
+        prometheus::BuildGauge().Name("cpu_temperature").Help("cpu_temperature").Register(prometheus.registry());
+    Gauge& cpu_temperature_ = cpu_tempearature_family_.Add({});
+
+    Family<Gauge>& mem_usage_family_ =
+        prometheus::BuildGauge().Name("mem_usage").Help("mem_usage").Register(prometheus.registry());
+    Gauge& mem_usage_ = mem_usage_family_.Add({});
+
+    Family<Gauge>& mem_total_family_ =
+        prometheus::BuildGauge().Name("mem_total").Help("mem_total").Register(prometheus.registry());
+    Gauge& mem_total_ = mem_total_family_.Add({});
+
+    Family<Gauge>& mem_available_family_ =
+        prometheus::BuildGauge().Name("mem_available").Help("mem_available").Register(prometheus.registry());
+    Gauge& mem_available_ = mem_available_family_.Add({});
+
+    Family<Gauge>& network_in_octets_family_ =
+        prometheus::BuildGauge().Name("network_in_octets").Help("network_in_octets").Register(prometheus.registry());
+    Gauge& network_in_octets_ = network_in_octets_family_.Add({});
+
+    Family<Gauge>& network_out_octets_family_ =
+        prometheus::BuildGauge().Name("network_out_octets").Help("network_out_octets").Register(prometheus.registry());
+    Gauge& network_out_octets_ = network_out_octets_family_.Add({});
 };
 
 }  // namespace milvus

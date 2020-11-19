@@ -119,7 +119,7 @@ SystemInfo::MemUsage() {
 
             while (fgets(line, line_length, file) != nullptr) {
                 if (strncmp(line, "VmRSS:", 6) == 0) {
-                    result = ParseLine(line);
+                    result = parse_line(line);
                     break;
                 }
             }
@@ -167,7 +167,7 @@ SystemInfo::MemAvailable() {
 int64_t
 SystemInfo::NetworkInOctets() {
     try {
-        auto in_and_out_octets = Octets();
+        auto in_and_out_octets = octets();
         return in_and_out_octets.first;
     } catch (std::exception& ex) {
         std::string msg = "Cannot get network in octets, reason: " + std::string(ex.what());
@@ -178,7 +178,7 @@ SystemInfo::NetworkInOctets() {
 int64_t
 SystemInfo::NetworkOutOctets() {
     try {
-        auto in_and_out_octets = Octets();
+        auto in_and_out_octets = octets();
         return in_and_out_octets.second;
     } catch (std::exception& ex) {
         std::string msg = "Cannot get network out octets, reason: " + std::string(ex.what());
@@ -275,7 +275,7 @@ SystemInfo::GpuMemAvailable(int64_t device_id) {
 #endif
 
 int64_t
-SystemInfo::ParseLine(char* line) {
+SystemInfo::parse_line(char* line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int i = strlen(line);
     const char* p = line;
@@ -288,7 +288,7 @@ SystemInfo::ParseLine(char* line) {
 }
 
 std::pair<int64_t, int64_t>
-SystemInfo::Octets() {
+SystemInfo::octets() {
     try {
         const std::string filename = "/proc/net/netstat";
         std::ifstream file(filename);
