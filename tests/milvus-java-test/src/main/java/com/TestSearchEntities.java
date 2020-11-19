@@ -49,7 +49,8 @@ public class TestSearchEntities {
   public void testSearchCollectionEmpty(MilvusClient client, String collectionName) {
     SearchParam searchParam = SearchParam.create(collectionName).setDsl(floatDsl);
     SearchResult res_search = client.search(searchParam);
-    Assert.assertEquals(res_search.getResultIdsList().size(), 0);
+    Assert.assertEquals(res_search.getResultIdsList().size(), nq);
+    Assert.assertEquals(res_search.getResultIdsList().get(0).size(), 0);
   }
 
   @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -105,7 +106,8 @@ public class TestSearchEntities {
     SearchParam searchParam =
         SearchParam.create(collectionName).setDsl(floatDsl).setPartitionTags(queryTags);
     SearchResult res_search = client.search(searchParam);
-    Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
+    Assert.assertEquals(res_search.getResultDistancesList().size(), nq);
+    Assert.assertEquals(res_search.getResultDistancesList().get(0).size(), 0);
   }
 
   @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -127,10 +129,10 @@ public class TestSearchEntities {
                 entities.get(Constants.floatVectorFieldName));
     client.insert(insertParam);
     client.flush(collectionName);
-    SearchParam searchParam =
-        SearchParam.create(collectionName).setDsl(floatDsl).setPartitionTags(queryTags);
+    SearchParam searchParam = SearchParam.create(collectionName).setDsl(floatDsl).setPartitionTags(queryTags);
     SearchResult res_search = client.search(searchParam);
-    Assert.assertEquals(res_search.getResultDistancesList().size(), 0);
+    Assert.assertEquals(res_search.getResultDistancesList().size(), nq);
+    Assert.assertEquals(res_search.getResultDistancesList().get(0).size(), 0);
   }
 
   @Test(

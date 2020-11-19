@@ -116,7 +116,7 @@
         <dependency>
             <groupId>io.milvus</groupId>
             <artifactId>milvus-sdk-java</artifactId>
-            <version>0.9.1-SNAPSHOT</version>
+            <version>0.9.2-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
