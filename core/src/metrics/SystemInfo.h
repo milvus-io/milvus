@@ -69,10 +69,10 @@ class SystemInfo {
 
  private:
     static int64_t
-    ParseLine(char* line);
+    parse_line(char* line);
 
     static std::pair<int64_t, int64_t>
-    Octets();
+    octets();
 };
 
 }  // namespace milvus

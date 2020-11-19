@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <prometheus/collectable.h>
+#include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 #include <prometheus/text_serializer.h>
 
@@ -55,11 +56,6 @@ class Prometheus {
         prometheus::TextSerializer serializer;
         serializer.Serialize(ss, registry_->Collect());
         return ss.str();
-    }
-
-    void
-    RegisterCollectable(const std::weak_ptr<prometheus::Collectable>& collectable) {
-        collectables_.push_back(collectable);
     }
 
  private:

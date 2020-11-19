@@ -39,6 +39,12 @@ SystemInfoCollector::collector_function() {
     while (running_) {
         /* collect metrics */
         cpu_utilization_ratio_.Set(SystemInfo::CpuUtilizationRatio());
+        cpu_temperature_.Set(SystemInfo::CpuTemperature());
+        mem_usage_.Set(SystemInfo::MemUsage());
+        mem_total_.Set(SystemInfo::MemTotal());
+        mem_available_.Set(SystemInfo::MemAvailable());
+        network_in_octets_.Set(SystemInfo::NetworkInOctets());
+        network_out_octets_.Set(SystemInfo::NetworkOutOctets());
 
         /* collect interval */
         // TODO: interval from config
