@@ -18,7 +18,8 @@ namespace milvus {
 void
 SystemInfoCollector::Start() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (running_) return;
+    if (running_)
+        return;
     running_ = true;
     collector_thread_ = std::thread(&SystemInfoCollector::collector_function, this);
 }
@@ -26,7 +27,8 @@ SystemInfoCollector::Start() {
 void
 SystemInfoCollector::Stop() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (not running_) return;
+    if (not running_)
+        return;
     running_ = false;
     collector_thread_.join();
 }
@@ -43,4 +45,3 @@ SystemInfoCollector::collector_function() {
 }
 
 }  // namespace milvus
-

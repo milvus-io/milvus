@@ -18,22 +18,21 @@ namespace milvus {
 
 class SystemInfoCollector {
  public:
-     void
-     Start();
+    void
+    Start();
 
-     void
-     Stop();
-
- private:
-     void
-     collector_function();
+    void
+    Stop();
 
  private:
-     bool running_ = false;
-     std::mutex mutex_;
+    void
+    collector_function();
 
-     std::thread collector_thread_;
+ private:
+    bool running_ = false;
+    std::mutex mutex_;
+
+    std::thread collector_thread_;
 };
 
 }  // namespace milvus
-
