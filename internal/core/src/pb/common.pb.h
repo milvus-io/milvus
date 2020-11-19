@@ -112,12 +112,13 @@ enum ErrorCode : int {
   ILLEGAL_NLIST = 22,
   ILLEGAL_METRIC_TYPE = 23,
   OUT_OF_MEMORY = 24,
+  DD_REQUEST_RACE = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ErrorCode_IsValid(int value);
 constexpr ErrorCode ErrorCode_MIN = SUCCESS;
-constexpr ErrorCode ErrorCode_MAX = OUT_OF_MEMORY;
+constexpr ErrorCode ErrorCode_MAX = DD_REQUEST_RACE;
 constexpr int ErrorCode_ARRAYSIZE = ErrorCode_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ErrorCode_descriptor();

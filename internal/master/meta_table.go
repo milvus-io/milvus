@@ -222,8 +222,9 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	if len(coll.SegmentIDs) != 0 {
 		return errors.Errorf("segment should be empty when creating collection")
 	}
-	if len(coll.PartitionTags) != 0 {
-		return errors.Errorf("segment should be empty when creating collection")
+
+	if len(coll.PartitionTags) == 0 {
+		coll.PartitionTags = append(coll.PartitionTags, "default")
 	}
 	_, ok := mt.collName2ID[coll.Schema.Name]
 	if ok {

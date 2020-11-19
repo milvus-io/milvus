@@ -28,7 +28,11 @@ enum ErrorCode {
     ILLEGAL_NLIST = 22;
     ILLEGAL_METRIC_TYPE = 23;
     OUT_OF_MEMORY = 24;
+
+    // internal error code.
+    DD_REQUEST_RACE = 1000;
 }
+
 
 message Empty{}
 

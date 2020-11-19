@@ -329,7 +329,6 @@ func (s *Master) grpcLoop(grpcPort int64) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErr <- err
 	}
-
 }
 
 func (s *Master) tsLoop() {

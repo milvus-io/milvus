@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxMergeRequests = 10000
+	maxConcurrentRequests = 10000
 )
 
 type request interface {
@@ -46,18 +46,23 @@ type idRequest struct {
 	count uint32
 }
 
-func (req *idRequest) Wait() {
-	req.baseRequest.Wait()
-}
-
 type tsoRequest struct {
 	baseRequest
 	timestamp Timestamp
 	count     uint32
 }
 
-func (req *tsoRequest) Wait() {
-	req.baseRequest.Wait()
+type segRequest struct {
+	baseRequest
+	count     uint32
+	colName   string
+	partition string
+	segID     UniqueID
+	channelID int32
+}
+
+type syncRequest struct {
+	baseRequest
 }
 
 type tickerChan interface {
@@ -117,9 +122,16 @@ type Allocator struct {
 	masterClient  masterpb.MasterClient
 	countPerRPC   uint32
 
-	tChan       tickerChan
+	toDoReqs []request
+
+	syncReqs []request
+
+	tChan         tickerChan
+	forceSyncChan chan request
+
 	syncFunc    func()
-	processFunc func(req request)
+	processFunc func(req request) error
+	checkFunc   func(timeout bool) bool
 }
 
 func (ta *Allocator) Start() error {
@@ -148,25 +160,40 @@ func (ta *Allocator) connectMaster() error {
 	return nil
 }
 
+func (ta *Allocator) init() {
+	ta.forceSyncChan = make(chan request, maxConcurrentRequests)
+}
+
 func (ta *Allocator) mainLoop() {
 	defer ta.wg.Done()
 
 	loopCtx, loopCancel := context.WithCancel(ta.ctx)
 	defer loopCancel()
 
-	defaultSize := maxMergeRequests + 1
-	reqs := make([]request, defaultSize)
 	for {
 		select {
-		case <-ta.tChan.Chan():
-			ta.sync()
-		case first := <-ta.reqs:
-			pendingPlus1 := len(ta.reqs) + 1
-			reqs[0] = first
-			for i := 1; i < pendingPlus1; i++ {
-				reqs[i] = <-ta.reqs
+
+		case first := <-ta.forceSyncChan:
+			ta.syncReqs = append(ta.syncReqs, first)
+			pending := len(ta.forceSyncChan)
+			for i := 0; i < pending; i++ {
+				ta.syncReqs = append(ta.syncReqs, <-ta.forceSyncChan)
 			}
-			ta.finishRequest(reqs[:pendingPlus1])
+			ta.sync(true)
+			ta.finishSyncRequest()
+
+		case <-ta.tChan.Chan():
+			ta.sync(true)
+
+		case first := <-ta.reqs:
+			ta.toDoReqs = append(ta.toDoReqs, first)
+			pending := len(ta.reqs)
+			for i := 0; i < pending; i++ {
+				ta.toDoReqs = append(ta.toDoReqs, <-ta.reqs)
+			}
+			ta.sync(false)
+
+			ta.finishRequest()
 
 		case <-loopCtx.Done():
 			return
@@ -175,21 +202,39 @@ func (ta *Allocator) mainLoop() {
 	}
 }
 
-func (ta *Allocator) sync() {
-	if ta.syncFunc != nil {
-		ta.syncFunc()
-		ta.tChan.Reset()
-		fmt.Println("synced")
+func (ta *Allocator) sync(timeout bool) {
+	if ta.syncFunc == nil {
+		return
 	}
+	if ta.checkFunc == nil || !ta.checkFunc(timeout) {
+		return
+	}
+
+	ta.syncFunc()
+
+	if !timeout {
+		ta.tChan.Reset()
+	}
+	fmt.Println("synced")
 }
 
-func (ta *Allocator) finishRequest(reqs []request) {
-	for i := 0; i < len(reqs); i++ {
-		ta.processFunc(reqs[i])
-		if reqs[i] != nil {
-			reqs[i].Notify(nil)
+func (ta *Allocator) finishSyncRequest() {
+	for _, req := range ta.syncReqs {
+		if req != nil {
+			req.Notify(nil)
 		}
 	}
+	ta.syncReqs = ta.syncReqs[0:0]
+}
+
+func (ta *Allocator) finishRequest() {
+	for _, req := range ta.toDoReqs {
+		if req != nil {
+			err := ta.processFunc(req)
+			req.Notify(err)
+		}
+	}
+	ta.toDoReqs = ta.toDoReqs[0:0]
 }
 
 func (ta *Allocator) revokeRequest(err error) {
@@ -205,4 +250,10 @@ func (ta *Allocator) Close() {
 	ta.wg.Wait()
 	ta.tChan.Close()
 	ta.revokeRequest(errors.New("closing"))
+}
+
+func (ta *Allocator) CleanCache() {
+	req := &syncRequest{baseRequest: baseRequest{done: make(chan error), valid: false}}
+	ta.forceSyncChan <- req
+	req.Wait()
 }
