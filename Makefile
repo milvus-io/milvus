@@ -18,12 +18,6 @@ LIBRARY_PATH := $(PWD)/lib
 
 all: build-cpp build-go
 
-#TODO: Use ruleguard to check code specifications
-get-check-deps:
-	@mkdir -p ${GOPATH}/bin
-	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
-	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off $(GO) get github.com/quasilyte/go-ruleguard/...)
-
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
@@ -58,7 +52,7 @@ ruleguard:
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./test/...
 
-verifiers: clang-format get-check-deps fmt lint ruleguard
+verifiers: clang-format fmt lint ruleguard
 
 # Builds various components locally.
 build-go:
