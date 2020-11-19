@@ -48,7 +48,6 @@ SystemInfo::CpuUtilizationRatio() {
             percent /= (now - last_cpu_);
             percent *= 100;
         }
-
     } catch (std::exception& ex) {
         std::string msg = "Cannot get cpu utilization ratio, reason: " + std::string(ex.what());
         throw std::runtime_error(msg);
