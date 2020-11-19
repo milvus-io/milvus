@@ -95,7 +95,7 @@ class ResourceContext {
 template <typename T>
 class ResourceContextBuilder {
  public:
-    ResourceContextBuilder() : table_(T::Name), op_(meta::oAdd) {
+    explicit ResourceContextBuilder(ResourceContextOp op) : table_(T::Name), op_(op) {
     }
 
     ResourceContextBuilder<T>&

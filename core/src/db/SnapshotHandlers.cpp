@@ -36,8 +36,8 @@ SegmentsToSearchCollector::SegmentsToSearchCollector(snapshot::ScopedSnapshotT s
 }
 
 Status
-SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_commit) {
-    auto p_id = segment_commit->GetPartitionId();
+SegmentsToSearchCollector::Handle(const snapshot::PartitionCommitPtr& partition_commit) {
+    auto p_id = partition_commit->GetPartitionId();
     auto p_ptr = ss_->GetResource<snapshot::Partition>(p_id);
     auto& p_name = p_ptr->GetName();
 
@@ -55,7 +55,10 @@ SegmentsToSearchCollector::Handle(const snapshot::SegmentCommitPtr& segment_comm
     }
 
     if (match) {
-        segment_ids_.push_back(segment_commit->GetSegmentId());
+        auto& ids = partition_commit->GetMappings();
+        for (auto& id : ids) {
+            segment_ids_.emplace_back(ss_->GetResource<snapshot::SegmentCommit>(id)->GetSegmentId());
+        }
     }
 
     return Status::OK();

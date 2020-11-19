@@ -28,7 +28,6 @@ namespace cloner {
 void
 CopyIndexData(const VecIndexPtr& dst_index, const VecIndexPtr& src_index) {
     dst_index->SetUids(src_index->GetUids());
-    dst_index->SetBlacklist(src_index->GetBlacklist());
     dst_index->SetIndexSize(src_index->IndexSize());
 }
 

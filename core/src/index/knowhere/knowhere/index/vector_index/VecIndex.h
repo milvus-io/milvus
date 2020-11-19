@@ -84,16 +84,6 @@ class VecIndex : public Index {
     }
 #endif
 
-    faiss::ConcurrentBitsetPtr
-    GetBlacklist() {
-        return bitset_;
-    }
-
-    void
-    SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
-        bitset_ = std::move(bitset_ptr);
-    }
-
     std::shared_ptr<std::vector<IDType>>
     GetUids() const {
         return uids_;
@@ -105,17 +95,8 @@ class VecIndex : public Index {
     }
 
     size_t
-    BlacklistSize() {
-        if (bitset_) {
-            return bitset_->size() * sizeof(uint8_t);
-        } else {
-            return 0;
-        }
-    }
-
-    size_t
     UidsSize() {
-        return uids_->size() * sizeof(IDType);
+        return uids_ ? uids_->size() * sizeof(IDType) : 0;
     }
 
     virtual int64_t
@@ -137,7 +118,7 @@ class VecIndex : public Index {
 
     int64_t
     Size() override {
-        return BlacklistSize() + UidsSize() + IndexSize();
+        return UidsSize() + IndexSize();
     }
 
  protected:
@@ -145,9 +126,6 @@ class VecIndex : public Index {
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
-
- private:
-    faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

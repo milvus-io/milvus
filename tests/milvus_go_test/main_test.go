@@ -34,10 +34,9 @@ func init() {
 }
 
 func GetClient() milvus.MilvusClient {
-	var grpcClient milvus.Milvusclient
-	client := milvus.NewMilvusClient(grpcClient.Instance)
 	connectParam := milvus.ConnectParam{IPAddress: ip, Port: port}
-	err := client.Connect(connectParam)
+	client, err := milvus.NewMilvusClient(connectParam)
+	//err := client.Connect(connectParam)
 	if err != nil {
 		fmt.Println("Connect failed")
 		return nil
@@ -61,8 +60,8 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 		{
 			utils.DefaultFieldFloatName,
 			milvus.FLOAT,
-			"",
-			"",
+			milvus.NewParams(""),
+			milvus.NewParams(""),
 		},
 	}
 	params := map[string]interface{}{
@@ -73,15 +72,15 @@ func GenDefaultFields(fieldType milvus.DataType) []milvus.Field {
 		field = milvus.Field{
 			utils.DefaultFieldFloatVectorName,
 			milvus.VECTORFLOAT,
-			"",
-			string(paramsStr),
+			milvus.NewParams(""),
+			milvus.NewParams(string(paramsStr)),
 		}
 	} else {
 		field = milvus.Field{
 			utils.DefaultFieldBinaryVectorName,
 			milvus.VECTORBINARY,
-			"",
-			string(paramsStr),
+			milvus.NewParams(""),
+			milvus.NewParams(string(paramsStr)),
 		}
 	}
 	return append(fields, field)
@@ -117,10 +116,10 @@ func Collection(autoId bool, vectorType milvus.DataType) (milvus.MilvusClient, s
 		fmt.Printf(name)
 		params := map[string]interface{}{
 			"auto_id":           autoId,
-			"segment_row_count": utils.DefaultSegmentRowLimit,
+			"segment_row_limit": utils.DefaultSegmentRowLimit,
 		}
 		paramsStr, _ := json.Marshal(params)
-		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: string(paramsStr)}
+		mapping := milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(vectorType), ExtraParams: milvus.NewParams(string(paramsStr))}
 		status, _ := client.CreateCollection(mapping)
 		if !status.Ok() {
 			fmt.Println("Create collection failed")
@@ -138,10 +137,10 @@ func GenCollectionParams(name string, autoId bool, segmentRowLimit int) milvus.M
 	//if client != nil {
 	params := map[string]interface{}{
 		"auto_id":           autoId,
-		"segment_row_count": utils.DefaultSegmentRowLimit,
+		"segment_row_limit": utils.DefaultSegmentRowLimit,
 	}
 	paramsStr, _ := json.Marshal(params)
-	mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: string(paramsStr)}
+	mapping = milvus.Mapping{CollectionName: name, Fields: GenDefaultFields(milvus.VECTORFLOAT), ExtraParams: milvus.NewParams(string(paramsStr))}
 	//} else {
 	//	os.Exit(-2)
 	//}

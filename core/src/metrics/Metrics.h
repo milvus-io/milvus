@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include "MetricBase.h"
 #include "db/Types.h"
+#include "metrics/MetricBase.h"
 
 namespace milvus {
 namespace server {
@@ -87,7 +87,7 @@ class CollectQueryMetrics : CollectMetricsBase {
     explicit CollectQueryMetrics(size_t nq) : nq_(nq) {
     }
 
-    ~CollectQueryMetrics() {
+    ~CollectQueryMetrics() override {
         if (nq_ > 0) {
             auto total_time = TimeFromBegine();
             for (size_t i = 0; i < nq_; ++i) {

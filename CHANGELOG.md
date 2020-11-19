@@ -12,7 +12,10 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4113 After milvus 0.11.0 version vector data is misaligned
 -   \#4116 ResfulApi Search return null
 -   \#4170 Must_not query check failed in dsl
+-   \#4200 The scalar field information of search result is wrong after some entities deleted
 -   \#4205 Restful API error: When the specified partition is retrieved, the partition_tag is not valid
+-   \#4226 The Prometheus performance metrics sent by Milvus 0.11.0 is not right
+-   \#4242 Fix query hang up at unittest case
 
 ## Feature
 -   \#4163 Update C++ sdk search interface

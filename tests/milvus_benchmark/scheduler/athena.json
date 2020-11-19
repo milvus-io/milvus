@@ -3,8 +3,16 @@
         "server": "athena",
         "suite_params": [
             {
-                "suite": "add_flush_performance.yaml",
-                "image_type": "cpu"
+                "suite": "011_gpu_accuracy.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "011_search_stability.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "011_gpu_accuracy_ann.yaml",
+                "image_type": "gpu"
             }
         ]
     }

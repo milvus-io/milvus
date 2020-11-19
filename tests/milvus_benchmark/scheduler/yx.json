@@ -1,0 +1,11 @@
+[
+    {
+          "server": "athena",
+          "suite_params": [
+              {
+                  "suite": "011_gpu_sift50m_ivf.yaml",
+                  "image_type": "gpu"
+              }
+          ]
+      }
+  ]

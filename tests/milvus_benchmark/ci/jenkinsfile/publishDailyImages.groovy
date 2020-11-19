@@ -1,4 +1,4 @@
-timeout(time: 15, unit: 'MINUTES') {
+timeout(time: 30, unit: 'MINUTES') {
     def imageName = "milvus/engine:${DOCKER_VERSION}"
     def remoteImageName = "milvusdb/daily-build:${REMOTE_DOCKER_VERSION}"
     def localDockerRegistryImage = "${params.LOCAL_DOKCER_REGISTRY_URL}/${imageName}"
