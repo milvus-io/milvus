@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <unistd.h>
+#include <cmath>
 
 #include "metrics/SystemInfo.h"
 #include "metrics/SystemInfoCollector.h"
@@ -39,7 +40,8 @@ SystemInfoCollector::collector_function() {
     while (running_) {
         /* collect metrics */
         cpu_utilization_ratio_.Set(SystemInfo::CpuUtilizationRatio());
-        cpu_temperature_.Set(SystemInfo::CpuTemperature());
+        auto temperature = SystemInfo::CpuTemperature();
+        cpu_temperature_.Set((temperature < -40 || temperature > 120) ? nan("1") : temperature);
         mem_usage_.Set(SystemInfo::MemUsage());
         mem_total_.Set(SystemInfo::MemTotal());
         mem_available_.Set(SystemInfo::MemAvailable());
