@@ -15,7 +15,7 @@ CPlaceholderGroup
 ParsePlaceholderGroup(CPlan plan, void* placeholder_group_blob, long int blob_size);
 
 long int
-GetNumOfQueries(CPlaceholderGroup placeholderGroup);
+GetNumOfQueries(CPlaceholderGroup placeholder_group);
 
 long int
 GetTopK(CPlan plan);
@@ -24,7 +24,7 @@ void
 DeletePlan(CPlan plan);
 
 void
-DeletePlaceholderGroup(CPlaceholderGroup placeholderGroup);
+DeletePlaceholderGroup(CPlaceholderGroup placeholder_group);
 
 #ifdef __cplusplus
 }

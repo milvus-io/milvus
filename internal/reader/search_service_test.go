@@ -175,8 +175,9 @@ func TestSearch_Search(t *testing.T) {
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 
+	var vecSearch = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17}
 	var searchRawData []byte
-	for _, ele := range vec {
+	for _, ele := range vecSearch {
 		buf := make([]byte, 4)
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
 		searchRawData = append(searchRawData, buf...)
