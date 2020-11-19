@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <prometheus/collectable.h>
+#include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 #include <prometheus/text_serializer.h>
 
