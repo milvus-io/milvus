@@ -667,7 +667,7 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
 void
 GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
-    rpc_request_success_total_.Increment();
+    rpc_request_total_counter_.Increment();
     std::lock_guard<std::mutex> lock(context_map_mutex_);
     auto request_id = get_request_id(server_rpc_info->server_context());
 

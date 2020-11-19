@@ -21,6 +21,12 @@
 namespace milvus {
 namespace cache {
 
+CpuCacheMgr&
+CpuCacheMgr::GetInstance() {
+    static CpuCacheMgr s_mgr;
+    return s_mgr;
+}
+
 CpuCacheMgr::CpuCacheMgr() {
     cache_ = std::make_shared<Cache<DataObjPtr>>(config.cache.cache_size(), 1UL << 32, "[CACHE CPU]");
 
@@ -34,10 +40,14 @@ CpuCacheMgr::~CpuCacheMgr() {
     ConfigMgr::GetInstance().Detach("cache.cache_size", this);
 }
 
-CpuCacheMgr&
-CpuCacheMgr::GetInstance() {
-    static CpuCacheMgr s_mgr;
-    return s_mgr;
+DataObjPtr
+CpuCacheMgr::GetItem(const std::string& key) {
+    auto ret = CacheMgr<DataObjPtr>::GetItem(key);
+    cache_gets_total_counter_.Increment();
+    if (ret != nullptr) {
+        cache_hits_total_counter_.Increment();
+    }
+    return ret;
 }
 
 void

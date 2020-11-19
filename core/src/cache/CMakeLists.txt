@@ -17,4 +17,4 @@ target_sources( cache PRIVATE   ${CACHE_FILES}
                                 Cache.inl
                                 )
 target_include_directories( cache PUBLIC ${MILVUS_ENGINE_SRC}/cache )
-target_link_libraries( cache PRIVATE fiu )
+target_link_libraries( cache PRIVATE fiu metrics )
