@@ -16,7 +16,9 @@
 #include <memory>
 #include <ostream>
 #include <sstream>
+#include <string>
 
+#include <prometheus/collectable.h>
 #include <prometheus/registry.h>
 #include <prometheus/text_serializer.h>
 
@@ -47,14 +49,20 @@ class Prometheus {
     }
 
     std::string
-    get_metrics() {
+    GetMetrics() {
         std::ostringstream ss;
         prometheus::TextSerializer serializer;
         serializer.Serialize(ss, registry_->Collect());
         return ss.str();
     }
 
+    void
+    RegisterCollectable(const std::weak_ptr<prometheus::Collectable>& collectable) {
+        collectables_.push_back(collectable);
+    }
+
  private:
+    std::vector<std::weak_ptr<prometheus::Collectable>> collectables_;
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();
 };
 

@@ -63,7 +63,7 @@ CmdReq::OnExecute() {
         // FIXME
         result_ = "not supported yet";
     } else if (cmd_ == "metrics") {
-        result_ = prometheus.get_metrics();
+        result_ = prometheus.GetMetrics();
     } else if (cmd_ == "build_commit_id") {
         result_ = LAST_COMMIT_ID;
     } else if (cmd_ == "get_milvus_config") {
