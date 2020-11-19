@@ -1,5 +1,7 @@
 #!/bin/bash
 
+trap "echo `cat /var/log/syslog &> 1`" 4
+
 set -e
 
 SOURCE="${BASH_SOURCE[0]}"
