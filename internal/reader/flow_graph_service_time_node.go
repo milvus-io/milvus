@@ -2,8 +2,6 @@ package reader
 
 import (
 	"log"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 type serviceTimeNode struct {
@@ -35,8 +33,8 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 }
 
 func newServiceTimeNode(replica *collectionReplica) *serviceTimeNode {
-	maxQueueLength := flowgraph.Params.FlowGraphMaxQueueLength()
-	maxParallelism := flowgraph.Params.FlowGraphMaxParallelism()
+	maxQueueLength := Params.flowGraphMaxQueueLength()
+	maxParallelism := Params.flowGraphMaxParallelism()
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

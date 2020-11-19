@@ -14,11 +14,23 @@ master:
   port: 53100
   pulsarmoniterinterval: 1
   pulsartopic: "monitor-topic"
+
+  proxyidlist: [1, 2]
+  proxyTimeSyncChannels: ["proxy1", "proxy2"]
+  proxyTimeSyncSubName: "proxy-topic"
+  softTimeTickBarrierInterval: 500
+
+  writeidlist: [3, 4]
+  writeTimeSyncChannels: ["write3", "write4"]
+  writeTimeSyncSubName: "write-topic"
+
+  dmTimeSyncChannels: ["dm5", "dm6"]
+  k2sTimeSyncChannels: ["k2s7", "k2s8"]
+
   defaultSizePerRecord: 1024
   minimumAssignSize: 1048576
   segmentThreshold: 536870912
   segmentExpireDuration: 2000
-  proxyidlist: [0]
   querynodenum: 1
   writenodenum: 1
   statsChannels: "statistic"

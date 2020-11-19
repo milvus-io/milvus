@@ -4,7 +4,6 @@
 #include "pb/etcd_meta.pb.h"
 #include <google/protobuf/text_format.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <cstring>
 
 namespace milvus::segcore {
 
@@ -134,7 +133,7 @@ Collection::parse() {
     auto schema = std::make_shared<Schema>();
     for (const milvus::proto::schema::FieldSchema& child : collection_meta.schema().fields()) {
         const auto& type_params = child.type_params();
-        int dim = 16;
+        int64_t dim = 16;
         for (const auto& type_param : type_params) {
             if (type_param.key() == "dim") {
                 dim = strtoll(type_param.value().c_str(), nullptr, 10);

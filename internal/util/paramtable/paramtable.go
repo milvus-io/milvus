@@ -12,7 +12,7 @@
 package paramtable
 
 import (
-	"fmt"
+	"log"
 	"path"
 	"runtime"
 	"strconv"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 
+	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 )
 
@@ -86,11 +87,34 @@ func (gp *BaseTable) LoadYaml(fileName string) error {
 	}
 
 	for _, key := range config.AllKeys() {
-		fmt.Println(key)
-		err := gp.params.Save(strings.ToLower(key), config.GetString(key))
+		val := config.Get(key)
+		str, err := cast.ToStringE(val)
+		if err != nil {
+			switch val := val.(type) {
+			case []interface{}:
+				str = str[:0]
+				for _, v := range val {
+					ss, err := cast.ToStringE(v)
+					if err != nil {
+						log.Panic(err)
+					}
+					if len(str) == 0 {
+						str = ss
+					} else {
+						str = str + "," + ss
+					}
+				}
+
+			default:
+				log.Panicf("undefine config type, key=%s", key)
+			}
+		}
+		log.Printf("%s : %s", key, str)
+		err = gp.params.Save(strings.ToLower(key), str)
 		if err != nil {
 			panic(err)
 		}
+
 	}
 
 	return nil

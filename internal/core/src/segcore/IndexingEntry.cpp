@@ -11,7 +11,8 @@ IndexingEntry::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBas
     assert(field_meta_.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field_meta_.get_dim();
 
-    auto source = static_cast<const ConcurrentVector<float>*>(vec_base);
+    auto source = dynamic_cast<const ConcurrentVector<float>*>(vec_base);
+    Assert(source);
     auto chunk_size = source->chunk_size();
     assert(ack_end <= chunk_size);
     auto conf = get_build_conf();
