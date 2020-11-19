@@ -186,26 +186,27 @@ func (p *Proxy) queryResultLoop() {
 			if msgPack == nil {
 				continue
 			}
-			tsMsg := msgPack.Msgs[0]
-			searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
-			reqID := searchResultMsg.GetReqID()
-			_, ok = queryResultBuf[reqID]
-			if !ok {
-				queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
-			}
-			queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
-			if len(queryResultBuf[reqID]) == 4 {
-				// TODO: use the number of query node instead
-				t := p.taskSch.getTaskByReqID(reqID)
-				if t != nil {
-					qt, ok := t.(*QueryTask)
-					if ok {
-						log.Printf("address of query task: %p", qt)
-						qt.resultBuf <- queryResultBuf[reqID]
-						delete(queryResultBuf, reqID)
+			for _, tsMsg := range msgPack.Msgs {
+				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
+				reqID := searchResultMsg.GetReqID()
+				_, ok = queryResultBuf[reqID]
+				if !ok {
+					queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
+				}
+				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+				if len(queryResultBuf[reqID]) == 4 {
+					// TODO: use the number of query node instead
+					t := p.taskSch.getTaskByReqID(reqID)
+					if t != nil {
+						qt, ok := t.(*QueryTask)
+						if ok {
+							log.Printf("address of query task: %p", qt)
+							qt.resultBuf <- queryResultBuf[reqID]
+							delete(queryResultBuf, reqID)
+						}
+					} else {
+						log.Printf("task with reqID %v is nil", reqID)
 					}
-				} else {
-					log.Printf("task with reqID %v is nil", reqID)
 				}
 			}
 		case <-p.proxyLoopCtx.Done():
