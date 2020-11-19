@@ -18,7 +18,7 @@ import (
 )
 
 // NOTE: start pulsar before test
-func TestManipulationService_Start(t *testing.T) {
+func TestDataSyncService_Start(t *testing.T) {
 	Params.Init()
 	var ctx context.Context
 
@@ -155,6 +155,24 @@ func TestManipulationService_Start(t *testing.T) {
 		Msgs:    insertMessages,
 	}
 
+	// generate timeTick
+	timeTickMsgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []int32{0},
+	}
+	timeTickResult := internalPb.TimeTickMsg{
+		MsgType:   internalPb.MsgType_kTimeTick,
+		PeerID:    UniqueID(0),
+		Timestamp: math.MaxUint64,
+	}
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg:     baseMsg,
+		TimeTickMsg: timeTickResult,
+	}
+	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
+
 	// pulsar produce
 	const receiveBufSize = 1024
 	producerChannels := []string{"insert"}
@@ -165,7 +183,11 @@ func TestManipulationService_Start(t *testing.T) {
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
+
 	err = insertMsgStream.Produce(&msgPack)
+	assert.NoError(t, err)
+
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

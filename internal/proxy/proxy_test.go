@@ -22,6 +22,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var ctx context.Context
@@ -48,6 +49,15 @@ func startMaster(ctx context.Context) {
 	}
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	if err != nil {
+		panic(err)
+	}
+	_, err = etcdCli.Delete(context.TODO(), rootPath, clientv3.WithPrefix())
+	if err != nil {
+		panic(err)
+	}
 
 	opt := master.Option{
 		KVRootPath:            kvRootPath,
@@ -420,6 +430,67 @@ func TestProxy_DropCollection(t *testing.T) {
 				t.Logf("response of insert collection %v: %v", i, resp)
 			}
 		}(&wg)
+	}
+	wg.Wait()
+}
+
+func TestProxy_PartitionGRPC(t *testing.T) {
+	var wg sync.WaitGroup
+	collName := "collPartTest"
+	filedName := "collPartTestF1"
+	collReq := &schemapb.CollectionSchema{
+		Name: collName,
+		Fields: []*schemapb.FieldSchema{
+			&schemapb.FieldSchema{
+				Name:        filedName,
+				Description: "",
+				DataType:    schemapb.DataType_VECTOR_FLOAT,
+			},
+		},
+	}
+	st, err := proxyClient.CreateCollection(ctx, collReq)
+	assert.Nil(t, err)
+	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+	for i := 0; i < testNum; i++ {
+		wg.Add(1)
+		i := i
+		go func() {
+			defer wg.Done()
+			tag := fmt.Sprintf("partition-%d", i)
+			preq := &servicepb.PartitionName{
+				CollectionName: collName,
+				Tag:            tag,
+			}
+
+			stb, err := proxyClient.HasPartition(ctx, preq)
+			assert.Nil(t, err)
+			assert.Equal(t, stb.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+			assert.Equal(t, stb.Value, false)
+
+			st, err := proxyClient.CreatePartition(ctx, preq)
+			assert.Nil(t, err)
+			assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+			stb, err = proxyClient.HasPartition(ctx, preq)
+			assert.Nil(t, err)
+			assert.Equal(t, stb.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+			assert.Equal(t, stb.Value, true)
+
+			std, err := proxyClient.DescribePartition(ctx, preq)
+			assert.Nil(t, err)
+			assert.Equal(t, std.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+
+			sts, err := proxyClient.ShowPartitions(ctx, &servicepb.CollectionName{CollectionName: collName})
+			assert.Nil(t, err)
+			assert.Equal(t, sts.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+			assert.True(t, len(sts.Values) >= 1)
+			assert.True(t, len(sts.Values) <= testNum)
+
+			st, err = proxyClient.DropPartition(ctx, preq)
+			assert.Nil(t, err)
+			assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		}()
 	}
 	wg.Wait()
 }
