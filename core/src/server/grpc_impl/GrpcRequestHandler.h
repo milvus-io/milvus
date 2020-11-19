@@ -363,9 +363,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
                                                                       .Help("the number of rpc request")
                                                                       .Register(prometheus.registry());
 
-    prometheus::Counter& rpc_request_success_total_ = rpc_request_total_.Add({{"outcome", "success"}});
-    // TODO
-    // prometheus::Counter& rpc_request_fail_total_ = rpc_request_total_.Add({{"outcome", "fail"}});
+    prometheus::Counter& rpc_request_total_counter_ = rpc_request_total_.Add({});
 
     prometheus::Family<prometheus::Histogram>& operation_lantency_second_family_ =
         prometheus::BuildHistogram()
