@@ -9,16 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "unittest/utils.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-
-#include <gtest/gtest.h>
+#include <execinfo.h>
 
 #include <cmath>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <utility>
+#include <string>
+
+#include <gtest/gtest.h>
+
+#include "unittest/utils.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -311,3 +314,46 @@ ivecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     return (int*)fvecs_read(fname, d_out, n_out);
 }
 #endif
+
+static void
+print_stacktrace() {
+    const int bt_depth = 128;
+    void* array[bt_depth];
+    int stack_num = backtrace(array, bt_depth);
+    char** stacktrace = backtrace_symbols(array, stack_num);
+
+    std::cout << "Call stack:" << std::endl;
+    for (int i = 0; i < stack_num; ++i) {
+        std::string info = stacktrace[i];
+        std::cout << "No." << i << ": " << info << std::endl;
+        std::cout << info << std::endl;
+    }
+    free(stacktrace);
+}
+
+void
+handle_signal(int signum) {
+    int32_t exit_code = 1; /* 0: normal exit; 1: exception */
+    switch (signum) {
+        case SIGINT:
+        case SIGUSR2:
+            exit_code = 0;
+            /* no break */
+        default: {
+            if (exit_code == 0) {
+                std::cout << "Server received signal: " << signum << std::endl;
+            } else {
+                std::cout << "Server received critical signal: " << signum << std::endl;
+                print_stacktrace();
+            }
+        }
+    }
+}
+
+int
+main(int argc, char** argv) {
+    signal(SIGILL, handle_signal);
+    signal(SIGSEGV, handle_signal);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
