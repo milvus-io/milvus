@@ -111,7 +111,7 @@ for test in `ls ${UNITTEST_DIR}`; do
     fi
     echo $test " running..."
     # run unittest
-    strace -f -F ${UNITTEST_DIR}/${test}
+    ${UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
         echo ${UNITTEST_DIR}/${test} "run failed"
         exit 1
