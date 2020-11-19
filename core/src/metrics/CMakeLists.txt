@@ -15,6 +15,8 @@ set( METRICS_SRCS   Prometheus.cpp
                     Prometheus.h
                     SystemInfo.cpp
                     SystemInfo.h
+                    SystemInfoCollector.cpp
+                    SystemInfoCollector.h
                     )
 
 set( METRICS_LIBS   prometheus-cpp::core
