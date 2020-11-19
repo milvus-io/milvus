@@ -20,6 +20,7 @@
 #include "db/snapshot/Snapshots.h"
 #include "index/archive/KnowhereResource.h"
 #include "log/LogMgr.h"
+#include "metrics/SystemInfoCollector.h"
 #include "scheduler/SchedInst.h"
 #include "server/DBWrapper.h"
 #include "server/grpc_impl/GrpcServer.h"
@@ -200,6 +201,8 @@ Server::Start() {
                          << std::string(15, '*') << "Config in memory" << std::string(15, '*') << "\n\n"
                          << ConfigMgr::GetInstance().Dump();
 
+        SystemInfoCollector::GetInstance().Start();
+
         return StartService();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
@@ -240,6 +243,8 @@ Server::Stop() {
     }
 
     StopService();
+
+    SystemInfoCollector::GetInstance().Stop();
 
     std::cerr << "Milvus server exit..." << std::endl;
 }

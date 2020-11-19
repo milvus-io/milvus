@@ -11,6 +11,7 @@
 
 #include <unistd.h>
 
+#include "metrics/SystemInfo.h"
 #include "metrics/SystemInfoCollector.h"
 
 namespace milvus {
@@ -37,6 +38,7 @@ void
 SystemInfoCollector::collector_function() {
     while (running_) {
         /* collect metrics */
+        cpu_utilization_ratio_.Set(SystemInfo::CpuUtilizationRatio());
 
         /* collect interval */
         // TODO: interval from config

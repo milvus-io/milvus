@@ -14,10 +14,18 @@
 #include <mutex>
 #include <thread>
 
+#include "metrics/Prometheus.h"
+
 namespace milvus {
 
 class SystemInfoCollector {
  public:
+    static SystemInfoCollector&
+    GetInstance() {
+        static SystemInfoCollector instance;
+        return instance;
+    }
+
     void
     Start();
 
@@ -25,6 +33,8 @@ class SystemInfoCollector {
     Stop();
 
  private:
+    SystemInfoCollector() = default;
+
     void
     collector_function();
 
@@ -33,6 +43,18 @@ class SystemInfoCollector {
     std::mutex mutex_;
 
     std::thread collector_thread_;
+
+    /* metrics */
+    template <typename T>
+    using Family = prometheus::Family<T>;
+    using Gauge = prometheus::Gauge;
+
+    /* cpu_utilization_ratio */
+    Family<Gauge>& cpu_utilization_ratio_family_ = prometheus::BuildGauge()
+                                                       .Name("cpu_utilization_ratio")
+                                                       .Help("cpu_utilization_ratio")
+                                                       .Register(prometheus.registry());
+    Gauge& cpu_utilization_ratio_ = cpu_utilization_ratio_family_.Add({});
 };
 
 }  // namespace milvus
