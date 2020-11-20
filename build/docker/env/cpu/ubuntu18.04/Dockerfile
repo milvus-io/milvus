@@ -50,7 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Taken from - https://docs.docker.com/engine/examples/running_ssh_service/#environment-variables
-
 RUN mkdir /var/run/sshd && echo 'root:root' | chpasswd && \
     useradd -u 2000 -ms /bin/bash debugger && echo 'debugger:milvus' | chpasswd
 
