@@ -197,11 +197,6 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "  path: /tmp/milvus_web_controller_test/logs\n"
     "  max_log_file_size: 1024MB\n"
     "  log_rotate_num: 0\n"
-    "\n"
-    "metric:\n"
-    "  enable: false\n"
-    "  address: 127.0.0.1\n"
-    "  port: 9091\n"
     "\n";
 
 }  // namespace
@@ -310,6 +305,8 @@ class TestClient : public oatpp::web::client::ApiClient {
     API_CALL("GET", "/system/{msg}", cmd, PATH(String, cmd_str, "msg"), QUERY(String, action), QUERY(String, target))
 
     API_CALL("PUT", "/system/{op}", op, PATH(String, cmd_str, "op"), BODY_STRING(String, body))
+
+    API_CALL("GET", "/metrics", getMetrics)
 
 #include OATPP_CODEGEN_END(ApiClient)
 };
