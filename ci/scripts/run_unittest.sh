@@ -106,8 +106,11 @@ echo -e "`gcc --version`"
 echo -e "\n Echo g++ version:\n"
 echo -e "`g++ --version`"
 
-echo -e "\n Echo time status\n"
-echo -e "`timedatectl status`"
+#echo -e "\n Echo time status\n"
+#echo -e "`timedatectl status`"
+echo -e "\ncmake version:\n"
+echo -e "`cmake --version`"
+echo -e "`make --version`"
 
 # run unittest
 for test in `ls ${UNITTEST_DIR}`; do
