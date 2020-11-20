@@ -47,13 +47,17 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
     using Counter = prometheus::Counter;
 
     /* cache_gets_total */
-    Family<Counter>& cache_gets_total_family_ =
-        prometheus::BuildCounter().Name("cache_gets_total").Help("cache_gets_total").Register(prometheus.registry());
+    Family<Counter>& cache_gets_total_family_ = prometheus::BuildCounter()
+                                                    .Name("milvus_cache_gets_total")
+                                                    .Help("cache_gets_total")
+                                                    .Register(prometheus.registry());
     Counter& cache_gets_total_counter_ = cache_gets_total_family_.Add({});
 
     /* cache_hits_total */
-    Family<Counter>& cache_hits_total_family_ =
-        prometheus::BuildCounter().Name("cache_hits_total").Help("cache_hits_total").Register(prometheus.registry());
+    Family<Counter>& cache_hits_total_family_ = prometheus::BuildCounter()
+                                                    .Name("milvus_cache_hits_total")
+                                                    .Help("cache_hits_total")
+                                                    .Register(prometheus.registry());
     Counter& cache_hits_total_counter_ = cache_hits_total_family_.Add({});
 };
 
