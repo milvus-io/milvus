@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <cmath>
 
+#include "db/Constants.h"
 #include "metrics/SystemInfo.h"
 #include "metrics/SystemInfoCollector.h"
 
@@ -41,11 +42,17 @@ SystemInfoCollector::collector_function() {
     auto network_out = SystemInfo::NetworkOutOctets();
     while (running_) {
         /* collect metrics */
+        // cpu_utilization_ratio range: 0~2560000%
         cpu_utilization_ratio_.Set(cpu_utilization_ratio());
+        // cpu_temperature range: -40°C~120°C
         cpu_temperature_.Set(cpu_temperature_celsius());
+        // mem_usage range: 0~1TB
         mem_usage_.Set(mem_usage());
+        // mem_available range: 0~1TB
         mem_available_.Set(mem_available());
+        // network_in_octets range: 0~1GB
         network_in_octets_.Set(network_receive_speed());
+        // network_out_octets range: 0~1GB
         network_out_octets_.Set(network_transport_speed());
 
         /* collect interval */
@@ -77,7 +84,7 @@ SystemInfoCollector::cpu_temperature_celsius() {
 double
 SystemInfoCollector::mem_usage() {
     auto value = SystemInfo::MemUsage();
-    if (0 <= value && value <= 1024l * 1024 * 1024 * 1024) {
+    if (0 <= value && value <= engine::TB) {
         return value;
     } else {
         return nan("1");
@@ -87,7 +94,7 @@ SystemInfoCollector::mem_usage() {
 double
 SystemInfoCollector::mem_available() {
     auto value = SystemInfo::MemAvailable();
-    if (0 <= value && value <= 1024l * 1024 * 1024 * 1024) {
+    if (0 <= value && value <= engine::TB) {
         return value;
     } else {
         return nan("1");
@@ -99,7 +106,7 @@ SystemInfoCollector::network_receive_speed() {
     auto network_in_octets = SystemInfo::NetworkInOctets();
     auto value = network_in_octets - last_network_in_octets_;
     last_network_in_octets_ = network_in_octets;
-    if (0 <= value && value <= 1024l * 1024 * 1024) {
+    if (0 <= value && value <= engine::GB) {
         return value;
     } else {
         return nan("1");
@@ -111,7 +118,7 @@ SystemInfoCollector::network_transport_speed() {
     auto network_out_octets = SystemInfo::NetworkOutOctets();
     auto value = network_out_octets - last_network_out_octets_;
     last_network_out_octets_ = network_out_octets;
-    if (0 <= value && value <= 1024l * 1024 * 1024) {
+    if (0 <= value && value <= engine::GB) {
         return value;
     } else {
         return nan("1");
