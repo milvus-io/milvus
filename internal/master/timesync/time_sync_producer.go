@@ -1,4 +1,4 @@
-package master
+package timesync
 
 import (
 	"context"

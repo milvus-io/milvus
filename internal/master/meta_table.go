@@ -4,11 +4,15 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 )
+
+type UniqueID = typeutil.UniqueID
 
 type metaTable struct {
 	client        *kv.EtcdKV                     // client of a reliable kv service, i.e. etcd client

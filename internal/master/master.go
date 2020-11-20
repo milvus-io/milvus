@@ -10,23 +10,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/master/id"
+	"github.com/zilliztech/milvus-distributed/internal/master/informer"
+	masterParams "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
+	"github.com/zilliztech/milvus-distributed/internal/master/timesync"
+	"github.com/zilliztech/milvus-distributed/internal/master/tso"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"google.golang.org/grpc"
 )
 
 // Server is the pd server.
-
-type (
-	UniqueID  = typeutil.UniqueID
-	Timestamp = typeutil.Timestamp
-)
 
 type Option struct {
 	KVRootPath   string
@@ -73,6 +73,9 @@ type Master struct {
 	//grpc server
 	grpcServer *grpc.Server
 
+	// pulsar client
+	pc *informer.PulsarClient
+
 	// chans
 	ssChan chan internalpb.SegmentStats
 
@@ -81,7 +84,7 @@ type Master struct {
 	kvBase    *kv.EtcdKV
 	scheduler *ddRequestScheduler
 	mt        *metaTable
-	tsmp      *timeSyncMsgProducer
+	tsmp      timesync.MsgProducer
 
 	// tso ticker
 	tsTicker *time.Ticker
@@ -92,11 +95,6 @@ type Master struct {
 
 	segmentMgr *SegmentManager
 	statsMs    ms.MsgStream
-
-	//id allocator
-	idAllocator *GlobalIDAllocator
-	//tso allocator
-	tsoAllocator *GlobalTSOAllocator
 }
 
 func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
@@ -110,7 +108,18 @@ func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 
 func Init() {
 	rand.Seed(time.Now().UnixNano())
-	Params.InitParamTable()
+	masterParams.Params.InitParamTable()
+	etcdAddr, err := masterParams.Params.EtcdAddress()
+	if err != nil {
+		panic(err)
+	}
+	rootPath, err := masterParams.Params.EtcdRootPath()
+	if err != nil {
+		panic(err)
+	}
+	id.Init([]string{etcdAddr}, rootPath)
+	tso.Init([]string{etcdAddr}, rootPath)
+
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -128,7 +137,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	}
 
 	//timeSyncMsgProducer
-	tsmp, err := NewTimeSyncMsgProducer(ctx)
+	tsmp, err := timesync.NewTimeSyncMsgProducer(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +146,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	pulsarProxyStream.CreatePulsarConsumers(opt.PulsarProxyChannels, opt.PulsarProxySubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
-	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, opt.ProxyIDs, opt.SoftTTBInterval)
+	proxyTimeTickBarrier := timesync.NewSoftTimeTickBarrier(ctx, &proxyStream, opt.ProxyIDs, opt.SoftTTBInterval)
 	tsmp.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
@@ -145,7 +154,7 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 	pulsarWriteStream.CreatePulsarConsumers(opt.PulsarWriteChannels, opt.PulsarWriteSubName, ms.NewUnmarshalDispatcher(), 1024)
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
-	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, opt.WriteIDs)
+	writeTimeTickBarrier := timesync.NewHardTimeTickBarrier(ctx, &writeStream, opt.WriteIDs)
 	tsmp.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
 	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
@@ -168,31 +177,15 @@ func CreateServer(ctx context.Context, opt *Option) (*Master, error) {
 		ctx:            ctx,
 		startTimestamp: time.Now().Unix(),
 		kvBase:         newKVBase(opt.KVRootPath, opt.EtcdAddr),
+		scheduler:      NewDDRequestScheduler(),
 		mt:             metakv,
 		tsmp:           tsmp,
 		ssChan:         make(chan internalpb.SegmentStats, 10),
 		grpcErr:        make(chan error),
+		pc:             informer.NewPulsarClient(),
+		segmentMgr:     NewSegmentManager(metakv, opt),
 		statsMs:        statsMs,
 	}
-
-	//init idAllocator
-	m.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(opt.EtcdAddr, opt.KVRootPath, "gid"))
-	if err := m.idAllocator.Initialize(); err != nil {
-		return nil, err
-	}
-
-	//init tsoAllocator
-	m.tsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(opt.EtcdAddr, opt.KVRootPath, "tso"))
-	if err := m.tsoAllocator.Initialize(); err != nil {
-		return nil, err
-	}
-
-	m.scheduler = NewDDRequestScheduler(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
-	m.segmentMgr = NewSegmentManager(metakv, opt,
-		func() (UniqueID, error) { return m.idAllocator.AllocOne() },
-		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
-	)
-
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
 	return m, nil
@@ -340,18 +333,18 @@ func (s *Master) grpcLoop(grpcPort int64) {
 
 func (s *Master) tsLoop() {
 	defer s.serverLoopWg.Done()
-	s.tsTicker = time.NewTicker(UpdateTimestampStep)
+	s.tsTicker = time.NewTicker(tso.UpdateTimestampStep)
 	defer s.tsTicker.Stop()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	for {
 		select {
 		case <-s.tsTicker.C:
-			if err := s.tsoAllocator.UpdateTSO(); err != nil {
+			if err := tso.UpdateTSO(); err != nil {
 				log.Println("failed to update timestamp", err)
 				return
 			}
-			if err := s.idAllocator.UpdateID(); err != nil {
+			if err := id.UpdateID(); err != nil {
 				log.Println("failed to update id", err)
 				return
 			}
