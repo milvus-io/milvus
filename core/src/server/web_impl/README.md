@@ -792,6 +792,7 @@ $ curl -X GET "http://127.0.0.1:19121/collections/test_collection/segments/15837
                 }
             ],
         },
+        partition_tags: ["part_1", "part_2"],
         "fields": ["field_vec"]
     }
 }
@@ -836,7 +837,7 @@ $ curl -X PUT "http://127.0.0.1:19121/collections/test_collection/entities" -H "
     "code": 0,
     "message": "OK",
     "data": {
-        "num": 2,
+        "nq": 2,
         "result": [
             [
                 {
