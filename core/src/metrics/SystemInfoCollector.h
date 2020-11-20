@@ -55,10 +55,10 @@ class SystemInfoCollector {
     mem_available();
 
     double
-    network_receive_speed();
+    network_receive_total();
 
     double
-    network_transport_speed();
+    network_transport_total();
 
  private:
     bool running_ = false;
@@ -66,8 +66,8 @@ class SystemInfoCollector {
 
     std::thread collector_thread_;
 
-    int64_t last_network_in_octets_ = 0;
-    int64_t last_network_out_octets_ = 0;
+    int64_t base_network_in_octets_ = 0;
+    int64_t base_network_out_octets_ = 0;
 
     /* metrics */
     template <typename T>
@@ -95,17 +95,17 @@ class SystemInfoCollector {
         prometheus::BuildGauge().Name("milvus_mem_available").Help("mem_available").Register(prometheus.registry());
     Gauge& mem_available_ = mem_available_family_.Add({});
 
-    Family<Gauge>& network_in_octets_family_ = prometheus::BuildGauge()
-                                                   .Name("milvus_network_in_octets")
-                                                   .Help("network_in_octets")
-                                                   .Register(prometheus.registry());
-    Gauge& network_in_octets_ = network_in_octets_family_.Add({});
+    Family<Gauge>& network_receive_bytes_total_family_ = prometheus::BuildGauge()
+                                                             .Name("milvus_network_receive_bytes_total")
+                                                             .Help("network_in_octets")
+                                                             .Register(prometheus.registry());
+    Gauge& network_receive_bytes_total_ = network_receive_bytes_total_family_.Add({});
 
-    Family<Gauge>& network_out_octets_family_ = prometheus::BuildGauge()
-                                                    .Name("milvus_network_out_octets")
-                                                    .Help("network_out_octets")
-                                                    .Register(prometheus.registry());
-    Gauge& network_out_octets_ = network_out_octets_family_.Add({});
+    Family<Gauge>& network_transport_bytes_total_family_ = prometheus::BuildGauge()
+                                                               .Name("milvus_network_transport_bytes_total")
+                                                               .Help("network_out_octets")
+                                                               .Register(prometheus.registry());
+    Gauge& network_transport_bytes_total_ = network_transport_bytes_total_family_.Add({});
 };
 
 }  // namespace milvus
