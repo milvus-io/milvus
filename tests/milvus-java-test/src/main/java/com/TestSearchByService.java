@@ -124,7 +124,8 @@ public class TestSearchByService {
         Query query = genDefaultQuery(MetricType.L2, queryVectors, top_k, n_probe);
         SearchParam searchParam = service.buildSearchParam(query);
         SearchResult resSearch = service.search(searchParam);
-        Assert.assertEquals(resSearch.getResultIdsList().size(), 0);
+        Assert.assertEquals(resSearch.getResultIdsList().size(), nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), 0);
     }
 
     @Test
@@ -168,7 +169,6 @@ public class TestSearchByService {
         );
     }
 
-    //    TODO
     @Test
     public void testSearchPartition() {
         String tag = "tag";
@@ -180,7 +180,8 @@ public class TestSearchByService {
         SearchParam searchParam = service.buildSearchParam(query).setPartitionTags(queryTags).setParamsInJson("{\"fields\": [\"int64\"]}");
         SearchResult resSearch = service.search(searchParam);
         Assert.assertEquals(resSearch.getTopK(), 0);
-        resSearch.getQueryResultsList();
+        Assert.assertEquals(resSearch.getQueryResultsList().size(), nq);
+        Assert.assertEquals(resSearch.getResultIdsList().get(0).size(), 0);
     }
 
     @Test(expectedExceptions = ServerSideMilvusException.class)
@@ -240,7 +241,7 @@ public class TestSearchByService {
     }
 
     //    TODO
-    @Test()
+    @Test(expectedExceptions = ServerSideMilvusException.class)
     public void testSearchMultiVectors() {
         Query query =
                 Query.bool(

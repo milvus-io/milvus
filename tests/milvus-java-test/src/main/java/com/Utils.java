@@ -166,6 +166,7 @@ public class Utils {
     for (ByteBuffer byteBuffer : queryVectors) {
       byte[] b = new byte[byteBuffer.remaining()];
       byteBuffer.get(b);
+      byteBuffer.rewind();
       vectorsToSearch.add(Arrays.asList(ArrayUtils.toObject(b)));
     }
     fieldParam.put("query", vectorsToSearch);
@@ -245,12 +246,18 @@ public class Utils {
   public static JSONArray parseJsonArray(String message, String type) {
     JSONObject jsonObject = JSONObject.parseObject(message);
     JSONArray partitionsJsonArray = jsonObject.getJSONArray("partitions");
-    if ("partitions".equals(type)) return partitionsJsonArray;
+    if ("partitions".equals(type)) {
+      return partitionsJsonArray;
+    }
     JSONArray segmentsJsonArray =
         ((JSONObject) partitionsJsonArray.get(0)).getJSONArray("segments");
-    if ("segments".equals(type)) return segmentsJsonArray;
+    if ("segments".equals(type)) {
+      return segmentsJsonArray;
+    }
     JSONArray filesJsonArray = ((JSONObject) segmentsJsonArray.get(0)).getJSONArray("files");
-    if ("files".equals(type)) return filesJsonArray;
+    if ("files".equals(type)) {
+      return filesJsonArray;
+    }
     throw new RuntimeException("unsupported type");
   }
 
