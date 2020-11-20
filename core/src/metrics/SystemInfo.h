@@ -20,8 +20,8 @@ namespace milvus {
 
 class SystemInfo {
  public:
-    static double
-    CpuUtilizationRatio();
+    static void
+    CpuUtilizationRatio(clock_t& cpu, clock_t& sys_cpu, clock_t& user_cpu);
 
     static int64_t
     CpuTemperature();

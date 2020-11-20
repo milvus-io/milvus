@@ -69,6 +69,10 @@ class SystemInfoCollector {
     int64_t base_network_in_octets_ = 0;
     int64_t base_network_out_octets_ = 0;
 
+    clock_t base_cpu_ = clock_t();
+    clock_t base_sys_cpu_ = clock_t();
+    clock_t base_user_cpu_ = clock_t();
+
     /* metrics */
     template <typename T>
     using Family = prometheus::Family<T>;

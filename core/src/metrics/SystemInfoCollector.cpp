@@ -40,9 +40,10 @@ void
 SystemInfoCollector::collector_function() {
     base_network_in_octets_ = SystemInfo::NetworkInOctets();
     base_network_out_octets_ = SystemInfo::NetworkOutOctets();
+    SystemInfo::CpuUtilizationRatio(base_cpu_, base_sys_cpu_, base_user_cpu_);
     while (running_) {
         /* collect metrics */
-        // cpu_utilization_ratio range: 0~2560000%
+        // cpu_utilization_ratio range: 0~25600%
         cpu_utilization_ratio_.Set(cpu_utilization_ratio());
 
         // cpu_temperature range: -40°C~120°C
@@ -68,7 +69,21 @@ SystemInfoCollector::collector_function() {
 
 double
 SystemInfoCollector::cpu_utilization_ratio() {
-    auto value = SystemInfo::CpuUtilizationRatio();
+    clock_t now_cpu, now_sys_cpu, now_user_cpu;
+    SystemInfo::CpuUtilizationRatio(now_cpu, now_sys_cpu, now_user_cpu);
+
+    double value = 0;
+    if (now_cpu <= base_cpu_ || now_sys_cpu < base_sys_cpu_ || now_user_cpu < base_user_cpu_) {
+        // Overflow detection. Just skip this value.
+        value = -1.0;
+    } else {
+        value = (now_sys_cpu - base_sys_cpu_) + (now_user_cpu - base_user_cpu_);
+        value /= (now_cpu - base_cpu_);
+        value *= 100;
+    }
+    base_cpu_ = now_cpu;
+    base_sys_cpu_ = now_sys_cpu;
+    base_user_cpu_ = now_user_cpu;
     if (0 <= value && value <= 256 * 100) {
         return value;
     } else {

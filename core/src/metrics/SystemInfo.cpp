@@ -26,33 +26,17 @@
 
 namespace milvus {
 
-double
-SystemInfo::CpuUtilizationRatio() {
-    double percent = 0;
+void
+SystemInfo::CpuUtilizationRatio(clock_t& cpu, clock_t& sys_cpu, clock_t& user_cpu) {
     try {
-        struct tms time_first {};
-        clock_t last_cpu_ = times(&time_first);
-        clock_t last_sys_cpu_ = time_first.tms_stime;
-        clock_t last_user_cpu_ = time_first.tms_utime;
-        usleep(100000);
-
-        struct tms time_sample {};
-        clock_t now;
-
-        now = times(&time_sample);
-        if (now <= last_cpu_ || time_sample.tms_stime < last_sys_cpu_ || time_sample.tms_utime < last_user_cpu_) {
-            // Overflow detection. Just skip this value.
-            percent = -1.0;
-        } else {
-            percent = (time_sample.tms_stime - last_sys_cpu_) + (time_sample.tms_utime - last_user_cpu_);
-            percent /= (now - last_cpu_);
-            percent *= 100;
-        }
+        struct tms time_first;
+        cpu = times(&time_first);
+        sys_cpu = time_first.tms_stime;
+        user_cpu = time_first.tms_utime;
     } catch (std::exception& ex) {
         std::string msg = "Cannot get cpu utilization ratio, reason: " + std::string(ex.what());
         throw std::runtime_error(msg);
     }
-    return percent;
 }
 
 int64_t
