@@ -34,6 +34,7 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 			},
 		},
 		manipulationMsgStream: p.manipulationMsgStream,
+		rowIDAllocator:        p.idAllocator,
 	}
 
 	var cancel func()

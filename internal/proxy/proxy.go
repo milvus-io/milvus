@@ -122,6 +122,7 @@ func (p *Proxy) startProxy() error {
 	if err != nil {
 		return err
 	}
+	initGlobalMetaCache(p.proxyLoopCtx, p.masterClient, p.idAllocator, p.tsoAllocator)
 	p.manipulationMsgStream.Start()
 	p.queryMsgStream.Start()
 	p.queryResultMsgStream.Start()

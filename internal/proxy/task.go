@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -34,6 +35,7 @@ type InsertTask struct {
 	result                *servicepb.IntegerRangeResponse
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
+	rowIDAllocator        *allocator.IDAllocator
 }
 
 func (it *InsertTask) SetTs(ts Timestamp) {
@@ -61,6 +63,28 @@ func (it *InsertTask) PreExecute() error {
 }
 
 func (it *InsertTask) Execute() error {
+	collectionName := it.BaseInsertTask.CollectionName
+	if !globalMetaCache.Hit(collectionName) {
+		err := globalMetaCache.Update(collectionName)
+		if err != nil {
+			return err
+		}
+	}
+	description, err := globalMetaCache.Get(collectionName)
+	if err != nil || description == nil {
+		return err
+	}
+	autoID := description.Schema.AutoID
+	if autoID || true {
+		rowNums := len(it.BaseInsertTask.RowData)
+		rowIDBegin, rowIDEnd, _ := it.rowIDAllocator.Alloc(uint32(rowNums))
+		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
+		for i := rowIDBegin; i < rowIDEnd; i++ {
+			offset := i - rowIDBegin
+			it.BaseInsertTask.RowIDs[offset] = i
+		}
+	}
+
 	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
 	msgPack := &msgstream.MsgPack{
 		BeginTs: it.BeginTs(),
@@ -68,7 +92,7 @@ func (it *InsertTask) Execute() error {
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := it.manipulationMsgStream.Produce(msgPack)
+	err = it.manipulationMsgStream.Produce(msgPack)
 	it.result = &servicepb.IntegerRangeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -379,18 +403,14 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 }
 
 func (dct *DescribeCollectionTask) Execute() error {
-	resp, err := dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
-	if err != nil {
-		log.Printf("describe collection failed, error= %v", err)
-		dct.result = &servicepb.CollectionDescription{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "internal error",
-			},
+	if !globalMetaCache.Hit(dct.CollectionName.CollectionName) {
+		err := globalMetaCache.Update(dct.CollectionName.CollectionName)
+		if err != nil {
+			return err
 		}
-	} else {
-		dct.result = resp
 	}
+	var err error
+	dct.result, err = globalMetaCache.Get(dct.CollectionName.CollectionName)
 	return err
 }
 
