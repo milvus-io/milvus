@@ -13,12 +13,12 @@
 #include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
-#include <src/cache/CpuCacheMgr.h>
 #include <algorithm>
 #include <experimental/filesystem>
 #include <set>
 #include <string>
 
+#include "cache/CpuCacheMgr.h"
 #include "db/SnapshotUtils.h"
 #include "db/SnapshotVisitor.h"
 #include "db/merge/MergeAdaptiveStrategy.h"
@@ -233,6 +233,7 @@ BuildQueryPtr(const std::string& collection_name, int64_t n, int64_t topk, std::
         for (int64_t j = 0; j < COLLECTION_DIM; j++) vector_record.float_data[COLLECTION_DIM * i + j] = drand48();
         vector_record.float_data[COLLECTION_DIM * i] += i / 2000.;
     }
+    vector_record.vector_count = n;
     vector_query->query_vector = vector_record;
     vector_query->metric_type = "L2";
     vector_query->extra_params = {{"nprobe", 1024}};
@@ -1444,6 +1445,61 @@ TEST_F(DBTest, DeleteEntitiesTest) {
         ASSERT_TRUE(status.ok()) << status.ToString();
         ASSERT_EQ(entity_data_chunk->count_, 0);
     }
+}
+
+TEST_F(DBTest, DeleteEntitiesTest2) {
+    std::string collection_name = "test_collection_delete2_";
+    CreateCollection3(db_, collection_name, 0);
+
+    // insert 100 entities into default partition without flush
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities2(10000, 0, data_chunk);
+    std::vector<uint8_t> first_vector(sizeof(float) * COLLECTION_DIM);
+    memcpy(first_vector.data(), data_chunk->fixed_fields_["float_vector"]->data_.data(),
+           sizeof(float) * COLLECTION_DIM);
+    auto status = db_->Insert(collection_name, "", data_chunk);
+    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
+
+    milvus::engine::IDNumbers del_ids;
+    del_ids.emplace_back(entity_ids[0]);
+    del_ids.emplace_back(entity_ids[10]);
+
+    // delete all the entities in memory
+    status = db_->DeleteEntityByID(collection_name, del_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    // flush empty segment
+    db_->Flush(collection_name);
+
+    std::vector<bool> valid_row;
+    milvus::engine::DataChunkPtr entity_data_chunk;
+    status = db_->GetEntityByID(collection_name, {del_ids}, {}, valid_row, entity_data_chunk);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(entity_data_chunk->count_, 0);
+    for (const auto& vr : valid_row) {
+        ASSERT_FALSE(vr);
+    }
+
+    // Test search after delete
+    milvus::server::ContextPtr ctx1;
+    milvus::query::QueryPtr query_ptr = std::make_shared<milvus::query::Query>();
+    milvus::engine::QueryResultPtr result = std::make_shared<milvus::engine::QueryResult>();
+
+    std::vector<std::string> field_names;
+    std::vector<std::string> partitions;
+    int64_t nq = 1;
+    int64_t topk = 10;
+    BuildQueryPtr(collection_name, nq, topk, field_names, partitions, query_ptr);
+    auto& records = query_ptr->vectors["placeholder_1"]->query_vector;
+    records.float_data.clear();
+    records.float_data.resize(1 * COLLECTION_DIM);
+    memcpy(records.float_data.data(), first_vector.data(), sizeof(float) * COLLECTION_DIM);
+
+    status = db_->Query(ctx1, query_ptr, result);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(result->row_num_, nq);
+    ASSERT_NE(result->result_ids_[0], entity_ids[0]);
 }
 
 TEST_F(DBTest, DeleteStaleTest) {

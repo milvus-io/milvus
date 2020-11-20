@@ -13,9 +13,9 @@ timeout(time: 60, unit: 'MINUTES') {
 		}
 
 		withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-			sh ". ./before-install.sh && ./update_cache.sh -l ${params.JFROG_ARTFACTORY_URL}/ccache --cache_dir=\${CCACHE_DIR} -f \${CCACHE_COMPRESS_PACKAGE_FILE} -u ${USERNAME} -p ${PASSWORD}"
+			sh '. ./before-install.sh && ./update_cache.sh -l $JFROG_ARTFACTORY_URL/ccache --cache_dir=\${CCACHE_DIR} -f \${CCACHE_COMPRESS_PACKAGE_FILE} -u $USERNAME -p $PASSWORD'
 			if (isTimeTriggeredBuild) {
-				sh ". ./before-install.sh && ./update_cache.sh -l ${params.JFROG_ARTFACTORY_URL}/thirdparty --cache_dir=\${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} -f \${THIRDPARTY_COMPRESS_PACKAGE_FILE} -u ${USERNAME} -p ${PASSWORD}"
+				sh '. ./before-install.sh && ./update_cache.sh -l $JFROG_ARTFACTORY_URL/thirdparty --cache_dir=\${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} -f \${THIRDPARTY_COMPRESS_PACKAGE_FILE} -u $USERNAME -p $PASSWORD'
 			}
 		}
 	}

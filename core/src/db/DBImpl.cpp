@@ -646,6 +646,8 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
         return Status{DB_ERROR, "BinaryQuery is null"};
     }
 
+    auto vector_param = query_ptr->vectors.begin()->second;
+
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
 

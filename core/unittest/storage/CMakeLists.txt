@@ -29,10 +29,9 @@ target_link_libraries(test_storage
         stdc++
         server
         milvus_engine
+        storage
         value
         utils
-        tracing
-        query
         log
         )
 

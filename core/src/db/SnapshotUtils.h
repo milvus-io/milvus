@@ -55,6 +55,9 @@ Status
 GetSnapshotInfo(const std::string& collection_name, milvus::json& json_info);
 
 Status
+GetDataSize(size_t& data_size);
+
+Status
 GetSegmentRowLimit(const std::string& collection_name, int64_t& segment_row_limit);
 
 Status

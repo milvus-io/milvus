@@ -21,7 +21,8 @@
 #include <fiu/fiu-local.h>
 
 #include "db/Utils.h"
-#include "query/BinaryQuery.h"
+#include "metrics/SystemInfo.h"
+#include "query/QueryUtil.h"
 #include "server/ValidationUtil.h"
 #include "server/delivery/request/BaseReq.h"
 #include "server/web_impl/Constants.h"
@@ -807,7 +808,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
             return status;
         }
         auto general_query = std::make_shared<query::GeneralQuery>();
-        query::GenBinaryQuery(boolean_query, general_query->bin);
+        query::QueryUtil::GenBinaryQuery(boolean_query, general_query->bin);
 
         query_ptr_->root = general_query;
 

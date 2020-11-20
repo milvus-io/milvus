@@ -70,7 +70,7 @@ struct RangeQuery {
 using RangeQueryPtr = std::shared_ptr<RangeQuery>;
 
 struct VectorRecord {
-    size_t vector_count;
+    size_t vector_count = 0;
     std::vector<float> float_data;
     std::vector<uint8_t> binary_data;
 };
@@ -78,10 +78,10 @@ struct VectorRecord {
 struct VectorQuery {
     std::string field_name;
     milvus::json extra_params = {};
-    int64_t topk;
-    int64_t nq;
+    int64_t topk = 0;
+    int64_t nq = 0;
     std::string metric_type = "";
-    float boost;
+    float boost = 0.0f;
     VectorRecord query_vector;
 };
 using VectorQueryPtr = std::shared_ptr<VectorQuery>;

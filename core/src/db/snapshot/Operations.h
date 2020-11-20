@@ -215,7 +215,7 @@ template <typename StepT>
 void
 Operations::AddStep(const StepT& step, ResourceContextPtr<StepT> step_context, bool activate) {
     if (step_context == nullptr) {
-        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
+        step_context = ResourceContextBuilder<StepT>(meta::oAdd).CreatePtr();
     }
 
     auto s = std::make_shared<StepT>(step);
@@ -235,7 +235,7 @@ void
 Operations::AddStepWithLsn(const StepT& step, const LSN_TYPE& lsn, ResourceContextPtr<StepT> step_context,
                            bool activate) {
     if (step_context == nullptr) {
-        step_context = ResourceContextBuilder<StepT>().SetOp(meta::oAdd).CreatePtr();
+        step_context = ResourceContextBuilder<StepT>(meta::oAdd).CreatePtr();
     }
 
     auto s = std::make_shared<StepT>(step);
@@ -368,7 +368,7 @@ class SoftDeleteOperation : public Operations {
             return Status(SS_NOT_FOUND_ERROR, emsg.str());
         }
         resource_->Deactivate();
-        auto r_ctx_p = ResourceContextBuilder<ResourceT>().SetResource(resource_).SetOp(meta::oUpdate).CreatePtr();
+        auto r_ctx_p = ResourceContextBuilder<ResourceT>(meta::oUpdate).SetResource(resource_).CreatePtr();
         r_ctx_p->AddAttr(StateField::Name);
         AddStep(*resource_, r_ctx_p, false);
         return status;

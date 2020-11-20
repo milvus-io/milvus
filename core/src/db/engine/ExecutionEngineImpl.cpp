@@ -45,8 +45,7 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
 
-namespace milvus {
-namespace engine {
+namespace milvus::engine {
 
 ExecutionEngineImpl::ExecutionEngineImpl(const std::string& dir_root, const SegmentVisitorPtr& segment_visitor)
     : gpu_enable_(config.gpu.enable()) {
@@ -253,7 +252,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
     try {
         faiss::ConcurrentBitsetPtr bitset = nullptr;
         std::string vector_placeholder;
-        faiss::ConcurrentBitsetPtr list = nullptr;
+        faiss::ConcurrentBitsetPtr filter_list = nullptr;
 
         SegmentPtr segment_ptr;
         segment_reader_->GetSegment(segment_ptr);
@@ -288,16 +287,19 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
         }
         rc.RecordSection("Scalar field filtering");
 
-        // combine filter and deletion
-        list = vec_index->GetBlacklist();
-        if (list != nullptr) {
-            if (bitset != nullptr) {
-                list = (*list) | (*bitset);
+        // Merge scalar filter and deletion bitset
+        segment::DeletedDocsPtr deleted_docs_ptr;
+        segment_reader_->LoadDeletedDocs(deleted_docs_ptr);
+        if (deleted_docs_ptr) {
+            auto& del_docs = deleted_docs_ptr->GetDeletedDocs();
+            auto del_bitset = deleted_docs_ptr->GetBlacklist();
+            if (bitset != nullptr && del_bitset != nullptr) {
+                filter_list = (*bitset) | (*del_bitset);
+            } else {
+                filter_list = (bitset != nullptr) ? bitset : del_bitset;
             }
         } else {
-            if (bitset != nullptr) {
-                list = bitset;
-            }
+            filter_list = bitset;
         }
 
         auto& vector_param = context.query_ptr_->vectors.at(vector_placeholder);
@@ -307,7 +309,7 @@ ExecutionEngineImpl::Search(ExecutionEngineContext& context) {
             vector_param->nq = vector_param->query_vector.binary_data.size() * 8 / vec_index->Dim();
         }
 
-        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, list);
+        status = VecSearch(context, context.query_ptr_->vectors.at(vector_placeholder), vec_index, filter_list);
         if (!status.ok()) {
             return status;
         }
@@ -771,18 +773,15 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
 
     std::shared_ptr<std::vector<idx_t>> uids;
-    ConCurrentBitsetPtr blacklist;
     knowhere::DatasetPtr dataset;
     if (from_index) {
         dataset =
             knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
         uids = from_index->GetUids();
-        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
                                               bin_from_index->GetRawIds());
         uids = bin_from_index->GetUids();
-        blacklist = bin_from_index->GetBlacklist();
     }
 
     try {
@@ -801,10 +800,8 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
 #endif
 
     new_index->SetUids(uids);
-    new_index->SetBlacklist(blacklist);
 
     return Status::OK();
 }
 
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine

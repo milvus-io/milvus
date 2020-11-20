@@ -21,7 +21,7 @@ set( STORAGE_FILES  ${STORAGE_MAIN_FILES}
 add_library( storage STATIC )
 target_sources( storage PRIVATE ${STORAGE_FILES} )
 
-set ( LINK_LIBRARY fiu log )
+set ( LINK_LIBRARY stdc++fs fiu log )
 
 if ( MILVUS_WITH_AWS )
     list( APPEND LINK_LIBRARY

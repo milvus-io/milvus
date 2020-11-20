@@ -161,6 +161,10 @@ SegmentReader::LoadField(const std::string& field_name, engine::BinaryDataPtr& r
         }
 
         auto raw_visitor = field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+        if (raw_visitor->GetFile() == nullptr) {
+            std::string emsg = "File of field " + field_name + " is not found";
+            return Status(DB_FILE_NOT_FOUND, emsg);
+        }
         std::string file_path =
             engine::snapshot::GetResPath<engine::snapshot::SegmentFile>(dir_collections_, raw_visitor->GetFile());
 
@@ -390,20 +394,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
             return Status(DB_ERROR, "Field is not vector type");
         }
 
-        // load deleted doc
         int64_t row_count = GetRowCount();
-        faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
-        segment::DeletedDocsPtr deleted_docs_ptr;
-        LoadDeletedDocs(deleted_docs_ptr);
-        if (deleted_docs_ptr != nullptr) {
-            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-            if (!deleted_docs.empty()) {
-                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(row_count);
-                for (auto& offset : deleted_docs) {
-                    concurrent_bitset_ptr->set(offset);
-                }
-            }
-        }
         recorder.RecordSection("prepare");
 
         knowhere::BinarySet index_data;
@@ -448,7 +439,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
                 index_ptr->Train(knowhere::DatasetPtr(), conf);
                 index_ptr->AddWithoutIds(dataset, conf);
                 index_ptr->SetUids(uids_ptr);
-                index_ptr->SetBlacklist(concurrent_bitset_ptr);
                 segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);
@@ -508,7 +498,6 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
         STATUS_CHECK(LoadUids(*uids_ptr));
 
         index_ptr->SetUids(uids_ptr);
-        index_ptr->SetBlacklist(concurrent_bitset_ptr);
         segment_ptr_->SetVectorIndex(field_name, index_ptr);
 
         cache::CpuCacheMgr::GetInstance().InsertItem(index_file_path, index_ptr);  // put into cache
@@ -679,6 +668,11 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
+            auto id = segment_visitor_->GetSegment()->GetID();
+            auto sc = segment_visitor_->GetSnapshot()->GetSegmentCommitBySegmentId(id);
+            if (sc) {
+                deleted_docs_ptr->GenBlacklist(sc->GetRowCount());
+            }
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
             deleted_docs_ptr = std::static_pointer_cast<segment::DeletedDocs>(data_obj);

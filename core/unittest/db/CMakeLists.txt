@@ -24,16 +24,9 @@ set( TEST_FILES ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
 add_executable( test_db
                 ${SCHEDULER_FILES}
                 ${TEST_FILES}
-                # ${grpc_server_files}
-                # ${grpc_service_files}
-                # ${web_server_files}
-                # ${server_delivery_files}
-                # ${server_files}
-                # ${server_init_files}
                 )
 
 target_link_libraries( test_db  ${UNITTEST_LIBS}
-                                server
                                  milvus_engine
                                  value
                                  stdc++
