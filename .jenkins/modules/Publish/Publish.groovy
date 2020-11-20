@@ -2,7 +2,7 @@ dir ("docker/deploy") {
     def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
     withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
-        def downloadStatus = sh(returnStatus: true, script: 'curl -u$JFROG_USERNAME:$JFROG_PASSWORD -O $JFROG_ARTFACTORY_URL/milvus/package/${binaryPackage}')
+        def downloadStatus = sh(returnStatus: true, script: 'curl -u$JFROG_USERNAME:$JFROG_PASSWORD -O $JFROG_ARTFACTORY_URL/milvus/package/$PROJECT_NAME-$PACKAGE_VERSION.tar.gz')
 
         if (downloadStatus != 0) {
             error("\" Download \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage} \" failed!")
