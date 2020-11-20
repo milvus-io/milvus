@@ -106,7 +106,7 @@ echo -e "`gcc --version`"
 echo -e "\n Echo g++ version:\n"
 echo -e "`g++ --version`"
 
-echo -d "\n Echo time status\n"
+echo -e "\n Echo time status\n"
 echo -e "`timedatectl status`"
 
 # run unittest
