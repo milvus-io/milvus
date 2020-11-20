@@ -1721,8 +1721,8 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
         }
         auto status = Status::OK();
-        if (vector_params.empty()) {
-            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+        if (vector_params.size() != 1) {
+            return Status(SERVER_INVALID_DSL_PARAMETER, "There should only be one vector query");
         }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
