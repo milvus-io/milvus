@@ -69,8 +69,14 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
-        auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
+        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
         hnsw_stats->max_level = index_->maxlevel_;
+        hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
+        for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+            hnsw_stats->distribution[i] = index_->level_stats_[i];
+        }
+        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        hnsw_stats->show();
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -96,13 +102,6 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
-        auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
-        hnsw_stats->max_level = index_->maxlevel_;
-        for (auto i = 0; i < index_->element_levels_.size(); ++ i) {
-            if (index_->element_levels_[i] >= hnsw_stats->distribution.size())
-                hnsw_stats->distribution.resize(index_->element_levels_[i] + 1, 0);
-            hnsw_stats->distribution[index_->element_levels_[i]] ++;
-        }
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -142,10 +141,18 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::BuilderSuspend::check_wait();
         index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
+    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    hnsw_stats->max_level = index_->maxlevel_;
+    hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
+    for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+        hnsw_stats->distribution[i] = index_->level_stats_[i];
+    }
+    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    hnsw_stats->show();
 }
 
-DatasetPtr
-IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+        DatasetPtr
+        IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -156,9 +163,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
-    std::vector<hnswlib::Statistics> query_stats;
+    std::vector<hnswlib::StatisticsInfo> query_stats;
     query_stats.reserve(rows);
-    auto hnsw_stats = dynamic_cast<HNSWStatistics*>(stats);
+    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
     if (hnsw_stats->bs_percentage_static < 0) {
         hnsw_stats->bs_percentage_static = (double)bitset->count_1() / bitset->count();
     }
@@ -217,6 +224,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     }
     hnsw_stats->bs_percentage_dynamic += (double)tot_hit / (double)tot_access;
     hnsw_stats->bs_percentage_dynamic /= 2.0;
+    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+    hnsw_stats->show();
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);

@@ -14,13 +14,6 @@ namespace hnswlib {
 typedef unsigned int tableint;
 typedef unsigned int linklistsizeint;
 
-class Statistics {
- public:
-    Statistics(): bitset_access_cnt(0), bitset_hit_cnt(0) {}
-    unsigned int bitset_access_cnt;
-    unsigned int bitset_hit_cnt;
-    std::vector<unsigned int> accessed_points;
-};
 
 template<typename dist_t>
 class HierarchicalNSW : public AlgorithmInterface<dist_t> {
@@ -84,6 +77,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
         mult_ = 1 / log(1.0 * M_);
         revSize_ = 1.0 / mult_;
+        level_stats_.resize(10);
     }
 
     struct CompareByFirst {
@@ -139,6 +133,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     char *data_level0_memory_;
     char **linkLists_;
     std::vector<int> element_levels_;
+    std::vector<int> level_stats_;
 
     size_t data_size_;
 
@@ -260,7 +255,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset, Statistics &stats) const {
+    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) const {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -279,7 +274,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             candidate_set.emplace(-dist, ep_id);
         } else {
               stats.bitset_access_cnt ++;
-              stats.bitset_hit_cnt ++
+              stats.bitset_hit_cnt ++;
             lowerBound = std::numeric_limits<dist_t>::max();
             candidate_set.emplace(-lowerBound, ep_id);
         }
@@ -728,6 +723,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
+        level_stats_ = std::vector<int>(maxlevel_ + 1, 0);
         revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
@@ -736,10 +732,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
                 element_levels_[i] = 0;
+                level_stats_[0] ++;
 
                 linkLists_[i] = nullptr;
             } else {
                 element_levels_[i] = linkListSize / size_links_per_element_;
+                level_stats_[element_levels_[i]] ++;
                 linkLists_[i] = (char *) malloc(linkListSize);
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
@@ -999,6 +997,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         element_levels_[cur_c] = curlevel;
 
         std::unique_lock <std::mutex> templock(global);
+        if (curlevel >= level_stats_.size()) {
+            level_stats_.resize(curlevel + 1, 0);
+        }
+        level_stats_[curlevel] ++;
         int maxlevelcopy = maxlevel_;
         if (curlevel <= maxlevelcopy)
             templock.unlock();
@@ -1079,7 +1081,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     };
 
     std::priority_queue<std::pair<dist_t, labeltype >>
-    searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset, Statistics &stats) const {
+    searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
         if (cur_element_count == 0) return result;
 
@@ -1137,7 +1139,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <typename Comp>
     std::vector<std::pair<dist_t, labeltype>>
-    searchKnn(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset, Statistics &stats) {
+    searchKnn(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) {
         std::vector<std::pair<dist_t, labeltype>> result;
         if (cur_element_count == 0) return result;
 
