@@ -61,12 +61,6 @@ class SystemInfo {
     static int64_t
     NetworkOutOctets();
 
-    static double
-    FloatingReadSpeed();
-
-    static double
-    FloatingWriteSpeed();
-
  private:
     static int64_t
     parse_line(char* line);
