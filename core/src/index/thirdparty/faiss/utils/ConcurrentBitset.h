@@ -201,18 +201,18 @@ class ConcurrentBitset {
     }
 
     uint64_t
-    count_1() const {
+    count_1() {
         uint64_t ret = 0;
-        auto p_data = reinterpret_cast<uint64_t *>(bitset_.data());
+        auto p_data = reinterpret_cast<uint64_t *>(mutable_data());
         auto len = size() >> 3;
-        auto remainder = size() % 8;
-        auto popcount8 = [&](uint8 x) -> int{
+        //auto remainder = size() % 8;
+        auto popcount8 = [&](uint8_t x) -> int{
             x = (x & 0x55) + ((x >> 1) & 0x55);
             x = (x & 0x33) + ((x >> 2) & 0x33);
             x = (x & 0x0F) + ((x >> 4) & 0x0F);
             return x;
         };
-        for (auto i = 0; i < len; ++ i) {
+        for (size_t i = 0; i < len; ++ i) {
             ret += __builtin_popcountl(*p_data);
             p_data ++;
         }
