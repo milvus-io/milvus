@@ -255,6 +255,29 @@ class TestFlushBase:
         res = connect.count_entities(collection)
         assert res == 0
 
+    @pytest.mark.level(2)
+    def test_delete_flush_during_search(self, connect, collection, args):
+        '''
+        method: search at background, call `delete and flush`
+        expected: no timeout
+        '''
+        ids = []
+        loops = 5
+        for i in range(loops):
+            tmp_ids = connect.bulk_insert(collection, default_entities)
+            connect.flush([collection])
+            ids.extend(tmp_ids)
+        nq = 10000
+        query, query_vecs = gen_query_vectors(default_float_vec_field_name, default_entities, default_top_k, nq)
+        time.sleep(0.1)
+        future = connect.search(collection, query, _async=True)
+        delete_ids = [ids[0], ids[-1]]
+        status = connect.delete_entity_by_id(collection, delete_ids)
+        connect.flush([collection])
+        res = future.result()
+        res_count = connect.count_entities(collection, timeout = 120)
+        assert res_count == loops * default_nb - len(delete_ids)
+
 
 class TestFlushAsync:
     @pytest.fixture(scope="function", autouse=True)
