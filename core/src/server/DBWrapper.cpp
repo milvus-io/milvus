@@ -39,7 +39,6 @@ DBWrapper::StartService() {
     opt.meta_.path_ = path + engine::DB_FOLDER;
 
     opt.auto_flush_interval_ = config.storage.auto_flush_interval();
-    opt.metric_enable_ = config.metric.enable();
     opt.insert_buffer_size_ = config.cache.insert_buffer_size();
 
     if (not config.cluster.enable()) {

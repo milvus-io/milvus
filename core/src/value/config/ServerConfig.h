@@ -100,12 +100,6 @@ struct ServerConfig {
         Integer max_concurrent_insert_request_size;
     } cache;
 
-    struct Metric {
-        Bool enable;
-        String address;
-        Integer port;
-    } metric;
-
     struct Engine {
         Integer max_partition_num;
         Integer build_index_threshold;
