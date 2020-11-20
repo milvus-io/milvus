@@ -101,6 +101,11 @@ echo -e "\n\n CPU Info \n\n"
 echo ${cpuinfo}
 echo -e "\n\n END CPU Info \n\n"
 
+echo -e "\n Echo gcc version:\n"
+echo -e "`gcc --version`"
+echo -e "\n Echo g++ version:\n"
+echo -e "`g++ --version`"
+
 # run unittest
 for test in `ls ${UNITTEST_DIR}`; do
     if [[ ${test} == *".log" ]] || [[ ${test} == *".info" ]]; then
