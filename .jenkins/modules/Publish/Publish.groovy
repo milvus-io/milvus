@@ -2,7 +2,7 @@ dir ("docker/deploy") {
     def binaryPackage = "${PROJECT_NAME}-${PACKAGE_VERSION}.tar.gz"
 
     withCredentials([usernamePassword(credentialsId: "${params.JFROG_CREDENTIALS_ID}", usernameVariable: 'JFROG_USERNAME', passwordVariable: 'JFROG_PASSWORD')]) {
-        def downloadStatus = sh(returnStatus: true, script: "curl -u${JFROG_USERNAME}:${JFROG_PASSWORD} -O ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage}")
+        def downloadStatus = sh(returnStatus: true, script: 'curl -u$JFROG_USERNAME:$JFROG_PASSWORD -O ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage}')
 
         if (downloadStatus != 0) {
             error("\" Download \" ${params.JFROG_ARTFACTORY_URL}/milvus/package/${binaryPackage} \" failed!")
@@ -16,7 +16,7 @@ dir ("docker/deploy") {
         sh "docker-compose build --force-rm ${BINARY_VERSION}_${OS_NAME}"
         try {
             withCredentials([usernamePassword(credentialsId: "${params.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                sh "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${params.DOKCER_REGISTRY_URL}"
+                sh 'docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD ${params.DOKCER_REGISTRY_URL}'
                 sh "docker-compose push ${BINARY_VERSION}_${OS_NAME}"
             }
         } catch (exc) {
