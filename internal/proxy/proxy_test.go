@@ -15,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/master"
-	masterParam "github.com/zilliztech/milvus-distributed/internal/master/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -39,11 +38,11 @@ var testNum = 10
 
 func startMaster(ctx context.Context) {
 	master.Init()
-	etcdAddr, err := masterParam.Params.EtcdAddress()
+	etcdAddr, err := master.Params.EtcdAddress()
 	if err != nil {
 		panic(err)
 	}
-	rootPath, err := masterParam.Params.EtcdRootPath()
+	rootPath, err := master.Params.EtcdRootPath()
 	if err != nil {
 		panic(err)
 	}
@@ -87,7 +86,7 @@ func startMaster(ctx context.Context) {
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
-	if err := svr.Run(int64(masterParam.Params.Port())); err != nil {
+	if err := svr.Run(int64(master.Params.Port())); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 

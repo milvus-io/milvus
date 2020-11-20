@@ -1,4 +1,4 @@
-package timesync
+package master
 
 import (
 	"context"
@@ -10,6 +10,12 @@ import (
 )
 
 type (
+	TimeTickBarrier interface {
+		GetTimeTick() (Timestamp, error)
+		Start() error
+		Close()
+	}
+
 	softTimeTickBarrier struct {
 		peer2LastTt   map[UniqueID]Timestamp
 		minTtInterval Timestamp
@@ -102,13 +108,13 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 	return nil
 }
 
-func NewSoftTimeTickBarrier(ctx context.Context,
+func newSoftTimeTickBarrier(ctx context.Context,
 	ttStream *ms.MsgStream,
 	peerIds []UniqueID,
 	minTtInterval Timestamp) *softTimeTickBarrier {
 
 	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is empty!\n")
+		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!\n")
 		return nil
 	}
 
@@ -124,7 +130,7 @@ func NewSoftTimeTickBarrier(ctx context.Context,
 		sttbarrier.peer2LastTt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2LastTt) {
-		log.Printf("[NewSoftTimeTickBarrier] Warning: there are duplicate peerIds!\n")
+		log.Printf("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!\n")
 	}
 
 	return &sttbarrier
@@ -228,12 +234,12 @@ func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
 	return tempMin
 }
 
-func NewHardTimeTickBarrier(ctx context.Context,
+func newHardTimeTickBarrier(ctx context.Context,
 	ttStream *ms.MsgStream,
 	peerIds []UniqueID) *hardTimeTickBarrier {
 
 	if len(peerIds) <= 0 {
-		log.Printf("[NewSoftTimeTickBarrier] Error: peerIds is empty!")
+		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!")
 		return nil
 	}
 
@@ -248,7 +254,7 @@ func NewHardTimeTickBarrier(ctx context.Context,
 		sttbarrier.peer2Tt[id] = Timestamp(0)
 	}
 	if len(peerIds) != len(sttbarrier.peer2Tt) {
-		log.Printf("[NewSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
+		log.Printf("[newSoftTimeTickBarrier] Warning: there are duplicate peerIds!")
 	}
 
 	return &sttbarrier
