@@ -123,7 +123,6 @@ main(int argc, char* argv[]) {
         exit(exit_code);
     };
     signal(SIGHUP, milvus::HandleSignal);
-    signal(SIGILL, milvus::HandleSignal);
     signal(SIGINT, milvus::HandleSignal);
     signal(SIGUSR1, milvus::HandleSignal);
     signal(SIGSEGV, milvus::HandleSignal);

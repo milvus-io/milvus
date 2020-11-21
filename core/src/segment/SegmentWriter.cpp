@@ -137,7 +137,6 @@ SegmentWriter::WriteBloomFilter() {
         return status;
     }
 
-    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto uid_blf_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_BLOOM_FILTER);
     if (uid_blf_visitor && uid_blf_visitor->GetFile()) {
@@ -182,7 +181,6 @@ SegmentWriter::WriteBloomFilter(const std::string& file_path, const IdBloomFilte
 
 Status
 SegmentWriter::WriteDeletedDocs() {
-    auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
     auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
     auto del_doc_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_DELETED_DOCS);
     if (del_doc_visitor && del_doc_visitor->GetFile()) {
@@ -310,7 +308,6 @@ SegmentWriter::WriteVectorIndex(const std::string& field_name) {
             return Status(DB_ERROR, "Index doesn't exist: " + status.message());
         }
 
-        auto& field_visitors_map = segment_visitor_->GetFieldVisitors();
         auto field = segment_visitor_->GetFieldVisitor(field_name);
         if (field == nullptr) {
             return Status(DB_ERROR, "Invalid filed name: " + field_name);

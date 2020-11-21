@@ -1093,7 +1093,6 @@ CreateCollectionOperation::DoExecute(StorePtr store) {
     AddStepWithLsn(*collection, c_context_.lsn, c_ctx_p);
     context_.new_collection = collection;
     MappingT field_commit_ids = {};
-    ID_TYPE result_id;
     auto field_idx = 0;
     for (auto& field_kv : c_context_.fields_schema) {
         field_idx++;

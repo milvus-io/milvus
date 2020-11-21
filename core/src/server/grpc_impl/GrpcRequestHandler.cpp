@@ -1773,7 +1773,6 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 ::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::QueryResult* response) {
-    std::cout << "[Search] " << context->peer() << std::endl;
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 

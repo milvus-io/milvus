@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <iostream>
 #include <map>
 #include <set>
 #include <string>
@@ -30,10 +29,6 @@ class CompoundBaseOperation : public Operations {
 
     CompoundBaseOperation(const OperationContext& context, ScopedSnapshotT prev_ss)
         : BaseT(context, prev_ss, OperationsType::W_Compound) {
-    }
-
-    ~CompoundBaseOperation() override {
-        std::cout << "Gc Operation " << DerivedT::Name << std::endl;
     }
 
     std::string

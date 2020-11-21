@@ -88,8 +88,8 @@ class MetaSession {
 
  private:
     std::vector<MetaApplyContext> apply_context_;
-    int64_t pos_;
     MetaEnginePtr db_engine_;
+    int64_t pos_;
 };
 
 template <typename T, typename U>

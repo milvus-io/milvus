@@ -87,8 +87,8 @@ set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )
 set_milvus_definition( MILVUS_WITH_FIU          "FIU_ENABLE" )
 
 if ( CMAKE_BUILD_TYPE STREQUAL "Release" )
-    append_flags( CMAKE_CXX_FLAGS FLAGS "-O0" )
-    append_flags( CUDA_NVCC_FLAGS FLAGS "-O0" )
+    append_flags( CMAKE_CXX_FLAGS FLAGS "-O3" )
+    append_flags( CUDA_NVCC_FLAGS FLAGS "-O3" )
 elseif ( CMAKE_BUILD_TYPE STREQUAL "Debug" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-O0" "-g" )
     append_flags( CUDA_NVCC_FLAGS FLAGS "-O0" "-g" )
@@ -99,6 +99,10 @@ endif ()
 # option "-rdynamic" is to print out detailed backtrace info for debug-ease
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
+#                    "-Wall"
+#                    "-Wno-sign-compare"
+#                    "-Wno-reorder"
+#                    "-Wno-unused-function"
                     "-fPIC"
                     "-DELPP_THREAD_SAFE"
                     "-fopenmp"

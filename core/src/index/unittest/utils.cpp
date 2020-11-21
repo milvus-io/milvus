@@ -9,19 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <execinfo.h>
+#include "unittest/utils.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
-#include <cmath>
-#include <iostream>
+#include <gtest/gtest.h>
+#include <math.h>
 #include <memory>
 #include <string>
 #include <utility>
-#include <string>
-
-#include <gtest/gtest.h>
-
-#include "unittest/utils.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -45,31 +40,23 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
     this->nq = nq;
 
     if (!is_binary) {
-        std::cout << "Is binary: " << is_binary << ", GenAll" << std::endl;
         GenAll(dim, nb, xb, ids, xids, nq, xq);
         assert(xb.size() == (size_t)dim * nb);
         assert(xq.size() == (size_t)dim * nq);
 
-        std::cout << "base_dataset knowhere::GenDatasetWithIds" << std::endl;
         base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
-        std::cout << "query_datase knowhere::GenDataset" << std::endl;
         query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
     } else {
-        std::cout << "Is binary: " << is_binary << std::endl;
         int64_t dim_x = dim / 8;
         GenAll(dim_x, nb, xb_bin, ids, xids, nq, xq_bin);
         assert(xb_bin.size() == (size_t)dim_x * nb);
         assert(xq_bin.size() == (size_t)dim_x * nq);
 
-        std::cout << "knowhere::GenDatasetWithIds" << std::endl;
         base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb_bin.data(), ids.data());
-        std::cout << "knowhere::GenDataset" << std::endl;
         query_dataset = milvus::knowhere::GenDataset(nq, dim, xq_bin.data());
     }
 
-    std::cout << "id_dataset knowhere::GenDatasetWithIds" << std::endl;
     id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
-    std::cout << "xid_dataset knowhere::GenDatasetWithIds" << std::endl;
     xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
 }
 
