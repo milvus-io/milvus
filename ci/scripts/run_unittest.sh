@@ -58,6 +58,11 @@ while true ; do
     esac
 done
 
+cpuinfo=`cat /proc/cpuinfo`
+echo -e "\n\n CPU Info \n\n"
+echo ${cpuinfo}
+echo -e "\n\n END CPU Info \n\n"
+
 # Set defaults for vars modified by flags to this script
 INSTALL_PREFIX=${INSTALL_PREFIX:="/var/lib/milvus"}
 UNITTEST_DIR="${INSTALL_PREFIX}/unittest"
@@ -95,11 +100,6 @@ if [ $? -ne 0 ]; then
     echo "gen ${BASE_INFO} failed"
     exit 1
 fi
-
-cpuinfo=`cat /proc/cpuinfo`
-echo -e "\n\n CPU Info \n\n"
-echo ${cpuinfo}
-echo -e "\n\n END CPU Info \n\n"
 
 echo -e "\n Echo gcc version:\n"
 echo -e "`gcc --version`"
