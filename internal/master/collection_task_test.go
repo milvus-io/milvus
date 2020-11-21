@@ -187,7 +187,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_SUCCESS, listResp.Status.ErrorCode)
 
 	// CreateCollection Test
-	collMeta, err := svr.metaTable.GetCollectionByName(sch.Name)
+	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
 	t.Logf("collection id = %d", collMeta.ID)
 	assert.Equal(t, collMeta.CreateTime, uint64(11))
@@ -298,7 +298,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-	collMeta, err = svr.metaTable.GetCollectionByName(sch.Name)
+	collMeta, err = svr.mt.GetCollectionByName(sch.Name)
 	assert.NotNil(t, err)
 
 	// HasCollection "col1" is false

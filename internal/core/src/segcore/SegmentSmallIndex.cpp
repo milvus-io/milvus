@@ -433,7 +433,6 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
 #endif
 }
 
-
 int64_t
 SegmentSmallIndex::GetMemoryUsageInBytes() {
     int64_t total_bytes = 0;

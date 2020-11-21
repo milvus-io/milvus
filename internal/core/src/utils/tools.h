@@ -16,4 +16,4 @@ upper_div(int64_t value, int64_t align) {
     return groups;
 }
 
-}
+}  // namespace milvus

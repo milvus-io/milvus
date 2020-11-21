@@ -52,7 +52,7 @@ class SegmentSmallIndex : public SegmentBase {
     // TODO: originally, id should be put into data_chunk
     // TODO: Is it ok to put them the other side?
     Status
-    Insert(int64_t reserverd_offset,
+    Insert(int64_t reserved_offset,
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
@@ -85,7 +85,7 @@ class SegmentSmallIndex : public SegmentBase {
     // using IndexMode = knowhere::IndexMode;
     // using IndexConfig = knowhere::Config;
     // BuildIndex With Paramaters, must with Frozen State
-    // NOTE: index_params contains serveral policies for several index
+    // NOTE: index_params contains several policies for several index
     // TODO: currently, index has to be set at startup, and can't be modified
     // AddIndex and DropIndex will be added later
     Status
