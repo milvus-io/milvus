@@ -8,8 +8,6 @@ services:
       - "2379:2379"
       - "2380:2380"
       - "4001:4001"
-    networks:
-      - milvus
 
   pulsar:
     image: apachepulsar/pulsar:latest
@@ -17,11 +15,6 @@ services:
     ports:
       - "6650:6650"
       - "18080:8080"
-    networks:
-      - milvus
-
-networks:
-  milvus:
 
 #  pd0:
 #    image: pingcap/pd:latest

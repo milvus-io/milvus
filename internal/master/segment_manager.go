@@ -86,15 +86,14 @@ func (segMgr *SegmentManager) closeSegment(segMeta *etcdpb.SegmentMeta) error {
 	if segMeta.GetCloseTime() == 0 {
 		// close the segment and remove from collStatus
 		collStatus, ok := segMgr.collStatus[segMeta.GetCollectionID()]
-		if !ok {
-			return errors.Errorf("Can not find the status of collection %d", segMeta.GetCollectionID())
-		}
-		openedSegments := collStatus.openedSegments
-		for i, openedSegID := range openedSegments {
-			if openedSegID == segMeta.SegmentID {
-				openedSegments[i] = openedSegments[len(openedSegments)-1]
-				collStatus.openedSegments = openedSegments[:len(openedSegments)-1]
-				return nil
+		if ok {
+			openedSegments := collStatus.openedSegments
+			for i, openedSegID := range openedSegments {
+				if openedSegID == segMeta.SegmentID {
+					openedSegments[i] = openedSegments[len(openedSegments)-1]
+					collStatus.openedSegments = openedSegments[:len(openedSegments)-1]
+					break
+				}
 			}
 		}
 		ts, err := segMgr.globalTSOAllocator()
@@ -108,7 +107,7 @@ func (segMgr *SegmentManager) closeSegment(segMeta *etcdpb.SegmentMeta) error {
 	if err != nil {
 		return err
 	}
-	return errors.Errorf("The segment %d is not opened in collection %d", segMeta.SegmentID, segMeta.GetCollectionID())
+	return nil
 }
 
 func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error) {

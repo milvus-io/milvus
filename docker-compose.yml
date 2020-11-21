@@ -10,6 +10,7 @@ x-ccache: &ccache
 services:
   ubuntu:
     image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+    network_mode: "host"
     build:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
@@ -28,8 +29,6 @@ services:
     command: &ubuntu-command >
       /bin/bash -c "
         make check-proto-product && make verifiers && make unittest"
-    networks:
-      - milvus
 
   gdbserver:
     image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
@@ -53,8 +52,3 @@ services:
     ports:
       - "7776:22"
       - "7777:7777"
-    networks:
-      - milvus
-
-networks:
-  milvus:

@@ -7,8 +7,7 @@
     "remoteUser": "debugger",
     "remoteEnv": {"CCACHE_COMPILERCHECK":"content", "CCACHE_MAXSIZE": "2G", "CCACHE_COMPRESS": "1", "CCACHE_COMPRESSLEVEL": "5"},
     "extensions": [
-      "ms-vscode.cmake-tools",
-      "ms-vscode.cpptools",
-      "golang.go"
-    ]
+		"ms-vscode.cpptools",
+		"golang.go"
+	]
 }
