@@ -287,7 +287,6 @@ func TestTt_SoftTtBarrierGetTimeTickCancel(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		cancel()
-		time.Sleep(100 * time.Millisecond)
 	}()
 
 	wg.Wait()
