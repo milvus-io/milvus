@@ -97,7 +97,7 @@ func startProxy(ctx context.Context) {
 	}
 
 	// TODO: change to wait until master is ready
-	if err := svr.Start(); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run proxy failed", zap.Error(err))
 	}
 }

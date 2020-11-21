@@ -12,6 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -28,7 +29,7 @@ type Proxy struct {
 	grpcServer   *grpc.Server
 	masterConn   *grpc.ClientConn
 	masterClient masterpb.MasterClient
-	sched        *TaskScheduler
+	taskSch      *TaskScheduler
 	tick         *timeTick
 
 	idAllocator  *allocator.IDAllocator
@@ -37,6 +38,7 @@ type Proxy struct {
 
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
+	queryResultMsgStream  *msgstream.PulsarMsgStream
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -60,6 +62,9 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	bufSize := int64(1000)
 	manipulationChannels := []string{"manipulation"}
 	queryChannels := []string{"query"}
+	queryResultChannels := []string{"QueryResult"}
+	queryResultSubName := "QueryResultSubject"
+	unmarshal := msgstream.NewUnmarshalDispatcher()
 
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
@@ -68,6 +73,13 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
 	p.queryMsgStream.CreatePulsarProducers(queryChannels)
+
+	p.queryResultMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryResultMsgStream.SetPulsarClient(pulsarAddress)
+	p.queryResultMsgStream.CreatePulsarConsumers(queryResultChannels,
+		queryResultSubName,
+		unmarshal,
+		bufSize)
 
 	masterAddr := Params.MasterAddress()
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)
@@ -89,7 +101,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 	}
 	p.segAssigner = segAssigner
 
-	p.sched, err = NewTaskScheduler(p.proxyLoopCtx, p.idAllocator, p.tsoAllocator)
+	p.taskSch, err = NewTaskScheduler(p.proxyLoopCtx, p.idAllocator, p.tsoAllocator)
 	if err != nil {
 		return nil, err
 	}
@@ -110,18 +122,16 @@ func (p *Proxy) startProxy() error {
 	initGlobalMetaCache(p.proxyLoopCtx, p.masterClient, p.idAllocator, p.tsoAllocator)
 	p.manipulationMsgStream.Start()
 	p.queryMsgStream.Start()
-	p.sched.Start()
+	p.queryResultMsgStream.Start()
+	p.taskSch.Start()
 	p.idAllocator.Start()
 	p.tsoAllocator.Start()
 	p.segAssigner.Start()
 
-	// Start callbacks
+	// Run callbacks
 	for _, cb := range p.startCallbacks {
 		cb()
 	}
-
-	p.proxyLoopWg.Add(1)
-	go p.grpcLoop()
 
 	return nil
 }
@@ -163,8 +173,65 @@ func (p *Proxy) connectMaster() error {
 	return nil
 }
 
-func (p *Proxy) Start() error {
-	return p.startProxy()
+func (p *Proxy) queryResultLoop() {
+	defer p.proxyLoopWg.Done()
+	defer p.proxyLoopCancel()
+
+	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
+
+	for {
+		select {
+		case msgPack, ok := <-p.queryResultMsgStream.Chan():
+			if !ok {
+				log.Print("buf chan closed")
+				return
+			}
+			if msgPack == nil {
+				continue
+			}
+			for _, tsMsg := range msgPack.Msgs {
+				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
+				reqID := searchResultMsg.GetReqID()
+				_, ok = queryResultBuf[reqID]
+				if !ok {
+					queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
+				}
+				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+				if len(queryResultBuf[reqID]) == 4 {
+					// TODO: use the number of query node instead
+					t := p.taskSch.getTaskByReqID(reqID)
+					if t != nil {
+						qt, ok := t.(*QueryTask)
+						if ok {
+							log.Printf("address of query task: %p", qt)
+							qt.resultBuf <- queryResultBuf[reqID]
+							delete(queryResultBuf, reqID)
+						}
+					} else {
+						log.Printf("task with reqID %v is nil", reqID)
+					}
+				}
+			}
+		case <-p.proxyLoopCtx.Done():
+			log.Print("proxy server is closed ...")
+			return
+		}
+	}
+}
+
+func (p *Proxy) startProxyLoop() {
+	p.proxyLoopWg.Add(2)
+	go p.grpcLoop()
+	go p.queryResultLoop()
+
+}
+
+func (p *Proxy) Run() error {
+	if err := p.startProxy(); err != nil {
+		return err
+	}
+	p.startProxyLoop()
+	return nil
 }
 
 func (p *Proxy) stopProxyLoop() {
@@ -179,11 +246,13 @@ func (p *Proxy) stopProxyLoop() {
 
 	p.segAssigner.Close()
 
-	p.sched.Close()
+	p.taskSch.Close()
 
 	p.manipulationMsgStream.Close()
 
 	p.queryMsgStream.Close()
+
+	p.queryResultMsgStream.Close()
 
 	p.proxyLoopWg.Wait()
 }

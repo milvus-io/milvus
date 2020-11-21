@@ -34,7 +34,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Start(); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 
