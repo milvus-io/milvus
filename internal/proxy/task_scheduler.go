@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type TaskQueue interface {
@@ -140,7 +142,7 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if e.Value.(task).EndTs() >= ts {
+		if e.Value.(task).EndTs() < ts {
 			return false
 		}
 	}
@@ -148,7 +150,7 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	for ats := range queue.activeTasks {
-		if ats >= ts {
+		if ats < ts {
 			return false
 		}
 	}
@@ -357,6 +359,68 @@ func (sched *TaskScheduler) queryLoop() {
 	}
 }
 
+func (sched *TaskScheduler) queryResultLoop() {
+	defer sched.wg.Done()
+
+	// TODO: use config instead
+	pulsarAddress := "pulsar://localhost:6650"
+	bufSize := int64(1000)
+	queryResultChannels := []string{"QueryResult"}
+	queryResultSubName := "QueryResultSubject"
+	unmarshal := msgstream.NewUnmarshalDispatcher()
+
+	queryResultMsgStream := msgstream.NewPulsarMsgStream(sched.ctx, bufSize)
+	queryResultMsgStream.SetPulsarClient(pulsarAddress)
+	queryResultMsgStream.CreatePulsarConsumers(queryResultChannels,
+		queryResultSubName,
+		unmarshal,
+		bufSize)
+
+	queryResultMsgStream.Start()
+	defer queryResultMsgStream.Close()
+
+	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
+
+	for {
+		select {
+		case msgPack, ok := <-queryResultMsgStream.Chan():
+			if !ok {
+				log.Print("buf chan closed")
+				return
+			}
+			if msgPack == nil {
+				continue
+			}
+			for _, tsMsg := range msgPack.Msgs {
+				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
+				reqID := searchResultMsg.GetReqID()
+				_, ok = queryResultBuf[reqID]
+				if !ok {
+					queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
+				}
+				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+				if len(queryResultBuf[reqID]) == 4 {
+					// TODO: use the number of query node instead
+					t := sched.getTaskByReqID(reqID)
+					if t != nil {
+						qt, ok := t.(*QueryTask)
+						if ok {
+							log.Printf("address of query task: %p", qt)
+							qt.resultBuf <- queryResultBuf[reqID]
+							delete(queryResultBuf, reqID)
+						}
+					} else {
+						log.Printf("task with reqID %v is nil", reqID)
+					}
+				}
+			}
+		case <-sched.ctx.Done():
+			log.Print("proxy server is closed ...")
+			return
+		}
+	}
+}
+
 func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.definitionLoop()
@@ -366,6 +430,9 @@ func (sched *TaskScheduler) Start() error {
 
 	sched.wg.Add(1)
 	go sched.queryLoop()
+
+	sched.wg.Add(1)
+	go sched.queryResultLoop()
 
 	return nil
 }

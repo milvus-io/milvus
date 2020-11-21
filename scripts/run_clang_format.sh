@@ -11,9 +11,3 @@ formatThis() {
 formatThis "${CorePath}/src"
 formatThis "${CorePath}/unittest"
 
-if test -z "$(git status | grep -E "*\.c|*\.h")"; then
-  exit 0
-else
-  echo "Please format your code by clang-format!"
-  exit 1
-fi
