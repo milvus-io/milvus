@@ -58,10 +58,6 @@ while true ; do
     esac
 done
 
-cpuinfo=`cat /proc/cpuinfo`
-echo -e "\n\n CPU Info \n\n"
-echo ${cpuinfo}
-echo -e "\n\n END CPU Info \n\n"
 
 # Set defaults for vars modified by flags to this script
 INSTALL_PREFIX=${INSTALL_PREFIX:="/var/lib/milvus"}
