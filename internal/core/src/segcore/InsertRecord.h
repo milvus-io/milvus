@@ -12,11 +12,36 @@ struct InsertRecord {
     std::vector<std::shared_ptr<VectorBase>> entity_vec_;
 
     InsertRecord(const Schema& schema);
+    template <typename Type>
+    auto
+    get_scalar_entity(int offset) const {
+        auto ptr = std::dynamic_pointer_cast<const ConcurrentVector<Type, true>>(entity_vec_[offset]);
+        Assert(ptr);
+        return ptr;
+    }
+
+    template <typename Type>
+    auto
+    get_vec_entity(int offset) const {
+        auto ptr = std::dynamic_pointer_cast<const ConcurrentVector<Type>>(entity_vec_[offset]);
+        Assert(ptr);
+        return ptr;
+    }
+
+    template <typename Type>
+    auto
+    get_scalar_entity(int offset) {
+        auto ptr = std::dynamic_pointer_cast<ConcurrentVector<Type, true>>(entity_vec_[offset]);
+        Assert(ptr);
+        return ptr;
+    }
 
     template <typename Type>
     auto
     get_vec_entity(int offset) {
-        return std::static_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
+        auto ptr = std::dynamic_pointer_cast<ConcurrentVector<Type>>(entity_vec_[offset]);
+        Assert(ptr);
+        return ptr;
     }
 };
 }  // namespace milvus::segcore

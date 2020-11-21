@@ -67,7 +67,7 @@ struct TermExpr : Expr {
 struct RangeExpr : Expr {
     FieldId field_id_;
     DataType data_type_ = DataType::NONE;
-    enum class OpType { LessThan, LessEqual, GreaterThan, GreaterEqual, Equal, NotEqual };
+    enum class OpType { GreaterThan = 0, GreaterEqual = 1, LessThan = 2, LessEqual = 3, Equal, NotEqual };
     static const std::map<std::string, OpType> mapping_;  // op_name -> op
 
     // std::vector<std::tuple<OpType, std::any>> conditions_;

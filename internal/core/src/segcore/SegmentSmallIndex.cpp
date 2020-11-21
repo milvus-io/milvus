@@ -14,6 +14,7 @@
 #include "query/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "segcore/Reduce.h"
+#include "utils/tools.h"
 
 namespace milvus::segcore {
 
@@ -432,13 +433,6 @@ SegmentSmallIndex::BuildIndex(IndexMetaPtr remote_index_meta) {
 #endif
 }
 
-static uint64_t
-upper_align(int64_t value, int64_t align) {
-    Assert(align > 0);
-    Assert((align & (align - 1)) == 0);
-    auto groups = (value + align - 1) / align;
-    return groups * align;
-}
 
 int64_t
 SegmentSmallIndex::GetMemoryUsageInBytes() {
