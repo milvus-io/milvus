@@ -44,7 +44,7 @@ type Proxy struct {
 }
 
 func Init() {
-	Params.InitParamTable()
+	Params.Init()
 }
 
 func CreateProxy(ctx context.Context) (*Proxy, error) {
@@ -57,17 +57,14 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 
 	// TODO: use config instead
 	pulsarAddress := Params.PulsarAddress()
-	bufSize := int64(1000)
-	manipulationChannels := []string{"manipulation"}
-	queryChannels := []string{"query"}
 
-	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	p.manipulationMsgStream.CreatePulsarProducers(manipulationChannels)
+	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
 
-	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, bufSize)
+	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
-	p.queryMsgStream.CreatePulsarProducers(queryChannels)
+	p.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
 
 	masterAddr := Params.MasterAddress()
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)

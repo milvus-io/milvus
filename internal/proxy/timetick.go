@@ -17,7 +17,7 @@ type tickCheckFunc = func(Timestamp) bool
 type timeTick struct {
 	lastTick    Timestamp
 	currentTick Timestamp
-	interval    int64
+	interval    time.Duration
 
 	pulsarProducer pulsar.Producer
 
@@ -35,24 +35,23 @@ type timeTick struct {
 
 func newTimeTick(ctx context.Context,
 	tsoAllocator *allocator.TimestampAllocator,
+	interval time.Duration,
 	checkFunc tickCheckFunc) *timeTick {
 	ctx1, cancel := context.WithCancel(ctx)
 	t := &timeTick{
 		ctx:          ctx1,
 		cancel:       cancel,
 		tsoAllocator: tsoAllocator,
-		interval:     200,
+		interval:     interval,
 		peerID:       1,
 		checkFunc:    checkFunc,
 	}
 
-	bufSize := int64(1000)
-	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, bufSize)
+	t.tickMsgStream = msgstream.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize())
 	pulsarAddress := Params.PulsarAddress()
 
-	producerChannels := []string{"timeTick"}
 	t.tickMsgStream.SetPulsarClient(pulsarAddress)
-	t.tickMsgStream.CreatePulsarProducers(producerChannels)
+	t.tickMsgStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames())
 	return t
 }
 
@@ -85,7 +84,7 @@ func (tt *timeTick) tick() error {
 
 func (tt *timeTick) tickLoop() {
 	defer tt.wg.Done()
-	tt.timer = time.NewTicker(time.Millisecond * time.Duration(tt.interval))
+	tt.timer = time.NewTicker(tt.interval)
 	for {
 		select {
 		case <-tt.timer.C:

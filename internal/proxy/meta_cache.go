@@ -22,6 +22,7 @@ var globalMetaCache MetaCache
 
 type SimpleMetaCache struct {
 	mu             sync.RWMutex
+	proxyID        UniqueID
 	metas          map[string]*servicepb.CollectionDescription // collection name to schema
 	masterClient   masterpb.MasterClient
 	reqIDAllocator *allocator.IDAllocator
@@ -59,7 +60,7 @@ func (smc *SimpleMetaCache) Update(collectionName string) error {
 		MsgType:   internalpb.MsgType_kDescribeCollection,
 		ReqID:     reqID,
 		Timestamp: ts,
-		ProxyID:   0,
+		ProxyID:   smc.proxyID,
 		CollectionName: &servicepb.CollectionName{
 			CollectionName: collectionName,
 		},
@@ -86,6 +87,7 @@ func newSimpleMetaCache(ctx context.Context,
 		masterClient:   mCli,
 		reqIDAllocator: idAllocator,
 		tsoAllocator:   tsoAllocator,
+		proxyID:        Params.ProxyID(),
 		ctx:            ctx,
 	}
 }

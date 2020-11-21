@@ -35,3 +35,5 @@ msgChannel:
     insert: [0, 15]
     delete: [0, 15]
     k2s: [0, 15]
+    search: [0, 0]
+    searchResult: [0, 1]

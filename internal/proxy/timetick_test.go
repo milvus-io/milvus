@@ -34,7 +34,7 @@ func TestTimeTick_Start2(t *testing.T) {
 	err = tsoAllocator.Start()
 	assert.Nil(t, err)
 
-	tt := newTimeTick(ctx, tsoAllocator, checkFunc)
+	tt := newTimeTick(ctx, tsoAllocator, Params.TimeTickInterval(), checkFunc)
 
 	defer func() {
 		cancel()
