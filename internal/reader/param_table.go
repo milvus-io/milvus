@@ -25,7 +25,7 @@ func (p *ParamTable) pulsarAddress() (string, error) {
 	if err != nil {
 		panic(err)
 	}
-	return "pulsar://" + url, nil
+	return url, nil
 }
 
 func (p *ParamTable) queryNodeID() int {
@@ -176,4 +176,20 @@ func (p *ParamTable) statsReceiveBufSize() int64 {
 		panic(err)
 	}
 	return int64(bufSize)
+}
+
+func (p *ParamTable) etcdAddress() string {
+	etcdAddress, err := p.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+	return etcdAddress
+}
+
+func (p *ParamTable) etcdRootPath() string {
+	etcdRootPath, err := p.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	return etcdRootPath
 }

@@ -79,7 +79,8 @@ func receiveMsg(stream *ms.MsgStream) []uint64 {
 }
 
 func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	Init()
+	pulsarAddress := Params.PulsarAddress()
 
 	producerChannels := []string{"proxyTtBarrier"}
 	consumerChannels := []string{"proxyTtBarrier"}

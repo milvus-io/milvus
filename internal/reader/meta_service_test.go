@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -13,9 +14,14 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
+func TestMain(m *testing.M) {
+	Params.Init()
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
+
 func TestMetaService_start(t *testing.T) {
 	var ctx context.Context
-	Params.Init()
 
 	if closeWithDeadline {
 		var cancel context.CancelFunc
@@ -34,8 +40,6 @@ func TestMetaService_start(t *testing.T) {
 }
 
 func TestMetaService_getCollectionObjId(t *testing.T) {
-	Params.Init()
-
 	var key = "/collection/collection0"
 	var collectionObjID1 = GetCollectionObjID(key)
 
@@ -48,8 +52,6 @@ func TestMetaService_getCollectionObjId(t *testing.T) {
 }
 
 func TestMetaService_getSegmentObjId(t *testing.T) {
-	Params.Init()
-
 	var key = "/segment/segment0"
 	var segmentObjID1 = GetSegmentObjID(key)
 
@@ -62,8 +64,6 @@ func TestMetaService_getSegmentObjId(t *testing.T) {
 }
 
 func TestMetaService_isCollectionObj(t *testing.T) {
-	Params.Init()
-
 	var key = "by-dev/collection/collection0"
 	var b1 = isCollectionObj(key)
 
@@ -76,8 +76,6 @@ func TestMetaService_isCollectionObj(t *testing.T) {
 }
 
 func TestMetaService_isSegmentObj(t *testing.T) {
-	Params.Init()
-
 	var key = "by-dev/segment/segment0"
 	var b1 = isSegmentObj(key)
 
@@ -90,8 +88,6 @@ func TestMetaService_isSegmentObj(t *testing.T) {
 }
 
 func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) {
-	Params.Init()
-
 	var s = etcdpb.SegmentMeta{
 		SegmentID:    UniqueID(0),
 		CollectionID: UniqueID(0),
@@ -179,8 +175,6 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 }
 
 func TestMetaService_processCollectionCreate(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -224,8 +218,6 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -296,8 +288,6 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 }
 
 func TestMetaService_processCreate(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -352,8 +342,6 @@ func TestMetaService_processCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentModify(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -435,8 +423,6 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 }
 
 func TestMetaService_processCollectionModify(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -508,8 +494,6 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 }
 
 func TestMetaService_processModify(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -606,8 +590,6 @@ func TestMetaService_processModify(t *testing.T) {
 }
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -681,8 +663,6 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 }
 
 func TestMetaService_processCollectionDelete(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -729,8 +709,6 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 }
 
 func TestMetaService_processDelete(t *testing.T) {
-	Params.Init()
-
 	d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), d)
 	defer cancel()
@@ -792,8 +770,6 @@ func TestMetaService_processDelete(t *testing.T) {
 }
 
 func TestMetaService_processResp(t *testing.T) {
-	Params.Init()
-
 	var ctx context.Context
 	if closeWithDeadline {
 		var cancel context.CancelFunc
@@ -819,8 +795,6 @@ func TestMetaService_processResp(t *testing.T) {
 }
 
 func TestMetaService_loadCollections(t *testing.T) {
-	Params.Init()
-
 	var ctx context.Context
 	if closeWithDeadline {
 		var cancel context.CancelFunc
@@ -840,8 +814,6 @@ func TestMetaService_loadCollections(t *testing.T) {
 }
 
 func TestMetaService_loadSegments(t *testing.T) {
-	Params.Init()
-
 	var ctx context.Context
 	if closeWithDeadline {
 		var cancel context.CancelFunc

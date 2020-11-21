@@ -17,15 +17,14 @@ func main() {
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 
-	etcdAddress, _ := master.Params.EtcdAddress()
-	etcdRootPath, _ := master.Params.EtcdRootPath()
-	pulsarAddr, _ := master.Params.PulsarAddress()
-	pulsarAddr = "pulsar://" + pulsarAddr
+	etcdAddress := master.Params.EtcdAddress()
+	etcdRootPath := master.Params.EtcdRootPath()
+	pulsarAddr := master.Params.PulsarAddress()
 	defaultRecordSize := master.Params.DefaultRecordSize()
 	minimumAssignSize := master.Params.MinimumAssignSize()
 	segmentThreshold := master.Params.SegmentThreshold()
 	segmentExpireDuration := master.Params.SegmentExpireDuration()
-	numOfChannel, _ := master.Params.TopicNum()
+	numOfChannel := master.Params.TopicNum()
 	nodeNum, _ := master.Params.QueryNodeNum()
 	statsChannel := master.Params.StatsChannels()
 

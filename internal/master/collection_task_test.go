@@ -23,7 +23,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdAddr, _ := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress()
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
@@ -34,7 +34,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 		KVRootPath:            "/test/root/kv",
 		MetaRootPath:          "/test/root/meta",
 		EtcdAddr:              []string{etcdAddr},
-		PulsarAddr:            "pulsar://localhost:6650",
+		PulsarAddr:            Params.PulsarAddress(),
 		ProxyIDs:              []typeutil.UniqueID{1, 2},
 		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
 		PulsarProxySubName:    "proxyTopics",

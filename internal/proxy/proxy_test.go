@@ -38,14 +38,8 @@ var testNum = 10
 
 func startMaster(ctx context.Context) {
 	master.Init()
-	etcdAddr, err := master.Params.EtcdAddress()
-	if err != nil {
-		panic(err)
-	}
-	rootPath, err := master.Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	etcdAddr := master.Params.EtcdAddress()
+	rootPath := master.Params.EtcdRootPath()
 	kvRootPath := path.Join(rootPath, "kv")
 	metaRootPath := path.Join(rootPath, "meta")
 
@@ -62,7 +56,7 @@ func startMaster(ctx context.Context) {
 		KVRootPath:            kvRootPath,
 		MetaRootPath:          metaRootPath,
 		EtcdAddr:              []string{etcdAddr},
-		PulsarAddr:            "pulsar://localhost:6650",
+		PulsarAddr:            Params.PulsarAddress(),
 		ProxyIDs:              []typeutil.UniqueID{1, 2},
 		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
 		PulsarProxySubName:    "proxyTopics",
@@ -290,7 +284,7 @@ func TestProxy_Search(t *testing.T) {
 		queryResultChannels := []string{"QueryResult"}
 		bufSize := 1024
 		queryResultMsgStream := msgstream.NewPulsarMsgStream(ctx, int64(bufSize))
-		pulsarAddress := "pulsar://localhost:6650"
+		pulsarAddress := Params.PulsarAddress()
 		queryResultMsgStream.SetPulsarClient(pulsarAddress)
 		assert.NotEqual(t, queryResultMsgStream, nil, "query result message stream should not be nil!")
 		queryResultMsgStream.CreatePulsarProducers(queryResultChannels)

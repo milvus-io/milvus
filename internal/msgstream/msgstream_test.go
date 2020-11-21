@@ -4,11 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"testing"
 
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
+
+var Params paramtable.BaseTable
+
+func TestMain(m *testing.M) {
+	Params.Init()
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
 
 func repackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	result := make(map[int32]*MsgPack)
@@ -209,7 +219,7 @@ func receiveMsg(outputStream *MsgStream, msgCount int) {
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -231,7 +241,7 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Delete(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"delete"}
 	consumerChannels := []string{"delete"}
 	consumerSubName := "subDelete"
@@ -251,7 +261,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Search(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"search"}
 	consumerChannels := []string{"search"}
 	consumerSubName := "subSearch"
@@ -271,7 +281,7 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"searchResult"}
 	consumerChannels := []string{"searchResult"}
 	consumerSubName := "subSearchResult"
@@ -291,7 +301,7 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"timeTick"}
 	consumerChannels := []string{"timeTick"}
 	consumerSubName := "subTimeTick"
@@ -311,7 +321,7 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -331,7 +341,7 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -351,7 +361,7 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -404,7 +414,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -454,7 +464,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
@@ -487,7 +497,7 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"

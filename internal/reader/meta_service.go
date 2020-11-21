@@ -30,15 +30,8 @@ type metaService struct {
 }
 
 func newMetaService(ctx context.Context, replica *collectionReplica) *metaService {
-	ETCDAddr, err := Params.EtcdAddress()
-	if err != nil {
-		panic(err)
-	}
-
-	ETCDRootPath, err := Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	ETCDAddr := Params.etcdAddress()
+	ETCDRootPath := Params.etcdRootPath()
 
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{ETCDAddr},
@@ -78,28 +71,22 @@ func (mService *metaService) start() {
 }
 
 func GetCollectionObjID(key string) string {
-	ETCDRootPath, err := Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	ETCDRootPath := Params.etcdRootPath()
+
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjID(key string) string {
-	ETCDRootPath, err := Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	ETCDRootPath := Params.etcdRootPath()
+
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	ETCDRootPath, err := Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	ETCDRootPath := Params.etcdRootPath()
+
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)
@@ -108,10 +95,8 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	ETCDRootPath, err := Params.EtcdRootPath()
-	if err != nil {
-		panic(err)
-	}
+	ETCDRootPath := Params.etcdRootPath()
+
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
 	index := strings.Index(key, prefix)

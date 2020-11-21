@@ -15,10 +15,7 @@ var gTestIDAllocator *GlobalIDAllocator
 func TestMain(m *testing.M) {
 	Params.Init()
 
-	etcdAddr, err := Params.EtcdAddress()
-	if err != nil {
-		panic(err)
-	}
+	etcdAddr := Params.EtcdAddress()
 	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
 	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
 	exitCode := m.Run()

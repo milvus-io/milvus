@@ -372,8 +372,7 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 	}
 }
 
-
-//TODO test InMemMsgStream 
+//TODO test InMemMsgStream
 /*
 type InMemMsgStream struct {
 	buffer chan *MsgPack

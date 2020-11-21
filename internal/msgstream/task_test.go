@@ -118,7 +118,7 @@ func getInsertTask(reqID UniqueID, hashValue int32) TsMsg {
 }
 
 func TestStream_task_Insert(t *testing.T) {
-	pulsarAddress := "pulsar://localhost:6650"
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"

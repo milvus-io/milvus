@@ -178,3 +178,39 @@ func (p *ParamTable) K2STimeSyncChannels() []string {
 	}
 	return strings.Split(chs, ",")
 }
+
+func (p *ParamTable) PulsarAddress() string {
+	pulsarAddress, err := p.Load("_PulsarAddress")
+	if err != nil {
+		panic(err)
+	}
+	return pulsarAddress
+}
+
+func (p *ParamTable) EtcdAddress() string {
+	etcdAddress, err := p.Load("_EtcdAddress")
+	if err != nil {
+		panic(err)
+	}
+	return etcdAddress
+}
+
+func (p *ParamTable) EtcdRootPath() string {
+	etcdRootPath, err := p.Load("etcd.rootpath")
+	if err != nil {
+		panic(err)
+	}
+	return etcdRootPath
+}
+
+func (p *ParamTable) TopicNum() int {
+	topicNum, err := p.Load("pulsar.topicnum")
+	if err != nil {
+		panic(err)
+	}
+	num, err := strconv.Atoi(topicNum)
+	if err != nil {
+		panic(err)
+	}
+	return num
+}

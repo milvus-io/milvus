@@ -19,6 +19,9 @@ services:
     shm_size: 2G
     environment:
       <<: *ccache
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
     volumes: &ubuntu-volumes
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-cache:/ccache:delegated
@@ -37,6 +40,10 @@ services:
     security_opt: # options needed for gdb debugging
       - seccomp:unconfined
       - apparmor:unconfined
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
     volumes:
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
