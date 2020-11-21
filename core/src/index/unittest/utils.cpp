@@ -13,6 +13,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 #include <gtest/gtest.h>
+#include <execinfo.h>
 #include <math.h>
 #include <memory>
 #include <string>
@@ -335,12 +336,4 @@ handle_signal(int signum) {
             }
         }
     }
-}
-
-int
-main(int argc, char** argv) {
-    signal(SIGILL, handle_signal);
-    signal(SIGSEGV, handle_signal);
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

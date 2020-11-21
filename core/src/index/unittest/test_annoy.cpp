@@ -11,7 +11,6 @@
 
 #include <gtest/gtest.h>
 #include <src/index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <execinfo.h>
 #include <iostream>
 #include <sstream>
 
@@ -312,3 +311,11 @@ main() {
     return 0;
 }
 */
+
+int
+main(int argc, char** argv) {
+    signal(SIGILL, handle_signal);
+    signal(SIGSEGV, handle_signal);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
