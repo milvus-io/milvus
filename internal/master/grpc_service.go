@@ -16,7 +16,7 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 	}
@@ -46,7 +46,7 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 	}
@@ -76,7 +76,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		hasCollection: false,
@@ -113,7 +113,7 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		description: nil,
@@ -149,7 +149,7 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		stringListResponse: nil,
@@ -187,7 +187,7 @@ func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreateParti
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 	}
@@ -218,7 +218,7 @@ func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartition
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 	}
@@ -249,7 +249,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		hasPartition: false,
@@ -290,7 +290,7 @@ func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribeP
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		description: nil,
@@ -328,7 +328,7 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 		req: in,
 		baseTask: baseTask{
 			sch: s.scheduler,
-			mt:  s.mt,
+			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
 		stringListResponse: nil,

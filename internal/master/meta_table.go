@@ -105,7 +105,7 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
-// mt.ddLock.Lock() before call this function
+// metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 	collBytes, err := proto.Marshal(coll)
 	if err != nil {
@@ -116,7 +116,7 @@ func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
 }
 
-// mt.ddLock.Lock() before call this function
+// metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 	segBytes, err := proto.Marshal(seg)
 	if err != nil {
@@ -128,7 +128,7 @@ func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
 	return mt.client.Save("/segment/"+strconv.FormatInt(seg.SegmentID, 10), string(segBytes))
 }
 
-// mt.ddLock.Lock() before call this function
+// metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta, segIDs []UniqueID) error {
 	segIDStrs := make([]string, 0, len(segIDs))
 	for _, segID := range segIDs {
@@ -156,7 +156,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 	return mt.client.MultiSaveAndRemove(kvs, segIDStrs)
 }
 
-// mt.ddLock.Lock() before call this function
+// metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg *pb.SegmentMeta) error {
 	kvs := make(map[string]string)
 	collBytes, err := proto.Marshal(coll)
@@ -179,7 +179,7 @@ func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg
 	return mt.client.MultiSave(kvs)
 }
 
-// mt.ddLock.Lock() before call this function
+// metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) deleteCollectionsAndSegmentsMeta(collID UniqueID, segIDs []UniqueID) error {
 	collIDStr := "/collection/" + strconv.FormatInt(collID, 10)
 

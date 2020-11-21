@@ -168,7 +168,7 @@ func TestMaster_Partition(t *testing.T) {
 	assert.NotNil(t, st)
 	assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
-	collMeta, err := svr.mt.GetCollectionByName(sch.Name)
+	collMeta, err := svr.metaTable.GetCollectionByName(sch.Name)
 	assert.Nil(t, err)
 	t.Logf("collection id = %d", collMeta.ID)
 	assert.Equal(t, collMeta.CreateTime, uint64(1))
