@@ -20,6 +20,7 @@ class DataObj {
  public:
     virtual int64_t
     Size() = 0;
+    virtual ~DataObj() = default;
 };
 
 using DataObjPtr = std::shared_ptr<DataObj>;
