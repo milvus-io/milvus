@@ -12,7 +12,9 @@
 #include <vector>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <queue>
+#include <algorithm>
 
 #include <omp.h>
 
@@ -44,6 +46,8 @@ namespace faiss {
 
 struct DistanceComputer; // from AuxIndexStructures
 class VisitedListPool;
+struct RHNSWStatistics;
+struct RHNSWStatInfo;
 
 struct RHNSW {
   /// internal storage of vectors (32 bits: this is expensive)
@@ -153,6 +157,7 @@ struct RHNSW {
 
   /// level of each vector (base level = 1), size = ntotal
   std::vector<int> levels;
+  std::vector<int> level_stats;
 
   /// number of entry points in levels > 0.
   int upper_beam;
@@ -237,7 +242,7 @@ struct RHNSW {
 
   /// search interface inspired by hnswlib
   void searchKnn(DistanceComputer& qdis, int k,
-                 idx_t *I, float *D,
+                 idx_t *I, float *D, RHNSWStatInfo &rsi,
                  ConcurrentBitsetPtr bitset = nullptr) const;
 
   size_t cal_size();
@@ -358,6 +363,56 @@ struct RHNSWStats {
     nreorder = 0;
     view = false;
   }
+};
+
+struct RHNSWStatistics {
+    RHNSWStatistics():max_level(0) {}
+    int max_level;
+    std::vector<int> distribution;
+    std::unordered_map<unsigned int, uint64_t> access_cnt;
+    void CaculateStatistics(std::vector<double> &access_gini_coefficient) {
+        std::vector<int64_t> cnts;
+        int64_t sum = 0;
+        for (auto &elem : access_cnt) {
+            cnts.push_back(elem.second);
+            sum += elem.second;
+        }
+        std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
+        size_t len = cnts.size();
+        std::vector<int> stat_len = {5, 10, 15, 20, 50};
+        auto gini_len = stat_len.size();
+        for (auto i = 0; i < gini_len; ++ i) {
+            stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
+        }
+        int64_t tmp_cnt = 0;
+        access_gini_coefficient.resize(gini_len << 1);
+        int j = 0;
+        for (auto i = 0; i < len && j < gini_len; ++ i) {
+            if (i > stat_len[j]) {
+                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                tmp_cnt = 0;
+                j ++;
+            }
+            if (j >= gini_len)
+                break;
+            tmp_cnt += cnts[i];
+        }
+        tmp_cnt = 0;
+        for (auto i = len - 1; i >= 0 && j < (gini_len << 1); -- i) {
+            if (len - i > stat_len[j - gini_len]) {
+                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                tmp_cnt = 0;
+                j ++;
+            }
+            if (j >= (gini_len << 1))
+                break;
+            tmp_cnt += cnts[i];
+        }
+    }
+};
+
+struct RHNSWStatInfo {
+    std::vector<unsigned int> access_points;
 };
 
 // global var that collects them all

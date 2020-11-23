@@ -470,6 +470,7 @@ static void read_RHNSW (RHNSW *rhnsw, IOReader *f) {
     READ1 (rhnsw->efSearch);
 
     READVECTOR (rhnsw->levels);
+    rhnsw->level_stats = std::vector<int>(rhnsw->max_level + 1, 0);
     auto ntotal = rhnsw->levels.size();
     rhnsw->level0_links = (char*) malloc(ntotal * rhnsw->level0_link_size);
     READANDCHECK( rhnsw->level0_links, ntotal * rhnsw->level0_link_size);
@@ -478,6 +479,7 @@ static void read_RHNSW (RHNSW *rhnsw, IOReader *f) {
         if (rhnsw->levels[i]) {
             rhnsw->linkLists[i] = (char*)malloc(rhnsw->link_size * rhnsw->levels[i] + 1);
             READANDCHECK( rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
+            rhnsw->level_stats[rhnsw->levels[i]] ++;
         }
     }
 }

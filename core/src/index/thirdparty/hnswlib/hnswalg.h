@@ -266,15 +266,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
           if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
-              if (has_deletions_)
-                  stats.bitset_access_cnt ++;
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
         } else {
-              stats.bitset_access_cnt ++;
-              stats.bitset_hit_cnt ++;
             lowerBound = std::numeric_limits<dist_t>::max();
             candidate_set.emplace(-lowerBound, ep_id);
         }
@@ -327,13 +323,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
                         if (!has_deletions || (!bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
-                            if (has_deletions_)
-                                stats.bitset_access_cnt ++;
                             top_candidates.emplace(dist, candidate_id);
                         }
                         else {
-                            stats.bitset_hit_cnt ++;
-                            stats.bitset_access_cnt ++;
                         }
 
                         if (top_candidates.size() > ef)

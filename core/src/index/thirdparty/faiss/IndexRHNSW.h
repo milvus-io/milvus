@@ -72,6 +72,7 @@ struct IndexRHNSW : Index {
 
     // the link strcuture
     RHNSW hnsw;
+    RHNSWStatistics stats;
 
     // the sequential storage
     bool own_fields;
@@ -101,6 +102,8 @@ struct IndexRHNSW : Index {
     size_t cal_size();
 
     void init_hnsw();
+
+    void update_stats(std::vector<double> &ret);
 };
 
 
