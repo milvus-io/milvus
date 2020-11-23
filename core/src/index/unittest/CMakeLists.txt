@@ -184,67 +184,67 @@ install(TARGETS test_nsg DESTINATION unittest)
 
 ################################################################################
 #<HNSW-TEST>
-set(hnsw_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
-        )
-if (NOT TARGET test_hnsw)
-    add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_hnsw DESTINATION unittest)
+#set(hnsw_srcs
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexHNSW.cpp
+#        )
+#if (NOT TARGET test_hnsw)
+#    add_executable(test_hnsw test_hnsw.cpp ${hnsw_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_hnsw DESTINATION unittest)
 
 ################################################################################
 #<RHNSW_FLAT-TEST>
-set(rhnsw_flat_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWFlat.cpp
-        )
-if (NOT TARGET test_rhnsw_flat)
-    add_executable(test_rhnsw_flat test_rhnsw_flat.cpp ${rhnsw_flat_srcs} ${util_srcs} ${faiss_srcs})
-endif ()
-target_link_libraries(test_rhnsw_flat ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_rhnsw_flat DESTINATION unittest)
+#set(rhnsw_flat_srcs
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWFlat.cpp
+#        )
+#if (NOT TARGET test_rhnsw_flat)
+#    add_executable(test_rhnsw_flat test_rhnsw_flat.cpp ${rhnsw_flat_srcs} ${util_srcs} ${faiss_srcs})
+#endif ()
+#target_link_libraries(test_rhnsw_flat ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_rhnsw_flat DESTINATION unittest)
 
 ################################################################################
 #<RHNSW_PQ-TEST>
-set(rhnsw_pq_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWPQ.cpp
-        )
-if (NOT TARGET test_rhnsw_pq)
-    add_executable(test_rhnsw_pq test_rhnsw_pq.cpp ${rhnsw_pq_srcs} ${util_srcs} ${faiss_srcs})
-endif ()
-target_link_libraries(test_rhnsw_pq ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_rhnsw_pq DESTINATION unittest)
+#set(rhnsw_pq_srcs
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWPQ.cpp
+#        )
+#if (NOT TARGET test_rhnsw_pq)
+#    add_executable(test_rhnsw_pq test_rhnsw_pq.cpp ${rhnsw_pq_srcs} ${util_srcs} ${faiss_srcs})
+#endif ()
+#target_link_libraries(test_rhnsw_pq ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_rhnsw_pq DESTINATION unittest)
 
 ################################################################################
 #<RHNSW_SQ8-TEST>
-set(rhnsw_sq8_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWSQ.cpp
-        )
-if (NOT TARGET test_rhnsw_sq8)
-    add_executable(test_rhnsw_sq8 test_rhnsw_sq8.cpp ${rhnsw_sq8_srcs} ${util_srcs} ${faiss_srcs})
-endif ()
-target_link_libraries(test_rhnsw_sq8 ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_rhnsw_sq8 DESTINATION unittest)
+#set(rhnsw_sq8_srcs
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSW.cpp
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexRHNSWSQ.cpp
+#        )
+#if (NOT TARGET test_rhnsw_sq8)
+#    add_executable(test_rhnsw_sq8 test_rhnsw_sq8.cpp ${rhnsw_sq8_srcs} ${util_srcs} ${faiss_srcs})
+#endif ()
+#target_link_libraries(test_rhnsw_sq8 ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_rhnsw_sq8 DESTINATION unittest)
 
 ################################################################################
 #<SPTAG-TEST>
-if (MILVUS_SUPPORT_SPTAG)
-    set(sptag_srcs
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/SptagAdapter.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
-            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexSPTAG.cpp
-            )
-    if (NOT TARGET test_sptag)
-        add_executable(test_sptag test_sptag.cpp ${sptag_srcs} ${util_srcs})
-    endif ()
-    target_link_libraries(test_sptag
-            SPTAGLibStatic
-            ${depend_libs} ${unittest_libs} ${basic_libs})
-    install(TARGETS test_sptag DESTINATION unittest)
-endif ()
+#if (MILVUS_SUPPORT_SPTAG)
+#    set(sptag_srcs
+#            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/SptagAdapter.cpp
+#            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/SPTAGParameterMgr.cpp
+#            ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexSPTAG.cpp
+#            )
+#    if (NOT TARGET test_sptag)
+#        add_executable(test_sptag test_sptag.cpp ${sptag_srcs} ${util_srcs})
+#    endif ()
+#    target_link_libraries(test_sptag
+#            SPTAGLibStatic
+#            ${depend_libs} ${unittest_libs} ${basic_libs})
+#    install(TARGETS test_sptag DESTINATION unittest)
+#endif ()
 
 ################################################################################
 #<ANNOY-TEST>
@@ -259,39 +259,39 @@ install(TARGETS test_annoy DESTINATION unittest)
 
 ################################################################################
 #<STRUCTURED-INDEX-SORT-TEST>
-set(structured_index_sort_srcs
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/structured_index/StructuredIndexSort-inl.h
-        )
-if (NOT TARGET test_structured_index_sort)
-    add_executable(test_structured_index_sort test_structured_index_sort.cpp ${structured_index_sort_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_structured_index_sort ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_structured_index_sort DESTINATION unittest)
+#set(structured_index_sort_srcs
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/structured_index/StructuredIndexSort-inl.h
+#        )
+#if (NOT TARGET test_structured_index_sort)
+#    add_executable(test_structured_index_sort test_structured_index_sort.cpp ${structured_index_sort_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_structured_index_sort ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_structured_index_sort DESTINATION unittest)
 
 #add_subdirectory(faiss_benchmark)
 #add_subdirectory(metric_alg_benchmark)
 ################################################################################
 #<NGTPANNG-TEST>
-set(ngtpanng_srcs
-	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTPANNG.cpp
-	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
-		)
-if (NOT TARGET test_ngtpanng)
-	add_executable(test_ngtpanng test_ngtpanng.cpp ${ngtpanng_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ngtpanng ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ngtpanng DESTINATION unittest)
+#set(ngtpanng_srcs
+#	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTPANNG.cpp
+#	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
+#		)
+#if (NOT TARGET test_ngtpanng)
+#	add_executable(test_ngtpanng test_ngtpanng.cpp ${ngtpanng_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_ngtpanng ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_ngtpanng DESTINATION unittest)
 
 ################################################################################
 #<NGTPANNG-TEST>
-set(ngtonng_srcs
-	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTONNG.cpp
-	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
-		)
-if (NOT TARGET test_ngtonng)
-	add_executable(test_ngtonng test_ngtonng.cpp ${ngtonng_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ngtonng ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ngtonng DESTINATION unittest)
+#set(ngtonng_srcs
+#	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTONNG.cpp
+#	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGT.cpp
+#		)
+#if (NOT TARGET test_ngtonng)
+#	add_executable(test_ngtonng test_ngtonng.cpp ${ngtonng_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_ngtonng ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_ngtonng DESTINATION unittest)
 
 ################################################################################
