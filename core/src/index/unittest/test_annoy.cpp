@@ -27,15 +27,15 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
     void
     SetUp() override {
         IndexType = GetParam();
-        Generate(128, 10000, 10);
+//        Generate(128, 10000, 10);
 //        index_ = std::make_shared<milvus::knowhere::IndexAnnoy>();
-        conf = milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, dim},
-            {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::n_trees, 4},
-            {milvus::knowhere::IndexParams::search_k, 100},
-            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-        };
+//        conf = milvus::knowhere::Config{
+//            {milvus::knowhere::meta::DIM, dim},
+//            {milvus::knowhere::meta::TOPK, 10},
+//            {milvus::knowhere::IndexParams::n_trees, 4},
+//            {milvus::knowhere::IndexParams::search_k, 100},
+//            {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+//        };
     }
 
  protected:
@@ -48,7 +48,8 @@ INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
 
 
 TEST_P(AnnoyTest, annoy_basic) {
-    assert(!xb.empty());
+    ASSERT_EQ(IndexType, "Annoy");
+//    assert(!xb.empty());
 
     // null faiss index
 //    {
