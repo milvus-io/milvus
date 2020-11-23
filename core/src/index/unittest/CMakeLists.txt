@@ -4,6 +4,8 @@ include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
 
+set( ENTRY_FILE main.cpp )
+
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
@@ -82,105 +84,105 @@ endif ()
 
 ################################################################################
 #<INSTRUCTIONSET-TEST>
-if (NOT TARGET test_instructionset)
-    add_executable(test_instructionset test_instructionset.cpp)
-endif ()
-target_link_libraries(test_instructionset ${depend_libs} ${unittest_libs})
-install(TARGETS test_instructionset DESTINATION unittest)
+#if (NOT TARGET test_instructionset)
+#    add_executable(test_instructionset test_instructionset.cpp)
+#endif ()
+#target_link_libraries(test_instructionset ${depend_libs} ${unittest_libs})
+#install(TARGETS test_instructionset DESTINATION unittest)
 
 ################################################################################
 #<KNOWHERE-COMMON-TEST>
-if (NOT TARGET test_knowhere_common)
-    add_executable(test_knowhere_common test_common.cpp ${util_srcs})
-endif ()
-target_link_libraries(test_knowhere_common ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_knowhere_common DESTINATION unittest)
+#if (NOT TARGET test_knowhere_common)
+#    add_executable(test_knowhere_common test_common.cpp ${util_srcs})
+#endif ()
+#target_link_libraries(test_knowhere_common ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_knowhere_common DESTINATION unittest)
 
-if (MILVUS_GPU_VERSION)
+#if (MILVUS_GPU_VERSION)
 ################################################################################
 #<GPU-RESOURCE-TEST>
-add_executable(test_gpuresource test_gpuresource.cpp ${util_srcs} ${faiss_srcs})
-target_link_libraries(test_gpuresource ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_gpuresource DESTINATION unittest)
+#add_executable(test_gpuresource test_gpuresource.cpp ${util_srcs} ${faiss_srcs})
+#target_link_libraries(test_gpuresource ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_gpuresource DESTINATION unittest)
 
 ################################################################################
 #<CUSTOMIZED-INDEX-TEST>
-add_executable(test_customized_index test_customized_index.cpp ${util_srcs} ${faiss_srcs})
-target_link_libraries(test_customized_index ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_customized_index DESTINATION unittest)
-endif ()
+#add_executable(test_customized_index test_customized_index.cpp ${util_srcs} ${faiss_srcs})
+#target_link_libraries(test_customized_index ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_customized_index DESTINATION unittest)
+#endif ()
 
 ################################################################################
 #<IDMAP-TEST>
-if (NOT TARGET test_idmap)
-    add_executable(test_idmap test_idmap.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_idmap DESTINATION unittest)
+#if (NOT TARGET test_idmap)
+#    add_executable(test_idmap test_idmap.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_idmap DESTINATION unittest)
 
 ################################################################################
 #<IVF-TEST>
-if (NOT TARGET test_ivf)
-    add_executable(test_ivf test_ivf.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ivf DESTINATION unittest)
+#if (NOT TARGET test_ivf)
+#    add_executable(test_ivf test_ivf.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_ivf DESTINATION unittest)
 
 ################################################################################
 #<IVFNM-TEST-CPU>
-if (NOT TARGET test_ivf_cpu_nm)
-    add_executable(test_ivf_cpu_nm test_ivf_cpu_nm.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ivf_cpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ivf_cpu_nm DESTINATION unittest)
+#if (NOT TARGET test_ivf_cpu_nm)
+#    add_executable(test_ivf_cpu_nm test_ivf_cpu_nm.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_ivf_cpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_ivf_cpu_nm DESTINATION unittest)
 
 ################################################################################
 #<IVFNM-TEST-GPU>
-if (NOT TARGET test_ivf_gpu_nm)
-    add_executable(test_ivf_gpu_nm test_ivf_gpu_nm.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_ivf_gpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_ivf_gpu_nm DESTINATION unittest)
+#if (NOT TARGET test_ivf_gpu_nm)
+#    add_executable(test_ivf_gpu_nm test_ivf_gpu_nm.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_ivf_gpu_nm ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_ivf_gpu_nm DESTINATION unittest)
 
 ################################################################################
 #<BinaryIDMAP-TEST>
-if (NOT TARGET test_binaryidmap)
-    add_executable(test_binaryidmap test_binaryidmap.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_binaryidmap ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_binaryidmap DESTINATION unittest)
-
-################################################################################
-#<BinaryIVF-TEST>
-if (NOT TARGET test_binaryivf)
-    add_executable(test_binaryivf test_binaryivf.cpp ${faiss_srcs} ${util_srcs})
-endif ()
-target_link_libraries(test_binaryivf ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_binaryivf DESTINATION unittest)
+#if (NOT TARGET test_binaryidmap)
+#    add_executable(test_binaryidmap test_binaryidmap.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_binaryidmap ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_binaryidmap DESTINATION unittest)
+#
+#################################################################################
+##<BinaryIVF-TEST>
+#if (NOT TARGET test_binaryivf)
+#    add_executable(test_binaryivf test_binaryivf.cpp ${faiss_srcs} ${util_srcs})
+#endif ()
+#target_link_libraries(test_binaryivf ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_binaryivf DESTINATION unittest)
 
 
 ################################################################################
 #<NSG-TEST>
-add_definitions(-std=c++11 -O3 -march=native -Werror -DINFO)
-
-find_package(OpenMP REQUIRED)
-if (OpenMP_FOUND)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-else ()
-    message(FATAL_ERROR "no OpenMP supprot")
-endif ()
-
-include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg)
-aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg nsg_src)
-set(interface_src
-        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexNSG_NM.cpp
-        )
-if (NOT TARGET test_nsg)
-    add_executable(test_nsg test_nsg.cpp ${interface_src} ${nsg_src} ${util_srcs} ${faiss_srcs})
-endif ()
-target_link_libraries(test_nsg ${depend_libs} ${unittest_libs} ${basic_libs})
-install(TARGETS test_nsg DESTINATION unittest)
+#add_definitions(-std=c++11 -O3 -march=native -Werror -DINFO)
+#
+#find_package(OpenMP REQUIRED)
+#if (OpenMP_FOUND)
+#    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+#else ()
+#    message(FATAL_ERROR "no OpenMP supprot")
+#endif ()
+#
+#include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg)
+#aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/impl/nsg nsg_src)
+#set(interface_src
+#        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexNSG_NM.cpp
+#        )
+#if (NOT TARGET test_nsg)
+#    add_executable(test_nsg test_nsg.cpp ${interface_src} ${nsg_src} ${util_srcs} ${faiss_srcs})
+#endif ()
+#target_link_libraries(test_nsg ${depend_libs} ${unittest_libs} ${basic_libs})
+#install(TARGETS test_nsg DESTINATION unittest)
 
 ################################################################################
 #<HNSW-TEST>

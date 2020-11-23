@@ -314,11 +314,3 @@ main() {
     return 0;
 }
 */
-
-int
-main(int argc, char** argv) {
-    signal(SIGILL, handle_signal);
-    signal(SIGSEGV, handle_signal);
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
