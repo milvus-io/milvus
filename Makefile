@@ -21,9 +21,8 @@ all: build-cpp build-go
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
-clang-format:
-	@echo "Running $@ check"
-	@(env bash ${PWD}/scripts/run_clang_format.sh internal/core)
+cppcheck:
+	@(env bash ${PWD}/scripts/core_build.sh -l)
 
 generated-proto-go:export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
 generated-proto-go: build-cpp
@@ -52,7 +51,7 @@ ruleguard:
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./test/...
 
-verifiers: clang-format fmt lint ruleguard
+verifiers: cppcheck fmt lint ruleguard
 
 # Builds various components locally.
 build-go:
