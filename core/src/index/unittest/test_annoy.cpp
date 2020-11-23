@@ -46,6 +46,7 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
 
 INSTANTIATE_TEST_CASE_P(AnnoyParameters, AnnoyTest, Values("Annoy"));
 
+
 TEST_P(AnnoyTest, annoy_basic) {
     assert(!xb.empty());
 
@@ -91,7 +92,7 @@ TEST_P(AnnoyTest, annoy_basic) {
     */
 }
 
-TEST_P(AnnoyTest, annoy_delete) {
+//TEST_P(AnnoyTest, annoy_delete) {
 //    assert(!xb.empty());
 //
 //    index_->BuildAll(base_dataset, conf);  // Train + Add
@@ -151,9 +152,9 @@ TEST_P(AnnoyTest, annoy_delete) {
         std::cout << "dist\n" << ss_dist.str() << std::endl;
     }
     */
-}
+//}
 
-TEST_P(AnnoyTest, annoy_serialize) {
+//TEST_P(AnnoyTest, annoy_serialize) {
 //    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
 //        {
 //            // write and flush
@@ -201,7 +202,7 @@ TEST_P(AnnoyTest, annoy_serialize) {
 //        auto result = index_->Query(query_dataset, conf, nullptr);
 //        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
 //    }
-}
+//}
 
 /*
  * faiss style test

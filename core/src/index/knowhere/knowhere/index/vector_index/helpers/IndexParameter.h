@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <faiss/Index.h>
+#include <faiss/MetricType.h>
 #include <string>
 
 namespace milvus {

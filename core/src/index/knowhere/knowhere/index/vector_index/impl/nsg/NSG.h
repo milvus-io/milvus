@@ -19,6 +19,7 @@
 
 #include "Distance.h"
 #include "Neighbor.h"
+#include "faiss/Index.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 

@@ -12,8 +12,6 @@
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Exception.h"
 
-#include <faiss/Index.h>
-
 namespace milvus {
 namespace knowhere {
 
