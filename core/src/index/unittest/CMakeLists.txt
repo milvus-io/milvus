@@ -4,6 +4,7 @@ include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR})
 
+set( ENTRY_FILE main.cpp )
 set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
