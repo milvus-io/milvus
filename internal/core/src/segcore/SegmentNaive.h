@@ -41,10 +41,12 @@ class SegmentNaive : public SegmentBase {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
-    // query contains metadata of
+ private:
+    // NOTE: now deprecated, remains for further copy out
     Status
-    QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) override;
+    QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results);
 
+ public:
     Status
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],

@@ -7,22 +7,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"google.golang.org/grpc"
-
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc"
 )
 
 var mt *metaTable
@@ -36,7 +35,7 @@ var masterCancelFunc context.CancelFunc
 
 func setup() {
 	Params.Init()
-	etcdAddress := Params.EtcdAddress()
+	etcdAddress := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {
@@ -77,18 +76,18 @@ func setup() {
 	if err != nil {
 		panic(err)
 	}
-	opt := &Option{
-		SegmentThreshold:      536870912,
-		SegmentExpireDuration: 2000,
-		MinimumAssignSize:     1048576,
-		DefaultRecordSize:     1024,
-		NumOfQueryNode:        3,
-		NumOfChannel:          5,
-	}
 
 	var cnt int64
 
-	segMgr = NewSegmentManager(mt, opt,
+	Params.TopicNum = 5
+	Params.QueryNodeNum = 3
+	Params.SegmentSize = 536870912 / 1024 / 1024
+	Params.SegmentSizeFactor = 0.75
+	Params.DefaultRecordSize = 1024
+	Params.MinSegIDAssignCnt = 1048576 / 1024
+	Params.SegIDAssignExpiration = 2000
+
+	segMgr = NewSegmentManager(mt,
 		func() (UniqueID, error) {
 			val := atomic.AddInt64(&cnt, 1)
 			return val, nil
@@ -209,7 +208,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 
 	// close segment
 	stats.SegStats[0].NumRows = 600000
-	stats.SegStats[0].MemorySize = 600000000
+	stats.SegStats[0].MemorySize = int64(0.8 * segMgr.segmentThreshold)
 	err = segMgr.HandleQueryNodeMsgPack(&msgPack)
 	assert.Nil(t, err)
 	segMeta, _ = mt.GetSegmentByID(100)
@@ -219,7 +218,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 
 func startupMaster() {
 	Params.Init()
-	etcdAddress := Params.EtcdAddress()
+	etcdAddress := Params.EtcdAddress
 	rootPath := "/test/root"
 	ctx, cancel := context.WithCancel(context.TODO())
 	masterCancelFunc = cancel
@@ -231,32 +230,40 @@ func startupMaster() {
 	if err != nil {
 		panic(err)
 	}
-	pulsarAddress := Params.PulsarAddress()
 
-	opt := &Option{
-		KVRootPath:            "/test/root/kv",
-		MetaRootPath:          "/test/root/meta",
-		EtcdAddr:              []string{etcdAddress},
-		PulsarAddr:            pulsarAddress,
-		ProxyIDs:              []typeutil.UniqueID{1, 2},
-		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
-		PulsarProxySubName:    "proxyTopics",
-		SoftTTBInterval:       300,
-		WriteIDs:              []typeutil.UniqueID{3, 4},
-		PulsarWriteChannels:   []string{"write3", "write4"},
-		PulsarWriteSubName:    "writeTopics",
-		PulsarDMChannels:      []string{"dm0", "dm1"},
-		PulsarK2SChannels:     []string{"k2s0", "k2s1"},
+	Params = ParamTable{
+		Address: Params.Address,
+		Port:    Params.Port,
+
+		EtcdAddress:   Params.EtcdAddress,
+		EtcdRootPath:  rootPath,
+		PulsarAddress: Params.PulsarAddress,
+
+		ProxyIDList:     []typeutil.UniqueID{1, 2},
+		WriteNodeIDList: []typeutil.UniqueID{3, 4},
+
+		TopicNum:                    5,
+		QueryNodeNum:                3,
+		SoftTimeTickBarrierInterval: 300,
+
+		// segment
+		SegmentSize:           536870912 / 1024 / 1024,
+		SegmentSizeFactor:     0.75,
 		DefaultRecordSize:     1024,
-		MinimumAssignSize:     1048576,
-		SegmentThreshold:      536870912,
-		SegmentExpireDuration: 2000,
-		NumOfChannel:          5,
-		NumOfQueryNode:        3,
-		StatsChannels:         "statistic",
+		MinSegIDAssignCnt:     1048576 / 1024,
+		MaxSegIDAssignCnt:     Params.MaxSegIDAssignCnt,
+		SegIDAssignExpiration: 2000,
+
+		// msgChannel
+		ProxyTimeTickChannelNames:     []string{"proxy1", "proxy2"},
+		WriteNodeTimeTickChannelNames: []string{"write3", "write4"},
+		InsertChannelNames:            []string{"dm0", "dm1"},
+		K2SChannelNames:               []string{"k2s0", "k2s1"},
+		QueryNodeStatsChannelName:     "statistic",
+		MsgChannelSubName:             Params.MsgChannelSubName,
 	}
 
-	master, err = CreateServer(ctx, opt)
+	master, err = CreateServer(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -327,7 +334,7 @@ func TestSegmentManager_RPC(t *testing.T) {
 
 	// test stats
 	segID := assignments[0].SegID
-	pulsarAddress := Params.PulsarAddress()
+	pulsarAddress := Params.PulsarAddress
 	ms := msgstream.NewPulsarMsgStream(ctx, 1024)
 	ms.SetPulsarClient(pulsarAddress)
 	ms.CreatePulsarProducers([]string{"statistic"})

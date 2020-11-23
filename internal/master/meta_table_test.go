@@ -15,7 +15,7 @@ import (
 func TestMetaTable_Collection(t *testing.T) {
 	Init()
 
-	etcdAddr := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
@@ -152,7 +152,7 @@ func TestMetaTable_Collection(t *testing.T) {
 func TestMetaTable_DeletePartition(t *testing.T) {
 	Init()
 
-	etcdAddr := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
@@ -243,7 +243,7 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 func TestMetaTable_Segment(t *testing.T) {
 	Init()
 
-	etcdAddr := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
@@ -324,7 +324,7 @@ func TestMetaTable_Segment(t *testing.T) {
 func TestMetaTable_UpdateSegment(t *testing.T) {
 	Init()
 
-	etcdAddr := Params.EtcdAddress()
+	etcdAddr := Params.EtcdAddress
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)

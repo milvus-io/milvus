@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -20,7 +19,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -38,10 +36,8 @@ var testNum = 10
 
 func startMaster(ctx context.Context) {
 	master.Init()
-	etcdAddr := master.Params.EtcdAddress()
-	rootPath := master.Params.EtcdRootPath()
-	kvRootPath := path.Join(rootPath, "kv")
-	metaRootPath := path.Join(rootPath, "meta")
+	etcdAddr := master.Params.EtcdAddress
+	rootPath := master.Params.EtcdRootPath
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	if err != nil {
@@ -52,35 +48,12 @@ func startMaster(ctx context.Context) {
 		panic(err)
 	}
 
-	opt := master.Option{
-		KVRootPath:            kvRootPath,
-		MetaRootPath:          metaRootPath,
-		EtcdAddr:              []string{etcdAddr},
-		PulsarAddr:            Params.PulsarAddress(),
-		ProxyIDs:              []typeutil.UniqueID{1, 2},
-		PulsarProxyChannels:   []string{"proxy1", "proxy2"},
-		PulsarProxySubName:    "proxyTopics",
-		SoftTTBInterval:       300,
-		WriteIDs:              []typeutil.UniqueID{3, 4},
-		PulsarWriteChannels:   []string{"write3", "write4"},
-		PulsarWriteSubName:    "writeTopics",
-		PulsarDMChannels:      []string{"dm0", "dm1"},
-		PulsarK2SChannels:     []string{"k2s0", "k2s1"},
-		DefaultRecordSize:     1024,
-		MinimumAssignSize:     1048576,
-		SegmentThreshold:      536870912,
-		SegmentExpireDuration: 2000,
-		NumOfChannel:          5,
-		NumOfQueryNode:        3,
-		StatsChannels:         "statistic",
-	}
-
-	svr, err := master.CreateServer(ctx, &opt)
+	svr, err := master.CreateServer(ctx)
 	masterServer = svr
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
-	if err := svr.Run(int64(master.Params.Port())); err != nil {
+	if err := svr.Run(int64(master.Params.Port)); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 
