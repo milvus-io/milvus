@@ -23,7 +23,9 @@ public:
     Statistics():bs_percentage_static(-1.0), bs_percentage_dynamic(0.0) {}
     virtual ~Statistics() = default;
     double bs_percentage_static; // the percentage of 1 in bitset before search
-    double bs_percentage_dynamic; // the percentage of 1 in search process
+    int64_t nq;
+    std::string
+    ToString() = 0;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
