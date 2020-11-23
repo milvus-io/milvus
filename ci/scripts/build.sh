@@ -2,6 +2,11 @@
 
 set -e
 
+cpuinfo=`cat /proc/cpuinfo`
+echo -e "\n\n CPU Info \n\n"
+echo ${cpuinfo}
+echo -e "\n\n END CPU Info \n\n"
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"

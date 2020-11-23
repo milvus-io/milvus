@@ -17,6 +17,7 @@ main(int argc, char** argv) {
     std::cout << "Start index ut" << std::endl;
     signal(SIGILL, handle_signal);
     signal(SIGSEGV, handle_signal);
+    signal(SIGABRT, handle_signal);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
