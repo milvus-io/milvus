@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -26,6 +28,7 @@ class DataGen {
     DataGen() {
         std::string cpu_flag;
         faiss::hook_init(cpu_flag);
+        sleep(1);
         std::cout << cpu_flag << std::endl;
     }
 
