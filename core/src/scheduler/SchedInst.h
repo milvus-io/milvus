@@ -119,6 +119,12 @@ class OptimizerInst {
                     pass_list.push_back(std::make_shared<FaissIVFPass>());
                     pass_list.push_back(std::make_shared<FaissIVFSQ8HPass>());
                 }
+#elif defined MILVUS_FPGA_VERSION
+                bool enable_fpga = config.fpga.enable();
+                if (enable_fpga) {
+                    pass_list.push_back(std::make_shared<FaissIVFPass>());
+                    LOG_SERVER_DEBUG_ << LogOut("add fpga ");
+                }
 #endif
                 pass_list.push_back(std::make_shared<FallbackPass>());
                 instance = std::make_shared<Optimizer>(pass_list);

@@ -50,6 +50,13 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
+if (MILVUS_FPGA_VERSION OR KNOWHERE_FPGA_VERSION)
+    message(STATUS "Building Knowhere FPGA version")
+    add_compile_definitions("MILVUS_FPGA_VERSION")
+else ()
+  message(STATUS "Building Knowhere CPU version")
+endif ()
+
 using_ccache_if_defined( KNOWHERE_USE_CCACHE )
 
 if (MILVUS_GPU_VERSION)

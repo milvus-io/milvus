@@ -32,6 +32,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(ExecutionEngineContext& context) override;
 
     Status
+    CopyToFpga() override;
+
+    Status
     CopyToGpu(uint64_t device_id) override;
 
     Status
@@ -89,7 +92,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     ExecutionEngineContext context_;
 
     int64_t entity_count_;
-
+    std::mutex mutex_;
     int64_t gpu_num_ = 0;
     bool gpu_enable_ = false;
 };

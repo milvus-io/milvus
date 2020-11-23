@@ -65,4 +65,26 @@ ParseGPUDevices(const std::string& str) {
     return devices;
 }
 
+std::vector<int64_t>
+ParseFPGADevices(const std::string& str) {
+    std::stringstream ss(str);
+    std::vector<int64_t> devices;
+    std::unordered_set<int64_t> device_set;
+    std::string device;
+
+    while (std::getline(ss, device, ',')) {
+        fiu_do_on("ParseFPGADevices.invalid_format", device = "");
+        if (device.length() < 4) {
+            /* Invalid format string */
+            return {};
+        }
+        device_set.insert(std::stoll(device.substr(4)));
+    }
+
+    devices.reserve(device_set.size());
+    for (auto dev : device_set) {
+        devices.push_back(dev);
+    }
+    return devices;
+}
 }  // namespace milvus

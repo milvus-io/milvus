@@ -27,6 +27,7 @@ enum class LoadType {
     DISK2CPU = 0,
     CPU2GPU = 1,
     GPU2CPU = 2,
+    CPU2FPGA = 3,
     TEST = 99,
 };
 

@@ -11,49 +11,27 @@
 
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <limits>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
-#include "config/ConfigMgr.h"
-#include "scheduler/selector/Pass.h"
+#include "Resource.h"
 
 namespace milvus {
 namespace scheduler {
 
-class FaissIVFPass : public Pass, public ConfigObserver {
+class FpgaResource : public Resource {
  public:
-    FaissIVFPass();
+    explicit FpgaResource(std::string name, uint64_t device_id, bool enable_executor);
 
-    ~FaissIVFPass();
+    friend std::ostream&
+    operator<<(std::ostream& out, const FpgaResource& resource);
 
- public:
+ protected:
     void
-    Init() override;
+    LoadFile(TaskPtr task) override;
 
-    bool
-    Run(const TaskPtr& task) override;
-
- public:
     void
-    ConfigUpdate(const std::string& name) override;
-
- private:
-    int64_t idx_ = 0;
-    bool gpu_enable_ = false;
-    int64_t threshold_ = 0;
-    std::vector<int64_t> search_gpus_;
+    Process(TaskPtr task) override;
 };
-
-using FaissIVFPassPtr = std::shared_ptr<FaissIVFPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

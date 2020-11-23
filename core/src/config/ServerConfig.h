@@ -124,7 +124,11 @@ struct ServerConfig {
 
     struct Engine {
         Integer max_partition_num{4096};
+#ifdef MILVUS_FPGA_VERSION
+        Integer build_index_threshold{65536};  // due to max size memory of fpga is 64G
+#else
         Integer build_index_threshold{4096};
+#endif
         Integer search_combine_nq{0};
         Integer use_blas_threshold{0};
         Integer omp_thread_num{0};
@@ -141,6 +145,11 @@ struct ServerConfig {
         String search_devices{"unknown"};
         String build_index_devices{"unknown"};
     } gpu;
+
+    struct FPGA {
+        Bool enable{false};
+        String search_devices{"unknown"};
+    } fpga;
 
     struct Tracing {
         String json_config_path{"unknown"};
@@ -185,4 +194,7 @@ ParsePreloadCollection(const std::string&);
 
 std::vector<int64_t>
 ParseGPUDevices(const std::string&);
+
+std::vector<int64_t>
+ParseFPGADevices(const std::string&);
 }  // namespace milvus

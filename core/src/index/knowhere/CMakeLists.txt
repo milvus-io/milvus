@@ -104,7 +104,21 @@ if (MILVUS_SUPPORT_SPTAG)
             ${depend_libs}
             )
 endif ()
+if (MILVUS_FPGA_VERSION)
+    
+    set(depend_libs 
+              armadillo
+             ${depend_libs}             
+    )
+    set(vector_index_srcs ${vector_index_srcs}
+            knowhere/index/vector_index/fpga/Fpga.cpp
+            knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
+            knowhere/index/vector_index/fpga/xilinx_c.cpp
+            knowhere/index/vector_index/fpga/utils.cpp
+            knowhere/index/vector_index/fpga/FpgaInst.cpp
+    )
 
+endif ()
 
 if (MILVUS_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})

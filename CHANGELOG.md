@@ -20,7 +20,7 @@ Please mark all changes in change log and use the issue from GitHub
 
 ## Feature
 -   \#4163 Update C++ sdk search interface
-
+-   \#3773 Support IVF_PQ to run on FPGA.
 ## Improvement
 -   \#4096 Improve performance for create large amount of partitions
 

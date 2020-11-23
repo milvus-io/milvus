@@ -34,6 +34,7 @@
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -43,6 +44,10 @@
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
+#endif
+#ifdef MILVUS_FPGA_VERSION
+#include "knowhere/index/vector_index/fpga/FPGAIndex.h"
+#include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
 #endif
 
 namespace milvus::engine {
@@ -145,6 +150,46 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
         target_fields_.insert(name);
     }
 
+    return Status::OK();
+}
+Status
+ExecutionEngineImpl::CopyToFpga() {
+#ifdef MILVUS_FPGA_VERSION
+    TimeRecorderAuto rc("ExecutionEngineImpl::CopyToFpga");
+    LOG_ENGINE_ERROR_ << "copy to fpga";
+    SegmentPtr segment_ptr;
+    segment_reader_->GetSegment(segment_ptr);
+
+    engine::VECTOR_INDEX_MAP new_map;
+    engine::VECTOR_INDEX_MAP& indice = segment_ptr->GetVectorIndice();
+    LOG_ENGINE_ERROR_ << indice.size() << "size";
+    bool indexModify = false;
+    for (auto& pair : indice) {
+        if (pair.second != nullptr) {
+            int64_t indexsize = pair.second->IndexSize();
+            if (pair.second->index_type() == "FLAT")
+                continue;
+            LOG_ENGINE_ERROR_ << indexsize << "firts:" << pair.first << "type:" << pair.second->index_type();
+            std::shared_ptr<knowhere::IVFPQ> ivfpq = std::static_pointer_cast<knowhere::IVFPQ>(pair.second);
+            std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
+            indexFpga->SetIndexSize(indexsize);
+            indexFpga->CopyIndexToFpga();
+           // indexFpga->SetBlacklist(ivfpq->GetBlacklist());
+            auto uids = ivfpq->GetUids();
+            indexFpga->SetUids(uids);
+            indexModify = true;
+            if (indexFpga == nullptr) {
+                new_map.insert(pair);
+            } else {
+                LOG_ENGINE_ERROR_ << "new fpga index";
+                new_map.insert(std::make_pair(pair.first, indexFpga));
+            }
+        }
+    }
+    if (indexModify) {
+        indice.swap(new_map);
+    }
+#endif
     return Status::OK();
 }
 

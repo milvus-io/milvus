@@ -10,7 +10,14 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
+#-------------------------------------------------
+set_option_category("FPGA version")
 
+if (MILVUS_FPGA_VERSION)
+    define_option(KNOWHERE_FPGA_VERSION "Build FPGA version" ON)
+else ()
+    define_option(KNOWHERE_FPGA_VERSION "Build FPGA version" OFF)
+endif ()
 macro(set_option_category name)
     set(KNOWHERE_OPTION_CATEGORY ${name})
     list(APPEND "KNOWHERE_OPTION_CATEGORIES" ${name})

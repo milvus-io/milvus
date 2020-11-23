@@ -37,6 +37,7 @@ enum class ResourceType {
     CPU = 1,
     GPU = 2,
     TEST = 3,
+    FPGA = 4,
 };
 
 class Resource : public Node, public std::enable_shared_from_this<Resource> {

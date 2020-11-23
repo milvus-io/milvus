@@ -138,7 +138,9 @@ InitConfig() {
         {"gpu.search_devices", CreateStringConfig("gpu.search_devices", &config.gpu.search_devices.value, "gpu0")},
         {"gpu.build_index_devices",
          CreateStringConfig("gpu.build_index_devices", &config.gpu.build_index_devices.value, "gpu0")},
-
+        /* fpga */
+        {"fpga.enable", CreateBoolConfig("fpga.enable", &config.fpga.enable.value, false)},
+        {"fpga.search_devices", CreateStringConfig("fpga.search_devices", &config.fpga.search_devices.value, "fpga0")},
         /* log */
         {"logs.level", CreateStringConfig("logs.level", &config.logs.level.value, "debug")},
         {"logs.trace.enable", CreateBoolConfig("logs.trace.enable", &config.logs.trace.enable.value, true)},
@@ -330,6 +332,20 @@ gpu:
   gpu_search_threshold: @gpu.gpu_search_threshold@
   search_devices: @gpu.search_devices@
   build_index_devices: @gpu.build_index_devices@
+
+
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# FPGA Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# enable               | Use FPGA devices or not.                                    | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# search_devices       | The list of FPGA devices used for search computation.       | DeviceList | gpu0            |
+#                      | Must be in format fpgax.                                    |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+   
+fpga:
+   enable: @FPGA_ENABLE@
+   search_devices: @fpga.search_devices@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |

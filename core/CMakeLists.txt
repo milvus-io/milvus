@@ -64,6 +64,13 @@ include( ExternalProject )
 
 # **************************** Compiler arguments ****************************
 
+if (MILVUS_FPGA_VERSION)
+    message(STATUS "Building Milvus FPGA version")
+    add_compile_definitions("MILVUS_FPGA_VERSION")
+else ()
+    message(STATUS "Building Milvus CPU version")
+endif ()
+
 if ( MILVUS_GPU_VERSION )
     message( STATUS "Building Milvus GPU version" )
     add_compile_definitions( "MILVUS_GPU_VERSION" )
@@ -229,6 +236,12 @@ add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 if ( NOT MILVUS_DB_PATH )
     set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
+endif ()
+
+if (MILVUS_FPGA_VERSION)
+    set(FPGA_ENABLE "true")
+else ()
+    set(FPGA_ENABLE "false")
 endif ()
 
 if ( MILVUS_GPU_VERSION )
