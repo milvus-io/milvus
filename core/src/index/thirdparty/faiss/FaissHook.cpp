@@ -56,6 +56,7 @@ bool support_sse() {
 }
 
 bool hook_init(std::string& cpu_flag) {
+    std::cout << "Start init faiss hook ..." << std::endl;
     static std::mutex hook_mutex;
     std::lock_guard<std::mutex> lock(hook_mutex);
 
@@ -72,6 +73,7 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx512;
 
         cpu_flag = "AVX512";
+        std::cout << "Set AVX512" << std::endl;
     } else if (support_avx2()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_avx;
@@ -85,6 +87,7 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx;
 
         cpu_flag = "AVX2";
+        std::cout << "Set AVX2" << std::endl;
     } else if (support_sse()) {
         /* for IVFFLAT */
         fvec_inner_product = fvec_inner_product_sse;
@@ -98,8 +101,10 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_ref;
 
         cpu_flag = "SSE42";
+        std::cout << "Set SSE42" << std::endl;
     } else {
         cpu_flag = "UNSUPPORTED";
+        std::cout << "CPU unsupported" << std::endl;
         return false;
     }
 

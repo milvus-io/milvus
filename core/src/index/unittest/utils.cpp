@@ -14,7 +14,7 @@
 
 #include <gtest/gtest.h>
 #include <execinfo.h>
-#include <math.h>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
