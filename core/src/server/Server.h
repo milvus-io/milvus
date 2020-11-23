@@ -13,8 +13,11 @@
 
 #include <string>
 #include <vector>
+#include <boost/asio.hpp>
 
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
+#include "utils/TimerContext.h"
 #include "value/config/ServerConfig.h"
 
 namespace milvus::server {
@@ -26,6 +29,9 @@ class Server {
 
     void
     Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
+
+    void
+    AddTimer(int interval_us, TimerContext::HandlerT& handler);
 
     Status
     Start();
@@ -61,6 +67,9 @@ class Server {
     std::string config_filename_;
     /* Used for lock work directory */
     std::vector<int64_t> fd_list_;
+    boost::asio::io_service aio_;
+    ThreadPoolPtr timer_executors_;
+    std::vector<TimerContextPtr> timers_;
 };  // Server
 
 }  // namespace milvus::server

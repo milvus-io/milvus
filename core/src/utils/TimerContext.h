@@ -38,10 +38,11 @@ struct TimerContext {
     ThreadPoolPtr pool_;
 };
 
+inline
 void
 TimerContext::Reschedule(const boost::system::error_code& ec) {
-    pool_->Enqueue(handler_, ec);
-    decltype(ec) e;
+    pool_->enqueue(handler_, ec);
+    boost::system::error_code e;
     auto new_expires = timer_.expires_at() + interval_;
     timer_.expires_at(new_expires, e);
     if (e) {

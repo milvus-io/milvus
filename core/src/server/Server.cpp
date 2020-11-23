@@ -54,6 +54,15 @@ Server::Init(int64_t daemonized, const std::string& pid_filename, const std::str
 }
 
 void
+Server::AddTimer(int interval_us, TimerContext::HandlerT& handler) {
+    if (!timer_executors_) {
+        // ThreadPool size should be from env or config
+        timer_executors_ = std::make_shared<ThreadPool>(5);
+    }
+    timers_.emplace_back(std::make_shared<TimerContext>(aio_, interval_us, handler, timer_executors_));
+}
+
+void
 Server::Daemonize() {
     if (daemonized_ == 0) {
         return;
@@ -204,7 +213,16 @@ Server::Start() {
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 
-        return StartService();
+        STATUS_CHECK(StartService());
+
+        for (auto timer : timers_) {
+            timer->timer_.async_wait(std::bind(&TimerContext::Reschedule, timer, std::placeholders::_1));
+        }
+        boost::system::error_code ec;
+        aio_.run(ec);
+        if (ec) {
+            return Status(SERVER_UNEXPECTED_ERROR, ec.message());
+        }
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
