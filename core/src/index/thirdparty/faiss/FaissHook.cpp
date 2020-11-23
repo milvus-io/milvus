@@ -33,26 +33,44 @@ sq_sel_inv_list_scanner_func_ptr sq_sel_inv_list_scanner = sq_select_inverted_li
 /*****************************************************************************/
 
 bool support_avx512() {
-    if (!faiss_use_avx512) return false;
+    std::cout << "Check if support avx512" << std::endl;
+    if (!faiss_use_avx512) {
+        std::cout << "faiss_use_avx512 is " << faiss_use_avx512 << std::endl;
+        return false;
+    }
 
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
-    return (instruction_set_inst.AVX512F() &&
-            instruction_set_inst.AVX512DQ() &&
-            instruction_set_inst.AVX512BW());
+    bool supported = (instruction_set_inst.AVX512F() &&
+                      instruction_set_inst.AVX512DQ() &&
+                      instruction_set_inst.AVX512BW());
+    std::cout << "InstructionSet check " << supported << std::endl;
+    return supported;
 }
 
 bool support_avx2() {
-    if (!faiss_use_avx2) return false;
+    std::cout << "Check if support avx2" << std::endl;
+    if (!faiss_use_avx2) {
+        std::cout << "faiss_use_avx2 is " << faiss_use_avx2 << std::endl;
+        return false;
+    }
 
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
-    return (instruction_set_inst.AVX2());
+    bool supported = (instruction_set_inst.AVX2());
+    std::cout << "InstructionSet check " << supported << std::endl;
+    retrurn supported;
 }
 
 bool support_sse() {
-    if (!faiss_use_sse) return false;
+    std::cout << "Check if support sse" << std::endl;
+    if (!faiss_use_sse) {
+        std::cout << "faiss_use_sse is " << faiss_use_sse << std::endl;
+        return false;
+    }
 
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
-    return (instruction_set_inst.SSE42());
+    bool supported = (instruction_set_inst.SSE42());
+    std::cout << "InstructionSet check " << supported << std::endl;
+    return supported;
 }
 
 bool hook_init(std::string& cpu_flag) {
