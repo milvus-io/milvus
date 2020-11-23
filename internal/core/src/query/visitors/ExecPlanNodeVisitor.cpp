@@ -3,8 +3,6 @@
 #include "segcore/SegmentBase.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSmallIndex.h"
-#include "query/generated/ExecExprVisitor.h"
-#include "query/Search.h"
 
 namespace milvus::query {
 
@@ -51,12 +49,7 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     auto& ph = placeholder_group_.at(0);
     auto src_data = ph.get_blob<float>();
     auto num_queries = ph.num_of_queries_;
-    if (node.predicate_.has_value()) {
-        auto bitmap = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
-        auto ptr = &bitmap;
-        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, ptr, ret);
-    }
-    QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, std::nullopt, ret);
+    segment->QueryBruteForceImpl(node.query_info_, src_data, num_queries, timestamp_, ret);
     ret_ = ret;
 }
 

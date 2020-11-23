@@ -204,6 +204,137 @@ SegmentSmallIndex::Delete(int64_t reserved_begin,
     //    return Status::OK();
 }
 
+template <typename RecordType>
+int64_t
+get_barrier(const RecordType& record, Timestamp timestamp) {
+    auto& vec = record.timestamps_;
+    int64_t beg = 0;
+    int64_t end = record.ack_responder_.GetAck();
+    while (beg < end) {
+        auto mid = (beg + end) / 2;
+        if (vec[mid] < timestamp) {
+            beg = mid + 1;
+        } else {
+            end = mid;
+        }
+    }
+    return beg;
+}
+
+Status
+SegmentSmallIndex::QueryBruteForceImpl(const query::QueryInfo& info,
+                                       const float* query_data,
+                                       int64_t num_queries,
+                                       Timestamp timestamp,
+                                       QueryResult& results) {
+    // step 1: binary search to find the barrier of the snapshot
+    auto ins_barrier = get_barrier(record_, timestamp);
+    // auto del_barrier = get_barrier(deleted_record_, timestamp);
+#if 0
+    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    Assert(bitmap_holder);
+    auto bitmap = bitmap_holder->bitmap_ptr;
+#endif
+
+    // step 2.1: get meta
+    // step 2.2: get which vector field to search
+    auto vecfield_offset_opt = schema_->get_offset(info.field_id_);
+    Assert(vecfield_offset_opt.has_value());
+    auto vecfield_offset = vecfield_offset_opt.value();
+    Assert(vecfield_offset < record_.entity_vec_.size());
+
+    auto& field = schema_->operator[](vecfield_offset);
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(vecfield_offset));
+
+    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
+    auto dim = field.get_dim();
+    auto topK = info.topK_;
+    auto total_count = topK * num_queries;
+    // TODO: optimize
+
+    // step 3: small indexing search
+    std::vector<int64_t> final_uids(total_count, -1);
+    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+
+    auto max_chunk = (ins_barrier + DefaultElementPerChunk - 1) / DefaultElementPerChunk;
+
+    auto max_indexed_id = indexing_record_.get_finished_ack();
+    const auto& indexing_entry = indexing_record_.get_indexing(vecfield_offset);
+    auto search_conf = indexing_entry.get_search_conf(topK);
+
+    for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
+        auto indexing = indexing_entry.get_indexing(chunk_id);
+        auto src_data = vec_ptr->get_chunk(chunk_id).data();
+        auto dataset = knowhere::GenDataset(num_queries, dim, src_data);
+        auto ans = indexing->Query(dataset, search_conf, nullptr);
+        auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
+        auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
+    }
+
+    // step 4: brute force search where small indexing is unavailable
+    for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
+        std::vector<int64_t> buf_uids(total_count, -1);
+        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+
+        faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
+
+        auto src_data = vec_ptr->get_chunk(chunk_id).data();
+        auto nsize =
+            chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
+        faiss::knn_L2sqr(query_data, src_data, dim, num_queries, nsize, &buf);
+        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+    }
+
+    // step 5: convert offset to uids
+    for (auto& id : final_uids) {
+        if (id == -1) {
+            continue;
+        }
+        id = record_.uids_[id];
+    }
+
+    results.result_ids_ = std::move(final_uids);
+    results.result_distances_ = std::move(final_dis);
+    results.topK_ = topK;
+    results.num_queries_ = num_queries;
+
+    //    throw std::runtime_error("unimplemented");
+    return Status::OK();
+}
+
+Status
+SegmentSmallIndex::QueryDeprecated(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& result) {
+    // TODO: enable delete
+    // TODO: enable index
+    // TODO: remove mock
+    if (query_info == nullptr) {
+        query_info = std::make_shared<query::QueryDeprecated>();
+        query_info->field_name = "fakevec";
+        query_info->topK = 10;
+        query_info->num_queries = 1;
+
+        auto dim = schema_->operator[]("fakevec").get_dim();
+        std::default_random_engine e(42);
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+        query_info->query_raw_data.resize(query_info->num_queries * dim);
+        for (auto& x : query_info->query_raw_data) {
+            x = dis(e);
+        }
+    }
+    // TODO
+    query::QueryInfo info{
+        query_info->topK,
+        query_info->field_name,
+        "L2",
+        nlohmann::json{
+            {"nprobe", 10},
+        },
+    };
+    auto num_queries = query_info->num_queries;
+    return QueryBruteForceImpl(info, query_info->query_raw_data.data(), num_queries, timestamp, result);
+}
+
 Status
 SegmentSmallIndex::Close() {
     if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
