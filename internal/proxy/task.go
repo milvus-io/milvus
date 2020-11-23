@@ -14,7 +14,8 @@ import (
 )
 
 type task interface {
-	ID() UniqueID // return ReqID
+	ID() UniqueID       // return ReqID
+	SetID(uid UniqueID) // set ReqID
 	Type() internalpb.MsgType
 	BeginTs() Timestamp
 	EndTs() Timestamp
@@ -36,6 +37,10 @@ type InsertTask struct {
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
 	rowIDAllocator        *allocator.IDAllocator
+}
+
+func (it *InsertTask) SetID(uid UniqueID) {
+	it.ReqID = uid
 }
 
 func (it *InsertTask) SetTs(ts Timestamp) {
@@ -121,6 +126,10 @@ func (cct *CreateCollectionTask) ID() UniqueID {
 	return cct.ReqID
 }
 
+func (cct *CreateCollectionTask) SetID(uid UniqueID) {
+	cct.ReqID = uid
+}
+
 func (cct *CreateCollectionTask) Type() internalpb.MsgType {
 	return cct.MsgType
 }
@@ -169,6 +178,10 @@ type DropCollectionTask struct {
 
 func (dct *DropCollectionTask) ID() UniqueID {
 	return dct.ReqID
+}
+
+func (dct *DropCollectionTask) SetID(uid UniqueID) {
+	dct.ReqID = uid
 }
 
 func (dct *DropCollectionTask) Type() internalpb.MsgType {
@@ -220,6 +233,10 @@ type QueryTask struct {
 
 func (qt *QueryTask) ID() UniqueID {
 	return qt.ReqID
+}
+
+func (qt *QueryTask) SetID(uid UniqueID) {
+	qt.ReqID = uid
 }
 
 func (qt *QueryTask) Type() internalpb.MsgType {
@@ -329,6 +346,10 @@ func (hct *HasCollectionTask) ID() UniqueID {
 	return hct.ReqID
 }
 
+func (hct *HasCollectionTask) SetID(uid UniqueID) {
+	hct.ReqID = uid
+}
+
 func (hct *HasCollectionTask) Type() internalpb.MsgType {
 	return hct.MsgType
 }
@@ -382,6 +403,10 @@ func (dct *DescribeCollectionTask) ID() UniqueID {
 	return dct.ReqID
 }
 
+func (dct *DescribeCollectionTask) SetID(uid UniqueID) {
+	dct.ReqID = uid
+}
+
 func (dct *DescribeCollectionTask) Type() internalpb.MsgType {
 	return dct.MsgType
 }
@@ -428,6 +453,10 @@ type ShowCollectionsTask struct {
 
 func (sct *ShowCollectionsTask) ID() UniqueID {
 	return sct.ReqID
+}
+
+func (sct *ShowCollectionsTask) SetID(uid UniqueID) {
+	sct.ReqID = uid
 }
 
 func (sct *ShowCollectionsTask) Type() internalpb.MsgType {
@@ -482,6 +511,10 @@ func (cpt *CreatePartitionTask) ID() UniqueID {
 	return cpt.ReqID
 }
 
+func (cpt *CreatePartitionTask) SetID(uid UniqueID) {
+	cpt.ReqID = uid
+}
+
 func (cpt *CreatePartitionTask) Type() internalpb.MsgType {
 	return cpt.MsgType
 }
@@ -521,6 +554,10 @@ type DropPartitionTask struct {
 
 func (dpt *DropPartitionTask) ID() UniqueID {
 	return dpt.ReqID
+}
+
+func (dpt *DropPartitionTask) SetID(uid UniqueID) {
+	dpt.ReqID = uid
 }
 
 func (dpt *DropPartitionTask) Type() internalpb.MsgType {
@@ -564,6 +601,10 @@ func (hpt *HasPartitionTask) ID() UniqueID {
 	return hpt.ReqID
 }
 
+func (hpt *HasPartitionTask) SetID(uid UniqueID) {
+	hpt.ReqID = uid
+}
+
 func (hpt *HasPartitionTask) Type() internalpb.MsgType {
 	return hpt.MsgType
 }
@@ -605,6 +646,10 @@ func (dpt *DescribePartitionTask) ID() UniqueID {
 	return dpt.ReqID
 }
 
+func (dpt *DescribePartitionTask) SetID(uid UniqueID) {
+	dpt.ReqID = uid
+}
+
 func (dpt *DescribePartitionTask) Type() internalpb.MsgType {
 	return dpt.MsgType
 }
@@ -644,6 +689,10 @@ type ShowPartitionsTask struct {
 
 func (spt *ShowPartitionsTask) ID() UniqueID {
 	return spt.ReqID
+}
+
+func (spt *ShowPartitionsTask) SetID(uid UniqueID) {
+	spt.ReqID = uid
 }
 
 func (spt *ShowPartitionsTask) Type() internalpb.MsgType {
