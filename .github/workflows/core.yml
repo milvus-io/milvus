@@ -57,25 +57,27 @@ jobs:
           path: .docker
           key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-
-      - name: Docker Run
-        run: |
-          docker-compose run ubuntu-core
-      - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
-        continue-on-error: true
-        shell: bash
-        run: |
-          docker login -u ${{ secrets.DOCKERHUB_USER }} \
-                       -p ${{ secrets.DOCKERHUB_TOKEN }}
-          docker-compose push ubuntu-core
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./ci/scripts/milvus_output.info
-          name: ubuntu-${{ matrix.ubuntu }}-unittests
-          flags: cpu_version_ubuntu_18_04_unittest
-          yml: ./codecov.yaml
+      - name: Setup Debug Session
+        uses: csexton/debugger-action@master
+#      - name: Docker Run
+#        run: |
+#          docker-compose run ubuntu-core
+#      - name: Docker Push
+#        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+#        continue-on-error: true
+#        shell: bash
+#        run: |
+#          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+#                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+#          docker-compose push ubuntu-core
+#      - name: Upload coverage to Codecov
+#        uses: codecov/codecov-action@v1
+#        with:
+#          token: ${{ secrets.CODECOV_TOKEN }}
+#          file: ./ci/scripts/milvus_output.info
+#          name: ubuntu-${{ matrix.ubuntu }}-unittests
+#          flags: cpu_version_ubuntu_18_04_unittest
+#          yml: ./codecov.yaml
 
   centos:
     name: AMD64 CentOS ${{ matrix.centos }}
