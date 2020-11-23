@@ -33,7 +33,7 @@ class InstructionSet {
           f_81_EDX_{0},
           data_{},
           extdata_{} {
-        std::cout << "Initialize InstructionSet ..." << std::endl;
+//        std::cout << "Initialize InstructionSet ..." << std::endl;
         std::array<int, 4> cpui;
 
         // Calling __cpuid with 0x0 as the function_id argument
