@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -78,13 +78,12 @@ func setup() {
 		panic(err)
 	}
 	opt := &Option{
-		SegmentThreshold:       536870912,
-		SegmentExpireDuration:  2000,
-		MinimumAssignSize:      1048576,
-		DefaultRecordSize:      1024,
-		NumOfQueryNode:         3,
-		NumOfChannel:           5,
-		SegmentThresholdFactor: 0.75,
+		SegmentThreshold:      536870912,
+		SegmentExpireDuration: 2000,
+		MinimumAssignSize:     1048576,
+		DefaultRecordSize:     1024,
+		NumOfQueryNode:        3,
+		NumOfChannel:          5,
 	}
 
 	var cnt int64
@@ -210,7 +209,7 @@ func TestSegmentManager_SegmentStats(t *testing.T) {
 
 	// close segment
 	stats.SegStats[0].NumRows = 600000
-	stats.SegStats[0].MemorySize = int64(0.8 * segMgr.segmentThreshold)
+	stats.SegStats[0].MemorySize = 600000000
 	err = segMgr.HandleQueryNodeMsgPack(&msgPack)
 	assert.Nil(t, err)
 	segMeta, _ = mt.GetSegmentByID(100)

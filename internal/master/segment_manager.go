@@ -29,21 +29,20 @@ type segmentStatus struct {
 }
 
 type SegmentManager struct {
-	metaTable              *metaTable
-	statsStream            msgstream.MsgStream
-	channelRanges          []*channelRange
-	segmentStatus          map[UniqueID]*segmentStatus    // segment id to segment status
-	collStatus             map[UniqueID]*collectionStatus // collection id to collection status
-	defaultSizePerRecord   int64
-	minimumAssignSize      int64
-	segmentThreshold       float64
-	segmentThresholdFactor float64
-	segmentExpireDuration  int64
-	numOfChannels          int
-	numOfQueryNodes        int
-	globalIDAllocator      func() (UniqueID, error)
-	globalTSOAllocator     func() (Timestamp, error)
-	mu                     sync.RWMutex
+	metaTable             *metaTable
+	statsStream           msgstream.MsgStream
+	channelRanges         []*channelRange
+	segmentStatus         map[UniqueID]*segmentStatus    // segment id to segment status
+	collStatus            map[UniqueID]*collectionStatus // collection id to collection status
+	defaultSizePerRecord  int64
+	minimumAssignSize     int64
+	segmentThreshold      int64
+	segmentExpireDuration int64
+	numOfChannels         int
+	numOfQueryNodes       int
+	globalIDAllocator     func() (UniqueID, error)
+	globalTSOAllocator    func() (Timestamp, error)
+	mu                    sync.RWMutex
 }
 
 func (segMgr *SegmentManager) HandleQueryNodeMsgPack(msgPack *msgstream.MsgPack) error {
@@ -77,7 +76,7 @@ func (segMgr *SegmentManager) handleSegmentStat(segStats *internalpb.SegmentStat
 	segMeta.NumRows = segStats.NumRows
 	segMeta.MemSize = segStats.MemorySize
 
-	if segStats.MemorySize > int64(segMgr.segmentThresholdFactor*segMgr.segmentThreshold) {
+	if segStats.MemorySize > segMgr.segmentThreshold {
 		return segMgr.closeSegment(segMeta)
 	}
 	return segMgr.metaTable.UpdateSegment(segMeta)
@@ -151,7 +150,6 @@ func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDReques
 
 func (segMgr *SegmentManager) assignSegment(collName string, collID UniqueID, partitionTag string, count uint32, channelID int32,
 	collStatus *collectionStatus) (*internalpb.SegIDAssignment, error) {
-	segmentThreshold := int64(segMgr.segmentThreshold)
 	for _, segID := range collStatus.openedSegments {
 		segMeta, _ := segMgr.metaTable.GetSegmentByID(segID)
 		if segMeta.GetCloseTime() != 0 || channelID < segMeta.GetChannelStart() ||
@@ -162,8 +160,8 @@ func (segMgr *SegmentManager) assignSegment(collName string, collID UniqueID, pa
 		assignedMem := segMgr.checkAssignedSegExpire(segID)
 		memSize := segMeta.MemSize
 		neededMemSize := segMgr.calNeededSize(memSize, segMeta.NumRows, int64(count))
-		if memSize+assignedMem+neededMemSize <= segmentThreshold {
-			remainingSize := segmentThreshold - memSize - assignedMem
+		if memSize+assignedMem+neededMemSize <= segMgr.segmentThreshold {
+			remainingSize := segMgr.segmentThreshold - memSize - assignedMem
 			allocMemSize := segMgr.calAllocMemSize(neededMemSize, remainingSize)
 			segMgr.addAssignment(segID, allocMemSize)
 			return &internalpb.SegIDAssignment{
@@ -176,7 +174,7 @@ func (segMgr *SegmentManager) assignSegment(collName string, collID UniqueID, pa
 		}
 	}
 	neededMemSize := segMgr.defaultSizePerRecord * int64(count)
-	if neededMemSize > segmentThreshold {
+	if neededMemSize > segMgr.segmentThreshold {
 		return nil, errors.Errorf("request with count %d need about %d mem size which is larger than segment threshold",
 			count, neededMemSize)
 	}
@@ -186,7 +184,7 @@ func (segMgr *SegmentManager) assignSegment(collName string, collID UniqueID, pa
 		return nil, err
 	}
 
-	allocMemSize := segMgr.calAllocMemSize(neededMemSize, segmentThreshold)
+	allocMemSize := segMgr.calAllocMemSize(neededMemSize, segMgr.segmentThreshold)
 	segMgr.addAssignment(segMeta.SegmentID, allocMemSize)
 	return &internalpb.SegIDAssignment{
 		SegID:        segMeta.SegmentID,
@@ -329,19 +327,18 @@ func NewSegmentManager(meta *metaTable,
 	globalTSOAllocator func() (Timestamp, error),
 ) *SegmentManager {
 	segMgr := &SegmentManager{
-		metaTable:              meta,
-		channelRanges:          make([]*channelRange, 0),
-		segmentStatus:          make(map[UniqueID]*segmentStatus),
-		collStatus:             make(map[UniqueID]*collectionStatus),
-		segmentThreshold:       opt.SegmentThreshold,
-		segmentThresholdFactor: opt.SegmentThresholdFactor,
-		segmentExpireDuration:  opt.SegmentExpireDuration,
-		minimumAssignSize:      opt.MinimumAssignSize,
-		defaultSizePerRecord:   opt.DefaultRecordSize,
-		numOfChannels:          opt.NumOfChannel,
-		numOfQueryNodes:        opt.NumOfQueryNode,
-		globalIDAllocator:      globalIDAllocator,
-		globalTSOAllocator:     globalTSOAllocator,
+		metaTable:             meta,
+		channelRanges:         make([]*channelRange, 0),
+		segmentStatus:         make(map[UniqueID]*segmentStatus),
+		collStatus:            make(map[UniqueID]*collectionStatus),
+		segmentThreshold:      int64(opt.SegmentThreshold),
+		segmentExpireDuration: opt.SegmentExpireDuration,
+		minimumAssignSize:     opt.MinimumAssignSize,
+		defaultSizePerRecord:  opt.DefaultRecordSize,
+		numOfChannels:         opt.NumOfChannel,
+		numOfQueryNodes:       opt.NumOfQueryNode,
+		globalIDAllocator:     globalIDAllocator,
+		globalTSOAllocator:    globalTSOAllocator,
 	}
 	segMgr.createChannelRanges()
 	return segMgr

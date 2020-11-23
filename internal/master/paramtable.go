@@ -214,15 +214,3 @@ func (p *ParamTable) TopicNum() int {
 	}
 	return num
 }
-
-func (p *ParamTable) SegmentThresholdFactor() float64 {
-	factor, err := p.Load("master.segmentThresholdFactor")
-	if err != nil {
-		panic(err)
-	}
-	res, err := strconv.ParseFloat(factor, 64)
-	if err != nil {
-		panic(err)
-	}
-	return res
-}
