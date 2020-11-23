@@ -57,7 +57,7 @@ bool support_avx2() {
     InstructionSet& instruction_set_inst = InstructionSet::GetInstance();
     bool supported = (instruction_set_inst.AVX2());
     std::cout << "InstructionSet check " << supported << std::endl;
-    retrurn supported;
+    return supported;
 }
 
 bool support_sse() {
