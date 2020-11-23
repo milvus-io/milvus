@@ -111,4 +111,6 @@ inline ThreadPool::~ThreadPool() {
     }
 }
 
+using ThreadPoolPtr = std::shared_ptr<ThreadPool>;
+
 }  // namespace milvus
