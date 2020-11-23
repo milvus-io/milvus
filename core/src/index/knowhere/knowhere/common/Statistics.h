@@ -20,12 +20,12 @@ namespace knowhere {
 
 class Statistics {
 public:
-    Statistics():bs_percentage_static(-1.0), bs_percentage_dynamic(0.0) {}
+    Statistics():bitset_percentage1_sum(0.0), nq_cnt(0) {}
     virtual ~Statistics() = default;
-    double bs_percentage_static; // the percentage of 1 in bitset before search
-    int64_t nq;
-    std::string
-    ToString() = 0;
+    double bitset_percentage1_sum; // the percentage of 1 in bitset before search
+    int64_t nq_cnt;
+    virtual std::string
+    ToString(const std::string &index_name) = 0;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
@@ -35,11 +35,11 @@ public:
     int max_level;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
+    std::vector<double> access_gini_coefficient;
 
     void
     clear() {
-        bs_percentage_dynamic = 0.0;
-        bs_percentage_static = 0.0;
+        bitset_percentage1_sum = 0.0;
         max_level = 0;
         distribution.clear();
         access_cnt.clear();
@@ -47,8 +47,7 @@ public:
     void
     show() {
         LOG_KNOWHERE_DEBUG_ << "HNSWStatistics:";
-        LOG_KNOWHERE_DEBUG_ << "bs_percentage_static = " << bs_percentage_static;
-        LOG_KNOWHERE_DEBUG_ << "bs_percentage_dynamic = " << bs_percentage_dynamic;
+        LOG_KNOWHERE_DEBUG_ << "bs_percentage_static = " << bitset_percentage1_sum;
         LOG_KNOWHERE_DEBUG_ << "max level = " << max_level;
         LOG_KNOWHERE_DEBUG_ << "level distribution:";
         for (auto i = 0; i < distribution.size(); ++ i) {
@@ -67,7 +66,112 @@ public:
             LOG_KNOWHERE_DEBUG_ << "there is no access cnt records";
         }
     }
+
+    void
+    CaculateStatistics() {
+        std::vector<int64_t> cnts;
+        int64_t sum = 0;
+        for (auto &elem : access_cnt) {
+            cnts.push_back(elem.second);
+            sum += elem.second;
+        }
+        std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
+        size_t len = cnts.size();
+        // todo: hard code?
+        std::vector<int> stat_len = {5, 10, 15, 20, 50};
+        auto gini_len = stat_len.size();
+        for (auto i = 0; i < gini_len; ++ i) {
+            stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
+        }
+        int64_t tmp_cnt = 0;
+        access_gini_coefficient.resize(gini_len << 1);
+        int j = 0;
+        for (auto i = 0; i < len && j < gini_len; ++ i) {
+            if (i > stat_len[j]) {
+                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                tmp_cnt = 0;
+                j ++;
+            }
+            if (j >= gini_len)
+                break;
+            tmp_cnt += cnts[i];
+        }
+        tmp_cnt = 0;
+        for (auto i = len - 1; i >= 0 && j < (gini_len << 1); -- i) {
+            if (len - i > stat_len[j - gini_len]) {
+                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                tmp_cnt = 0;
+                j ++;
+            }
+            if (j >= (gini_len << 1))
+                break;
+            tmp_cnt += cnts[i];
+        }
+    };
+
+    std::string
+    ToString(const std::string &index_name) override {
+        CaculateStatistics();
+        std::ostringstream ret;
+        ret << index_name << " Statistics:" << std::endl;
+        ret << "Total queries: " << nq_cnt << std::endl;
+        ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        ret << "Max level: " << max_level << std::endl;
+        ret << "Level distribution: " << std::endl;
+        for (auto i = 0; i < max_level; ++ i) {
+            ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
+        }
+        std::vector<int> stat_len = {5, 10, 15, 20, 50};
+        ret << "The gini coefficient of access distribution at level 1:" << std::endl;
+        for (auto i = 0; i < access_gini_coefficient.size() / 2; ++ i) {
+            ret << "The top" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        }
+        for (auto i = access_gini_coefficient.size() / 2; i < access_gini_coefficient.size(); ++ i) {
+            ret << "The last" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        }
+        return ret.str();
+    }
 };
+
+class RHNSWStatistics : public Statistics {
+public:
+    RHNSWStatistics():Statistics(), max_level(0) {}
+    int max_level;
+    std::vector<int> distribution;
+    std::unordered_map<unsigned int, uint64_t> access_cnt;
+    std::vector<double> access_gini_coefficient;
+
+    void
+    clear() {
+        bitset_percentage1_sum = 0.0;
+        max_level = 0;
+        distribution.clear();
+        access_cnt.clear();
+    }
+
+    std::string
+    ToString(const std::string &index_name) override {
+        std::ostringstream ret;
+        ret << index_name << " Statistics:" << std::endl;
+        ret << "Total queries: " << nq_cnt << std::endl;
+        ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        ret << "Max level: " << max_level << std::endl;
+        ret << "Level distribution: " << std::endl;
+        for (auto i = 0; i < max_level; ++ i) {
+            ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
+        }
+        std::vector<int> stat_len = {5, 10, 15, 20, 50};
+        ret << "The gini coefficient of access distribution at level 1:" << std::endl;
+        for (auto i = 0; i < access_gini_coefficient.size() / 2; ++ i) {
+            ret << "The top" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        }
+        for (auto i = access_gini_coefficient.size() / 2; i < access_gini_coefficient.size(); ++ i) {
+            ret << "The last" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        }
+        return ret.str();
+    }
+};
+
 
 }  // namespace knowhere
 }  // namespace milvus

@@ -58,6 +58,9 @@ class IndexHNSW : public VecIndex {
     void
     UpdateIndexSize() override;
 
+    std::string
+    GetStatistics() override;
+
  private:
     bool normalize = false;
     std::mutex mutex_;

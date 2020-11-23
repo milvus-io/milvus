@@ -82,9 +82,7 @@ namespace hnswlib {
 
     class StatisticsInfo {
     public:
-        StatisticsInfo(): bitset_access_cnt(0), bitset_hit_cnt(0) {}
-        unsigned int bitset_access_cnt;
-        unsigned int bitset_hit_cnt;
+        StatisticsInfo(): {}
         std::vector<unsigned int> accessed_points;
     };
 

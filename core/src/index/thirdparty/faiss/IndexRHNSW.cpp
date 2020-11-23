@@ -193,6 +193,11 @@ void IndexRHNSW::init_hnsw() {
     hnsw.init(ntotal);
 }
 
+void
+IndexRHNSW::update_stats(std::vector<double> &ret) {
+    stats.CaculateStatistics(ret);
+}
+
 void IndexRHNSW::train(idx_t n, const float* x)
 {
     FAISS_THROW_IF_NOT_MSG(storage,
@@ -213,6 +218,9 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
     idx_t check_period = InterruptCallback::get_period_hint (
           hnsw.max_level * d * hnsw.efSearch);
 
+    std::vector<RHNSWStatInfo> query_stats;
+    query_stats.resize(n);
+
     for (idx_t i0 = 0; i0 < n; i0 += check_period) {
         idx_t i1 = std::min(i0 + check_period, n);
 
@@ -230,7 +238,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                hnsw.searchKnn(*dis, k, idxi, simi, bitset);
+                hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -257,6 +265,15 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
         // we need to revert the negated distances
         for (size_t i = 0; i < k * n; i++) {
             distances[i] = -distances[i];
+        }
+    }
+    for (auto i = 0; i < n; ++ i) {
+        for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
+            auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
+            if (tgt == stats.access_cnt.end())
+                stats.access_cnt[query_stats[i].access_points[j]] = 1;
+            else
+                tgt->second += 1;
         }
     }
 
