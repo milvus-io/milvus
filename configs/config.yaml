@@ -31,6 +31,7 @@ master:
   minimumAssignSize: 1048576
   segmentThreshold: 536870912
   segmentExpireDuration: 2000
+  segmentThresholdFactor: 0.75
   querynodenum: 1
   writenodenum: 1
   statsChannels: "statistic"
