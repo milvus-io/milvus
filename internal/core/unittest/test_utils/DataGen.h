@@ -111,4 +111,24 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     return std::move(res);
 }
 
+inline auto
+CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
+    namespace ser = milvus::proto::service;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    std::normal_distribution<double> dis(0, 1);
+    std::default_random_engine e(seed);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    return raw_group;
+}
+
 }  // namespace milvus::segcore

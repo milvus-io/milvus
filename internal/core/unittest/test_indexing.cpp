@@ -76,15 +76,13 @@ TEST(Indexing, SmartBruteForce) {
 
     auto query_data = raw;
 
-    vector<int64_t> final_uids(total_count);
+    vector<int64_t> final_uids(total_count, -1);
     vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
     for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
         vector<int64_t> buf_uids(total_count, -1);
         vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
-
         faiss::float_maxheap_array_t buf = {queries, TOPK, buf_uids.data(), buf_dis.data()};
-
         auto end = beg + DefaultElementPerChunk;
         if (end > N) {
             end = N;
@@ -93,12 +91,10 @@ TEST(Indexing, SmartBruteForce) {
         auto src_data = raw + beg * DIM;
 
         faiss::knn_L2sqr(query_data, src_data, DIM, queries, nsize, &buf, nullptr);
-        if (beg == 0) {
-            final_uids = buf_uids;
-            final_dis = buf_dis;
-        } else {
-            merge_into(queries, TOPK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        for (auto& x : buf_uids) {
+            x = uids[x + beg];
         }
+        merge_into(queries, TOPK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 
     for (int qn = 0; qn < queries; ++qn) {

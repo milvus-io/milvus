@@ -8,6 +8,7 @@
 #include "query/generated/ShowPlanNodeVisitor.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
+#include "segcore/SegmentSmallIndex.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -148,29 +149,165 @@ TEST(Query, ParsePlaceholderGroup) {
     auto schema = std::make_shared<Schema>();
     schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
     auto plan = CreatePlan(*schema, dsl_string);
-    int num_queries = 10;
+    int64_t num_queries = 100000;
     int dim = 16;
-    std::default_random_engine e;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
+    auto raw_group = CreatePlaceholderGroup(num_queries, dim);
     auto blob = raw_group.SerializeAsString();
-    // ser::PlaceholderGroup new_group;
-    // new_group.ParseFromString()
     auto placeholder = ParsePlaceholderGroup(plan.get(), blob);
 }
 
-TEST(Query, Exec) {
+TEST(Query, ExecWithPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::FLOAT);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "age": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    int64_t N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    segment->PreInsert(N);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    QueryResult qr;
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    std::vector<std::vector<std::string>> results;
+    int topk = 5;
+    for (int q = 0; q < num_queries; ++q) {
+        std::vector<std::string> result;
+        for (int k = 0; k < topk; ++k) {
+            int index = q * topk + k;
+            result.emplace_back(std::to_string(qr.result_ids_[index]) + "->" +
+                                std::to_string(qr.result_distances_[index]));
+        }
+        results.emplace_back(std::move(result));
+    }
+
+    auto ref = Json::parse(R"([
+  [
+    [
+      "980486->3.149221",
+      "318367->3.661235",
+      "302798->4.553688",
+      "321424->4.757450",
+      "565529->5.083780"
+    ],
+    [
+      "233390->7.931535",
+      "238958->8.109344",
+      "230645->8.439169",
+      "901939->8.658772",
+      "380328->8.731251"
+    ],
+    [
+      "897246->3.749835",
+      "750683->3.897577",
+      "857598->4.230977",
+      "299009->4.379639",
+      "440010->4.454046"
+    ],
+    [
+      "840855->4.782170",
+      "709627->5.063170",
+      "72322->5.166143",
+      "107142->5.180207",
+      "948403->5.247065"
+    ],
+    [
+      "810401->3.926393",
+      "46575->4.054171",
+      "201740->4.274491",
+      "669040->4.399628",
+      "231500->4.831223"
+    ]
+  ]
+])");
+
+    Json json{results};
+    ASSERT_EQ(json, ref);
+}
+
+TEST(Query, ExecWihtoutPredicate) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::FLOAT);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+    int64_t N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto segment = std::make_unique<SegmentSmallIndex>(schema);
+    segment->PreInsert(N);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    QueryResult qr;
+    Timestamp time = 1000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    std::vector<std::vector<std::string>> results;
+    int topk = 5;
+    for (int q = 0; q < num_queries; ++q) {
+        std::vector<std::string> result;
+        for (int k = 0; k < topk; ++k) {
+            int index = q * topk + k;
+            result.emplace_back(std::to_string(qr.result_ids_[index]) + "->" +
+                                std::to_string(qr.result_distances_[index]));
+        }
+        results.emplace_back(std::move(result));
+    }
+
+    Json json{results};
+    std::cout << json.dump(2);
 }

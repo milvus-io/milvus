@@ -115,8 +115,8 @@ ShowExprVisitor::visit(TermExpr& expr) {
                 return TermExtract<double>(expr);
             case DataType::FLOAT:
                 return TermExtract<float>(expr);
-            case DataType::BOOL:
-                return TermExtract<bool>(expr);
+            // case DataType::BOOL:
+            //    return TermExtract<bool>(expr);
             default:
                 PanicInfo("unsupported type");
         }
