@@ -253,7 +253,7 @@ set(annoy_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexAnnoy.cpp
         )
 if (NOT TARGET test_annoy)
-    add_executable(test_annoy test_annoy.cpp ${annoy_srcs} ${util_srcs})
+    add_executable(test_annoy test_annoy.cpp ${annoy_srcs} ${util_srcs} ${ENTRY_FILE})
 endif ()
 target_link_libraries(test_annoy ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_annoy DESTINATION unittest)

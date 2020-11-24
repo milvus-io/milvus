@@ -22,6 +22,7 @@ main(int argc, char** argv) {
     signal(SIGABRT, handle_signal);
     signal(SIGFPE, handle_signal);
     signal(SIGTERM, handle_signal);
+    signal(SIGBUS, handle_signal);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
