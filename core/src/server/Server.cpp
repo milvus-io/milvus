@@ -340,7 +340,9 @@ Server::StopTimers() {
             LOG_SERVER_ERROR_ << "Fail to cancel timer: " << ec;
         }
     }
-    timer_executors_->Stop();
+    if (timer_executors_) {
+        timer_executors_->Stop();
+    }
 }
 
 std::string
