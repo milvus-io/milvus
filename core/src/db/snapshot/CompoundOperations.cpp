@@ -15,6 +15,7 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/IterateHandler.h"
@@ -922,6 +923,31 @@ GetSnapshotIDsOperation::DoExecute(StorePtr store) {
 const IDS_TYPE&
 GetSnapshotIDsOperation::GetIDs() const {
     return ids_;
+}
+
+GetAllActiveSnapshotIDsOperation::GetAllActiveSnapshotIDsOperation()
+    : BaseT(OperationContext(), ScopedSnapshotT(), OperationsType::O_Compound) {
+}
+
+Status
+GetAllActiveSnapshotIDsOperation::DoExecute(StorePtr store) {
+    std::vector<CollectionCommitPtr> ccs;
+    STATUS_CHECK(store->GetActiveResources<CollectionCommit>(ccs));
+    for (auto& cc : ccs) {
+        auto cid = cc->GetCollectionId();
+        auto it = cid_ccid_.find(cid);
+        if (it == cid_ccid_.end()) {
+            cid_ccid_[cid] = cc->GetID();
+        } else {
+            cid_ccid_[cid] = std::max(it->second, cc->GetID());
+        }
+    }
+    return Status::OK();
+}
+
+const std::map<ID_TYPE, ID_TYPE>&
+GetAllActiveSnapshotIDsOperation::GetIDs() const {
+    return cid_ccid_;
 }
 
 GetCollectionIDsOperation::GetCollectionIDsOperation(bool reversed)
