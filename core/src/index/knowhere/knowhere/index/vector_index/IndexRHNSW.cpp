@@ -102,6 +102,8 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
 
     real_index->hnsw.efSearch = (config[IndexParams::ef]);
     real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset);
+    real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
+    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString(index_type_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
