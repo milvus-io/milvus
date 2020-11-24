@@ -63,6 +63,9 @@ class CPUSPTAGRNG : public VecIndex {
     void
     UpdateIndexSize() override;
 
+    StatisticsPtr
+    GetStatistics() override;
+
  private:
     void
     SetParameters(const Config& config);

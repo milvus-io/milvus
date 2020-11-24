@@ -125,12 +125,12 @@ IndexRHNSW::Dim() {
     return index_->d;
 }
 
-std::string
+StatisticsPtr
 IndexRHNSW::GetStatistics() {
-    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-    real_index->update_stats(hnsw_stats->access_gini_coefficient);
-    return hnsw_stats->ToString();
+    real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
+    return hnsw_stats;
 }
 
 void

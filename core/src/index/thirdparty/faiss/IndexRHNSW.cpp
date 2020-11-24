@@ -194,8 +194,21 @@ void IndexRHNSW::init_hnsw() {
 }
 
 void
-IndexRHNSW::update_stats(std::vector<double> &ret) {
+IndexRHNSW::calculate_stats(std::vector<double> &ret) {
     stats.CaculateStatistics(ret);
+}
+
+void
+IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
+    for (auto i = 0; i < n; ++ i) {
+        for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
+            auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
+            if (tgt == stats.access_cnt.end())
+                stats.access_cnt[query_stats[i].access_points[j]] = 1;
+            else
+                tgt->second += 1;
+        }
+    }
 }
 
 void IndexRHNSW::train(idx_t n, const float* x)
@@ -267,6 +280,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
             distances[i] = -distances[i];
         }
     }
+//    update_stats(n, query_stats);
     for (auto i = 0; i < n; ++ i) {
         for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
             auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);

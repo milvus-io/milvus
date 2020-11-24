@@ -37,6 +37,9 @@ class IVFSQ : public IVF {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
 };
 
 using IVFSQPtr = std::shared_ptr<IVFSQ>;

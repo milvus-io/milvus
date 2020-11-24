@@ -68,7 +68,7 @@ class VecIndex : public Index {
     virtual int64_t
     Count() = 0;
 
-    virtual std::string
+    virtual StatisticsPtr
     GetStatistics() = 0;
 
     virtual IndexType

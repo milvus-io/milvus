@@ -231,5 +231,11 @@ IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int6
     index_->search(n, data, k, distances, labels, bitset);
 }
 
+StatisticsPtr
+IDMAP::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIDMAP has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

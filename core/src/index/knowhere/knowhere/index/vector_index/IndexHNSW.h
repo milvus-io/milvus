@@ -58,7 +58,7 @@ class IndexHNSW : public VecIndex {
     void
     UpdateIndexSize() override;
 
-    std::string
+    StatisticsPtr
     GetStatistics() override;
 
  private:

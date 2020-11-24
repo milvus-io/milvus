@@ -375,5 +375,11 @@ IVF_NM::UpdateIndexSize() {
     index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
+StatisticsPtr
+IVF_NM::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIVF_NM has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus
