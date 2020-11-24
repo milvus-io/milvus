@@ -13,17 +13,17 @@
 
 #include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include <vector>
 #include <functional>
 #include <memory>
+#include <vector>
 
-#include "utils/ThreadPool.h"
 #include "utils/Log.h"
+#include "utils/ThreadPool.h"
 
 namespace milvus {
 
 struct TimerContext {
-    using HandlerT =std::function<void(const boost::system::error_code&)>;
+    using HandlerT = std::function<void(const boost::system::error_code&)>;
     TimerContext(boost::asio::io_service& io, int interval_us, HandlerT& handler, ThreadPoolPtr pool)
         : io_(io), interval_(interval_us), handler_(handler), timer_(io, interval_), pool_(pool) {
     }
@@ -38,8 +38,7 @@ struct TimerContext {
     ThreadPoolPtr pool_;
 };
 
-inline
-void
+inline void
 TimerContext::Reschedule(const boost::system::error_code& ec) {
     pool_->enqueue(handler_, ec);
     boost::system::error_code e;

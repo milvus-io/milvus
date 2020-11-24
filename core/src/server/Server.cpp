@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <cstring>
+#include <memory>
 #include <unordered_map>
 
 #include "db/snapshot/Snapshots.h"

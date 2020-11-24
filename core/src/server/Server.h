@@ -11,9 +11,9 @@
 
 #pragma once
 
+#include <boost/asio.hpp>
 #include <string>
 #include <vector>
-#include <boost/asio.hpp>
 
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"

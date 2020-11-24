@@ -12,6 +12,7 @@
 #pragma once
 
 #include <fiu/fiu-local.h>
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -22,7 +23,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <atomic>
 
 #define MAX_THREADS_NUM 32
 
@@ -103,8 +103,7 @@ ThreadPool::enqueue(F&& f, Args&&... args) -> std::future<typename std::result_o
     return res;
 }
 
-inline
-void
+inline void
 ThreadPool::Stop() {
     if (stop_) {
         return;
@@ -118,7 +117,6 @@ ThreadPool::Stop() {
         worker.join();
     }
 }
-
 
 // the destructor joins all threads
 inline ThreadPool::~ThreadPool() {
