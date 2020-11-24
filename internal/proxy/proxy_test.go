@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -25,6 +24,7 @@ import (
 
 var ctx context.Context
 var cancel func()
+var proxyAddress = "127.0.0.1:5053"
 var proxyConn *grpc.ClientConn
 var proxyClient servicepb.MilvusServiceClient
 
@@ -81,13 +81,8 @@ func setup() {
 
 	startMaster(ctx)
 	startProxy(ctx)
-	proxyAddr := Params.NetWorkAddress()
-	addr := strings.Split(proxyAddr, ":")
-	if addr[0] == "0.0.0.0" {
-		proxyAddr = "127.0.0.1:" + addr[1]
-	}
 
-	conn, err := grpc.DialContext(ctx, proxyAddr, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, proxyAddress, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		log.Fatalf("Connect to proxy failed, error= %v", err)
 	}

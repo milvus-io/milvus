@@ -12,6 +12,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.3.2
 	github.com/google/btree v1.0.0
+	github.com/json-iterator/go v1.1.10
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.5
@@ -25,7 +26,7 @@ require (
 	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463 // indirect
 	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/prometheus/client_golang v1.5.1 // indirect
-	github.com/prometheus/common v0.10.0 // indirect
+	github.com/prometheus/common v0.10.0
 	github.com/prometheus/procfs v0.1.3 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0

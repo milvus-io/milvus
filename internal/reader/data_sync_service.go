@@ -30,9 +30,7 @@ func (dsService *dataSyncService) start() {
 }
 
 func (dsService *dataSyncService) close() {
-	if dsService.fg != nil {
-		dsService.fg.Close()
-	}
+	dsService.fg.Close()
 }
 
 func (dsService *dataSyncService) initNodes() {

@@ -13,6 +13,7 @@ package reader
 import "C"
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"log"
 	"strconv"
 	"sync"
 
@@ -37,13 +38,18 @@ type collectionReplica interface {
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
+	hasCollection(collectionID UniqueID) bool
 
 	// partition
 	// Partition tags in different collections are not unique,
 	// so partition api should specify the target collection.
+	getPartitionNum(collectionID UniqueID) (int, error)
 	addPartition(collectionID UniqueID, partitionTag string) error
 	removePartition(collectionID UniqueID, partitionTag string) error
+	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
+	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
 	getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error)
+	hasPartition(collectionID UniqueID, partitionTag string) bool
 
 	// segment
 	getSegmentNum() int
@@ -52,8 +58,6 @@ type collectionReplica interface {
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
-
-	freeAll()
 }
 
 type collectionReplicaImpl struct {
@@ -142,7 +146,31 @@ func (colReplica *collectionReplicaImpl) getCollectionByName(collectionName stri
 	return nil, errors.New("Cannot found collection: " + collectionName)
 }
 
+func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bool {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for _, col := range colReplica.collections {
+		if col.ID() == collectionID {
+			return true
+		}
+	}
+	return false
+}
+
 //----------------------------------------------------------------------------------------------------- partition
+func (colReplica *collectionReplicaImpl) getPartitionNum(collectionID UniqueID) (int, error) {
+	collection, err := colReplica.getCollectionByID(collectionID)
+	if err != nil {
+		return -1, err
+	}
+
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	return len(collection.partitions), nil
+}
+
 func (colReplica *collectionReplicaImpl) addPartition(collectionID UniqueID, partitionTag string) error {
 	collection, err := colReplica.getCollectionByID(collectionID)
 	if err != nil {
@@ -182,6 +210,61 @@ func (colReplica *collectionReplicaImpl) removePartition(collectionID UniqueID, 
 	return nil
 }
 
+func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
+	if !colReplica.hasCollection(colMeta.ID) {
+		err := errors.New("Cannot find collection, id = " + strconv.FormatInt(colMeta.ID, 10))
+		return err
+	}
+	pToAdd := make([]string, 0)
+	for _, partitionTag := range colMeta.PartitionTags {
+		if !colReplica.hasPartition(colMeta.ID, partitionTag) {
+			pToAdd = append(pToAdd, partitionTag)
+		}
+	}
+
+	for _, tag := range pToAdd {
+		err := colReplica.addPartition(colMeta.ID, tag)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error {
+	col, err := colReplica.getCollectionByID(colMeta.ID)
+	if err != nil {
+		return err
+	}
+
+	colReplica.mu.Lock()
+
+	pToDel := make([]string, 0)
+	for _, partition := range col.partitions {
+		hasPartition := false
+		for _, tag := range colMeta.PartitionTags {
+			if partition.partitionTag == tag {
+				hasPartition = true
+			}
+		}
+		if !hasPartition {
+			pToDel = append(pToDel, partition.partitionTag)
+		}
+	}
+
+	colReplica.mu.Unlock()
+
+	for _, tag := range pToDel {
+		err := colReplica.removePartition(col.ID(), tag)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	return nil
+}
+
 func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error) {
 	collection, err := colReplica.getCollectionByID(collectionID)
 	if err != nil {
@@ -198,6 +281,25 @@ func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID
 	}
 
 	return nil, errors.New("cannot find partition, tag = " + partitionTag)
+}
+
+func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionTag string) bool {
+	collection, err := colReplica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	for _, p := range *collection.Partitions() {
+		if p.Tag() == partitionTag {
+			return true
+		}
+	}
+
+	return false
 }
 
 //----------------------------------------------------------------------------------------------------- segment
@@ -302,14 +404,4 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	_, ok := colReplica.segments[segmentID]
 
 	return ok
-}
-
-//-----------------------------------------------------------------------------------------------------
-func (colReplica *collectionReplicaImpl) freeAll() {
-	for _, seg := range colReplica.segments {
-		deleteSegment(seg)
-	}
-	for _, col := range colReplica.collections {
-		deleteCollection(col)
-	}
 }
