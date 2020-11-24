@@ -42,6 +42,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: Cache Docker Volumes
+        uses: actions/cache@v1
+        with:
+          path: .docker
+          key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('internal/core/**') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-
       - name: Dockerfile Lint
         uses: reviewdog/action-hadolint@v1
         with:
