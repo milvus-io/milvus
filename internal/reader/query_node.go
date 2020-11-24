@@ -69,5 +69,18 @@ func (node *QueryNode) Start() {
 }
 
 func (node *QueryNode) Close() {
-	// TODO: close services
+	<-node.ctx.Done()
+	// free collectionReplica
+	(*node.replica).freeAll()
+
+	// close services
+	if node.dataSyncService != nil {
+		(*node.dataSyncService).close()
+	}
+	if node.searchService != nil {
+		(*node.searchService).close()
+	}
+	if node.statsService != nil {
+		(*node.statsService).close()
+	}
 }

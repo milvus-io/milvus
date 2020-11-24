@@ -52,6 +52,8 @@ type collectionReplica interface {
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
+
+	freeAll()
 }
 
 type collectionReplicaImpl struct {
@@ -300,4 +302,14 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	_, ok := colReplica.segments[segmentID]
 
 	return ok
+}
+
+//-----------------------------------------------------------------------------------------------------
+func (colReplica *collectionReplicaImpl) freeAll() {
+	for _, seg := range colReplica.segments {
+		deleteSegment(seg)
+	}
+	for _, col := range colReplica.collections {
+		deleteCollection(col)
+	}
 }

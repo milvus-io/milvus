@@ -135,8 +135,7 @@ func (p *Proxy) AddCloseCallback(callbacks ...func()) {
 func (p *Proxy) grpcLoop() {
 	defer p.proxyLoopWg.Done()
 
-	// TODO: use address in config instead
-	lis, err := net.Listen("tcp", ":5053")
+	lis, err := net.Listen("tcp", Params.NetWorkAddress())
 	if err != nil {
 		log.Fatalf("Proxy grpc server fatal error=%v", err)
 	}
