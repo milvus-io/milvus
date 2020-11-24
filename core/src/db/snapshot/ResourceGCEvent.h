@@ -21,6 +21,7 @@
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus::engine::snapshot {
 
@@ -30,12 +31,18 @@ class ResourceGCEvent : public GCEvent {
     using Ptr = std::shared_ptr<ResourceGCEvent>;
 
     explicit ResourceGCEvent(typename ResourceT::Ptr res) : res_(res) {
+        auto is_cluster = config.cluster.enable();
+        auto role = config.cluster.role();
+        read_only_ = is_cluster && (role == ClusterRole::RO);
     }
 
     ~ResourceGCEvent() = default;
 
     Status
     Process(StorePtr store) override {
+        if (read_only_) {
+            return Status::OK();
+        }
         /* mark resource as 'deleted' in meta */
         auto sd_op = std::make_shared<SoftDeleteOperation<ResourceT>>(res_->GetID());
         STATUS_CHECK((*sd_op)(store));
@@ -93,6 +100,8 @@ class ResourceGCEvent : public GCEvent {
 
  private:
     typename ResourceT::Ptr res_;
+
+    bool read_only_ = false;
 };
 
 }  // namespace milvus::engine::snapshot
