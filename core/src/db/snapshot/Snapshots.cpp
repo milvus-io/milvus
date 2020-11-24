@@ -26,6 +26,8 @@ namespace milvus::engine::snapshot {
 /* Snapshots::DropAll() { */
 /* } */
 
+static constexpr int DEFAULT_REFRESH_INTERVAL_US = 500 * 1000;
+
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
     ScopedSnapshotT ss;
@@ -213,7 +215,23 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 
 void
 Snapshots::Refresh(const boost::system::error_code& ec) {
-    std::cout << "Do Refresh " << std::endl;
+    auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
+    auto status = (*op)(store_);
+    if (!status.ok()) {
+        LOG_SERVER_ERROR_ << "Snapshots::Refresh failed: " << status.message();
+        // TODO: Should be monitored
+        return;
+    }
+    auto ids = op->GetIDs();
+    ScopedSnapshotT ss;
+    for (auto& [cid, ccid] : ids) {
+        /* std::cout << "cid: " << cid << " ccid: " << ccid << std::endl; */
+        auto status = LoadSnapshot(store_, ss, cid, ccid);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << "Snapshots::Refresh failed: " << status.message();
+        }
+        /* std::cout << ss->ToString() << std::endl; */
+    }
 }
 
 std::vector<TimerContext::Context>
@@ -223,7 +241,7 @@ Snapshots::GetTimersContext() {
     auto role = config.cluster.role();
     if (is_cluster && (role == ClusterRole::RO)) {
         TimerContext::Context ctx;
-        ctx.interval_us = 200000;
+        ctx.interval_us = DEFAULT_REFRESH_INTERVAL_US;
         ctx.handler = std::bind(&Snapshots::Refresh, this, std::placeholders::_1);
         timers.push_back(std::move(ctx));
     }
@@ -258,12 +276,12 @@ Snapshots::StartService() {
         kill(0, SIGUSR1);
     }
 
-    auto store = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
-    snapshot::OperationExecutor::Init(store);
+    store_ = snapshot::Store::Build(config.general.meta_uri(), meta_path, codec::Codec::instance().GetSuffixSet());
+    snapshot::OperationExecutor::Init(store_);
     snapshot::OperationExecutor::GetInstance().Start();
-    snapshot::EventExecutor::Init(store);
+    snapshot::EventExecutor::Init(store_);
     snapshot::EventExecutor::GetInstance().Start();
-    return snapshot::Snapshots::GetInstance().Init(store);
+    return snapshot::Snapshots::GetInstance().Init(store_);
 }
 
 Status
