@@ -17,107 +17,56 @@
 #include <vector>
 
 namespace milvus {
-namespace server {
 
 class SystemInfo {
- private:
-    int64_t total_ram_ = 0;
-    clock_t last_cpu_ = clock_t();
-    clock_t last_sys_cpu_ = clock_t();
-    clock_t last_user_cpu_ = clock_t();
-    std::chrono::system_clock::time_point net_time_ = std::chrono::system_clock::now();
-    int32_t num_processors_ = 0;
-    int32_t num_physical_processors_ = 0;
-    // number of GPU
-    uint32_t num_device_ = 0;
-    int64_t in_octets_ = 0;
-    int64_t out_octets_ = 0;
-    bool initialized_ = false;
-
  public:
-    static SystemInfo&
-    GetInstance() {
-        static SystemInfo instance;
-        return instance;
-    }
+    static void
+    CpuUtilizationRatio(clock_t& cpu, clock_t& sys_cpu, clock_t& user_cpu);
 
-    void
-    Init();
+    static int64_t
+    CpuTemperature();
 
-    int32_t
-    num_processor() const {
-        return num_processors_;
-    }
+#ifdef MILVUS_GPU_VERSION
+    static void
+    GpuInit();
 
-    int32_t
-    num_physical_processors() const {
-        return num_physical_processors_;
-    }
+    static int64_t
+    GpuUtilizationRatio(int64_t device_id);
 
-    int32_t
-    num_device() const {
-        return num_device_;
-    }
+    static int64_t
+    GpuTemperature(int64_t device_id);
 
-    int64_t
-    get_inoctets() {
-        return in_octets_;
-    }
+    static int64_t
+    GpuMemUsage(int64_t device_id);
 
-    int64_t
-    get_octets() {
-        return out_octets_;
-    }
+    static int64_t
+    GpuMemTotal(int64_t device_id);
 
-    std::chrono::system_clock::time_point
-    get_nettime() {
-        return net_time_;
-    }
+    static int64_t
+    GpuMemAvailable(int64_t device_id);
+#endif
 
-    void
-    set_inoctets(int64_t value) {
-        in_octets_ = value;
-    }
+    static int64_t
+    MemUsage();
 
-    void
-    set_outoctets(int64_t value) {
-        out_octets_ = value;
-    }
+    static int64_t
+    MemTotal();
 
-    void
-    set_nettime() {
-        net_time_ = std::chrono::system_clock::now();
-    }
+    static int64_t
+    MemAvailable();
 
-    int64_t
-    ParseLine(char* line);
-    int64_t
-    GetPhysicalMemory();
-    int64_t
-    GetProcessUsedMemory();
-    double
-    MemoryPercent();
-    double
-    CPUPercent();
-    std::pair<int64_t, int64_t>
-    Octets();
-    std::vector<int64_t>
-    GPUMemoryTotal();
-    std::vector<int64_t>
-    GPUMemoryUsed();
+    static int64_t
+    NetworkInOctets();
 
-    std::vector<double>
-    CPUCorePercent();
-    std::vector<int64_t>
-    getTotalCpuTime(std::vector<int64_t>& workTime);
-    std::vector<int64_t>
-    GPUTemperature();
-    std::vector<float>
-    CPUTemperature();
+    static int64_t
+    NetworkOutOctets();
 
-    void
-    GetSysInfoJsonStr(std::string& result);
+ private:
+    static int64_t
+    parse_line(char* line);
+
+    static std::pair<int64_t, int64_t>
+    octets();
 };
 
-}  // namespace server
 }  // namespace milvus

@@ -37,9 +37,6 @@ constexpr int32_t NLIST = 1024;
 const char* DIMENSION = "dim";
 const char* METRICTYPE = "metric_type";
 const char* INDEXTYPE = "index_type";
-constexpr int64_t ADD_ENTITY_LOOP = 5;
-constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::IVF_FLAT;
-constexpr int32_t NLIST = 16384;
 
 void
 PrintEntity(const std::string& tag, const milvus::VectorData& entity) {

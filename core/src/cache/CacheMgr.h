@@ -12,7 +12,6 @@
 #pragma once
 
 #include "Cache.h"
-#include "metrics/Metrics.h"
 #include "utils/Log.h"
 
 #include <memory>

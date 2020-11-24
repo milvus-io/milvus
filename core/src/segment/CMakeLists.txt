@@ -18,6 +18,7 @@ add_library( segment STATIC )
 target_sources( segment PRIVATE ${SEGMENT_FILES}
                                 ${THIRDPARTY_DABLOOMS_FILES}
                                 )
-target_link_libraries( segment  sqlite
+target_link_libraries( segment  metrics
+                                sqlite
                                 mysqlpp
                                 fiu )

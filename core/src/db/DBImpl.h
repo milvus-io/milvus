@@ -138,12 +138,6 @@ class DBImpl : public DB, public ConfigObserver {
     TimingFlushThread();
 
     void
-    StartMetricTask();
-
-    void
-    TimingMetricThread();
-
-    void
     StartBuildIndexTask(const std::vector<std::string>& collection_names, bool force_build);
 
     void

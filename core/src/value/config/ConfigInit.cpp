@@ -150,11 +150,6 @@ InitConfig() {
         Bool(logs.log_to_stdout, false),
         Bool(logs.log_to_file, true),
 
-        /* metric */
-        Bool(metric.enable, false),
-        String(metric.address, "127.0.0.1"),
-        Integer(metric.port, 1025, 65534, 9091),
-
         /* tracing */
         String(tracing.json_config_path, ""),
 
@@ -356,20 +351,6 @@ logs:
   log_rotate_num: @logs.log_rotate_num@
   log_to_stdout: @logs.log_to_stdout@
   log_to_file: @logs.log_to_file@
-
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# Metric Config        | Description                                                | Type       | Default         |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# enable               | Enable monitoring function or not.                         | Boolean    | false           |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# address              | Pushgateway address                                        | IP         | 127.0.0.1       +
-#----------------------+------------------------------------------------------------+------------+-----------------+
-# port                 | Pushgateway port, port range (1024, 65535)                 | Integer    | 9091            |
-#----------------------+------------------------------------------------------------+------------+-----------------+
-metric:
-  enable: @metric.enable@
-  address: @metric.address@
-  port: @metric.port@
 
 )";
 

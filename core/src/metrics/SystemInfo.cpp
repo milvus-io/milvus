@@ -10,16 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "metrics/SystemInfo.h"
-#include "thirdparty/nlohmann/json.hpp"
-#include "utils/Exception.h"
-#include "utils/Log.h"
-
 #include <dirent.h>
-#include <fiu/fiu-local.h>
 #include <sys/sysinfo.h>
 #include <sys/times.h>
 #include <unistd.h>
 #include <map>
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -28,275 +25,30 @@
 #endif
 
 namespace milvus {
-namespace server {
 
 void
-SystemInfo::Init() {
-    if (initialized_) {
-        return;
-    }
-
-    initialized_ = true;
-
-    // initialize CPU information
+SystemInfo::CpuUtilizationRatio(clock_t& cpu, clock_t& sys_cpu, clock_t& user_cpu) {
     try {
-        struct tms time_sample;
-        last_cpu_ = times(&time_sample);
-        last_sys_cpu_ = time_sample.tms_stime;
-        last_user_cpu_ = time_sample.tms_utime;
-        num_processors_ = 0;
-        FILE* file = fopen("/proc/cpuinfo", "r");
-        if (file) {
-            char line[128];
-            while (fgets(line, 128, file) != nullptr) {
-                if (strncmp(line, "processor", 9) == 0) {
-                    num_processors_++;
-                }
-                if (strncmp(line, "physical", 8) == 0) {
-                    num_physical_processors_ = ParseLine(line);
-                }
-            }
-            fclose(file);
-        } else {
-            LOG_SERVER_ERROR_ << "Failed to read /proc/cpuinfo";
-        }
-        total_ram_ = GetPhysicalMemory();
+        struct tms time_first;
+        cpu = times(&time_first);
+        sys_cpu = time_first.tms_stime;
+        user_cpu = time_first.tms_utime;
     } catch (std::exception& ex) {
-        std::string msg = "Failed to read /proc/cpuinfo, reason: " + std::string(ex.what());
-        LOG_SERVER_ERROR_ << msg;
-    }
-
-#ifdef MILVUS_GPU_VERSION
-    // initialize GPU information
-    nvmlReturn_t nvmlresult;
-    nvmlresult = nvmlInit();
-    fiu_do_on("SystemInfo.Init.nvmInit_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
-    if (NVML_SUCCESS != nvmlresult) {
-        LOG_SERVER_ERROR_ << "System information initilization failed";
-        return;
-    }
-    nvmlresult = nvmlDeviceGetCount(&num_device_);
-    fiu_do_on("SystemInfo.Init.nvm_getDevice_fail", nvmlresult = NVML_ERROR_NOT_FOUND);
-    if (NVML_SUCCESS != nvmlresult) {
-        LOG_SERVER_ERROR_ << "Unable to get devidce number";
-        return;
-    }
-#endif
-
-    // initialize network traffic information
-    try {
-        std::pair<int64_t, int64_t> in_and_out_octets = Octets();
-        in_octets_ = in_and_out_octets.first;
-        out_octets_ = in_and_out_octets.second;
-        net_time_ = std::chrono::system_clock::now();
-    } catch (std::exception& ex) {
-        std::string msg = "Failed to initialize network traffic information, reason: " + std::string(ex.what());
-        LOG_SERVER_ERROR_ << msg;
+        std::string msg = "Cannot get cpu utilization ratio, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
     }
 }
 
 int64_t
-SystemInfo::ParseLine(char* line) {
-    // This assumes that a digit will be found and the line ends in " Kb".
-    int i = strlen(line);
-    const char* p = line;
-    while (*p < '0' || *p > '9') {
-        p++;
-    }
-    line[i - 3] = '\0';
-    i = atoi(p);
-    return i;
-}
-
-int64_t
-SystemInfo::GetPhysicalMemory() {
-    struct sysinfo memInfo;
-    sysinfo(&memInfo);
-    int64_t totalPhysMem = memInfo.totalram;
-    // Multiply in next statement to avoid int overflow on right hand side...
-    totalPhysMem *= memInfo.mem_unit;
-
-    return totalPhysMem;
-}
-
-int64_t
-SystemInfo::GetProcessUsedMemory() {
+SystemInfo::CpuTemperature() {
+    int64_t temperature = 0;
     try {
-        // Note: this value is in KB!
-        FILE* file = fopen("/proc/self/status", "r");
-        int64_t result = 0;
-        constexpr int64_t KB = 1024;
-        if (file) {
-            constexpr int64_t line_length = 128;
-            char line[line_length];
-
-            while (fgets(line, line_length, file) != nullptr) {
-                if (strncmp(line, "VmRSS:", 6) == 0) {
-                    result = ParseLine(line);
-                    break;
-                }
-            }
-            fclose(file);
-        } else {
-            LOG_SERVER_ERROR_ << "Failed to read /proc/self/status";
-        }
-
-        // return value in Byte
-        return (result * KB);
-    } catch (std::exception& ex) {
-        std::string msg = "Failed to read /proc/self/status, reason: " + std::string(ex.what());
-        LOG_SERVER_ERROR_ << msg;
-        return 0;
-    }
-}
-
-double
-SystemInfo::MemoryPercent() {
-    fiu_do_on("SystemInfo.MemoryPercent.mock", initialized_ = false);
-    if (!initialized_) {
-        Init();
-    }
-
-    auto mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
-    return mem_used / static_cast<double>(total_ram_);
-}
-
-std::vector<double>
-SystemInfo::CPUCorePercent() {
-    std::vector<int64_t> prev_work_time_array;
-    std::vector<int64_t> prev_total_time_array = getTotalCpuTime(prev_work_time_array);
-    usleep(100000);
-    std::vector<int64_t> cur_work_time_array;
-    std::vector<int64_t> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
-
-    std::vector<double> cpu_core_percent;
-    for (size_t i = 0; i < cur_total_time_array.size(); i++) {
-        double total_cpu_time = cur_total_time_array[i] - prev_total_time_array[i];
-        double cpu_work_time = cur_work_time_array[i] - prev_work_time_array[i];
-        cpu_core_percent.push_back((cpu_work_time / total_cpu_time) * 100);
-    }
-    return cpu_core_percent;
-}
-
-std::vector<int64_t>
-SystemInfo::getTotalCpuTime(std::vector<int64_t>& work_time_array) {
-    std::vector<int64_t> total_time_array;
-    try {
-        FILE* file = fopen("/proc/stat", "r");
-        fiu_do_on("SystemInfo.getTotalCpuTime.open_proc", file = nullptr);
-        if (file == nullptr) {
-            LOG_SERVER_ERROR_ << "Failed to read /proc/stat";
-            return total_time_array;
-        }
-
-        int64_t user = 0, nice = 0, system = 0, idle = 0;
-        int64_t iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
-
-        for (int i = 0; i < num_processors_; i++) {
-            char buffer[1024];
-            char* ret = fgets(buffer, sizeof(buffer) - 1, file);
-            fiu_do_on("SystemInfo.getTotalCpuTime.read_proc", ret = nullptr);
-            if (ret == nullptr) {
-                LOG_SERVER_ERROR_ << "Could not read stat file";
-                fclose(file);
-                return total_time_array;
-            }
-
-            sscanf(buffer, "cpu  %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld %16ld", &user, &nice, &system,
-                   &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
-
-            work_time_array.push_back(user + nice + system);
-            total_time_array.push_back(user + nice + system + idle + iowait + irq + softirq + steal);
-        }
-
-        fclose(file);
-    } catch (std::exception& ex) {
-        std::string msg = "Failed to read /proc/stat, reason: " + std::string(ex.what());
-        LOG_SERVER_ERROR_ << msg;
-    }
-
-    return total_time_array;
-}
-
-double
-SystemInfo::CPUPercent() {
-    fiu_do_on("SystemInfo.CPUPercent.mock", initialized_ = false);
-    if (!initialized_) {
-        Init();
-    }
-    struct tms time_sample;
-    clock_t now;
-    double percent;
-
-    now = times(&time_sample);
-    if (now <= last_cpu_ || time_sample.tms_stime < last_sys_cpu_ || time_sample.tms_utime < last_user_cpu_) {
-        // Overflow detection. Just skip this value.
-        percent = -1.0;
-    } else {
-        percent = (time_sample.tms_stime - last_sys_cpu_) + (time_sample.tms_utime - last_user_cpu_);
-        percent /= (now - last_cpu_);
-        percent *= 100;
-    }
-    last_cpu_ = now;
-    last_sys_cpu_ = time_sample.tms_stime;
-    last_user_cpu_ = time_sample.tms_utime;
-
-    return percent;
-}
-
-std::vector<int64_t>
-SystemInfo::GPUMemoryTotal() {
-    // get GPU usage percent
-    fiu_do_on("SystemInfo.GPUMemoryTotal.mock", initialized_ = false);
-    if (!initialized_) {
-        Init();
-    }
-    std::vector<int64_t> result;
-
-#ifdef MILVUS_GPU_VERSION
-    nvmlMemory_t nvmlMemory;
-    for (uint32_t i = 0; i < num_device_; ++i) {
-        nvmlDevice_t device;
-        nvmlDeviceGetHandleByIndex(i, &device);
-        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
-        result.push_back(nvmlMemory.total);
-    }
-#endif
-
-    return result;
-}
-
-std::vector<int64_t>
-SystemInfo::GPUTemperature() {
-    fiu_do_on("SystemInfo.GPUTemperature.mock", initialized_ = false);
-    if (!initialized_) {
-        Init();
-    }
-    std::vector<int64_t> result;
-
-#ifdef MILVUS_GPU_VERSION
-    for (uint32_t i = 0; i < num_device_; i++) {
-        nvmlDevice_t device;
-        nvmlDeviceGetHandleByIndex(i, &device);
-        unsigned int temp;
-        nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &temp);
-        result.push_back(temp);
-    }
-#endif
-
-    return result;
-}
-
-std::vector<float>
-SystemInfo::CPUTemperature() {
-    std::vector<float> result;
-    std::string path = "/sys/class/hwmon/";
-    try {
+        std::vector<float> cpu_temperatures;
+        std::string path = "/sys/class/hwmon/";
         DIR* dir = opendir(path.c_str());
-        fiu_do_on("SystemInfo.CPUTemperature.opendir", dir = nullptr);
         if (!dir) {
-            LOG_SERVER_ERROR_ << "Could not open hwmon directory";
-            return result;
+            std::string msg = "Could not open hwmon directory";
+            throw std::runtime_error(msg);
         }
 
         struct dirent* ptr = nullptr;
@@ -311,55 +63,214 @@ SystemInfo::CPUTemperature() {
                     std::string object = filename;
                     object += "/temp1_input";
                     FILE* file = fopen(object.c_str(), "r");
-                    fiu_do_on("SystemInfo.CPUTemperature.openfile", file = nullptr);
                     if (file == nullptr) {
-                        LOG_SERVER_ERROR_ << "Could not open temperature file";
-                        return result;
+                        std::string msg = "Cannot open file " + object;
+                        throw std::runtime_error(msg);
                     }
                     float temp;
                     if (fscanf(file, "%f", &temp) != -1) {
-                        result.push_back(temp / 1000);
+                        cpu_temperatures.push_back(temp / 1000);
                     }
                     fclose(file);
                 }
             }
         }
         closedir(dir);
+
+        float avg_cpu_temp = 0;
+        for (float cpu_temperature : cpu_temperatures) {
+            avg_cpu_temp += cpu_temperature;
+        }
+        temperature = avg_cpu_temp / cpu_temperatures.size();
     } catch (std::exception& ex) {
-        std::string msg = "Failed to get cpu temperature, reason: " + std::string(ex.what());
-        LOG_SERVER_ERROR_ << msg;
+        std::string msg = "Cannot get cpu temperature, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
     }
 
-    return result;
+    return temperature;
 }
 
-std::vector<int64_t>
-SystemInfo::GPUMemoryUsed() {
-    // get GPU memory used
-    fiu_do_on("SystemInfo.GPUMemoryUsed.mock", initialized_ = false);
-    if (!initialized_) {
-        Init();
+int64_t
+SystemInfo::MemUsage() {
+    try {
+        // Note: this value is in KB!
+        FILE* file = fopen("/proc/self/status", "r");
+        int64_t result = 0;
+        constexpr int64_t KB = 1024;
+        if (file) {
+            constexpr int64_t line_length = 128;
+            char line[line_length];
+
+            while (fgets(line, line_length, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    result = parse_line(line);
+                    break;
+                }
+            }
+            fclose(file);
+        } else {
+            std::string msg = "Failed to read /proc/self/status";
+            throw std::runtime_error(msg);
+        }
+
+        // return value in Byte
+        return (result * KB);
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get cpu memory usage, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::MemTotal() {
+    int64_t total_physMem;
+    try {
+        struct sysinfo memInfo;
+        sysinfo(&memInfo);
+        total_physMem = memInfo.totalram;
+        // Multiply in next statement to avoid int overflow on right hand side...
+        total_physMem *= memInfo.mem_unit;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get total memory, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
     }
 
-    std::vector<int64_t> result;
+    return total_physMem;
+}
+
+int64_t
+SystemInfo::MemAvailable() {
+    try {
+        return MemTotal() - MemUsage();
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get total memory, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::NetworkInOctets() {
+    try {
+        auto in_and_out_octets = octets();
+        return in_and_out_octets.first;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get network in octets, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::NetworkOutOctets() {
+    try {
+        auto in_and_out_octets = octets();
+        return in_and_out_octets.second;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get network out octets, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
+    }
+}
 
 #ifdef MILVUS_GPU_VERSION
-    nvmlMemory_t nvmlMemory;
-    for (uint32_t i = 0; i < num_device_; ++i) {
-        nvmlDevice_t device;
-        nvmlDeviceGetHandleByIndex(i, &device);
-        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
-        result.push_back(nvmlMemory.used);
+
+void
+SystemInfo::GpuInit() {
+    // initialize GPU information
+    nvmlReturn_t nvml_result = nvmlInit();
+    if (NVML_SUCCESS != nvml_result) {
+        std::string msg = "System information initilization failed";
+        throw std::runtime_error(msg);
     }
+}
+
+int64_t
+SystemInfo::GpuUtilizationRatio(int64_t device_id) {
+    try {
+        GpuInit();
+        nvmlMemory_t nvmlMemory;
+        nvmlDevice_t device;
+        nvmlDeviceGetHandleByIndex(device_id, &device);
+        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
+        return nvmlMemory.used / nvmlMemory.total;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get gpu" + std::to_string(device_id) + " utilization ratio, reason: " + ex.what();
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::GpuTemperature(int64_t device_id) {
+    try {
+        GpuInit();
+        nvmlDevice_t device;
+        nvmlDeviceGetHandleByIndex(device_id, &device);
+        unsigned int temperature;
+        nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &temperature);
+        return temperature;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get gpu" + std::to_string(device_id) + " temperature, reason: " + ex.what();
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::GpuMemUsage(int64_t device_id) {
+    try {
+        GpuInit();
+        nvmlMemory_t nvmlMemory;
+        nvmlDevice_t device;
+        nvmlDeviceGetHandleByIndex(device_id, &device);
+        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
+        return nvmlMemory.used;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get gpu" + std::to_string(device_id) + " memory usage, reason: " + ex.what();
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::GpuMemTotal(int64_t device_id) {
+    try {
+        GpuInit();
+        nvmlMemory_t nvmlMemory;
+        nvmlDevice_t device;
+        nvmlDeviceGetHandleByIndex(device_id, &device);
+        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
+        return nvmlMemory.total;
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get gpu" + std::to_string(device_id) + " memory usage, reason: " + ex.what();
+        throw std::runtime_error(msg);
+    }
+}
+
+int64_t
+SystemInfo::GpuMemAvailable(int64_t device_id) {
+    try {
+        return GpuMemTotal(device_id) - GpuMemUsage(device_id);
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get gpu" + std::to_string(device_id) + " memory usage, reason: " + ex.what();
+        throw std::runtime_error(msg);
+    }
+}
+
 #endif
 
-    return result;
+int64_t
+SystemInfo::parse_line(char* line) {
+    // This assumes that a digit will be found and the line ends in " Kb".
+    int i = strlen(line);
+    const char* p = line;
+    while (*p < '0' || *p > '9') {
+        p++;
+    }
+    line[i - 3] = '\0';
+    i = atoi(p);
+    return i;
 }
 
 std::pair<int64_t, int64_t>
-SystemInfo::Octets() {
-    const std::string filename = "/proc/net/netstat";
+SystemInfo::octets() {
     try {
+        const std::string filename = "/proc/net/netstat";
         std::ifstream file(filename);
         std::string lastline = "";
         std::string line = "";
@@ -377,11 +288,6 @@ SystemInfo::Octets() {
             space_pos = lastline.find(' ', space_pos + 1);
         }
         // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
-        if (space_position.size() < 9) {
-            std::string err = "space_position size(" + std::to_string(space_position.size()) + ") < 9";
-            throw std::runtime_error(err);
-        }
-
         size_t inoctets_begin = space_position[6] + 1;
         size_t inoctets_length = space_position[7] - inoctets_begin;
         size_t outoctets_begin = space_position[7] + 1;
@@ -393,34 +299,10 @@ SystemInfo::Octets() {
         int64_t outoctets_bytes = std::stoull(outoctets);
         std::pair<int64_t, int64_t> res(inoctets_bytes, outoctets_bytes);
         return res;
-    } catch (std::exception& e) {
-        LOG_SERVER_ERROR_ << "failed to read file " << filename << ": " << e.what();
-        return std::pair<int64_t, int64_t>(0, 0);
-    } catch (...) {
-        LOG_SERVER_ERROR_ << "failed to read file " << filename << ": Unknown exception";
-        return std::pair<int64_t, int64_t>(0, 0);
+    } catch (std::exception& ex) {
+        std::string msg = "Cannot get octets, reason: " + std::string(ex.what());
+        throw std::runtime_error(msg);
     }
 }
 
-void
-SystemInfo::GetSysInfoJsonStr(std::string& result) {
-    std::map<std::string, std::string> sys_info_map;
-
-    sys_info_map["memory_total"] = std::to_string(GetPhysicalMemory());
-    sys_info_map["memory_used"] = std::to_string(GetProcessUsedMemory());
-
-    std::vector<int64_t> gpu_mem_total = GPUMemoryTotal();
-    std::vector<int64_t> gpu_mem_used = GPUMemoryUsed();
-    for (size_t i = 0; i < gpu_mem_total.size(); i++) {
-        std::string key_total = "gpu" + std::to_string(i) + "_memory_total";
-        std::string key_used = "gpu" + std::to_string(i) + "_memory_used";
-        sys_info_map[key_total] = std::to_string(gpu_mem_total[i]);
-        sys_info_map[key_used] = std::to_string(gpu_mem_used[i]);
-    }
-
-    nlohmann::json sys_info_json(sys_info_map);
-    result = sys_info_json.dump();
-}
-
-}  // namespace server
 }  // namespace milvus

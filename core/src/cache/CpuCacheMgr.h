@@ -16,24 +16,49 @@
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
+#include "metrics/Prometheus.h"
 #include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace cache {
 
 class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
+ public:
+    static CpuCacheMgr&
+    GetInstance();
+
  private:
     CpuCacheMgr();
 
     ~CpuCacheMgr();
 
  public:
-    static CpuCacheMgr&
-    GetInstance();
+    DataObjPtr
+    GetItem(const std::string& key) override;
 
  public:
     void
     ConfigUpdate(const std::string& name) override;
+
+ private:
+    /* metrics */
+    template <typename T>
+    using Family = prometheus::Family<T>;
+    using Counter = prometheus::Counter;
+
+    /* cache_gets_total */
+    Family<Counter>& cache_gets_total_family_ = prometheus::BuildCounter()
+                                                    .Name("milvus_cache_gets_total")
+                                                    .Help("cache_gets_total")
+                                                    .Register(prometheus.registry());
+    Counter& cache_gets_total_counter_ = cache_gets_total_family_.Add({});
+
+    /* cache_hits_total */
+    Family<Counter>& cache_hits_total_family_ = prometheus::BuildCounter()
+                                                    .Name("milvus_cache_hits_total")
+                                                    .Help("cache_hits_total")
+                                                    .Register(prometheus.registry());
+    Counter& cache_hits_total_counter_ = cache_hits_total_family_.Add({});
 };
 
 }  // namespace cache

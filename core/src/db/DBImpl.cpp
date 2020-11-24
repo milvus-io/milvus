@@ -23,8 +23,6 @@
 #include "db/snapshot/Snapshots.h"
 #include "insert/MemManagerFactory.h"
 #include "knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "metrics/Metrics.h"
-#include "metrics/SystemInfo.h"
 #include "scheduler/Definition.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/job/SearchJob.h"
@@ -117,12 +115,6 @@ DBImpl::Start() {
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         // background build index thread
         bg_index_thread_ = std::thread(&DBImpl::TimingIndexThread, this);
-    }
-
-    // background metric thread
-    fiu_do_on("options_metric_enable", options_.metric_enable_ = true);
-    if (options_.metric_enable_) {
-        bg_metric_thread_ = std::thread(&DBImpl::TimingMetricThread, this);
     }
 
     return Status::OK();
@@ -594,10 +586,6 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
         }
     }
 
-    // metrics
-    Status status = Status::OK();
-    milvus::server::CollectInsertMetrics metrics(data_chunk->count_, status);
-
     return Status::OK();
 }
 
@@ -659,7 +647,6 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     }
 
     auto vector_param = query_ptr->vectors.begin()->second;
-    milvus::server::CollectQueryMetrics metrics(vector_param->query_vector.vector_count);
 
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
@@ -922,7 +909,6 @@ DBImpl::InternalFlush(const std::string& collection_name, bool merge) {
 void
 DBImpl::TimingFlushThread() {
     SetThreadName("timing_flush");
-    server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!ServiceAvailable()) {
             LOG_ENGINE_DEBUG_ << "DB background flush thread exit";
@@ -935,55 +921,6 @@ DBImpl::TimingFlushThread() {
         } else {
             swn_flush_.Wait();
         }
-    }
-}
-
-void
-DBImpl::StartMetricTask() {
-    server::Metrics::GetInstance().KeepingAliveCounterIncrement(BACKGROUND_METRIC_INTERVAL);
-    int64_t cache_usage = cache::CpuCacheMgr::GetInstance().CacheUsage();
-    int64_t cache_total = cache::CpuCacheMgr::GetInstance().CacheCapacity();
-    fiu_do_on("DBImpl.StartMetricTask.InvalidTotalCache", cache_total = 0);
-
-    if (cache_total > 0) {
-        double cache_usage_double = cache_usage;
-        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage_double * 100 / cache_total);
-    } else {
-        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(0);
-    }
-
-    server::Metrics::GetInstance().GpuCacheUsageGaugeSet();
-    /* SS TODO */
-    size_t size;
-    auto status = GetDataSize(size);
-    if (!status.ok()) {
-        LOG_ENGINE_WARNING_ << "Get data size failed: " << status.message();
-    }
-    server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
-    server::Metrics::GetInstance().CPUUsagePercentSet();
-    server::Metrics::GetInstance().RAMUsagePercentSet();
-    server::Metrics::GetInstance().GPUPercentGaugeSet();
-    server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
-    server::Metrics::GetInstance().OctetsSet();
-
-    server::Metrics::GetInstance().CPUCoreUsagePercentSet();
-    server::Metrics::GetInstance().GPUTemperature();
-    server::Metrics::GetInstance().CPUTemperature();
-    server::Metrics::GetInstance().PushToGateway();
-}
-
-void
-DBImpl::TimingMetricThread() {
-    SetThreadName("timing_metric");
-    server::SystemInfo::GetInstance().Init();
-    while (true) {
-        if (!ServiceAvailable()) {
-            LOG_ENGINE_DEBUG_ << "DB background metric thread exit";
-            break;
-        }
-
-        swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
-        StartMetricTask();
     }
 }
 
@@ -1079,7 +1016,6 @@ DBImpl::BackgroundBuildIndexTask(std::vector<std::string> collection_names, bool
 void
 DBImpl::TimingIndexThread() {
     SetThreadName("timing_index");
-    server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!ServiceAvailable()) {
             WaitMergeFileFinish();

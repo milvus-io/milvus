@@ -22,6 +22,7 @@
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
+#include "metrics/Prometheus.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
 #include "server/delivery/ReqHandler.h"
@@ -355,6 +356,24 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     std::condition_variable insert_event_cv_;
     const int64_t max_concurrent_insert_request_size_;
     int64_t max_concurrent_insert_request_size = 0;
+
+    /* prometheus */
+    prometheus::Family<prometheus::Counter>& rpc_requests_total_ = prometheus::BuildCounter()
+                                                                       .Name("milvus_rpc_requests_total")
+                                                                       .Help("the number of rpc requests")
+                                                                       .Register(prometheus.registry());
+
+    prometheus::Counter& rpc_requests_total_counter_ = rpc_requests_total_.Add({});
+
+    prometheus::Family<prometheus::Histogram>& operation_lantency_second_family_ =
+        prometheus::BuildHistogram()
+            .Name("milvus_operation_lantency_seconds")
+            .Help("operation_lantency_seconds")
+            .Register(prometheus.registry());
+    prometheus::Histogram& operation_insert_histogram_ = operation_lantency_second_family_.Add(
+        {{"operation", "insert"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
+    prometheus::Histogram& operation_search_histogram_ = operation_lantency_second_family_.Add(
+        {{"operation", "search"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
 };
 
 }  // namespace grpc

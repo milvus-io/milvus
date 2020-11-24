@@ -51,17 +51,17 @@ add_subdirectory( segment )
 add_subdirectory( tracing )
 
 add_subdirectory( utils )
-add_subdirectory( metrics )
 add_subdirectory( query )
 add_subdirectory( db ) # target milvus_engine
 add_subdirectory( log )
+add_subdirectory( metrics )
 add_subdirectory( server )
 add_subdirectory( value )
 
 set(link_lib
         milvus_engine
-        value
         metrics
+        value
         oatpp
         query
         utils

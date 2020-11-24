@@ -68,5 +68,6 @@ target_sources( server
                         ${WEB_SERVER_FILES}
                         ${SERVER_CONTEXT_FILES}
                         )
+add_dependencies( server metrics )
 
 add_subdirectory(init)

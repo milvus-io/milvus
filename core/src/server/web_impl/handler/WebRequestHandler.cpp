@@ -972,6 +972,8 @@ WebRequestHandler::GetEntityByIDs(const std::string& collection_name, const std:
 ////////////////////////////////// Router methods ////////////////////////////////////////////
 StatusDtoT
 WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
+    // FIXME
+    /*
     auto& system_info = SystemInfo::GetInstance();
 
     devices_dto->cpu = devices_dto->cpu->createShared();
@@ -993,6 +995,7 @@ WebRequestHandler::GetDevices(DevicesDtoT& devices_dto) {
         devices_dto->gpus->emplace_back("GPU" + OString(std::to_string(i).c_str()), device_dto);
     }
 #endif
+    */
 
     ASSIGN_RETURN_STATUS_DTO(Status::OK());
 }
@@ -1907,6 +1910,14 @@ StatusDtoT
 WebRequestHandler::ServerStatus(OString& response_str) {
     std::string result_str;
     auto status = CommandLine("status", result_str);
+    response_str = status.ok() ? result_str.c_str() : "NULL";
+    ASSIGN_RETURN_STATUS_DTO(status);
+}
+
+StatusDtoT
+WebRequestHandler::GetMetrics(OString& response_str) {
+    std::string result_str;
+    auto status = CommandLine("metrics", result_str);
     response_str = status.ok() ? result_str.c_str() : "NULL";
     ASSIGN_RETURN_STATUS_DTO(status);
 }

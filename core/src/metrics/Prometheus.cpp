@@ -9,30 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "metrics/Metrics.h"
-#ifdef MILVUS_WITH_PROMETHEUS
-#include "metrics/prometheus/PrometheusMetrics.h"
-#endif
-
-#include <string>
+#include "metrics/Prometheus.h"
 
 namespace milvus {
-namespace server {
 
-MetricsBase&
-Metrics::GetInstance() {
-    static MetricsBase& instance = CreateMetricsCollector();
-    return instance;
-}
+Prometheus prometheus;
 
-MetricsBase&
-Metrics::CreateMetricsCollector() {
-#ifdef MILVUS_WITH_PROMETHEUS
-    return PrometheusMetrics::GetInstance();
-#else
-    return MetricsBase::GetInstance();
-#endif
-}
-
-}  // namespace server
 }  // namespace milvus

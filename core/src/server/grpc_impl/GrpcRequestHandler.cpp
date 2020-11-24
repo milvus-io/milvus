@@ -667,6 +667,7 @@ GrpcRequestHandler::OnPostRecvInitialMetaData(
 void
 GrpcRequestHandler::OnPreSendMessage(::grpc::experimental::ServerRpcInfo* server_rpc_info,
                                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+    rpc_requests_total_counter_.Increment();
     std::lock_guard<std::mutex> lock(context_map_mutex_);
     auto request_id = get_request_id(server_rpc_info->server_context());
 
@@ -1301,6 +1302,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext* context, const ::milvus::grpc:
 
     auto request_id = GetContext(context)->ReqID();
     CHECK_NULLPTR_RETURN(request);
+    ScopedTimer scoped_timer([this](double lantency) { this->operation_insert_histogram_.Observe(lantency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", request_id.c_str(), __func__);
 
     // By limiting the number of requests processed at the same time,
@@ -1774,6 +1776,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::QueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
+    ScopedTimer scoped_timer([this](double lantency) { this->operation_search_histogram_.Observe(lantency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status;

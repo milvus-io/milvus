@@ -30,7 +30,6 @@ target_link_libraries( test_server
                             ${UNITTEST_LIBS}
                                 server
                                  milvus_engine
-                                 metrics
                                  value
                                  stdc++
                                  utils

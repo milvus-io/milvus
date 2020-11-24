@@ -27,6 +27,8 @@ add_executable(test_storage
 target_link_libraries(test_storage
         ${UNITTEST_LIBS}
         stdc++
+        server
+        milvus_engine
         storage
         value
         utils
