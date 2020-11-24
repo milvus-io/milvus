@@ -249,10 +249,10 @@ IndexHNSW::UpdateIndexSize() {
     index_size_ = index_->cal_size();
 }
 
-std::string
+StatisticsPtr
 IndexHNSW::GetStatistics() {
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-    return hnsw_stats->ToString();
+    return hnsw_stats;
 }
 
 }  // namespace knowhere

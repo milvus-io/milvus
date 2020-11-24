@@ -350,5 +350,11 @@ IVF::SealImpl() {
 #endif
 }
 
+StatisticsPtr
+IVF::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIVF has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

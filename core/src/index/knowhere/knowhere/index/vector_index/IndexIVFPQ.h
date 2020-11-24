@@ -38,6 +38,9 @@ class IVFPQ : public IVF {
     void
     UpdateIndexSize() override;
 
+    StatisticsPtr
+    GetStatistics() override;
+
  protected:
     std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config) override;

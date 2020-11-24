@@ -67,6 +67,9 @@ class IVF : public VecIndex, public FaissBaseIndex {
     void
     UpdateIndexSize() override;
 
+    StatisticsPtr
+    GetStatistics() override;
+
 #if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;

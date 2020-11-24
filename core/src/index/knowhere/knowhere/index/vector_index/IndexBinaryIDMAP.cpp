@@ -159,5 +159,11 @@ BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distanc
     }
 }
 
+StatisticsPtr
+BinaryIDMAP::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexBinaryIDMAP has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

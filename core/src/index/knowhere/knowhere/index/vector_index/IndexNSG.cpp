@@ -178,5 +178,11 @@ NSG::UpdateIndexSize() {
     index_size_ = index_->GetSize();
 }
 
+StatisticsPtr
+NSG::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNGT has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

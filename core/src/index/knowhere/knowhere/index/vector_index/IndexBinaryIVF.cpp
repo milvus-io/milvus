@@ -104,6 +104,12 @@ BinaryIVF::UpdateIndexSize() {
     index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
+StatisticsPtr
+BinaryIVF::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexBinaryIVF has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR(dataset_ptr)

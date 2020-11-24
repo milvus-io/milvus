@@ -212,5 +212,11 @@ IndexNGT::UpdateIndexSize() {
     KNOWHERE_THROW_MSG("IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
 }
 
+StatisticsPtr
+IndexNGT::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNGT has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
 }  // namespace knowhere
 }  // namespace milvus

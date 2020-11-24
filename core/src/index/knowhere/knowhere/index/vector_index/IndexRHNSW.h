@@ -65,7 +65,7 @@ class IndexRHNSW : public VecIndex, public FaissBaseIndex {
     void
     UpdateIndexSize() override;
 
-    std::string
+    StatisticsPtr
     GetStatistics() override;
 
 };
