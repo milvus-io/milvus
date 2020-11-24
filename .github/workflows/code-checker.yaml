@@ -1,4 +1,4 @@
-name: Build and test
+name: Code Checker
 # TODO: do not trigger action for some document file update
 
 # This workflow is triggered on pushes or pull request to the repository.
@@ -10,7 +10,7 @@ on:
       - 'internal/**'
       - 'cmd/**'
       - 'build/**'
-      - '.github/workflows/main.yaml'
+      - '.github/workflows/code-checker.yaml'
       - '.env'
       - docker-compose.yml
       - Makefile
@@ -22,7 +22,7 @@ on:
       - 'internal/**'
       - 'cmd/**'
       - 'build/**'
-      - '.github/workflows/main.yaml'
+      - '.github/workflows/code-checker.yaml'
       - '.env'
       - docker-compose.yml
       - Makefile
@@ -42,18 +42,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Cache Docker Volumes
-        uses: actions/cache@v1
+      - name: Dockerfile Lint
+        uses: reviewdog/action-hadolint@v1
         with:
-          path: .docker
-          key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('internal/core/**') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-
-      - name: Start Service
-        shell: bash
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check # Default is github-pr-check
+          hadolint_ignore: DL3008
+      - name: Code Check
         run: |
-          cd ${GITHUB_WORKSPACE}/deployments/docker && docker-compose -p milvus-distributed up -d
-      - name: Build and UnitTest
-        env:
-          CHECK_BUILDER: "1"
-        run: |
-          ./build/builder.sh /bin/bash -c "make check-proto-product && make unittest"
+          ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
