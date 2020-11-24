@@ -76,7 +76,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
             hnsw_stats->distribution[i] = index_->level_stats_[i];
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
-        hnsw_stats->show();
+//        hnsw_stats->show();
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -148,7 +149,8 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         hnsw_stats->distribution[i] = index_->level_stats_[i];
     }
     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
-    hnsw_stats->show();
+//    hnsw_stats->show();
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
 }
 
 DatasetPtr
@@ -218,7 +220,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         }
     }
     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    hnsw_stats->show();
+//    hnsw_stats->show();
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
