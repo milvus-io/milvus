@@ -23,7 +23,6 @@ import (
 func TestSearch_Search(t *testing.T) {
 	Params.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// init query node
 	pulsarURL, _ := Params.pulsarAddress()
@@ -240,6 +239,6 @@ func TestSearch_Search(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	node.searchService.close()
+	cancel()
 	node.Close()
 }

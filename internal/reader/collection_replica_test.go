@@ -13,7 +13,7 @@ import (
 )
 
 //----------------------------------------------------------------------------------------------------- collection
-func TestColSegContainer_getCollectionNum(t *testing.T) {
+func TestCollectionReplica_getCollectionNum(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -62,9 +62,11 @@ func TestColSegContainer_getCollectionNum(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_addCollection(t *testing.T) {
+func TestCollectionReplica_addCollection(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -117,9 +119,11 @@ func TestColSegContainer_addCollection(t *testing.T) {
 	assert.Equal(t, collection.meta.Schema.Name, collectionName)
 	assert.Equal(t, collection.meta.ID, UniqueID(0))
 	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_removeCollection(t *testing.T) {
+func TestCollectionReplica_removeCollection(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -178,9 +182,11 @@ func TestColSegContainer_removeCollection(t *testing.T) {
 	err = (*node.replica).removeCollection(collectionID)
 	assert.NoError(t, err)
 	assert.Equal(t, (*node.replica).getCollectionNum(), 0)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_getCollectionByID(t *testing.T) {
+func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -240,9 +246,11 @@ func TestColSegContainer_getCollectionByID(t *testing.T) {
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
 	assert.Equal(t, targetCollection.meta.ID, UniqueID(0))
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_getCollectionByName(t *testing.T) {
+func TestCollectionReplica_getCollectionByName(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -302,9 +310,11 @@ func TestColSegContainer_getCollectionByName(t *testing.T) {
 	assert.NotNil(t, targetCollection)
 	assert.Equal(t, targetCollection.meta.Schema.Name, "collection0")
 	assert.Equal(t, targetCollection.meta.ID, UniqueID(0))
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_hasCollection(t *testing.T) {
+func TestCollectionReplica_hasCollection(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -356,10 +366,12 @@ func TestColSegContainer_hasCollection(t *testing.T) {
 	assert.Equal(t, hasCollection, true)
 	hasCollection = (*node.replica).hasCollection(UniqueID(1))
 	assert.Equal(t, hasCollection, false)
+
+	(*node.replica).freeAll()
 }
 
 //----------------------------------------------------------------------------------------------------- partition
-func TestColSegContainer_getPartitionNum(t *testing.T) {
+func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -426,9 +438,11 @@ func TestColSegContainer_getPartitionNum(t *testing.T) {
 	partitionNum, err := (*node.replica).getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, partitionNum, 1)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_addPartition(t *testing.T) {
+func TestCollectionReplica_addPartition(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -491,9 +505,11 @@ func TestColSegContainer_addPartition(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, partition.partitionTag, "default")
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_removePartition(t *testing.T) {
+func TestCollectionReplica_removePartition(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -559,9 +575,11 @@ func TestColSegContainer_removePartition(t *testing.T) {
 		err = (*node.replica).removePartition(collectionID, partitionTag)
 		assert.NoError(t, err)
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_addPartitionsByCollectionMeta(t *testing.T) {
+func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -630,9 +648,11 @@ func TestColSegContainer_addPartitionsByCollectionMeta(t *testing.T) {
 	assert.Equal(t, hasPartition, true)
 	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, true)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_removePartitionsByCollectionMeta(t *testing.T) {
+func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -701,9 +721,11 @@ func TestColSegContainer_removePartitionsByCollectionMeta(t *testing.T) {
 	assert.Equal(t, hasPartition, false)
 	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p2")
 	assert.Equal(t, hasPartition, false)
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_getPartitionByTag(t *testing.T) {
+func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -767,9 +789,11 @@ func TestColSegContainer_getPartitionByTag(t *testing.T) {
 		assert.Equal(t, partition.partitionTag, "default")
 		assert.NotNil(t, partition)
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_hasPartition(t *testing.T) {
+func TestCollectionReplica_hasPartition(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -831,10 +855,12 @@ func TestColSegContainer_hasPartition(t *testing.T) {
 	assert.Equal(t, hasPartition, true)
 	hasPartition = (*node.replica).hasPartition(UniqueID(0), "default1")
 	assert.Equal(t, hasPartition, false)
+
+	(*node.replica).freeAll()
 }
 
 //----------------------------------------------------------------------------------------------------- segment
-func TestColSegContainer_addSegment(t *testing.T) {
+func TestCollectionReplica_addSegment(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -901,9 +927,11 @@ func TestColSegContainer_addSegment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_removeSegment(t *testing.T) {
+func TestCollectionReplica_removeSegment(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -972,9 +1000,11 @@ func TestColSegContainer_removeSegment(t *testing.T) {
 		err = (*node.replica).removeSegment(UniqueID(i))
 		assert.NoError(t, err)
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_getSegmentByID(t *testing.T) {
+func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -1041,9 +1071,11 @@ func TestColSegContainer_getSegmentByID(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
 	}
+
+	(*node.replica).freeAll()
 }
 
-func TestColSegContainer_hasSegment(t *testing.T) {
+func TestCollectionReplica_hasSegment(t *testing.T) {
 	ctx := context.Background()
 	node := NewQueryNode(ctx, 0)
 
@@ -1114,4 +1146,81 @@ func TestColSegContainer_hasSegment(t *testing.T) {
 		hasSeg = (*node.replica).hasSegment(UniqueID(i + 100))
 		assert.Equal(t, hasSeg, false)
 	}
+
+	(*node.replica).freeAll()
+}
+
+func TestCollectionReplica_freeAll(t *testing.T) {
+	ctx := context.Background()
+	node := NewQueryNode(ctx, 0)
+
+	collectionName := "collection0"
+	collectionID := UniqueID(0)
+	fieldVec := schemapb.FieldSchema{
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name: "collection0",
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            collectionID,
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
+	assert.NoError(t, err)
+
+	collection, err := (*node.replica).getCollectionByName(collectionName)
+	assert.NoError(t, err)
+
+	assert.Equal(t, collection.meta.Schema.Name, collectionName)
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+
+	err = (*node.replica).addPartition(collectionID, collectionMeta.PartitionTags[0])
+	assert.NoError(t, err)
+
+	const segmentNum = 3
+	for i := 0; i < segmentNum; i++ {
+		err := (*node.replica).addSegment(UniqueID(i), collectionMeta.PartitionTags[0], collectionID)
+		assert.NoError(t, err)
+		targetSeg, err := (*node.replica).getSegmentByID(UniqueID(i))
+		assert.NoError(t, err)
+		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
+		hasSeg := (*node.replica).hasSegment(UniqueID(i))
+		assert.Equal(t, hasSeg, true)
+		hasSeg = (*node.replica).hasSegment(UniqueID(i + 100))
+		assert.Equal(t, hasSeg, false)
+	}
+
+	(*node.replica).freeAll()
 }
