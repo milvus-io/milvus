@@ -12,6 +12,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "unittest/utils.h"
+
 int
 main(int argc, char** argv) {
     std::cout << "Start index ut" << std::endl;
@@ -19,6 +21,7 @@ main(int argc, char** argv) {
     signal(SIGSEGV, handle_signal);
     signal(SIGABRT, handle_signal);
     signal(SIGFPE, handle_signal);
+    signal(SIGTERM, handle_signal);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
