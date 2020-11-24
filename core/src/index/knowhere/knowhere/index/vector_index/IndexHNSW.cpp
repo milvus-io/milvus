@@ -20,6 +20,7 @@
 
 #include "faiss/BuilderSuspend.h"
 #include "hnswlib/hnswalg.h"
+#include "hnswlib/hnswlib.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
 #include "knowhere/common/Exception.h"
@@ -69,15 +70,18 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
         index_->loadIndex(reader);
-        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-        hnsw_stats->max_level = index_->maxlevel_;
-        hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-        for (auto i = 0; i <= index_->maxlevel_; ++ i) {
-            hnsw_stats->distribution[i] = index_->level_stats_[i];
-        }
-        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        if (STATISTICS_ENABLE) {
+            auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+            hnsw_stats->max_level = index_->maxlevel_;
+            hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
+            for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+                hnsw_stats->distribution[i] = index_->level_stats_[i];
+            }
+            LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
 //        hnsw_stats->show();
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+            LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+            index_->stats_enable = true;
+        }
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -103,6 +107,8 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
+        if (STATISTICS_ENABLE)
+            index_->stats_enable = true;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -142,15 +148,17 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::BuilderSuspend::check_wait();
         index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
-    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-    hnsw_stats->max_level = index_->maxlevel_;
-    hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-    for (auto i = 0; i <= index_->maxlevel_; ++ i) {
-        hnsw_stats->distribution[i] = index_->level_stats_[i];
-    }
-    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    if (STATISTICS_ENABLE) {
+        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+        hnsw_stats->max_level = index_->maxlevel_;
+        hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
+        for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+            hnsw_stats->distribution[i] = index_->level_stats_[i];
+        }
+        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
 //    hnsw_stats->show();
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    }
 }
 
 DatasetPtr
@@ -166,10 +174,12 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     std::vector<hnswlib::StatisticsInfo> query_stats;
-    query_stats.resize(rows);
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-    hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
-    hnsw_stats->nq_cnt += rows;
+    if (STATISTICS_ENABLE) {
+        query_stats.resize(rows);
+        hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        hnsw_stats->nq_cnt += rows;
+    }
 
     index_->setEf(config[IndexParams::ef]);
 
@@ -188,7 +198,13 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
+        if (STATISTICS_ENABLE) {
+            ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
+        }
+        else {
+            auto dummy_stat = hnswlib::StatisticsInfo();
+            ret = index_->searchKnn(single_query, k, compare, bitset, dummy_stat);
+        }
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
@@ -210,18 +226,20 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         memcpy(p_id + i * k, ids.data(), id_size);
     }
 
-    for (auto i = 0; i < rows; ++ i) {
-        for (auto j = 0; j < query_stats[i].accessed_points.size(); ++ j) {
-            auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
-            if (tgt == hnsw_stats->access_cnt.end())
-                hnsw_stats->access_cnt[query_stats[i].accessed_points[j]] = 1;
-            else
-                tgt->second += 1;
+    if (STATISTICS_ENABLE) {
+        for (auto i = 0; i < rows; ++ i) {
+            for (auto j = 0; j < query_stats[i].accessed_points.size(); ++ j) {
+                auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
+                if (tgt == hnsw_stats->access_cnt.end())
+                    hnsw_stats->access_cnt[query_stats[i].accessed_points[j]] = 1;
+                else
+                    tgt->second += 1;
+            }
         }
-    }
-    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
 //    hnsw_stats->show();
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    }
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
@@ -256,6 +274,14 @@ StatisticsPtr
 IndexHNSW::GetStatistics() {
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
     return hnsw_stats;
+}
+
+void
+IndexHNSW::ClearStatistics() {
+    if (!STATISTICS_ENABLE)
+        return;
+    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    hnsw_stats->Clear();
 }
 
 }  // namespace knowhere

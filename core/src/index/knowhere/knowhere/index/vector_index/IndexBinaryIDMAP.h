@@ -64,6 +64,9 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     StatisticsPtr
     GetStatistics() override;
 
+    void
+    ClearStatistics() override;
+
     virtual const uint8_t*
     GetRawVectors();
 

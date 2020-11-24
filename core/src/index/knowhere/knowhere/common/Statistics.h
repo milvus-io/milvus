@@ -26,6 +26,8 @@ public:
     int64_t nq_cnt;
     virtual std::string
     ToString(const std::string &index_name) = 0;
+    virtual void
+    Clear() = 0;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
@@ -35,10 +37,9 @@ public:
     int max_level;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
-    std::vector<double> access_gini_coefficient;
 
     void
-    clear() {
+    Clear() override {
         bitset_percentage1_sum = 0.0;
         max_level = 0;
         distribution.clear();
@@ -68,7 +69,7 @@ public:
     }
 
     void
-    CaculateStatistics() {
+    CaculateStatistics(std::vector<double> &access_lorenz_curve) {
         std::vector<int64_t> cnts;
         int64_t sum = 0;
         for (auto &elem : access_cnt) {
@@ -84,11 +85,11 @@ public:
             stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
-        access_gini_coefficient.resize(gini_len << 1);
+        access_lorenz_curve.resize(gini_len << 1);
         int j = 0;
         for (auto i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                access_lorenz_curve[j] = (double)tmp_cnt / sum;
                 tmp_cnt = 0;
                 j ++;
             }
@@ -99,7 +100,7 @@ public:
         tmp_cnt = 0;
         for (auto i = len - 1; i >= 0 && j < (gini_len << 1); -- i) {
             if (len - i > stat_len[j - gini_len]) {
-                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                access_lorenz_curve[j] = (double)tmp_cnt / sum;
                 tmp_cnt = 0;
                 j ++;
             }
@@ -111,11 +112,15 @@ public:
 
     std::string
     ToString(const std::string &index_name) override {
-        CaculateStatistics();
+        std::vector<double> access_lorenz_curve;
+        CaculateStatistics(access_lorenz_curve);
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         ret << "Total queries: " << nq_cnt << std::endl;
-        ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        if (nq_cnt)
+            ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        else
+            ret << "The percentage of 1 in bitset: 0%" << std::endl;
         ret << "Max level: " << max_level << std::endl;
         ret << "Level distribution: " << std::endl;
         for (auto i = 0; i < max_level; ++ i) {
@@ -123,11 +128,11 @@ public:
         }
         std::vector<int> stat_len = {5, 10, 15, 20, 50};
         ret << "The gini coefficient of access distribution at level 1:" << std::endl;
-        for (auto i = 0; i < access_gini_coefficient.size() / 2; ++ i) {
-            ret << "The top" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        for (auto i = 0; i < access_lorenz_curve.size() / 2; ++ i) {
+            ret << "The top" << stat_len[i] << " point has " << access_lorenz_curve[i] << "% access counts" << std::endl;
         }
-        for (auto i = access_gini_coefficient.size() / 2; i < access_gini_coefficient.size(); ++ i) {
-            ret << "The last" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        for (auto i = access_lorenz_curve.size() / 2; i < access_lorenz_curve.size(); ++ i) {
+            ret << "The last" << stat_len[i] << " point has " << access_lorenz_curve[i] << "% access counts" << std::endl;
         }
         return ret.str();
     }
@@ -142,7 +147,7 @@ public:
     std::vector<double> access_gini_coefficient;
 
     void
-    clear() {
+    Clear() override {
         bitset_percentage1_sum = 0.0;
         max_level = 0;
         distribution.clear();
@@ -154,7 +159,10 @@ public:
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         ret << "Total queries: " << nq_cnt << std::endl;
-        ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        if (nq_cnt)
+            ret << "The percentage of 1 in bitset: " << bitset_percentage1_sum * 100/ nq_cnt << "%" << std::endl;
+        else
+            ret << "The percentage of 1 in bitset: 0%" << std::endl;
         ret << "Max level: " << max_level << std::endl;
         ret << "Level distribution: " << std::endl;
         for (auto i = 0; i < max_level; ++ i) {

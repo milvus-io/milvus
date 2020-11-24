@@ -195,11 +195,15 @@ void IndexRHNSW::init_hnsw() {
 
 void
 IndexRHNSW::calculate_stats(std::vector<double> &ret) {
+    if (!STATISTICS_ENABLE)
+        return;
     stats.CaculateStatistics(ret);
 }
 
 void
 IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
+    if (!STATISTICS_ENABLE)
+        return;
     for (auto i = 0; i < n; ++ i) {
         for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
             auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
@@ -209,6 +213,13 @@ IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
                 tgt->second += 1;
         }
     }
+}
+
+void
+IndexRHNSW::clear_stats() {
+    if (!STATISTICS_ENABLE)
+        return;
+    stats.Clear();
 }
 
 void IndexRHNSW::train(idx_t n, const float* x)
@@ -232,7 +243,8 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
           hnsw.max_level * d * hnsw.efSearch);
 
     std::vector<RHNSWStatInfo> query_stats;
-    query_stats.resize(n);
+    if (STATISTICS_ENABLE)
+        query_stats.resize(n);
 
     for (idx_t i0 = 0; i0 < n; i0 += check_period) {
         idx_t i1 = std::min(i0 + check_period, n);
@@ -251,7 +263,12 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
+                if (STATISTICS_ENABLE)
+                    hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
+                else {
+                    auto dummy_stat = RHNSWStatInfo();
+                    hnsw.searchKnn(*dis, k, idxi, simi, dummy_stat, bitset);
+                }
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -281,13 +298,15 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
         }
     }
 //    update_stats(n, query_stats);
-    for (auto i = 0; i < n; ++ i) {
-        for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
-            auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
-            if (tgt == stats.access_cnt.end())
-                stats.access_cnt[query_stats[i].access_points[j]] = 1;
-            else
-                tgt->second += 1;
+    if (STATISTICS_ENABLE) {
+        for (auto i = 0; i < n; ++ i) {
+            for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
+                auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
+                if (tgt == stats.access_cnt.end())
+                    stats.access_cnt[query_stats[i].access_points[j]] = 1;
+                else
+                    tgt->second += 1;
+            }
         }
     }
 

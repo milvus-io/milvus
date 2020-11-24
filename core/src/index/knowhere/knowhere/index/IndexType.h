@@ -16,6 +16,8 @@
 namespace milvus {
 namespace knowhere {
 
+extern bool STATISTICS_ENABLE;
+
 /* used in 0.7.0 */
 enum class OldIndexType {
     INVALID = 0,

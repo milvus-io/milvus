@@ -40,6 +40,9 @@ class IVFSQ : public IVF {
 
     StatisticsPtr
     GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 };
 
 using IVFSQPtr = std::shared_ptr<IVFSQ>;

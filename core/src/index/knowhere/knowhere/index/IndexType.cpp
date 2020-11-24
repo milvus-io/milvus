@@ -17,6 +17,8 @@
 namespace milvus {
 namespace knowhere {
 
+bool STATISTICS_ENABLE = false;
+
 /* used in 0.8.0 */
 namespace IndexEnum {
 const char* INVALID = "";

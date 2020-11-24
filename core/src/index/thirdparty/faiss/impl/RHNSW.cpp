@@ -143,10 +143,12 @@ void RHNSW::addPoint(DistanceComputer& ptdis, int pt_level, int pt_id) {
 
   std::unique_lock<std::mutex> lock_el(link_list_locks[pt_id]);
   std::unique_lock<std::mutex> temp_lock(global);
-  if (pt_level >= level_stats.size()) {
-    level_stats.resize(pt_level + 1, 0);
+  if (STATISTICS_ENABLE) {
+    if (pt_level >= level_stats.size()) {
+      level_stats.resize(pt_level + 1, 0);
+    }
+    level_stats[pt_level] ++;
   }
-  level_stats[pt_level] ++;
   int maxlevel_copy = max_level;
   if (pt_level <= maxlevel_copy)
     temp_lock.unlock();
@@ -407,7 +409,7 @@ void RHNSW::searchKnn(DistanceComputer& qdis, int k,
         int cand = ep_link[j];
         if (cand < 0 || cand > levels.size())
           throw std::runtime_error("cand error");
-        if (i == 1) {
+        if (STATISTICS_ENABLE && i == 1) {
           rsi.access_points.push_back(cand);
         }
         float d = qdis(cand);

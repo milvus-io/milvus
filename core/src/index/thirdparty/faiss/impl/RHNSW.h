@@ -22,6 +22,7 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/common.h>
 
 
 namespace faiss {
@@ -408,6 +409,13 @@ struct RHNSWStatistics {
                 break;
             tmp_cnt += cnts[i];
         }
+    }
+
+    void
+    Clear() {
+        max_level = 0;
+        distribution.clear();
+        access_cnt.clear();
     }
 };
 

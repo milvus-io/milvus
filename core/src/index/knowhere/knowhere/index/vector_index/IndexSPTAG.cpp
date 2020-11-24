@@ -228,6 +228,11 @@ CPUSPTAGRNG::GetStatistics() {
     return nullptr;
 }
 
+void
+CPUSPTAGRNG::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexSPTAG has not implement interface ClearStatistics yet";
+}
+
 // void
 // CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 //     SetParameters(add_config);

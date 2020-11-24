@@ -61,6 +61,9 @@ class IndexHNSW : public VecIndex {
     StatisticsPtr
     GetStatistics() override;
 
+    void
+    ClearStatistics() override;
+
  private:
     bool normalize = false;
     std::mutex mutex_;

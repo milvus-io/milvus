@@ -71,6 +71,9 @@ class VecIndex : public Index {
     virtual StatisticsPtr
     GetStatistics() = 0;
 
+    virtual void
+    ClearStatistics() = 0;
+
     virtual IndexType
     index_type() const {
         return index_type_;
