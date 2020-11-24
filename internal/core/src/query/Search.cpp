@@ -1,3 +1,14 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
 #include "Search.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
@@ -7,6 +18,8 @@
 #include "utils/tools.h"
 
 namespace milvus::query {
+using segcore::DefaultElementPerChunk;
+
 static faiss::ConcurrentBitsetPtr
 create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk_id) {
     if (!bitmaps_opt.has_value()) {
@@ -21,15 +34,14 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
     return dst;
 }
 
-using namespace segcore;
 Status
-QueryBruteForceImpl(const SegmentSmallIndex& segment,
+QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
                     const query::QueryInfo& info,
                     const float* query_data,
                     int64_t num_queries,
                     Timestamp timestamp,
                     std::optional<const BitmapSimple*> bitmaps_opt,
-                    QueryResult& results) {
+                    segcore::QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -79,7 +91,7 @@ QueryBruteForceImpl(const SegmentSmallIndex& segment,
                 x += chunk_id * DefaultElementPerChunk;
             }
         }
-        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
+        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
     }
 
     auto vec_ptr = record.get_vec_entity<float>(vecfield_offset);
@@ -101,7 +113,7 @@ QueryBruteForceImpl(const SegmentSmallIndex& segment,
                 x += chunk_id * DefaultElementPerChunk;
             }
         }
-        merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
     }
 
     // step 5: convert offset to uids

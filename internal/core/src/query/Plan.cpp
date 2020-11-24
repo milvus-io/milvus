@@ -1,9 +1,21 @@
-#include "PlanImpl.h"
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "query/ExprImpl.h"
 #include "utils/Json.h"
-#include "PlanNode.h"
 #include "utils/EasyAssert.h"
 #include "pb/service_msg.pb.h"
-#include "ExprImpl.h"
 #include <vector>
 #include <memory>
 #include <boost/align/aligned_allocator.hpp>
@@ -42,7 +54,7 @@ to_lower(const std::string& raw) {
     auto data = raw;
     std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) { return std::tolower(c); });
     return data;
-};
+}
 
 template <typename T>
 std::unique_ptr<Expr>

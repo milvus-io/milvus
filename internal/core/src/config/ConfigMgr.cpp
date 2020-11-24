@@ -68,7 +68,6 @@ ConfigMgr ConfigMgr::instance;
 
 ConfigMgr::ConfigMgr() {
     config_list_ = {
-
         /* general */
         {"timezone", CreateStringConfig("timezone", false, &config.timezone.value, "UTC+8", nullptr, nullptr)},
 

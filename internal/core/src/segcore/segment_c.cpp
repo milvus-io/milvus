@@ -1,14 +1,26 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
 #include <cstring>
 
-#include "SegmentBase.h"
-#include "Collection.h"
-#include "segment_c.h"
+#include "segcore/SegmentBase.h"
+#include "segcore/Collection.h"
+#include "segcore/segment_c.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <cstdint>
 
 CSegmentBase
-NewSegment(CCollection collection, unsigned long segment_id) {
+NewSegment(CCollection collection, uint64_t segment_id) {
     auto col = (milvus::segcore::Collection*)collection;
 
     auto segment = milvus::segcore::CreateSegment(col->get_schema());
@@ -31,13 +43,13 @@ DeleteSegment(CSegmentBase segment) {
 
 int
 Insert(CSegmentBase c_segment,
-       long int reserved_offset,
-       signed long int size,
-       const long* row_ids,
-       const unsigned long* timestamps,
+       int64_t reserved_offset,
+       int64_t size,
+       const int64_t* row_ids,
+       const uint64_t* timestamps,
        void* raw_data,
        int sizeof_per_row,
-       signed long int count) {
+       int64_t count) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     milvus::segcore::RowBasedRawData dataChunk{};
 
@@ -52,8 +64,8 @@ Insert(CSegmentBase c_segment,
     return res.code();
 }
 
-long int
-PreInsert(CSegmentBase c_segment, long int size) {
+int64_t
+PreInsert(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
 
     // TODO: delete print
@@ -63,15 +75,15 @@ PreInsert(CSegmentBase c_segment, long int size) {
 
 int
 Delete(
-    CSegmentBase c_segment, long int reserved_offset, long size, const long* row_ids, const unsigned long* timestamps) {
+    CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
 
     auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
     return res.code();
 }
 
-long int
-PreDelete(CSegmentBase c_segment, long int size) {
+int64_t
+PreDelete(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
 
     // TODO: delete print
@@ -83,9 +95,9 @@ int
 Search(CSegmentBase c_segment,
        CPlan c_plan,
        CPlaceholderGroup* c_placeholder_groups,
-       unsigned long* timestamps,
+       uint64_t* timestamps,
        int num_groups,
-       long int* result_ids,
+       int64_t* result_ids,
        float* result_distances) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
@@ -99,7 +111,7 @@ Search(CSegmentBase c_segment,
 
     // result_ids and result_distances have been allocated memory in goLang,
     // so we don't need to malloc here.
-    memcpy(result_ids, query_result.result_ids_.data(), query_result.get_row_count() * sizeof(long int));
+    memcpy(result_ids, query_result.result_ids_.data(), query_result.get_row_count() * sizeof(int64_t));
     memcpy(result_distances, query_result.result_distances_.data(), query_result.get_row_count() * sizeof(float));
 
     return res.code();
@@ -130,7 +142,7 @@ IsOpened(CSegmentBase c_segment) {
     return status == milvus::segcore::SegmentBase::SegmentState::Open;
 }
 
-long int
+int64_t
 GetMemoryUsageInBytes(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto mem_size = segment->GetMemoryUsageInBytes();
@@ -139,14 +151,14 @@ GetMemoryUsageInBytes(CSegmentBase c_segment) {
 
 //////////////////////////////////////////////////////////////////
 
-long int
+int64_t
 GetRowCount(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto row_count = segment->get_row_count();
     return row_count;
 }
 
-long int
+int64_t
 GetDeletedCount(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentBase*)c_segment;
     auto deleted_count = segment->get_deleted_count();
