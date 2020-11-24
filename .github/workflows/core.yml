@@ -57,6 +57,11 @@ jobs:
           path: .docker
           key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-
+      - name: Read CPU
+        run: |
+          echo "`cat /proc/cpuinfo`"
+      - name: Setup Debug Session
+        uses: csexton/debugger-action@master
       - name: Docker Run
         run: |
           docker-compose run ubuntu-core
@@ -110,6 +115,11 @@ jobs:
           path: .docker
           key: centos${{ matrix.centos }}-${{ hashFiles('core/**') }}
           restore-keys: centos${{ matrix.centos }}-
+      - name: Read CPU
+        run: |
+          echo "`cat /proc/cpuinfo`"
+      - name: Setup Debug Session
+        uses: csexton/debugger-action@master
       - name: Docker Run
         run: |
           docker-compose run centos-core
