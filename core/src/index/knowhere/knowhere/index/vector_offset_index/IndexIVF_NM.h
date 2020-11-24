@@ -70,6 +70,9 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     StatisticsPtr
     GetStatistics() override;
 
+    void
+    ClearStatistics() override;
+
 #if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;

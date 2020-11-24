@@ -173,5 +173,10 @@ IndexAnnoy::GetStatistics() {
     return nullptr;
 }
 
+void
+IndexAnnoy::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexAnnoy has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

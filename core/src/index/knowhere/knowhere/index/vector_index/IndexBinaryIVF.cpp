@@ -111,6 +111,11 @@ BinaryIVF::GetStatistics() {
 }
 
 void
+BinaryIVF::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexBinaryIVF has not implement interface GetStatistics yet";
+}
+
+void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR(dataset_ptr)
 

@@ -17,9 +17,13 @@
 #include <faiss/utils/distances.h>
 
 #include "NGT/lib/NGT/defines.h"
+#include "config/ServerConfig.h"
+#include "faiss/common.h"
 #include "faiss/FaissHook.h"
 #include "faiss/utils/utils.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/ConfigUtils.h"
@@ -124,6 +128,11 @@ KnowhereResource::Initialize() {
     //    NGT_LOG_DEBUG_ = &knowhere::log_debug_;
     if (config.engine.stat_optimizer_enable()) {
         faiss::LOG_DEBUG_ = &knowhere::log_debug_;
+        milvus::knowhere::STATISTICS_ENABLE = true;
+        faiss::STATISTICS_ENABLE = true;
+    } else {
+        milvus::knowhere::STATISTICS_ENABLE = false;
+        faiss::STATISTICS_ENABLE = false;
     }
 
     return Status::OK();

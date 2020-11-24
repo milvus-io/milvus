@@ -66,6 +66,9 @@ class IndexAnnoy : public VecIndex {
     GetStatistics() override;
 
     void
+    ClearStatistics() override;
+
+    void
     UpdateIndexSize() override;
 
  private:

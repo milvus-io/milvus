@@ -184,5 +184,10 @@ NSG::GetStatistics() {
     return nullptr;
 }
 
+void
+NSG::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNGT has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

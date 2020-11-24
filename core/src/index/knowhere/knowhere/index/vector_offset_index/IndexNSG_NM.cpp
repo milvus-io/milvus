@@ -187,5 +187,10 @@ NSG_NM::GetStatistics() {
     return nullptr;
 }
 
+void
+NSG_NM::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNSG_NM has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

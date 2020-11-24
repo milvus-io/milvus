@@ -165,5 +165,10 @@ BinaryIDMAP::GetStatistics() {
     return nullptr;
 }
 
+void
+BinaryIDMAP::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexBinaryIDMAP has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

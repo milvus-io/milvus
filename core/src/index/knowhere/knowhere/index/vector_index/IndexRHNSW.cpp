@@ -57,6 +57,18 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         reader.data_ = binary->data.get();
 
         auto idx = faiss::read_index(&reader);
+        if (STATISTICS_ENABLE) {
+            auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
+            auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+            hnsw_stats->max_level = real_idx->hnsw.max_level;
+            hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
+            for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+                hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
+            }
+            LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+//        hnsw_stats->show();
+            LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        }
         index_.reset(idx);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -91,8 +103,10 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
-    hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
-    hnsw_stats->nq_cnt += rows;
+    if (STATISTICS_ENABLE) {
+        hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        hnsw_stats->nq_cnt += rows;
+    }
     for (auto i = 0; i < k * rows; ++i) {
         p_id[i] = -1;
         p_dist[i] = -1;
@@ -102,8 +116,10 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
 
     real_index->hnsw.efSearch = (config[IndexParams::ef]);
     real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset);
-    real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
-    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString(index_type_);
+    if (STATISTICS_ENABLE) {
+//        real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
+        LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString(index_type_);
+    }
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -130,9 +146,21 @@ IndexRHNSW::Dim() {
 StatisticsPtr
 IndexRHNSW::GetStatistics() {
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
+    if (!STATISTICS_ENABLE)
+        return hnsw_stats;
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
     real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
     return hnsw_stats;
+}
+
+void
+IndexRHNSW::ClearStatistics() {
+    if (!STATISTICS_ENABLE)
+        return;
+    auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
+    auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
+    hnsw_stats->Clear();
+    real_index->clear_stats();
 }
 
 void

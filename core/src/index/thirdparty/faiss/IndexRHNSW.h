@@ -106,6 +106,7 @@ struct IndexRHNSW : Index {
     void update_stats(idx_t n, std::vector<RHNSWStatInfo> &ret);
 
     void calculate_stats(std::vector<double> &ret);
+    void clear_stats();
 };
 
 

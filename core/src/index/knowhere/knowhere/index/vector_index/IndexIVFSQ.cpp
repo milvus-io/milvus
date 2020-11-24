@@ -90,5 +90,10 @@ IVFSQ::GetStatistics() {
     return nullptr;
 }
 
+void
+IVFSQ::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIVFSQ has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

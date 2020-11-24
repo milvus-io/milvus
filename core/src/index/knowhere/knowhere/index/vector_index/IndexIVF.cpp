@@ -356,5 +356,10 @@ IVF::GetStatistics() {
     return nullptr;
 }
 
+void
+IVF::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIVF has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

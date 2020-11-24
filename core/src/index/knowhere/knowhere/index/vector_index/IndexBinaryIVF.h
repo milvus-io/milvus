@@ -74,6 +74,9 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     StatisticsPtr
     GetStatistics() override;
 
+    void
+    ClearStatistics() override;
+
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
     GenParams(const Config& config);
