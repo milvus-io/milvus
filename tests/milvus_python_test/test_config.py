@@ -10,12 +10,14 @@ import ujson
 
 CONFIG_TIMEOUT = 80
 
+
 class TestCacheConfig:
     """
     ******************************************************************
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -30,9 +32,9 @@ class TestCacheConfig:
         relpy = connect.set_config("cache.cache_size", '4GB')
         config_value = connect.get_config("cache.cache_size")
         assert config_value == '4GB'
-        #relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
-        #config_value = connect.get_config("cache", "insert_buffer_size")
-        #assert config_value == '1073741824'
+        # relpy = connect.set_config("cache", "insert_buffer_size", '2GB')
+        # config_value = connect.get_config("cache", "insert_buffer_size")
+        # assert config_value == '1073741824'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_cache_size_invalid_parent_key(self, connect, collection):
@@ -44,7 +46,7 @@ class TestCacheConfig:
         invalid_configs = ["Cache_config", "cache config", "cache_Config", "cacheconfig"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+str(".cache_size"))
+                config_value = connect.get_config(config + str(".cache_size"))
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_cache_size_invalid_child_key(self, connect, collection):
@@ -56,7 +58,7 @@ class TestCacheConfig:
         invalid_configs = ["Cpu_cache_size", "cpu cache_size", "cpucachecapacity"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("cache."+config)
+                config_value = connect.get_config("cache." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_cache_size_valid(self, connect, collection):
@@ -78,7 +80,7 @@ class TestCacheConfig:
         invalid_configs = ["Cache_config", "cache config", "cache_Config", "cacheconfig"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".insert_buffer_size")
+                config_value = connect.get_config(config + ".insert_buffer_size")
 
     @pytest.mark.level(2)
     def test_get_insert_buffer_size_invalid_child_key(self, connect, collection):
@@ -90,7 +92,7 @@ class TestCacheConfig:
         invalid_configs = ["Insert_buffer size", "insert buffer_size", "insertbuffersize"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("cache."+config)
+                config_value = connect.get_config("cache." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_insert_buffer_size_valid(self, connect, collection):
@@ -112,7 +114,7 @@ class TestCacheConfig:
         invalid_configs = ["preloadtable", "preload collection "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("cache."+config)
+                config_value = connect.get_config("cache." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_preload_collection_valid(self, connect, collection):
@@ -129,6 +131,7 @@ class TestCacheConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     def get_memory_available(self, connect):
         info = connect._cmd("get_system_info")
         mem_info = ujson.loads(info)
@@ -157,7 +160,7 @@ class TestCacheConfig:
         invalid_configs = ["Cache_config", "cache config", "cache_Config", "cacheconfig"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config(config+".cache_size", '4294967296')
+                relpy = connect.set_config(config + ".cache_size", '4294967296')
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -171,7 +174,7 @@ class TestCacheConfig:
         invalid_configs = ["abc", 1]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config("cache."+config, '4294967296')
+                relpy = connect.set_config("cache." + config, '4294967296')
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -216,7 +219,7 @@ class TestCacheConfig:
         invalid_configs = ["Cache_config", "cache config", "cache_Config", "cacheconfig"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config(config+".insert_buffer_size", '1073741824')
+                relpy = connect.set_config(config + ".insert_buffer_size", '1073741824')
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -257,8 +260,7 @@ class TestCacheConfig:
         mem_total = self.get_memory_total(connect)
         logging.getLogger().info(mem_total)
         with pytest.raises(Exception) as e:
-            relpy = connect.set_config("cache.cache_size", str(int(mem_total + 1)+''))
-
+            relpy = connect.set_config("cache.cache_size", str(int(mem_total + 1) + ''))
 
 
 class TestGPUConfig:
@@ -267,6 +269,7 @@ class TestGPUConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -284,7 +287,7 @@ class TestGPUConfig:
         invalid_configs = ["Engine_config", "engine config"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".gpu_search_threshold")
+                config_value = connect.get_config(config + ".gpu_search_threshold")
 
     @pytest.mark.level(2)
     def test_get_gpu_search_threshold_invalid_child_key(self, connect, collection):
@@ -298,7 +301,7 @@ class TestGPUConfig:
         invalid_configs = ["Gpu_search threshold", "gpusearchthreshold"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("gpu."+config)
+                config_value = connect.get_config("gpu." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_gpu_search_threshold_valid(self, connect, collection):
@@ -317,6 +320,7 @@ class TestGPUConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_invalid_child_key(self, connect, collection):
@@ -328,7 +332,7 @@ class TestGPUConfig:
         invalid_configs = ["abc", 1]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config("gpu."+config, 1000)
+                relpy = connect.set_config("gpu." + config, 1000)
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -343,7 +347,7 @@ class TestGPUConfig:
         invalid_configs = ["Engine_config", "engine config"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config(config+".gpu_search_threshold", 1000)
+                relpy = connect.set_config(config + ".gpu_search_threshold", 1000)
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -383,17 +387,17 @@ class TestGPUConfig:
         relpy = connect.set_config("gpu.cache_size", 1)
         config_value = connect.get_config("gpu.cache_size")
         assert config_value == '1'
-        
-        #follows can not be changed
-        #relpy = connect.set_config("gpu", "enable", "true")
-        #config_value = connect.get_config("gpu", "enable")
-        #assert config_value == "true"
-        #relpy = connect.set_config("gpu", "search_devices", "gpu0")
-        #config_value = connect.get_config("gpu", "search_devices")
-        #assert config_value == 'gpu0'
-        #relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
-        #config_value = connect.get_config("gpu", "build_index_devices")
-        #assert config_value == 'gpu0'
+
+        # follows can not be changed
+        # relpy = connect.set_config("gpu", "enable", "true")
+        # config_value = connect.get_config("gpu", "enable")
+        # assert config_value == "true"
+        # relpy = connect.set_config("gpu", "search_devices", "gpu0")
+        # config_value = connect.get_config("gpu", "search_devices")
+        # assert config_value == 'gpu0'
+        # relpy = connect.set_config("gpu", "build_index_devices", "gpu0")
+        # config_value = connect.get_config("gpu", "build_index_devices")
+        # assert config_value == 'gpu0'
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_gpu_enable_invalid_parent_key(self, connect, collection):
@@ -405,10 +409,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".enable")
+                config_value = connect.get_config(config + ".enable")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_gpu_enable_invalid_child_key(self, connect, collection):
@@ -422,7 +426,7 @@ class TestGPUConfig:
         invalid_configs = ["Enab_le", "enab_le ", "disable", "true"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("gpu."+config)
+                config_value = connect.get_config("gpu." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_gpu_enable_valid(self, connect, collection):
@@ -446,10 +450,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".cache_size")
+                config_value = connect.get_config(config + ".cache_size")
 
     @pytest.mark.level(2)
     def test_get_cache_size_invalid_child_key(self, connect, collection):
@@ -463,7 +467,7 @@ class TestGPUConfig:
         invalid_configs = ["Cache_capacity", "cachecapacity"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("gpu."+config)
+                config_value = connect.get_config("gpu." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_cache_size_valid(self, connect, collection):
@@ -486,10 +490,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".search_devices")
+                config_value = connect.get_config(config + ".search_devices")
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_search_devices_invalid_child_key(self, connect, collection):
@@ -503,7 +507,7 @@ class TestGPUConfig:
         invalid_configs = ["Search_resources"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("gpu."+config)
+                config_value = connect.get_config("gpu." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_search_devices_valid(self, connect, collection):
@@ -527,10 +531,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config(config+".build_index_devices")
+                config_value = connect.get_config(config + ".build_index_devices")
 
     @pytest.mark.level(2)
     def test_get_build_index_devices_invalid_child_key(self, connect, collection):
@@ -544,7 +548,7 @@ class TestGPUConfig:
         invalid_configs = ["Build_index_resources"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("gpu."+config)
+                config_value = connect.get_config("gpu." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_build_index_devices_valid(self, connect, collection):
@@ -564,6 +568,7 @@ class TestGPUConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_gpu_enable_invalid_parent_key(self, connect, collection):
@@ -575,10 +580,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config(config+".enable", "true")
+                relpy = connect.set_config(config + ".enable", "true")
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -591,10 +596,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config("gpu."+config, "true")
+                relpy = connect.set_config("gpu." + config, "true")
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -636,10 +641,10 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                relpy = connect.set_config(config+".cache_size", 2)
+                relpy = connect.set_config(config + ".cache_size", 2)
 
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
@@ -680,7 +685,7 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "search_devices", "gpu0")
@@ -708,7 +713,7 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44","gpu10000","gpu 0","-gpu0"]:
+        for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44", "gpu10000", "gpu 0", "-gpu0"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "search_devices", i)
 
@@ -723,7 +728,7 @@ class TestGPUConfig:
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
         invalid_configs = ["Gpu_resource_config", "gpu resource config", \
-            "gpu_resource"]
+                           "gpu_resource"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config(config, "build_index_devices", "gpu0")
@@ -751,7 +756,7 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")) == "CPU":
             pytest.skip("Only support GPU mode")
-        for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44","gpu10000","gpu 0","-gpu0"]:
+        for i in [-1, "10", "gpu-1", "gpu0, gpu1", "gpu22,gpu44", "gpu10000", "gpu 0", "-gpu0"]:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("gpu", "build_index_devices", i)
         self.reset_configs(connect)
@@ -763,6 +768,7 @@ class TestNetworkConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -778,7 +784,7 @@ class TestNetworkConfig:
         invalid_configs = ["Address", "addresses", "address "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("network."+config)
+                config_value = connect.get_config("network." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_address_valid(self, connect, collection):
@@ -799,7 +805,7 @@ class TestNetworkConfig:
         invalid_configs = ["Port", "PORT", "port "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("network."+config)
+                config_value = connect.get_config("network." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_port_valid(self, connect, collection):
@@ -821,7 +827,7 @@ class TestNetworkConfig:
         invalid_configs = ["webport", "Web_port", "http port "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("network."+config)
+                config_value = connect.get_config("network." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_http_port_valid(self, connect, collection):
@@ -838,6 +844,7 @@ class TestNetworkConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     def gen_valid_timezones(self):
         timezones = []
         for i in range(0, 13):
@@ -917,6 +924,7 @@ class TestGeneralConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -932,7 +940,7 @@ class TestGeneralConfig:
         invalid_configs = ["backend_Url", "backend-url", "meta uri "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("general."+config)
+                config_value = connect.get_config("general." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_meta_uri_valid(self, connect, collection):
@@ -954,7 +962,7 @@ class TestGeneralConfig:
         invalid_configs = ["time", "time_zone "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("general."+config)
+                config_value = connect.get_config("general." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_timezone_valid(self, connect, collection):
@@ -971,6 +979,7 @@ class TestGeneralConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     def test_set_timezone_invalid(self, connect, collection):
         '''
@@ -1011,6 +1020,7 @@ class TestStorageConfig:
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -1026,7 +1036,7 @@ class TestStorageConfig:
         invalid_configs = ["Primary_path", "primarypath", "pa_th "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("storage."+config)
+                config_value = connect.get_config("storage." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_path_valid(self, connect, collection):
@@ -1048,7 +1058,7 @@ class TestStorageConfig:
         invalid_configs = ["autoFlushInterval", "auto_flush", "auto_flush interval "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("storage."+config)
+                config_value = connect.get_config("storage." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_auto_flush_interval_valid(self, connect, collection):
@@ -1064,6 +1074,7 @@ class TestStorageConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_storage_invalid_child_key(self, connect, collection):
@@ -1109,148 +1120,13 @@ class TestStorageConfig:
             with pytest.raises(Exception) as e:
                 relpy = connect.set_config("storage.auto_flush_interval", invalid_auto_flush_interval)
 
-
-class TestMetricConfig:
-    """
-    ******************************************************************
-      The following cases are used to test `get_config` function
-    ******************************************************************
-    """
-    @pytest.fixture(scope="function", autouse=True)
-    def skip_http_check(self, args):
-        if args["handler"] == "HTTP":
-            pytest.skip("skip in http mode")
-
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_invalid_child_key(self, connect, collection):
-        '''
-        target: get invalid child key
-        method: call get_config without child_key: enable
-        expected: status not ok
-        '''
-        invalid_configs = ["enablemonitor", "Enable_monitor", "en able "]
-        for config in invalid_configs:
-            with pytest.raises(Exception) as e:
-                config_value = connect.get_config("metric."+config)
-
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_enable_valid(self, connect, collection):
-        '''
-        target: get enable
-        method: call get_config correctly
-        expected: status ok
-        '''
-        config_value = connect.get_config("metric.enable")
-        assert config_value
-
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_invalid_child_key(self, connect, collection):
-        '''
-        target: get invalid child key
-        method: call get_config without child_key: address
-        expected: status not ok
-        '''
-        invalid_configs = ["Add ress", "addresses", "add ress "]
-        for config in invalid_configs:
-            with pytest.raises(Exception) as e:
-                config_value = connect.get_config("metric."+config)
-
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_address_valid(self, connect, collection):
-        '''
-        target: get address
-        method: call get_config correctly
-        expected: status ok
-        '''
-        config_value = connect.get_config("metric.address")
-        assert config_value
-
-    @pytest.mark.level(2)
-    def test_get_port_invalid_child_key(self, connect, collection):
-        '''
-        target: get invalid child key
-        method: call get_config without child_key: port
-        expected: status not ok
-        '''
-        invalid_configs = ["Po_rt", "PO_RT", "po_rt "]
-        for config in invalid_configs:
-            with pytest.raises(Exception) as e:
-                config_value = connect.get_config("metric."+config)
-
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_get_port_valid(self, connect, collection):
-        '''
-        target: get port
-        method: call get_config correctly
-        expected: status ok
-        '''
-        config_value = connect.get_config("metric.port")
-        assert config_value
-
-    """
-    ******************************************************************
-      The following cases are used to test `set_config` function
-    ******************************************************************
-    """
-    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_metric_invalid_child_key(self, connect, collection):
-        '''
-        target: set invalid child key
-        method: call set_config with invalid child_key
-        expected: status not ok
-        '''
-        with pytest.raises(Exception) as e:
-            relpy = connect.set_config("metric.child_key", 19530)
-
-    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-    def test_set_enable_valid(self, connect, collection):
-        '''
-        target: set enable
-        method: call set_config correctly
-        expected: status ok, set successfully
-        '''
-        for valid_enable in ["false", "true"]:
-            relpy = connect.set_config("metric.enable", valid_enable)
-
-    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-    @pytest.mark.timeout(CONFIG_TIMEOUT)
-    def test_set_address_valid(self, connect, collection):
-        '''
-        target: set address
-        method: call set_config correctly
-        expected: status ok, set successfully
-        '''
-        relpy = connect.set_config("metric.address", '127.0.0.1')
-
-    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-    def test_set_port_valid(self, connect, collection):
-        '''
-        target: set port
-        method: call set_config correctly
-        expected: status ok, set successfully
-        '''
-        for valid_port in [1025, 65534, "19530", "9091"]:
-            relpy = connect.set_config("metric.port", valid_port)
-
-    @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-    def test_set_port_invalid(self, connect, collection):
-        '''
-        target: set port
-        method: call set_config with port number out of range(1024, 65535), or same as http.port number
-        expected: status not ok
-        '''
-        for invalid_port in [1024, 65535, "0", "True", "100000"]:
-            with pytest.raises(Exception) as e:
-                relpy = connect.set_config("metric.port", invalid_port)
-
-
 class TestWALConfig:
     """
     ******************************************************************
       The following cases are used to test `get_config` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):
         if args["handler"] == "HTTP":
@@ -1266,7 +1142,7 @@ class TestWALConfig:
         invalid_configs = ["enabled", "Enab_le", "enable_"]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("wal."+config)
+                config_value = connect.get_config("wal." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_enable_valid(self, connect, collection):
@@ -1288,7 +1164,7 @@ class TestWALConfig:
         invalid_configs = ["recovery-error-ignore", "Recovery error_ignore", "recoveryxerror_ignore "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("wal."+config)
+                config_value = connect.get_config("wal." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_recovery_error_ignore_valid(self, connect, collection):
@@ -1310,7 +1186,7 @@ class TestWALConfig:
         invalid_configs = ["buffersize", "Buffer size", "buffer size "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("wal."+config)
+                config_value = connect.get_config("wal." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_buffer_size_valid(self, connect, collection):
@@ -1332,7 +1208,7 @@ class TestWALConfig:
         invalid_configs = ["wal", "Wal_path", "wal_path "]
         for config in invalid_configs:
             with pytest.raises(Exception) as e:
-                config_value = connect.get_config("wal."+config)
+                config_value = connect.get_config("wal." + config)
 
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_get_wal_path_valid(self, connect, collection):
@@ -1349,6 +1225,7 @@ class TestWALConfig:
       The following cases are used to test `set_config` function
     ******************************************************************
     """
+
     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
     @pytest.mark.timeout(CONFIG_TIMEOUT)
     def test_set_wal_invalid_child_key(self, connect, collection):
@@ -1399,4 +1276,3 @@ class TestWALConfig:
         expected: status ok, set successfully
         '''
         relpy = connect.set_config("wal.path", "/var/lib/milvus/wal")
-
