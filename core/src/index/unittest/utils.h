@@ -25,7 +25,7 @@ class DataGen {
  public:
     DataGen() {
         std::string cpu_flag;
-        // here we comment C1
+        // here we comment C2
         // faiss::hook_init(cpu_flag);
         std::cout << cpu_flag << std::endl;
     }
