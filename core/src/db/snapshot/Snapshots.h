@@ -22,6 +22,8 @@
 #include "db/snapshot/SnapshotHolder.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
+#include "utils/TimerContext.h"
+#include "utils/ThreadPool.h"
 
 namespace milvus::engine::snapshot {
 
@@ -69,6 +71,9 @@ class Snapshots {
 
     Status Init(StorePtr);
 
+    std::vector<TimerContext::Context>
+    GetTimersContext();
+
  public:
     Status
     StartService();
@@ -82,6 +87,9 @@ class Snapshots {
     Snapshots() = default;
     Status
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
+
+    void
+    Refresh(const boost::system::error_code&);
 
     Status
     LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder);

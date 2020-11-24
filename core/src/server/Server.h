@@ -32,6 +32,8 @@ class Server {
 
     void
     AddTimer(int interval_us, TimerContext::HandlerT handler);
+    void
+    AddTimer(const TimerContext::Context& context);
 
     Status
     Start();

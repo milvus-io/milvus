@@ -24,8 +24,21 @@ namespace milvus {
 
 struct TimerContext {
     using HandlerT = std::function<void(const boost::system::error_code&)>;
+    struct Context {
+        /* Context(int interval_us, HandlerT& handler, ThreadPoolPtr pool = nullptr) */
+        /*     : interval_(interval_us), handler_(handler), timer_(io, interval_), pool_(pool) { */
+        /* } */
+        int interval_us;
+        HandlerT handler;
+        ThreadPoolPtr pool = nullptr;
+    };
+
     TimerContext(boost::asio::io_service& io, int interval_us, HandlerT& handler, ThreadPoolPtr pool)
         : io_(io), interval_(interval_us), handler_(handler), timer_(io, interval_), pool_(pool) {
+    }
+    TimerContext(boost::asio::io_service& io, Context& context)
+        : io_(io), interval_(context.interval_us), handler_(context.handler),
+          timer_(io, interval_), pool_(context.pool) {
     }
 
     void

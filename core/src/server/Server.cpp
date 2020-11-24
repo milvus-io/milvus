@@ -64,6 +64,17 @@ Server::AddTimer(int interval_us, TimerContext::HandlerT handler) {
 }
 
 void
+Server::AddTimer(const TimerContext::Context& context) {
+    if (!timer_executors_) {
+        // ThreadPool size should be from env or config
+        timer_executors_ = std::make_shared<ThreadPool>(5);
+    }
+    TimerContext::Context ctx(context);
+    ctx.pool = timer_executors_;
+    timers_.emplace_back(std::make_shared<TimerContext>(aio_, ctx));
+}
+
+void
 Server::Daemonize() {
     if (daemonized_ == 0) {
         return;
@@ -215,6 +226,11 @@ Server::Start() {
         server::SystemInfo::GetInstance().Init();
 
         STATUS_CHECK(StartService());
+
+        auto timer_ctxs = engine::snapshot::Snapshots::GetInstance().GetTimersContext();
+        for (auto& ctx : timer_ctxs) {
+            AddTimer(ctx);
+        }
 
         for (auto timer : timers_) {
             timer->timer_.async_wait(std::bind(&TimerContext::Reschedule, timer, std::placeholders::_1));

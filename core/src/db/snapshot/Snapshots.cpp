@@ -211,6 +211,25 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
     return Status::OK();
 }
 
+void
+Snapshots::Refresh(const boost::system::error_code& ec) {
+    std::cout << "Do Refresh " << std::endl;
+}
+
+std::vector<TimerContext::Context>
+Snapshots::GetTimersContext() {
+    auto timers = std::vector<TimerContext::Context>();
+    auto is_cluster = config.cluster.enable();
+    auto role = config.cluster.role();
+    if (is_cluster && (role == ClusterRole::RO)) {
+        TimerContext::Context ctx;
+        ctx.interval_us = 200000;
+        ctx.handler = std::bind(&Snapshots::Refresh, this, std::placeholders::_1);
+        timers.push_back(std::move(ctx));
+    }
+    return std::move(timers);
+}
+
 Status
 Snapshots::Reset() {
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
