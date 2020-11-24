@@ -31,7 +31,7 @@ class Server {
     Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
 
     void
-    AddTimer(int interval_us, TimerContext::HandlerT& handler);
+    AddTimer(int interval_us, TimerContext::HandlerT handler);
 
     Status
     Start();
@@ -49,6 +49,8 @@ class Server {
     StartService();
     void
     StopService();
+    void
+    StopTimers();
 
  private:
     static std::string

@@ -54,7 +54,7 @@ Server::Init(int64_t daemonized, const std::string& pid_filename, const std::str
 }
 
 void
-Server::AddTimer(int interval_us, TimerContext::HandlerT& handler) {
+Server::AddTimer(int interval_us, TimerContext::HandlerT handler) {
     if (!timer_executors_) {
         // ThreadPool size should be from env or config
         timer_executors_ = std::make_shared<ThreadPool>(5);
@@ -223,6 +223,7 @@ Server::Start() {
         if (ec) {
             return Status(SERVER_UNEXPECTED_ERROR, ec.message());
         }
+        return Status::OK();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -320,12 +321,26 @@ Server::StopService() {
     //   get error message "Milvus server is shutdown!"
 
     // storage::S3ClientWrapper::GetInstance().StopService();
+    StopTimers();
+
     DBWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();
     scheduler::StopSchedulerService();
     engine::snapshot::Snapshots::GetInstance().StopService();
     engine::KnowhereResource::Finalize();
+}
+
+void
+Server::StopTimers() {
+    boost::system::error_code ec;
+    for (auto& timer : timers_) {
+        timer->timer_.cancel(ec);
+        if (ec) {
+            LOG_SERVER_ERROR_ << "Fail to cancel timer: " << ec;
+        }
+    }
+    timer_executors_->Stop();
 }
 
 std::string
