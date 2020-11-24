@@ -186,7 +186,7 @@ if [[ ${COMPILE_BUILD} == "ON" ]];then
     ccache -z
 
     # compile and build
-    make -j${PARALLEL_LEVEL} VERBOSE=${VERBOSE} || exit 1
+    make -j${PARALLEL_LEVEL} VERBOSE=1 || exit 1
 
     if [[ ${PRIVILEGES} == "ON" ]];then
         sudo make install || exit 1
