@@ -66,6 +66,8 @@ func TestSegment_newSegment(t *testing.T) {
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
 	assert.Equal(t, segmentID, segment.segmentID)
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 func TestSegment_deleteSegment(t *testing.T) {
@@ -118,6 +120,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 //-------------------------------------------------------------------------------------- stats functions
@@ -201,6 +204,9 @@ func TestSegment_getRowCount(t *testing.T) {
 
 	rowCount := segment.getRowCount()
 	assert.Equal(t, int64(N), rowCount)
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {
@@ -290,6 +296,8 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	var deletedCount = segment.getDeletedCount()
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(0))
+
+	deleteCollection(collection)
 }
 
 func TestSegment_getMemSize(t *testing.T) {
@@ -372,6 +380,9 @@ func TestSegment_getMemSize(t *testing.T) {
 
 	var memSize = segment.getMemSize()
 	assert.Equal(t, memSize, int64(2785280))
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 //-------------------------------------------------------------------------------------- dm & search functions
@@ -452,6 +463,9 @@ func TestSegment_segmentInsert(t *testing.T) {
 
 	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 func TestSegment_segmentDelete(t *testing.T) {
@@ -537,6 +551,8 @@ func TestSegment_segmentDelete(t *testing.T) {
 
 	err = segment.segmentDelete(offsetDelete, &ids, &timestamps)
 	assert.NoError(t, err)
+
+	deleteCollection(collection)
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
@@ -669,6 +685,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	err = segment.segmentSearch(cPlan, placeholderGroups, []Timestamp{searchTimestamp}, resultIds, resultDistances, numQueries, topK)
 	assert.NoError(t, err)
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 //-------------------------------------------------------------------------------------- preDm functions
@@ -743,6 +762,9 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 
 	var offset = segment.segmentPreInsert(N)
 	assert.GreaterOrEqual(t, offset, int64(0))
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
 
 func TestSegment_segmentPreDelete(t *testing.T) {
@@ -825,4 +847,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 
 	var offsetDelete = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
+
+	deleteSegment(segment)
+	deleteCollection(collection)
 }
