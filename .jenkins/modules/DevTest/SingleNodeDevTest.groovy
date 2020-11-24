@@ -85,5 +85,28 @@ timeout(time: 150, unit: 'MINUTES') {
                                     ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_sqlite_dev_test.log"
             sh "${pytestCMD_sqlite}"
         }
+
+        // read-write mode
+        retry(3) {
+            try {
+                dir ('charts/milvus') {
+                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
+                    def helmCMD_mysql = "${helmCMD}" + " --set cluster.enabled=true -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
+                    sh "${helmCMD_mysql}"
+                }
+            } catch (exc) {
+                sh script: helmStatusCMD, returnStatus: true
+                sh script: "helm uninstall -n milvus ${env.HELM_RELEASE_NAME} && sleep 1m", returnStatus: true
+                throw exc
+            }
+        }
+        def pytestCMD_mysql = "pytest . \
+                               --level=1 \
+                               -n 4 \
+                               --alluredir=\"test_out/dev/cluster\" \
+                               --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
+                               --service ${env.HELM_RELEASE_NAME} >> \
+                               ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_cluster_dev_test.log"
+        sh "${pytestCMD_mysql}"
     }
 }
