@@ -87,7 +87,7 @@ timeout(time: 150, unit: 'MINUTES') {
             sh "${pytestCMD_sqlite}"
         }
 
-        // read-write mode
+        // read-write mode test
         MPLModule('Cleanup Single Node DevTest')
         retry(3) {
             try {
