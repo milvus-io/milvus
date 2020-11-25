@@ -134,7 +134,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return CollectionInfo
     ::grpc::Status
     ShowCollectionInfo(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
-                       ::milvus::grpc::CollectionInfo* response);
+                       ::milvus::grpc::CollectionInfo* response) override;
 
     // *
     // @brief This method is used to delete collection.
@@ -190,7 +190,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     // @return BoolReply
     ::grpc::Status
     HasPartition(::grpc::ServerContext* context, const ::milvus::grpc::PartitionParam* request,
-                 ::milvus::grpc::BoolReply* response);
+                 ::milvus::grpc::BoolReply* response) override;
 
     // *
     // @brief This method is used to show partition information
@@ -310,25 +310,21 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     /*******************************************New Interface*********************************************/
 
-    ::grpc::Status
-    SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request,
-             ::milvus::grpc::QueryResult* response) override;
-
     void
     RegisterRequestHandler(const ReqHandler& handler) {
         req_handler_ = handler;
     }
 
-    Status
-    DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
-                               const std::string& dsl_string, query::BooleanQueryPtr& boolean_query,
-                               query::QueryPtr& query_ptr);
+    static Status
+    DeserializeDslToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
+                              const std::string& dsl_string, query::BooleanQueryPtr& boolean_query,
+                              query::QueryPtr& query_ptr);
 
-    Status
+    static Status
     ProcessBooleanQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& boolean_query,
                             query::QueryPtr& query_ptr);
 
-    Status
+    static Status
     ProcessLeafQueryJson(const milvus::json& query_json, query::BooleanQueryPtr& query, std::string& field_name);
 
  private:

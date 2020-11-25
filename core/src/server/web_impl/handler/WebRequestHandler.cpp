@@ -696,7 +696,7 @@ WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, que
             auto must_json = el.value();
             if (!must_json.is_array()) {
                 std::string msg = "Must json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                return Status(SERVER_INVALID_DSL_PARAMETER, msg);
             }
 
             for (auto& json : must_json) {
@@ -717,7 +717,7 @@ WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, que
             auto should_json = el.value();
             if (!should_json.is_array()) {
                 std::string msg = "Should json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                return Status(SERVER_INVALID_DSL_PARAMETER, msg);
             }
 
             for (auto& json : should_json) {
@@ -738,7 +738,7 @@ WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, que
             auto should_json = el.value();
             if (!should_json.is_array()) {
                 std::string msg = "Must_not json string is not an array";
-                return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+                return Status(SERVER_INVALID_DSL_PARAMETER, msg);
             }
 
             for (auto& json : should_json) {
@@ -756,7 +756,7 @@ WebRequestHandler::ProcessBooleanQueryJson(const nlohmann::json& query_json, que
             }
         } else {
             std::string msg = "BoolQuery json string does not include bool query";
-            return Status{SERVER_INVALID_DSL_PARAMETER, msg};
+            return Status(SERVER_INVALID_DSL_PARAMETER, msg);
         }
     }
 
@@ -803,10 +803,12 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         query_ptr_->partitions = partition_tags;
         query_ptr_->collection_id = collection_name;
 
-        status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_);
-        if (!status.ok()) {
-            return status;
+        STATUS_CHECK(ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr_));
+        if (query_ptr_->vectors.empty()) {
+            std::string msg = "DSL should include vector query";
+            return Status(SERVER_INVALID_DSL_PARAMETER, msg);
         }
+        STATUS_CHECK(query::QueryUtil::ValidateBooleanQuery(boolean_query));
         auto general_query = std::make_shared<query::GeneralQuery>();
         query::QueryUtil::GenBinaryQuery(boolean_query, general_query->bin);
 
