@@ -26,9 +26,9 @@ SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, 
 
 SnapshotHolder::~SnapshotHolder() {
     bool release = false;
-    for (auto& ss_kv : active_) {
-        if (!ss_kv.second->GetCollection()->IsActive()) {
-            ReadyForRelease(ss_kv.second);
+    for (auto& [_, ss] : active_) {
+        if (!ss->GetCollection()->IsActive()) {
+            ReadyForRelease(ss);
             release = true;
         }
     }

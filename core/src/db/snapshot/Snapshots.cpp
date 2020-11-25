@@ -273,7 +273,6 @@ Snapshots::Reset() {
     holders_.clear();
     alive_cids_.clear();
     name_id_map_.clear();
-    to_release_.clear();
     return Status::OK();
 }
 

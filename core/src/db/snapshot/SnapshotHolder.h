@@ -55,8 +55,6 @@ class SnapshotHolder {
     ~SnapshotHolder();
 
  private:
-    /* Status */
-    /* LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc); */
     Status
     LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, StorePtr store);
 
@@ -72,8 +70,6 @@ class SnapshotHolder {
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();
     std::map<ID_TYPE, Snapshot::Ptr> active_;
-    std::vector<Snapshot::Ptr> to_release_;
-    /* size_t num_versions_ = 1; */
     SnapshotPolicyPtr policy_;
     GCHandler gc_handler_;
 };
