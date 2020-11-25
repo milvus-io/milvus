@@ -32,7 +32,8 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ('charts/milvus') {
-                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
+                    // writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
+                    sh 'echo -e "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256" > test.yaml'
                     def helmCMD_mysql = "${helmCMD}" + " -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_mysql}"
                 }
@@ -66,7 +67,7 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ("milvus-helm/charts/milvus") {
-                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
+                    sh 'echo -e "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256" > test.yaml'
                     def helmCMD_sqlite = "${helmCMD}" + " -f ci/db_backend/sqlite_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_sqlite}"
                 }
