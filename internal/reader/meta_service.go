@@ -214,6 +214,18 @@ func (mService *metaService) processSegmentModify(id string, value string) {
 
 func (mService *metaService) processCollectionModify(id string, value string) {
 	println("Modify Collection: ", id)
+
+	col := mService.collectionUnmarshal(value)
+	if col != nil {
+		err := (*mService.replica).addPartitionsByCollectionMeta(col)
+		if err != nil {
+			log.Println(err)
+		}
+		err = (*mService.replica).removePartitionsByCollectionMeta(col)
+		if err != nil {
+			log.Println(err)
+		}
+	}
 }
 
 func (mService *metaService) processModify(key string, msg string) {

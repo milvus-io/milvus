@@ -6,8 +6,8 @@ package reader
 
 #cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
-#include "collection_c.h"
-#include "segment_c.h"
+#include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
 
 */
 import "C"
