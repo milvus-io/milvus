@@ -39,9 +39,18 @@ endif ()
 
 set(external_srcs
         knowhere/common/Exception.cpp
-        knowhere/common/Log.cpp
+#        knowhere/common/Log.cpp
         knowhere/common/Timer.cpp
         )
+
+set (LOG_SRC
+        knowhere/common/Log.cpp
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        )
+add_library(index_log STATIC ${LOG_SRC})
+set_target_properties(index_log PROPERTIES RULE_LAUNCH_COMPILE "")
+set_target_properties(index_log PROPERTIES RULE_LAUNCH_LINK "")
+include_directories(${MILVUS_THIRDPARTY_SRC})
 
 set(vector_index_srcs
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
@@ -96,6 +105,7 @@ set(depend_libs
         pthread
         fiu
         ngt
+        index_log
         )
 
 if (MILVUS_SUPPORT_SPTAG)
