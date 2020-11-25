@@ -159,6 +159,7 @@ struct RHNSW {
   /// level of each vector (base level = 1), size = ntotal
   std::vector<int> levels;
   std::vector<int> level_stats;
+  int target_level;
 
   /// number of entry points in levels > 0.
   int upper_beam;
@@ -371,41 +372,35 @@ struct RHNSWStatistics {
     int max_level;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
-    void CaculateStatistics(std::vector<double> &access_gini_coefficient) {
+    void CaculateStatistics(std::vector<double> &access_lorenz_curve, int64_t &access_total) {
         std::vector<int64_t> cnts;
-        int64_t sum = 0;
+        access_total = 0;
         for (auto &elem : access_cnt) {
             cnts.push_back(elem.second);
-            sum += elem.second;
+            access_total += elem.second;
         }
         std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
         size_t len = cnts.size();
-        std::vector<int> stat_len = {5, 10, 15, 20, 50};
-        auto gini_len = stat_len.size();
-        for (auto i = 0; i < gini_len; ++ i) {
+        auto gini_len = 100;
+        std::vector<int> stat_len(gini_len, 0);
+        for (auto i = 1; i < gini_len; ++ i) {
+            stat_len[i] = i;
+        }
+        for (auto i = 1; i < gini_len; ++ i) {
             stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
-        access_gini_coefficient.resize(gini_len << 1);
+        access_lorenz_curve.resize(gini_len + 1);
+        access_lorenz_curve[0] = 0.0;
+        access_lorenz_curve[gini_len] = 1.0;
         int j = 0;
         for (auto i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_gini_coefficient[j] = (double)tmp_cnt / sum;
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total;
                 tmp_cnt = 0;
                 j ++;
             }
             if (j >= gini_len)
-                break;
-            tmp_cnt += cnts[i];
-        }
-        tmp_cnt = 0;
-        for (auto i = len - 1; i >= 0 && j < (gini_len << 1); -- i) {
-            if (len - i > stat_len[j - gini_len]) {
-                access_gini_coefficient[j] = (double)tmp_cnt / sum;
-                tmp_cnt = 0;
-                j ++;
-            }
-            if (j >= (gini_len << 1))
                 break;
             tmp_cnt += cnts[i];
         }

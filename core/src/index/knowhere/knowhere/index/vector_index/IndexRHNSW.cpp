@@ -64,7 +64,10 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
             for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
                 hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
+                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                    hnsw_stats->target_level = i;
             }
+            real_idx->set_target_level(hnsw_stats->target_level);
             LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
 //        hnsw_stats->show();
             LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
@@ -88,6 +91,21 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     index_->add(rows, reinterpret_cast<const float*>(p_data));
+    if (STATISTICS_ENABLE) {
+        auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
+        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+        hnsw_stats->max_level = real_idx->hnsw.max_level;
+        hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
+        for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+            hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
+            if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                hnsw_stats->target_level = i;
+        }
+        real_idx->set_target_level(hnsw_stats->target_level);
+        LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Build finished, show statistics:";
+//        hnsw_stats->show();
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    }
 }
 
 DatasetPtr
@@ -149,7 +167,7 @@ IndexRHNSW::GetStatistics() {
     if (!STATISTICS_ENABLE)
         return hnsw_stats;
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-    real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
+    real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);
     return hnsw_stats;
 }
 

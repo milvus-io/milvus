@@ -194,10 +194,15 @@ void IndexRHNSW::init_hnsw() {
 }
 
 void
-IndexRHNSW::calculate_stats(std::vector<double> &ret) {
+IndexRHNSW::calculate_stats(std::vector<double> &ret, int64_t &tot) {
     if (!STATISTICS_ENABLE)
         return;
-    stats.CaculateStatistics(ret);
+    stats.CaculateStatistics(ret, tot);
+}
+
+void
+IndexRHNSW::set_target_level(const int tl) {
+    hnsw.target_level = tl;
 }
 
 void

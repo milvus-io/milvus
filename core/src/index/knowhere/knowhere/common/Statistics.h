@@ -33,14 +33,18 @@ using StatisticsPtr = std::shared_ptr<Statistics>;
 
 class HNSWStatistics : public Statistics {
 public:
-    HNSWStatistics():Statistics(), max_level(0) {}
+    HNSWStatistics():Statistics(), max_level(0), access_total(0), target_level(1) {}
     int max_level;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
+    int64_t access_total;
+    int target_level;
 
     void
     Clear() override {
         bitset_percentage1_sum = 0.0;
+        access_total = 0;
+        target_level = 1;
         max_level = 0;
         distribution.clear();
         access_cnt.clear();
@@ -71,40 +75,33 @@ public:
     void
     CaculateStatistics(std::vector<double> &access_lorenz_curve) {
         std::vector<int64_t> cnts;
-        int64_t sum = 0;
+        access_total = 0;
         for (auto &elem : access_cnt) {
             cnts.push_back(elem.second);
-            sum += elem.second;
+            access_total += elem.second;
         }
         std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
         size_t len = cnts.size();
-        // todo: hard code?
-        std::vector<int> stat_len = {5, 10, 15, 20, 50};
-        auto gini_len = stat_len.size();
-        for (auto i = 0; i < gini_len; ++ i) {
+        auto gini_len = 100;
+        std::vector<int> stat_len(gini_len, 0);
+        for (auto i = 1; i < gini_len; ++ i) {
+            stat_len[i] = i;
+        }
+        for (auto i = 1; i < gini_len; ++ i) {
             stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
-        access_lorenz_curve.resize(gini_len << 1);
+        access_lorenz_curve.resize(gini_len + 1);
+        access_lorenz_curve[0] = 0.0;
+        access_lorenz_curve[gini_len] = 1.0;
         int j = 0;
         for (auto i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / sum;
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total;
                 tmp_cnt = 0;
                 j ++;
             }
             if (j >= gini_len)
-                break;
-            tmp_cnt += cnts[i];
-        }
-        tmp_cnt = 0;
-        for (auto i = len - 1; i >= 0 && j < (gini_len << 1); -- i) {
-            if (len - i > stat_len[j - gini_len]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / sum;
-                tmp_cnt = 0;
-                j ++;
-            }
-            if (j >= (gini_len << 1))
                 break;
             tmp_cnt += cnts[i];
         }
@@ -126,13 +123,14 @@ public:
         for (auto i = 0; i < max_level; ++ i) {
             ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
         }
-        std::vector<int> stat_len = {5, 10, 15, 20, 50};
-        ret << "The gini coefficient of access distribution at level 1:" << std::endl;
-        for (auto i = 0; i < access_lorenz_curve.size() / 2; ++ i) {
-            ret << "The top" << stat_len[i] << " point has " << access_lorenz_curve[i] << "% access counts" << std::endl;
-        }
-        for (auto i = access_lorenz_curve.size() / 2; i < access_lorenz_curve.size(); ++ i) {
-            ret << "The last" << stat_len[i] << " point has " << access_lorenz_curve[i] << "% access counts" << std::endl;
+        ret << "There are " << access_total << " times point-access at level " << target_level << std::endl;
+        ret << "The distribution of probability density at level " << target_level << ":" << std::endl;
+        for (auto i = 0; i < access_lorenz_curve.size(); ++ i) {
+            ret << "(" << i << "," << access_lorenz_curve[i] << ")";
+            if (i < access_lorenz_curve.size())
+                ret << " ";
+            else
+                ret << std::endl;
         }
         return ret.str();
     }
@@ -140,18 +138,20 @@ public:
 
 class RHNSWStatistics : public Statistics {
 public:
-    RHNSWStatistics():Statistics(), max_level(0) {}
+    RHNSWStatistics():Statistics(), max_level(0), access_total(0), target_level(1) {}
     int max_level;
     std::vector<int> distribution;
-    std::unordered_map<unsigned int, uint64_t> access_cnt;
-    std::vector<double> access_gini_coefficient;
+    std::vector<double> access_lorenz_curve;
+    int64_t access_total;
+    int target_level;
 
     void
     Clear() override {
         bitset_percentage1_sum = 0.0;
         max_level = 0;
         distribution.clear();
-        access_cnt.clear();
+        access_total = 0;
+        target_level = 1;
     }
 
     std::string
@@ -168,13 +168,14 @@ public:
         for (auto i = 0; i < max_level; ++ i) {
             ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
         }
-        std::vector<int> stat_len = {5, 10, 15, 20, 50};
-        ret << "The gini coefficient of access distribution at level 1:" << std::endl;
-        for (auto i = 0; i < access_gini_coefficient.size() / 2; ++ i) {
-            ret << "The top" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
-        }
-        for (auto i = access_gini_coefficient.size() / 2; i < access_gini_coefficient.size(); ++ i) {
-            ret << "The last" << stat_len[i] << " point has " << access_gini_coefficient[i] << "% access counts" << std::endl;
+        ret << "There are " << access_total << " times point-access at level " << target_level << std::endl;
+        ret << "The distribution of probability density at level " << target_level << ":" << std::endl;
+        for (auto i = 0; i < access_lorenz_curve.size(); ++ i) {
+            ret << "(" << i << "," << access_lorenz_curve[i] << ")";
+            if (i < access_lorenz_curve.size())
+                ret << " ";
+            else
+                ret << std::endl;
         }
         return ret.str();
     }

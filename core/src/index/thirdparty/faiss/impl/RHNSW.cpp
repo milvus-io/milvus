@@ -33,6 +33,7 @@ RHNSW::RHNSW(int M) : M(M), rng(12345) {
   linkLists = nullptr;
   level_constant = 1 / log(1.0 * M);
   visited_list_pool = nullptr;
+  target_level = 1;
 }
 
 void RHNSW::init(int ntotal) {
@@ -409,7 +410,7 @@ void RHNSW::searchKnn(DistanceComputer& qdis, int k,
         int cand = ep_link[j];
         if (cand < 0 || cand > levels.size())
           throw std::runtime_error("cand error");
-        if (STATISTICS_ENABLE && i == 1) {
+        if (STATISTICS_ENABLE && i == target_level) {
           rsi.access_points.push_back(cand);
         }
         float d = qdis(cand);
