@@ -32,8 +32,7 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ('charts/milvus') {
-                    // writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
-                    sh "echo -e 'extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256' > test.yaml"
+                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
                     def helmCMD_mysql = "${helmCMD}" + " -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_mysql}"
                 }
@@ -67,7 +66,7 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ("milvus-helm/charts/milvus") {
-                    sh "echo -e 'extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256' > test.yaml"
+                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
                     def helmCMD_sqlite = "${helmCMD}" + " -f ci/db_backend/sqlite_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_sqlite}"
                 }
@@ -92,7 +91,10 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ("milvus-helm/charts/milvus") {
-                    sh "echo -e 'extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256' > test.yaml"
+                    if (fileExists('test.yaml')) {
+                        deleteDir('test.yaml')
+                    }
+                    writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
                     def helmCMD_mysql = "${helmCMD}" + " --set cluster.enabled=true -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_mysql}"
                 }
