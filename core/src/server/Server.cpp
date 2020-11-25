@@ -55,26 +55,6 @@ Server::Init(int64_t daemonized, const std::string& pid_filename, const std::str
 }
 
 void
-Server::AddTimer(int interval_us, TimerContext::HandlerT handler) {
-    if (!timer_executors_) {
-        // ThreadPool size should be from env or config
-        timer_executors_ = std::make_shared<ThreadPool>(5);
-    }
-    timers_.emplace_back(std::make_shared<TimerContext>(aio_, interval_us, handler, timer_executors_));
-}
-
-void
-Server::AddTimer(const TimerContext::Context& context) {
-    if (!timer_executors_) {
-        // ThreadPool size should be from env or config
-        timer_executors_ = std::make_shared<ThreadPool>(5);
-    }
-    TimerContext::Context ctx(context);
-    ctx.pool = timer_executors_;
-    timers_.emplace_back(std::make_shared<TimerContext>(aio_, ctx));
-}
-
-void
 Server::Daemonize() {
     if (daemonized_ == 0) {
         return;
@@ -227,19 +207,16 @@ Server::Start() {
 
         STATUS_CHECK(StartService());
 
+        SetPoolSize(5);
+
         auto timer_ctxs = engine::snapshot::Snapshots::GetInstance().GetTimersContext();
         for (auto& ctx : timer_ctxs) {
             AddTimer(ctx);
         }
 
-        for (auto timer : timers_) {
-            timer->timer_.async_wait(std::bind(&TimerContext::Reschedule, timer, std::placeholders::_1));
-        }
-        boost::system::error_code ec;
-        aio_.run(ec);
-        if (ec) {
-            return Status(SERVER_UNEXPECTED_ERROR, ec.message());
-        }
+        STATUS_CHECK(TimerManager::Start());
+        STATUS_CHECK(TimerManager::Run());
+
         return Status::OK();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
@@ -338,7 +315,7 @@ Server::StopService() {
     //   get error message "Milvus server is shutdown!"
 
     // storage::S3ClientWrapper::GetInstance().StopService();
-    StopTimers();
+    TimerManager::Stop();
 
     DBWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
@@ -346,20 +323,6 @@ Server::StopService() {
     scheduler::StopSchedulerService();
     engine::snapshot::Snapshots::GetInstance().StopService();
     engine::KnowhereResource::Finalize();
-}
-
-void
-Server::StopTimers() {
-    boost::system::error_code ec;
-    for (auto& timer : timers_) {
-        timer->timer_.cancel(ec);
-        if (ec) {
-            LOG_SERVER_ERROR_ << "Fail to cancel timer: " << ec;
-        }
-    }
-    if (timer_executors_) {
-        timer_executors_->Stop();
-    }
 }
 
 std::string
