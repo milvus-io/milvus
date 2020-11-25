@@ -65,7 +65,7 @@ TEST(CApiTest, InsertTest) {
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
-    assert(res == 0);
+    assert(res.error_code == Success);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -82,7 +82,7 @@ TEST(CApiTest, DeleteTest) {
     auto offset = PreDelete(segment, 3);
 
     auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
-    assert(del_res == 0);
+    assert(del_res.error_code == Success);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -116,7 +116,7 @@ TEST(CApiTest, SearchTest) {
     auto offset = PreInsert(segment, N);
 
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    assert(ins_res == 0);
+    assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"(
     {
@@ -163,7 +163,7 @@ TEST(CApiTest, SearchTest) {
     float result_distances[100];
 
     auto sea_res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, result_ids, result_distances);
-    assert(sea_res == 0);
+    assert(sea_res.error_code == Success);
 
     DeletePlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
@@ -199,7 +199,7 @@ TEST(CApiTest, BuildIndexTest) {
     auto offset = PreInsert(segment, N);
 
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    assert(ins_res == 0);
+    assert(ins_res.error_code == Success);
 
     // TODO: add index ptr
     Close(segment);
@@ -250,7 +250,7 @@ TEST(CApiTest, BuildIndexTest) {
     float result_distances[100];
 
     auto sea_res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, result_ids, result_distances);
-    assert(sea_res == 0);
+    assert(sea_res.error_code == Success);
 
     DeletePlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
@@ -315,7 +315,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
 
-    assert(res == 0);
+    assert(res.error_code == Success);
 
     auto memory_usage_size = GetMemoryUsageInBytes(segment);
 
@@ -482,7 +482,7 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto offset = PreDelete(segment, 3);
 
     auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
-    assert(del_res == 0);
+    assert(del_res.error_code == Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
     auto deleted_count = GetDeletedCount(segment);
@@ -502,7 +502,7 @@ TEST(CApiTest, GetRowCountTest) {
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
     auto offset = PreInsert(segment, N);
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    assert(res == 0);
+    assert(res.error_code == Success);
 
     auto row_count = GetRowCount(segment);
     assert(row_count == N);

@@ -33,6 +33,17 @@
 find_program(CLANG_TIDY_BIN
   NAMES
   clang-tidy-10
+  clang-tidy-9
+  clang-tidy-8
+  clang-tidy-7.0
+  clang-tidy-7
+  clang-tidy-6.0
+  clang-tidy-5.0
+  clang-tidy-4.0
+  clang-tidy-3.9
+  clang-tidy-3.8
+  clang-tidy-3.7
+  clang-tidy-3.6
   clang-tidy
   PATHS ${ClangTools_PATH} $ENV{CLANG_TOOLS_PATH} /usr/local/bin /usr/bin
         NO_DEFAULT_PATH
@@ -79,6 +90,17 @@ else()
     find_program(CLANG_FORMAT_BIN
       NAMES
       clang-format-10
+      clang-format-9
+      clang-format-8
+      clang-format-7.0
+      clang-format-7
+      clang-format-6.0
+      clang-format-5.0
+      clang-format-4.0
+      clang-format-3.9
+      clang-format-3.8
+      clang-format-3.7
+      clang-format-3.6
       clang-format
       PATHS ${ClangTools_PATH} $ENV{CLANG_TOOLS_PATH} /usr/local/bin /usr/bin
             NO_DEFAULT_PATH
