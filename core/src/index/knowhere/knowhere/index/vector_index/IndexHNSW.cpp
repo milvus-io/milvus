@@ -76,6 +76,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
             hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
             for (auto i = 0; i <= index_->maxlevel_; ++ i) {
                 hnsw_stats->distribution[i] = index_->level_stats_[i];
+                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                    hnsw_stats->target_level = i;
             }
             LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
 //        hnsw_stats->show();
@@ -154,6 +156,8 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
         for (auto i = 0; i <= index_->maxlevel_; ++ i) {
             hnsw_stats->distribution[i] = index_->level_stats_[i];
+            if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                hnsw_stats->target_level = i;
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
 //    hnsw_stats->show();
@@ -177,6 +181,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
     if (STATISTICS_ENABLE) {
         query_stats.resize(rows);
+        for (auto i = 0; i < rows; ++ i)
+            query_stats[i].target_level = hnsw_stats->target_level;
         hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
         hnsw_stats->nq_cnt += rows;
     }

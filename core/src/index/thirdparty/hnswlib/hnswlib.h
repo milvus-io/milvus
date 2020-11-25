@@ -82,7 +82,8 @@ namespace hnswlib {
 
     class StatisticsInfo {
     public:
-        StatisticsInfo() {}
+        StatisticsInfo(): target_level(1) {}
+        int target_level;
         std::vector<unsigned int> accessed_points;
     };
 

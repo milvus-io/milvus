@@ -1100,7 +1100,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     tableint cand = datal[i];
                     if (cand < 0 || cand > max_elements_)
                         throw std::runtime_error("cand error");
-                    if (stats_enable && level == 1) {
+                    if (stats_enable && level == stats.target_level) {
                         stats.accessed_points.push_back(cand);
                     }
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
