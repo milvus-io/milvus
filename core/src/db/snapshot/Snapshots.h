@@ -23,6 +23,7 @@
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 #include "utils/TimerContext.h"
+#include "utils/TimerManager.h"
 #include "utils/ThreadPool.h"
 
 namespace milvus::engine::snapshot {
@@ -63,16 +64,14 @@ class Snapshots {
 
     Status
     NumOfSnapshot(const std::string& collection_name, int& num) const;
-    /* int */
-    /* NumOfSnapshot(ID_TYPE collection_id) const; */
 
     Status
     Reset();
 
     Status Init(StorePtr);
 
-    std::vector<TimerContext::Context>
-    GetTimersContext();
+    Status
+    RegisterTimers(TimerManager* mgr);
 
  public:
     Status

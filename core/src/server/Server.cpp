@@ -207,13 +207,9 @@ Server::Start() {
 
         STATUS_CHECK(StartService());
 
-        SetPoolSize(5);
-
-        auto timer_ctxs = engine::snapshot::Snapshots::GetInstance().GetTimersContext();
-        for (auto& ctx : timer_ctxs) {
-            AddTimer(ctx);
-        }
-
+        // TODO: Pool size should be configurable
+        STATUS_CHECK(SetPoolSize(2));
+        STATUS_CHECK(engine::snapshot::Snapshots::GetInstance().RegisterTimers(this));
         STATUS_CHECK(TimerManager::Start());
         STATUS_CHECK(TimerManager::Run());
 

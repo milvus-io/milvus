@@ -234,18 +234,17 @@ Snapshots::Refresh(const boost::system::error_code& ec) {
     }
 }
 
-std::vector<TimerContext::Context>
-Snapshots::GetTimersContext() {
-    auto timers = std::vector<TimerContext::Context>();
+Status
+Snapshots::RegisterTimers(TimerManager* mgr) {
     auto is_cluster = config.cluster.enable();
     auto role = config.cluster.role();
     if (is_cluster && (role == ClusterRole::RO)) {
         TimerContext::Context ctx;
         ctx.interval_us = DEFAULT_REFRESH_INTERVAL_US;
         ctx.handler = std::bind(&Snapshots::Refresh, this, std::placeholders::_1);
-        timers.push_back(std::move(ctx));
+        mgr->AddTimer(ctx);
     }
-    return std::move(timers);
+    return Status::OK();
 }
 
 Status

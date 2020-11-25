@@ -28,6 +28,7 @@ TimerManager::SetPoolSize(unsigned int pool_size) {
         return Status(SERVER_UNEXPECTED_ERROR, "Cannot set pool size since it has been set already");
     }
     pool_size_ = pool_size;
+    return Status::OK();
 }
 
 Status
