@@ -1,14 +1,11 @@
-import pdb
 import pytest
 import logging
-import itertools
-from time import sleep
-import threading
-from multiprocessing import Process
+import time
 from utils import *
 from constants import *
 
 uid = "collection_info"
+
 
 class TestInfoBase:
 
@@ -49,7 +46,7 @@ class TestInfoBase:
       The following cases are used to test `get_collection_info` function, no data in collection
     ******************************************************************
     """
-  
+
     def test_info_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, check info returned
@@ -60,8 +57,8 @@ class TestInfoBase:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-                "fields": [filter_field, vector_field],
-                "segment_row_limit": default_segment_row_limit
+            "fields": [filter_field, vector_field],
+            "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
@@ -123,20 +120,19 @@ class TestInfoBase:
     def test_get_collection_info_multithread(self, connect):
         '''
         target: test create collection with multithread
-        method: create collection using multithread, 
+        method: create collection using multithread,
         expected: collections are created
         '''
-        threads_num = 4 
+        threads_num = 4
         threads = []
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
 
         def get_info():
-            res = connect.get_collection_info(connect, collection_name)
-            # assert
+            connect.get_collection_info(collection_name)
 
         for i in range(threads_num):
-            t = threading.Thread(target=get_info, args=())
+            t = TestThread(target=get_info)
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -159,8 +155,8 @@ class TestInfoBase:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-                "fields": [filter_field, vector_field],
-                "segment_row_limit": default_segment_row_limit
+            "fields": [filter_field, vector_field],
+            "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
@@ -199,13 +195,13 @@ class TestInfoInvalid(object):
     """
     Test get collection info with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
     )
     def get_collection_name(self, request):
         yield request.param
-
 
     @pytest.mark.level(2)
     def test_get_collection_info_with_invalid_collectionname(self, connect, get_collection_name):

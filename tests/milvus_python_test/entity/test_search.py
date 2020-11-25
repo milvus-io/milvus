@@ -1,7 +1,6 @@
 import time
 import pdb
 import copy
-import threading
 import logging
 from multiprocessing import Pool, Process
 import pytest
@@ -834,14 +833,14 @@ class TestSearchBase:
         entities, ids = init_data(milvus, collection)
 
         def search(milvus):
-            res = connect.search(collection, default_query)
+            res = milvus.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
 
         for i in range(threads_num):
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
-            t = threading.Thread(target=search, args=(milvus,))
+            t = TestThread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -868,13 +867,13 @@ class TestSearchBase:
         entities, ids = init_data(milvus, collection)
 
         def search(milvus):
-            res = connect.search(collection, default_query)
+            res = milvus.search(collection, default_query)
             assert len(res) == 1
             assert res[0]._entities[0].id in ids
             assert res[0]._distances[0] < epsilon
 
         for i in range(threads_num):
-            t = threading.Thread(target=search, args=(milvus,))
+            t = TestThread(target=search, args=(milvus,))
             threads.append(t)
             t.start()
             time.sleep(0.2)

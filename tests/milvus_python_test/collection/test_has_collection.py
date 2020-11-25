@@ -3,7 +3,7 @@ import pytest
 import logging
 import itertools
 import threading
-from time import sleep
+import time
 from multiprocessing import Process
 from utils import *
 from constants import *
@@ -57,9 +57,10 @@ class TestHasCollection:
         connect.create_collection(collection_name, default_fields)
 
         def has():
-            assert not assert_collection(connect, collection_name)
+            assert connect.has_collection(collection_name)
+            # assert not assert_collection(connect, collection_name)
         for i in range(threads_num):
-            t = threading.Thread(target=has, args=())
+            t = TestThread(target=has, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)

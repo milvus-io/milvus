@@ -2,7 +2,7 @@ import pdb
 import copy
 import logging
 import itertools
-from time import sleep
+import time
 import threading
 from multiprocessing import Process
 import sklearn.preprocessing
@@ -172,7 +172,7 @@ class TestCreateCollection:
             collection_names.append(collection_name)
             connect.create_collection(collection_name, default_fields)
         for i in range(threads_num):
-            t = threading.Thread(target=create, args=())
+            t = TestThread(target=create, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)

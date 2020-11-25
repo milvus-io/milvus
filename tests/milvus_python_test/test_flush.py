@@ -17,6 +17,7 @@ default_single_query = {
     }
 }
 
+
 class TestFlushBase:
     """
     ******************************************************************
@@ -240,17 +241,18 @@ class TestFlushBase:
             ids.extend(tmp_ids)
         disable_flush(connect)
         status = connect.delete_entity_by_id(collection, ids)
+
         def flush():
             milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
             logging.error("start flush")
             milvus.flush([collection])
             logging.error("end flush")
-    
-        p = threading.Thread(target=flush, args=())
+
+        p = TestThread(target=flush, args=())
         p.start()
         time.sleep(0.2)
         logging.error("start count")
-        res = connect.count_entities(collection, timeout = 10)
+        res = connect.count_entities(collection, timeout=10)
         p.join()
         res = connect.count_entities(collection)
         assert res == 0
@@ -275,7 +277,7 @@ class TestFlushBase:
         status = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         res = future.result()
-        res_count = connect.count_entities(collection, timeout = 120)
+        res_count = connect.count_entities(collection, timeout=120)
         assert res_count == loops * default_nb - len(delete_ids)
 
 

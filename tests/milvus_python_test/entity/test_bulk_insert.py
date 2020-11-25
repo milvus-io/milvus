@@ -546,15 +546,15 @@ class TestInsertBase:
 
         def insert(thread_i):
             logging.getLogger().info("In thread-%d" % thread_i)
-            res_ids = milvus.bulk_insert(collection, default_entities)
+            milvus.bulk_insert(collection, default_entities)
             milvus.flush([collection])
 
         for i in range(thread_num):
-            x = threading.Thread(target=insert, args=(i,))
-            threads.append(x)
-            x.start()
-        for th in threads:
-            th.join()
+            t = TestThread(target=insert, args=(i,))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
         res_count = milvus.count_entities(collection)
         assert res_count == thread_num * default_nb
 
