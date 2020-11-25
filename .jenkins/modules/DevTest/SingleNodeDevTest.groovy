@@ -91,6 +91,9 @@ timeout(time: 150, unit: 'MINUTES') {
         retry(3) {
             try {
                 dir ("milvus-helm/charts/milvus") {
+                    if fileExists('test.yaml') {
+                        sh script: "rm test.yaml"
+                    }
                     writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
                     def helmCMD_mysql = "${helmCMD}" + " --set cluster.enabled=true -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.HELM_RELEASE_NAME} ."
                     sh "${helmCMD_mysql}"
