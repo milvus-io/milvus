@@ -34,7 +34,6 @@ type BaseInsertTask = msgstream.InsertMsg
 type InsertTask struct {
 	BaseInsertTask
 	Condition
-	ts                    Timestamp
 	result                *servicepb.IntegerRangeResponse
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
@@ -46,15 +45,21 @@ func (it *InsertTask) SetID(uid UniqueID) {
 }
 
 func (it *InsertTask) SetTs(ts Timestamp) {
-	it.ts = ts
+	rowNum := len(it.RowData)
+	it.Timestamps = make([]uint64, rowNum)
+	for index := range it.Timestamps {
+		it.Timestamps[index] = ts
+	}
+	it.BeginTimestamp = ts
+	it.EndTimestamp = ts
 }
 
 func (it *InsertTask) BeginTs() Timestamp {
-	return it.ts
+	return it.BeginTimestamp
 }
 
 func (it *InsertTask) EndTs() Timestamp {
-	return it.ts
+	return it.EndTimestamp
 }
 
 func (it *InsertTask) ID() UniqueID {

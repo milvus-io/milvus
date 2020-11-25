@@ -7,6 +7,7 @@ require (
 	github.com/apache/pulsar-client-go v0.1.1
 	github.com/aws/aws-sdk-go v1.30.8
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
+	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect

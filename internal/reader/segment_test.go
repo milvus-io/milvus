@@ -463,6 +463,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 
 	err := segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
+
 	deleteSegment(segment)
 	deleteCollection(collection)
 }

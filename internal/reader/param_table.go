@@ -273,11 +273,11 @@ func (p *ParamTable) searchChannelNames() []string {
 }
 
 func (p *ParamTable) searchResultChannelNames() []string {
-	ch, err := p.Load("msgChannel.chanNamePrefix.search")
+	ch, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Fatal(err)
 	}
-	channelRange, err := p.Load("msgChannel.channelRange.search")
+	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
 	if err != nil {
 		panic(err)
 	}
