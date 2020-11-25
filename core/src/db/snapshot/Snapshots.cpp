@@ -18,6 +18,7 @@
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
+#include "utils/TimerContext.h"
 #include "value/config/ServerConfig.h"
 
 namespace milvus::engine::snapshot {
@@ -214,11 +215,11 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 }
 
 void
-Snapshots::Refresh(const boost::system::error_code& ec) {
+Snapshots::OnTimer(const boost::system::error_code& ec) {
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << "Snapshots::Refresh failed: " << status.message();
+        LOG_SERVER_ERROR_ << "Snapshots::OnTimer failed: " << status.message();
         // TODO: Should be monitored
         return;
     }
@@ -228,7 +229,7 @@ Snapshots::Refresh(const boost::system::error_code& ec) {
         /* std::cout << "cid: " << cid << " ccid: " << ccid << std::endl; */
         auto status = LoadSnapshot(store_, ss, cid, ccid);
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << "Snapshots::Refresh failed: " << status.message();
+            LOG_SERVER_ERROR_ << "Snapshots::OnTimer failed: " << status.message();
         }
         /* std::cout << ss->ToString() << std::endl; */
     }
@@ -241,7 +242,7 @@ Snapshots::RegisterTimers(TimerManager* mgr) {
     if (is_cluster && (role == ClusterRole::RO)) {
         TimerContext::Context ctx;
         ctx.interval_us = DEFAULT_REFRESH_INTERVAL_US;
-        ctx.handler = std::bind(&Snapshots::Refresh, this, std::placeholders::_1);
+        ctx.handler = std::bind(&Snapshots::OnTimer, this, std::placeholders::_1);
         mgr->AddTimer(ctx);
     }
     return Status::OK();
@@ -258,7 +259,6 @@ Snapshots::Reset() {
 
 void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
-    /* to_release_.push_back(ss_ptr); */
     ss_ptr->UnRef();
     LOG_ENGINE_DEBUG_ << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed";
 }
