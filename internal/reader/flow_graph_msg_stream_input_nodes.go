@@ -17,7 +17,7 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 		log.Fatal(err)
 	}
 
-	consumeChannels := []string{"insert"}
+	consumeChannels := Params.insertChannelNames()
 	consumeSubName := "insertSub"
 
 	insertStream := msgstream.NewPulsarTtMsgStream(ctx, receiveBufSize)
