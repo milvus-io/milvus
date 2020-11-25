@@ -53,6 +53,7 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     auto status = op->GetStatus();
 
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    alive_cids_.erase(context.collection->GetID());
     name_id_map_.erase(context.collection->GetName());
     holders_.erase(context.collection->GetID());
     return status;
@@ -198,6 +199,7 @@ Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHold
     ScopedSnapshotT ss;
     STATUS_CHECK(holder->Load(store, ss));
     name_id_map_[ss->GetName()] = collection_id;
+    alive_cids_.insert(collection_id);
     return Status::OK();
 }
 
@@ -225,13 +227,30 @@ Snapshots::OnTimer(const boost::system::error_code& ec) {
     }
     auto ids = op->GetIDs();
     ScopedSnapshotT ss;
+    std::set<ID_TYPE> alive_cids;
     for (auto& [cid, ccid] : ids) {
         /* std::cout << "cid: " << cid << " ccid: " << ccid << std::endl; */
         auto status = LoadSnapshot(store_, ss, cid, ccid);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << "Snapshots::OnTimer failed: " << status.message();
         }
+        alive_cids.insert(cid);
         /* std::cout << ss->ToString() << std::endl; */
+    }
+
+    std::set<ID_TYPE> diff;
+    std::set_difference(alive_cids_.begin(), alive_cids_.end(), alive_cids.begin(), alive_cids.end(),
+            std::inserter(diff, diff.begin()));
+    for (auto& cid : diff) {
+        ScopedSnapshotT ss;
+        status = GetSnapshot(ss, cid);
+        if (!status.ok()) {
+            // TODO: Should not happen
+            continue;
+        }
+        alive_cids_.erase(cid);
+        name_id_map_.erase(ss->GetName());
+        holders_.erase(cid);
     }
 }
 
@@ -252,6 +271,7 @@ Status
 Snapshots::Reset() {
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     holders_.clear();
+    alive_cids_.clear();
     name_id_map_.clear();
     to_release_.clear();
     return Status::OK();
