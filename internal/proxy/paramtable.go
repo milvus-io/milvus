@@ -430,3 +430,15 @@ func (pt *ParamTable) searchResultChannelNames() []string {
 	}
 	return channels
 }
+
+func (pt *ParamTable) MaxNameLength() int64 {
+	str, err := pt.Load("proxy.maxNameLength")
+	if err != nil {
+		panic(err)
+	}
+	maxNameLength, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return maxNameLength
+}
