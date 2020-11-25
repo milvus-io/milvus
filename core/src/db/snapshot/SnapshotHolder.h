@@ -52,6 +52,9 @@ class SnapshotHolder {
     bool
     IsActive(Snapshot::Ptr& ss);
 
+    Status
+    ApplyEject();
+
     ~SnapshotHolder();
 
  private:

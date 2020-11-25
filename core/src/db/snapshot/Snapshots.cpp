@@ -16,18 +16,14 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
-#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/TimerContext.h"
 #include "value/config/ServerConfig.h"
 
 namespace milvus::engine::snapshot {
 
-/* Status */
-/* Snapshots::DropAll() { */
-/* } */
-
-static constexpr int DEFAULT_REFRESH_INTERVAL_US = 500 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 500 * 1000;
+static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
 Snapshots::DropCollection(ID_TYPE collection_id, const LSN_TYPE& lsn) {
@@ -55,7 +51,12 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     std::unique_lock<std::shared_timed_mutex> lock(mutex_);
     alive_cids_.erase(context.collection->GetID());
     name_id_map_.erase(context.collection->GetName());
-    holders_.erase(context.collection->GetID());
+    auto h = holders_.find(context.collection->GetID());
+    if (h != holders_.end()) {
+        inactive_holders_[h->first] = h->second;
+        holders_.erase(h);
+    }
+    std::cout << inactive_holders_.size() << std::endl;
     return status;
 }
 
@@ -134,8 +135,7 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
 
-    auto policy = SnapshotPolicyFactory::Build(config);
-    holder = std::make_shared<SnapshotHolder>(collection_id, policy,
+    holder = std::make_shared<SnapshotHolder>(collection_id, policy_,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
         holder->Add(store, c_c_id);
@@ -145,6 +145,8 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 
 Status
 Snapshots::Init(StorePtr store) {
+    policy_ = SnapshotPolicyFactory::Build(config);
+
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     EventExecutor::GetInstance().Submit(event, true);
     STATUS_CHECK(event->WaitToFinish());
@@ -217,11 +219,11 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 }
 
 void
-Snapshots::OnTimer(const boost::system::error_code& ec) {
+Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << "Snapshots::OnTimer failed: " << status.message();
+        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
         // TODO: Should be monitored
         return;
     }
@@ -232,14 +234,26 @@ Snapshots::OnTimer(const boost::system::error_code& ec) {
         /* std::cout << "cid: " << cid << " ccid: " << ccid << std::endl; */
         auto status = LoadSnapshot(store_, ss, cid, ccid);
         if (!status.ok()) {
-            LOG_SERVER_ERROR_ << "Snapshots::OnTimer failed: " << status.message();
+            LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
         }
-        alive_cids.insert(cid);
+        if (ss && ss->GetCollection()->IsActive()) {
+            alive_cids.insert(cid);
+        }
         /* std::cout << ss->ToString() << std::endl; */
     }
+    auto op2 = std::make_shared<GetCollectionIDsOperation>();
+    status = (*op2)(store_);
+    if (!status.ok()) {
+        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
+        // TODO: Should be monitored
+        return;
+    }
+    auto aids = op2->GetIDs();
 
     std::set<ID_TYPE> diff;
-    std::set_difference(alive_cids_.begin(), alive_cids_.end(), alive_cids.begin(), alive_cids.end(),
+    /* std::set_difference(alive_cids_.begin(), alive_cids_.end(), alive_cids.begin(), alive_cids.end(), */
+    /*         std::inserter(diff, diff.begin())); */
+    std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
             std::inserter(diff, diff.begin()));
     for (auto& cid : diff) {
         ScopedSnapshotT ss;
@@ -254,14 +268,41 @@ Snapshots::OnTimer(const boost::system::error_code& ec) {
     }
 }
 
+void
+Snapshots::OnWriterTimer(const boost::system::error_code& ec) {
+    // Single mode
+    if (!config.cluster.enable()) {
+        inactive_holders_.clear();
+        return;
+    }
+    // Cluster RW mode
+    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    auto it = inactive_holders_.cbegin();
+    auto it_next = it;
+
+    for (; it != inactive_holders_.cend(); it = it_next)
+    {
+        ++it_next;
+        auto status = it->second->ApplyEject();
+        if (status.code() == SS_EMPTY_HOLDER) {
+            inactive_holders_.erase(it);
+        }
+    }
+}
+
 Status
 Snapshots::RegisterTimers(TimerManager* mgr) {
     auto is_cluster = config.cluster.enable();
     auto role = config.cluster.role();
     if (is_cluster && (role == ClusterRole::RO)) {
         TimerContext::Context ctx;
-        ctx.interval_us = DEFAULT_REFRESH_INTERVAL_US;
-        ctx.handler = std::bind(&Snapshots::OnTimer, this, std::placeholders::_1);
+        ctx.interval_us = DEFAULT_READER_TIMER_INTERVAL_US;
+        ctx.handler = std::bind(&Snapshots::OnReaderTimer, this, std::placeholders::_1);
+        mgr->AddTimer(ctx);
+    } else {
+        TimerContext::Context ctx;
+        ctx.interval_us = DEFAULT_WRITER_TIMER_INTERVAL_US;
+        ctx.handler = std::bind(&Snapshots::OnWriterTimer, this, std::placeholders::_1);
         mgr->AddTimer(ctx);
     }
     return Status::OK();
@@ -273,6 +314,7 @@ Snapshots::Reset() {
     holders_.clear();
     alive_cids_.clear();
     name_id_map_.clear();
+    inactive_holders_.clear();
     return Status::OK();
 }
 
@@ -304,6 +346,7 @@ Snapshots::StartService() {
 
 Status
 Snapshots::StopService() {
+    Reset();
     snapshot::EventExecutor::GetInstance().Stop();
     snapshot::OperationExecutor::GetInstance().Stop();
     return Status::OK();

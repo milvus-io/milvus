@@ -140,5 +140,6 @@ constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
 constexpr ErrorCode SS_TIMEOUT = ToSSErrorCode(10);
 constexpr ErrorCode SS_NOT_COMMITED = ToSSErrorCode(11);
 constexpr ErrorCode SS_COLLECTION_DROPPED = ToSSErrorCode(12);
+constexpr ErrorCode SS_EMPTY_HOLDER = ToSSErrorCode(13);
 
 }  // namespace milvus

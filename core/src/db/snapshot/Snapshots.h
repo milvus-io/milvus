@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 #include "db/snapshot/SnapshotHolder.h"
+#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"
@@ -87,7 +88,9 @@ class Snapshots {
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
 
     void
-    OnTimer(const boost::system::error_code&);
+    OnReaderTimer(const boost::system::error_code&);
+    void
+    OnWriterTimer(const boost::system::error_code&);
 
     Status
     LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
@@ -98,6 +101,8 @@ class Snapshots {
     std::map<ID_TYPE, SnapshotHolderPtr> holders_;
     std::set<ID_TYPE> alive_cids_;
     std::map<std::string, ID_TYPE> name_id_map_;
+    std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
+    SnapshotPolicyPtr policy_;
     StorePtr store_;
 };
 
