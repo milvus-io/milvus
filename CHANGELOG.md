@@ -17,6 +17,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4211 It should raise InvalidDsl exception when search with multi vectors
 -   \#4226 The Prometheus performance metrics sent by Milvus 0.11.0 is not right
 -   \#4242 Fix query hang up at unittest case
+-   \#4272 Program exit abnormally
 
 ## Feature
 -   \#4163 Update C++ sdk search interface

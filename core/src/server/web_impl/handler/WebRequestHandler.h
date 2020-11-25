@@ -91,6 +91,14 @@ class WebRequestHandler {
     CopyData2Json(const engine::DataChunkPtr& data_chunk, const engine::snapshot::FieldElementMappings& field_mappings,
                   const std::vector<int64_t>& id_array, nlohmann::json& json_res);
 
+    Status
+    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query, std::string& field_name,
+                         query::QueryPtr& query_ptr);
+
+    Status
+    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
+                            query::QueryPtr& query_ptr);
+
  protected:
     Status
     GetCollectionMetaInfo(const std::string& collection_name, nlohmann::json& json_out);
@@ -130,14 +138,6 @@ class WebRequestHandler {
 
     Status
     SetConfig(const nlohmann::json& json, std::string& result_str);
-
-    Status
-    ProcessLeafQueryJson(const nlohmann::json& json, query::BooleanQueryPtr& boolean_query, std::string& field_name,
-                         query::QueryPtr& query_ptr);
-
-    Status
-    ProcessBooleanQueryJson(const nlohmann::json& query_json, query::BooleanQueryPtr& boolean_query,
-                            query::QueryPtr& query_ptr);
 
     Status
     Search(const std::string& collection_name, const nlohmann::json& json, std::string& result_str);

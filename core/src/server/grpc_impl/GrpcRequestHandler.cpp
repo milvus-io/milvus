@@ -1417,64 +1417,6 @@ GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grp
     return ::grpc::Status::OK;
 }
 
-::grpc::Status
-GrpcRequestHandler::SearchPB(::grpc::ServerContext* context, const ::milvus::grpc::SearchParamPB* request,
-                             ::milvus::grpc::QueryResult* response) {
-    CHECK_NULLPTR_RETURN(request);
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
-
-    auto boolean_query = std::make_shared<query::BooleanQuery>();
-    auto query_ptr = std::make_shared<query::Query>();
-    DeSerialization(request->general_query(), boolean_query, query_ptr);
-
-    auto general_query = std::make_shared<query::GeneralQuery>();
-    query::QueryUtil::GenBinaryQuery(boolean_query, general_query->bin);
-
-    Status status;
-
-    if (!query::QueryUtil::ValidateBinaryQuery(general_query->bin)) {
-        status = Status{SERVER_INVALID_BINARY_QUERY, "Generate wrong binary query tree"};
-        SET_RESPONSE(response->mutable_status(), status, context)
-        return ::grpc::Status::OK;
-    }
-
-    std::vector<std::string> partition_list;
-    partition_list.resize(request->partition_tag_array_size());
-    for (uint64_t i = 0; i < request->partition_tag_array_size(); ++i) {
-        partition_list[i] = request->partition_tag_array(i);
-    }
-
-    milvus::json json_params;
-    for (int i = 0; i < request->extra_params_size(); i++) {
-        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
-        if (extra.key() == EXTRA_PARAM_KEY) {
-            json_params = json::parse(extra.value());
-        }
-    }
-
-    engine::QueryResultPtr result = std::make_shared<engine::QueryResult>();
-    std::vector<std::string> field_names;
-    engine::snapshot::FieldElementMappings field_mappings;
-    status = req_handler_.Search(GetContext(context), query_ptr, json_params, field_mappings, result);
-
-    // step 6: construct and return result
-    response->set_row_num(result->row_num_);
-    auto grpc_entity = response->mutable_entities();
-    //    ConstructEntityResults(result->attrs_, result->vectors_, field_names, grpc_entity);
-    grpc_entity->mutable_ids()->Resize(static_cast<int>(result->result_ids_.size()), 0);
-    memcpy(grpc_entity->mutable_ids()->mutable_data(), result->result_ids_.data(),
-           result->result_ids_.size() * sizeof(int64_t));
-
-    response->mutable_distances()->Resize(static_cast<int>(result->result_distances_.size()), 0.0);
-    memcpy(response->mutable_distances()->mutable_data(), result->result_distances_.data(),
-           result->result_distances_.size() * sizeof(float));
-
-    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-    SET_RESPONSE(response->mutable_status(), status, context);
-
-    return ::grpc::Status::OK;
-}
-
 #if 0
 Status
 ParseTermQuery(const milvus::json& term_json, std::unordered_map<std::string, engine::DataType> field_type,
@@ -1709,7 +1651,7 @@ GrpcRequestHandler::ProcessBooleanQueryJson(const milvus::json& query_json, quer
 }
 
 Status
-GrpcRequestHandler::DeserializeJsonToBoolQuery(
+GrpcRequestHandler::DeserializeDslToBoolQuery(
     const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params, const std::string& dsl_string,
     query::BooleanQueryPtr& boolean_query, query::QueryPtr& query_ptr) {
     try {
@@ -1791,7 +1733,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc:
     query::QueryPtr query_ptr = std::make_shared<query::Query>();
     query_ptr->collection_id = request->collection_name();
 
-    status = DeserializeJsonToBoolQuery(request->vector_param(), request->dsl(), boolean_query, query_ptr);
+    status = DeserializeDslToBoolQuery(request->vector_param(), request->dsl(), boolean_query, query_ptr);
     if (!status.ok()) {
         SET_RESPONSE(response->mutable_status(), status, context);
         return ::grpc::Status::OK;
