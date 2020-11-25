@@ -60,12 +60,12 @@ jobs:
       - name: Read CPU
         run: |
           echo "`cat /proc/cpuinfo`"
-#      - name: Docker Run
-#        run: |
-#          docker-compose run ubuntu-core
+      - name: Docker Run
+        run: |
+          docker-compose run ubuntu-core
 #        continue-on-error: true
-      - name: Setup Debug Session
-        uses: csexton/debugger-action@master
+#      - name: Setup Debug Session
+#        uses: csexton/debugger-action@master
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -119,12 +119,12 @@ jobs:
       - name: Read CPU
         run: |
           echo "`cat /proc/cpuinfo`"
-#      - name: Docker Run
-#        run: |
-#          docker-compose run centos-core
+      - name: Docker Run
+        run: |
+          docker-compose run centos-core
 #        continue-on-error: true
-      - name: Setup Debug Session
-        uses: csexton/debugger-action@master
+#      - name: Setup Debug Session
+#        uses: csexton/debugger-action@master
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true

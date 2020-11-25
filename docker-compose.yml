@@ -43,7 +43,7 @@ services:
     networks:
       - milvus
     command: &centos-command
-      ["/bin/bash", "-l", "-c", "/milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
+      ["/bin/bash", "-l", "-c", "ccache -C && /milvus/ci/scripts/build.sh -t Release -j2 -i ${MILVUS_INSTALL_PREFIX} --with_fiu --coverage -u &&
         /milvus/ci/scripts/run_unittest.sh -i ${MILVUS_INSTALL_PREFIX}"]
 
   ubuntu-cuda-core:
