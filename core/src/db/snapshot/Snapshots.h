@@ -22,9 +22,9 @@
 #include "db/snapshot/SnapshotHolder.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
 #include "utils/TimerContext.h"
 #include "utils/TimerManager.h"
-#include "utils/ThreadPool.h"
 
 namespace milvus::engine::snapshot {
 

@@ -37,8 +37,11 @@ struct TimerContext {
         : io_(io), interval_(interval_us), handler_(handler), timer_(io, interval_), pool_(pool) {
     }
     TimerContext(boost::asio::io_service& io, Context& context)
-        : io_(io), interval_(context.interval_us), handler_(context.handler),
-          timer_(io, interval_), pool_(context.pool) {
+        : io_(io),
+          interval_(context.interval_us),
+          handler_(context.handler),
+          timer_(io, interval_),
+          pool_(context.pool) {
     }
 
     void

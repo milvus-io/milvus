@@ -69,7 +69,6 @@ static const Status PERMISSION_ERROR = Status(DB_PERMISSION_ERROR, "Write permis
         return;                                                \
     }
 
-
 DBImpl::DBImpl(const DBOptions& options)
     : options_(options), available_(false), merge_thread_pool_(1, 1), index_thread_pool_(1, 1), index_task_tracker_(3) {
     mem_mgr_ = MemManagerFactory::Build(options_);

@@ -11,11 +11,11 @@
 
 #include "db/snapshot/CompoundOperations.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <vector>
-#include <algorithm>
 
 #include "db/meta/MetaAdapter.h"
 #include "db/snapshot/IterateHandler.h"

@@ -16,9 +16,9 @@
 #include <memory>
 #include <vector>
 
+#include "utils/Status.h"
 #include "utils/ThreadPool.h"
 #include "utils/TimerContext.h"
-#include "utils/Status.h"
 
 namespace milvus {
 
@@ -43,8 +43,7 @@ class TimerManager {
     virtual void
     Stop();
 
-    virtual
-    ~TimerManager();
+    virtual ~TimerManager();
 
  protected:
     boost::asio::io_service io_;

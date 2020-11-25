@@ -11,8 +11,8 @@
 
 #include <utility>
 
-#include "utils/TimerManager.h"
 #include "utils/Log.h"
+#include "utils/TimerManager.h"
 
 namespace milvus {
 
