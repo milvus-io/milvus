@@ -3,8 +3,17 @@
 ### Description：
 
 This project is used to test performance/reliability/stability for milvus server
-- Test cases can be organized with `yaml `
+- Test cases can be organized with `yaml`
 - Test can run with local mode or helm mode
+
+### Usage:
+`pip install requirements.txt`
+
+if using local mode, the following libs is optional
+
+`pymongo==3.10.0` 
+
+`kubernetes==10.0.1`
 
 ### Demos：
 
