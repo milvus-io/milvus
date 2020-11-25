@@ -9,7 +9,7 @@ set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
         ngt
-        inde_log
+        index_log
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
