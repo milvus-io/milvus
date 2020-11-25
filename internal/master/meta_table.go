@@ -220,7 +220,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	}
 
 	if len(coll.PartitionTags) == 0 {
-		coll.PartitionTags = append(coll.PartitionTags, "default")
+		coll.PartitionTags = append(coll.PartitionTags, Params.DefaultPartitionTag)
 	}
 	_, ok := mt.collName2ID[coll.Schema.Name]
 	if ok {
@@ -292,6 +292,10 @@ func (mt *metaTable) AddPartition(collID UniqueID, tag string) error {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
+	// number of partition tags (except _default) should be limited to 4096 by default
+	if int64(len(coll.PartitionTags)) > Params.MaxPartitionNum {
+		return errors.New("maximum partition's number should be limit to " + strconv.FormatInt(Params.MaxPartitionNum, 10))
+	}
 	for _, t := range coll.PartitionTags {
 		if t == tag {
 			return errors.Errorf("partition already exists.")
@@ -326,16 +330,28 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	if tag == Params.DefaultPartitionTag {
+		return errors.New("default partition cannot be deleted")
+	}
+
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
+	// check tag exists
+	exist := false
+
 	pt := make([]string, 0, len(collMeta.PartitionTags))
 	for _, t := range collMeta.PartitionTags {
 		if t != tag {
 			pt = append(pt, t)
+		} else {
+			exist = true
 		}
+	}
+	if !exist {
+		return errors.New("partition " + tag + " does not exist")
 	}
 	if len(pt) == len(collMeta.PartitionTags) {
 		return nil

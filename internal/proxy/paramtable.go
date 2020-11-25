@@ -463,3 +463,15 @@ func (pt *ParamTable) MaxNameLength() int64 {
 	}
 	return maxNameLength
 }
+
+func (pt *ParamTable) MaxFieldNum() int64 {
+	str, err := pt.Load("proxy.maxFieldNum")
+	if err != nil {
+		panic(err)
+	}
+	maxFieldNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return maxFieldNum
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -164,6 +165,10 @@ func (cct *CreateCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (cct *CreateCollectionTask) PreExecute() error {
+	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum() {
+		return errors.New("maximum field's number should be limited to " + strconv.FormatInt(Params.MaxFieldNum(), 10))
+	}
+
 	// validate collection name
 	if err := ValidateCollectionName(cct.schema.Name); err != nil {
 		return err

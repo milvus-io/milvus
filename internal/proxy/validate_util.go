@@ -68,7 +68,7 @@ func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
 
 	if strictCheck {
 		firstChar := partitionTag[0]
-		if firstChar != '_' && !isAlpha(firstChar) {
+		if firstChar != '_' && !isAlpha(firstChar) && !isNumber(firstChar) {
 			msg := invalidMsg + "The first character of a partition tag must be an underscore or letter."
 			return errors.New(msg)
 		}
