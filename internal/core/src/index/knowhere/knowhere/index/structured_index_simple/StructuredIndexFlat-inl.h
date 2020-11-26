@@ -65,8 +65,7 @@ StructuredIndexFlat<T>::NotIn(const size_t n, const T* values) {
     if (!is_built_) {
         build();
     }
-    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size());
-    bitset->set();
+    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size(), true);
     for (size_t i = 0; i < n; ++i) {
         for (const auto& index : data_) {
             if (index->a_ == *(values + i)) {

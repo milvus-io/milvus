@@ -55,11 +55,12 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		proxyLoopCancel: cancel,
 	}
 
+	// TODO: use config instead
 	pulsarAddress := Params.PulsarAddress()
 
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
-	p.queryMsgStream.CreatePulsarProducers(Params.searchChannelNames())
+	p.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
 
 	masterAddr := Params.MasterAddress()
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)
@@ -83,7 +84,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	p.manipulationMsgStream.CreatePulsarProducers(Params.insertChannelNames())
+	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, p.segAssigner, false)
 	}

@@ -56,8 +56,8 @@ verifiers: cppcheck fmt lint ruleguard
 # Builds various components locally.
 build-go:
 	@echo "Building each component's binary to './'"
-	@echo "Building query node ..."
-	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
+	@echo "Building reader ..."
+	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/reader $(PWD)/cmd/reader/reader.go 1>/dev/null
 	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
 	@echo "Building proxy ..."
@@ -72,7 +72,7 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
-#TODO: proxy master query node writer's unittest
+#TODO: proxy master reader writer's unittest
 test-go:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -83,14 +83,14 @@ test-cpp: build-cpp-with-unittest
 
 #TODO: build each component to docker
 docker: verifiers
-	@echo "Building query node docker image '$(TAG)'"
+	@echo "Building reader docker image '$(TAG)'"
 	@echo "Building proxy docker image '$(TAG)'"
 	@echo "Building master docker image '$(TAG)'"
 
 # Builds each component and installs it to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/reader $(GOPATH)/bin/reader
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxy $(GOPATH)/bin/proxy
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
@@ -100,6 +100,6 @@ clean:
 	@echo "Cleaning up all the generated files"
 	@find . -name '*.test' | xargs rm -fv
 	@find . -name '*~' | xargs rm -fv
-	@rm -rvf querynode
+	@rm -rvf reader
 	@rm -rvf master
 	@rm -rvf proxy

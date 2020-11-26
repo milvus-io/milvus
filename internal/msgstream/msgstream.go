@@ -70,7 +70,7 @@ func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 	for i := 0; i < len(channels); i++ {
 		pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
 		if err != nil {
-			log.Printf("Failed to create querynode producer %s, error = %v", channels[i], err)
+			log.Printf("Failed to create reader producer %s, error = %v", channels[i], err)
 		}
 		ms.producers = append(ms.producers, &pp)
 	}

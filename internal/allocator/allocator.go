@@ -57,7 +57,7 @@ type segRequest struct {
 	count     uint32
 	colName   string
 	partition string
-	segInfo   map[UniqueID]uint32
+	segID     UniqueID
 	channelID int32
 }
 
