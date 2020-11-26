@@ -21,7 +21,6 @@ extern "C" {
 #include "segcore/plan_c.h"
 
 typedef void* CSegmentBase;
-typedef void* CQueryResult;
 
 enum ErrorCode {
     Success = 0,
@@ -38,9 +37,6 @@ NewSegment(CCollection collection, uint64_t segment_id);
 
 void
 DeleteSegment(CSegmentBase segment);
-
-void
-DeleteQueryResult(CQueryResult query_result);
 
 //////////////////////////////////////////////////////////////////
 
@@ -70,7 +66,8 @@ Search(CSegmentBase c_segment,
        CPlaceholderGroup* placeholder_groups,
        uint64_t* timestamps,
        int num_groups,
-       CQueryResult* result);
+       int64_t* result_ids,
+       float* result_distances);
 
 //////////////////////////////////////////////////////////////////
 

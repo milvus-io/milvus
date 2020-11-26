@@ -36,6 +36,9 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 		manipulationMsgStream: p.manipulationMsgStream,
 		rowIDAllocator:        p.idAllocator,
 	}
+	if len(it.PartitionTag) <= 0 {
+		it.PartitionTag = Params.defaultPartitionTag()
+	}
 
 	var cancel func()
 	it.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)

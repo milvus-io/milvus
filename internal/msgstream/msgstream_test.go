@@ -50,7 +50,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
 			SegmentID:      1,
-			ChannelID:      0,
+			ChannelID:      1,
 			ProxyID:        1,
 			Timestamps:     []Timestamp{1},
 			RowIDs:         []int64{1},
@@ -82,7 +82,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
 			ReqID:           reqID,
 			ProxyID:         1,
 			Timestamp:       1,
-			ResultChannelID: 0,
+			ResultChannelID: 1,
 		}
 		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
@@ -97,7 +97,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
 			ProxyID:         1,
 			QueryNodeID:     1,
 			Timestamp:       1,
-			ResultChannelID: 0,
+			ResultChannelID: 1,
 		}
 		searchResultMsg := &SearchResultMsg{
 			BaseMsg:      baseMsg,
