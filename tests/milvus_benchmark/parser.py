@@ -13,8 +13,7 @@ def operations_parser(operations):
 
 
 def collection_parser(collection_name):
-    """
-    Parse the collection name defined in the suites,
+    """Parse the collection name defined in the suites,
     return data info with the given collection_name
     """
     tmp = collection_name.split("_")
@@ -49,10 +48,11 @@ def parse_ann_collection_name(collection_name):
         metric_type = "hamming"
     return ("ann_"+data_type, dimension, metric_type)
 
-"""
-parse the params defined in suites
-"""
+
 def search_params_parser(param):
+    """Parse the params on search field defined in suites,
+    return search params: nq/top-k/nprobe
+    """
     # parse top-k, set default value if top-k not in param
     if "top_ks" not in param:
         top_ks = [10]

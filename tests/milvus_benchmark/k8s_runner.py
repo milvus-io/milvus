@@ -31,8 +31,7 @@ default_path = "/var/lib/milvus"
 
 class K8sRunner(Runner):
     def __init__(self):
-        """
-        Run with helm mode, 
+        """Run with helm mode,
         upload test result after tests finished
         """
         super(K8sRunner, self).__init__()
@@ -43,9 +42,8 @@ class K8sRunner(Runner):
         self.env_value = None
         
     def init_env(self, server_config, server_host, deploy_mode, image_type, image_tag):
-        """
-        Deploy start server with using helm,
-        clean up env if deploy or start failed
+        """Deploy start server with using helm, clean up env
+        if deploy or start failed
         """
         logger.debug("Tests run on server host:")
         logger.debug(server_host)
@@ -857,9 +855,9 @@ class QueryTask(User):
                             task_name = random.choice(tasks)
                             mp.append((tmp_collection_name, task_name))
 
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrent_num) as executor:
+                        with futures.ThreadPoolExecutor(max_workers=concurrent_num) as executor:
                             future_results = {executor.submit(getattr(milvus_instances_map[mp[j][0]], mp[j][1])): j for j in range(concurrent_num)}
-                            for future in concurrent.futures.as_completed(future_results):
+                            for future in futures.as_completed(future_results):
                                 future.result()
 
                     else:
@@ -1098,7 +1096,7 @@ class MixTask(User):
                     "qps": locust_stats["Requests/s"],
                     "min_response_time": int(locust_stats["Min Response Time"]),
                     "max_response_time": int(locust_stats["Max Response Time"]),
-                    "min_response_time": int(locust_stats["Median Response Time"]),
+                    "median_response_time": int(locust_stats["Median Response Time"]),
                     "avg_response_time": int(locust_stats["Average Response Time"])
                 }
             }

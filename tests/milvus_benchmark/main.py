@@ -42,8 +42,7 @@ def get_image_tag(image_version, image_type):
 
 
 def queue_worker(queue):
-    """
-    Using queue to make sure only one test process on each host,
+    """Using queue to make sure only one test process on each host,
     workers can be run concurrently on different host
     """
     while not queue.empty():

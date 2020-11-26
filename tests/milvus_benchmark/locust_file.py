@@ -9,7 +9,7 @@ url = '/collections/%s/vectors' % collection_name
 top_k = 2
 nq = 1
 dim = 512
-vectors =  [[random.random() for _ in range(dim)] for _ in range(nq)] 
+vectors = [[random.random() for _ in range(dim)] for _ in range(nq)] 
 data = {
     "search":{
         "topk": top_k,

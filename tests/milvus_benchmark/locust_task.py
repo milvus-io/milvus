@@ -4,13 +4,11 @@ from client import MilvusClient
 
 
 class MilvusTask(object):
-    """
-    Generate milvus client for locust,
+    """Generate milvus client for locust,
     to make sure we can use the same function name in client as task name in Taskset/User
     """
     def __init__(self, connection_type="single", **kwargs):
-        """
-        Params: connection_type, single/multi is optional
+        """Params: connection_type, single/multi is optional
         other args: host/port/collection_name
         """
         self.request_type = "grpc"
@@ -23,8 +21,7 @@ class MilvusTask(object):
             self.m = MilvusClient(host=host, port=port, collection_name=collection_name)
 
     def __getattr__(self, name):
-        """
-        register success and failure event with using locust.events
+        """Register success and failure event with using locust.events
         make sure the task function name in locust equals to te name of function in MilvusClient
         """
         func = getattr(self.m, name)
@@ -32,7 +29,7 @@ class MilvusTask(object):
         def wrapper(*args, **kwargs):
             start_time = time.time()
             try:
-                result = func(*args, **kwargs)
+                _ = func(*args, **kwargs)
                 total_time = int((time.time() - start_time) * 1000)
                 events.request_success.fire(request_type=self.request_type, name=name, response_time=total_time,
                                             response_length=0)

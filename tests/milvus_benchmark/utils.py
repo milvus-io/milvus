@@ -44,10 +44,10 @@ represent_literal_str = change_style('|', SafeRepresenter.represent_str)
 yaml.add_representer(literal_str, represent_literal_str)
 
 
-"""
-normalize the vectors for Inner Product
-"""
 def normalize(metric_type, X):
+    """Normalize the vectors,
+    if type equals ip, using sklearn.preprocessing.normalize to convert it
+    """
     if metric_type == "ip":
         logger.info("Set normalize for metric_type: %s" % metric_type)
         X = sklearn.preprocessing.normalize(X, axis=1, norm='l2')
@@ -290,8 +290,7 @@ def update_values(file_path, deploy_mode, hostname, server_config):
 
 
 def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, namespace):
-    """
-    Deploy server with using helm
+    """Deploy server with using helm
     """
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)

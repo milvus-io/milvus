@@ -1,5 +1,4 @@
-import pdb
-import random, string, logging
+import random, string
 from locust import User, task, between
 from locust_task import MilvusTask
 from client import MilvusClient

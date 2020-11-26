@@ -47,6 +47,13 @@ def time_wrapper(func):
     return wrapper
 
 
+def metric_type_to_str(metric_type):
+    for key, value in METRIC_MAP.items():
+        if value == metric_type:
+            return key
+    raise Exception("metric_type: %s mapping not found" % metric_type)
+
+
 class MilvusClient(object):
     def __init__(self, collection_name=None, host=None, port=None, timeout=60):
         """
@@ -85,17 +92,11 @@ class MilvusClient(object):
             raise e
         self._metric_type = None
         if self._collection_name and self.exists_collection():
-            self._metric_type = self.metric_type_to_str(self.describe()[1].metric_type)
+            self._metric_type = metric_type_to_str(self.describe()[1].metric_type)
             self._dimension = self.describe()[1].dimension
 
     def __str__(self):
         return 'Milvus collection %s' % self._collection_name
-
-    def metric_type_to_str(self, metric_type):
-        for key, value in METRIC_MAP.items():
-            if value == metric_type:
-                return key
-        raise Exception("metric_type: %s mapping not found" % metric_type)
 
     def set_collection(self, name):
         self._collection_name = name

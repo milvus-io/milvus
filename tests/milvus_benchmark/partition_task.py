@@ -36,7 +36,7 @@ class QueryTask(User):
 
     @task(2)
     def test_count(self):
-        m.count(collection_name)
+        self.client.count(collection_name)
 
     @task(1)
     def test_drop(self):
