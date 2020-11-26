@@ -86,14 +86,14 @@ func TestParamTable_ProxyIDList(t *testing.T) {
 	Params.Init()
 	ids := Params.ProxyIDList
 	assert.Equal(t, len(ids), 1)
-	assert.Equal(t, ids[0], int64(1))
+	assert.Equal(t, ids[0], int64(0))
 }
 
 func TestParamTable_ProxyTimeTickChannelNames(t *testing.T) {
 	Params.Init()
 	names := Params.ProxyTimeTickChannelNames
 	assert.Equal(t, len(names), 1)
-	assert.Equal(t, names[0], "proxyTimeTick-1")
+	assert.Equal(t, names[0], "proxyTimeTick-0")
 }
 
 func TestParamTable_MsgChannelSubName(t *testing.T) {

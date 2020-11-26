@@ -70,6 +70,9 @@ func (tt *timeTick) tick() error {
 	}
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []int32{int32(Params.ProxyID())},
+		},
 		TimeTickMsg: internalpb.TimeTickMsg{
 			MsgType:   internalpb.MsgType_kTimeTick,
 			PeerID:    tt.peerID,
@@ -77,7 +80,12 @@ func (tt *timeTick) tick() error {
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	tt.tickMsgStream.Produce(&msgPack)
+	err := tt.tickMsgStream.Produce(&msgPack)
+	if err != nil {
+		log.Printf("proxy send time tick error: %v", err)
+	} else {
+		log.Printf("proxy send time tick message")
+	}
 	tt.lastTick = tt.currentTick
 	return nil
 }

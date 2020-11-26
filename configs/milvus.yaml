@@ -11,7 +11,7 @@
 
 
 nodeID: # will be deprecated after v0.2
-  proxyIDList: [1]
+  proxyIDList: [0]
   queryNodeIDList: [2]
   writeNodeIDList: [3]
 

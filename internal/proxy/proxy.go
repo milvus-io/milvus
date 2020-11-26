@@ -94,6 +94,8 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 		return nil, err
 	}
 
+	p.tick = newTimeTick(p.proxyLoopCtx, p.tsoAllocator, time.Millisecond*200, p.sched.TaskDoneTest)
+
 	return p, nil
 }
 
@@ -114,6 +116,7 @@ func (p *Proxy) startProxy() error {
 	p.idAllocator.Start()
 	p.tsoAllocator.Start()
 	p.segAssigner.Start()
+	p.tick.Start()
 
 	// Start callbacks
 	for _, cb := range p.startCallbacks {
@@ -183,6 +186,8 @@ func (p *Proxy) stopProxyLoop() {
 	p.manipulationMsgStream.Close()
 
 	p.queryMsgStream.Close()
+
+	p.tick.Close()
 
 	p.proxyLoopWg.Wait()
 }
