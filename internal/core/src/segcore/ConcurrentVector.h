@@ -20,7 +20,6 @@
 #include <vector>
 #include <utility>
 #include "utils/EasyAssert.h"
-#include <boost/container/vector.hpp>
 
 namespace milvus::segcore {
 
@@ -52,7 +51,7 @@ namespace milvus::segcore {
 //};
 
 template <typename Type>
-using FixedVector = boost::container::vector<Type>;
+using FixedVector = std::vector<Type>;
 constexpr int64_t DefaultElementPerChunk = 32 * 1024;
 
 template <typename Type>

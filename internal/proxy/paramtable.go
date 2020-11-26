@@ -480,6 +480,18 @@ func (pt *ParamTable) MaxFieldNum() int64 {
 	return maxFieldNum
 }
 
+func (pt *ParamTable) MaxDimension() int64 {
+	str, err := pt.Load("proxy.maxDimension")
+	if err != nil {
+		panic(err)
+	}
+	maxDimension, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return maxDimension
+}
+
 func (pt *ParamTable) defaultPartitionTag() string {
 	tag, err := pt.Load("common.defaultPartitionTag")
 	if err != nil {

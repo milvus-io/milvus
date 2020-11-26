@@ -192,10 +192,11 @@ ExecExprVisitor::visit(RangeExpr& expr) {
     Assert(expr.data_type_ == field_meta.get_data_type());
     RetType ret;
     switch (expr.data_type_) {
-        case DataType::BOOL: {
-            ret = ExecRangeVisitorDispatcher<bool>(expr);
-            break;
-        }
+        // case DataType::BOOL: {
+        //    ret = ExecRangeVisitorDispatcher<bool>(expr);
+        //    break;
+        //}
+        // case DataType::BOOL:
         case DataType::INT8: {
             ret = ExecRangeVisitorDispatcher<int8_t>(expr);
             break;

@@ -116,3 +116,14 @@ func ValidateFieldName(fieldName string) error {
 	}
 	return nil
 }
+
+func ValidateDimension(dim int64, isBinary bool) error {
+	if dim <= 0 || dim > Params.MaxDimension() {
+		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be in range 1 ~ " +
+			strconv.FormatInt(Params.MaxDimension(), 10) + ".")
+	}
+	if isBinary && dim%8 != 0 {
+		return errors.New("invalid dimension: " + strconv.FormatInt(dim, 10) + ". should be multiple of 8.")
+	}
+	return nil
+}
