@@ -20,7 +20,6 @@
 #include <thread>
 #include <vector>
 #include "db/snapshot/SnapshotHolder.h"
-#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
 #include "utils/ThreadPool.h"
@@ -102,7 +101,6 @@ class Snapshots {
     std::set<ID_TYPE> alive_cids_;
     std::map<std::string, ID_TYPE> name_id_map_;
     std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
-    SnapshotPolicyPtr policy_;
     StorePtr store_;
 };
 

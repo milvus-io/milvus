@@ -123,7 +123,6 @@ SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
 
 Status
 SnapshotHolder::ApplyEject() {
-    std::cout << "ApplyEject " << collection_id_ << std::endl;
     Status status;
     Snapshot::Ptr oldest_ss;
     {

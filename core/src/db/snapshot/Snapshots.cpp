@@ -16,6 +16,7 @@
 #include "db/snapshot/EventExecutor.h"
 #include "db/snapshot/InActiveResourcesGCEvent.h"
 #include "db/snapshot/OperationExecutor.h"
+#include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/TimerContext.h"
 #include "value/config/ServerConfig.h"
@@ -56,7 +57,6 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
         inactive_holders_[h->first] = h->second;
         holders_.erase(h);
     }
-    std::cout << inactive_holders_.size() << std::endl;
     return status;
 }
 
@@ -135,7 +135,8 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
         return Status(SS_NOT_FOUND_ERROR, emsg.str());
     }
 
-    holder = std::make_shared<SnapshotHolder>(collection_id, policy_,
+    auto policy = SnapshotPolicyFactory::Build(config);
+    holder = std::make_shared<SnapshotHolder>(collection_id, policy,
                                               std::bind(&Snapshots::SnapshotGCCallback, this, std::placeholders::_1));
     for (auto c_c_id : collection_commit_ids) {
         holder->Add(store, c_c_id);
@@ -145,8 +146,6 @@ Snapshots::LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& 
 
 Status
 Snapshots::Init(StorePtr store) {
-    policy_ = SnapshotPolicyFactory::Build(config);
-
     auto event = std::make_shared<InActiveResourcesGCEvent>();
     EventExecutor::GetInstance().Submit(event, true);
     STATUS_CHECK(event->WaitToFinish());
