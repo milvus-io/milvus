@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "db/meta/MetaFilter.h"
 #include "db/meta/MetaResourceAttrs.h"
 #include "db/meta/backend/MetaEngine.h"
 #include "db/snapshot/BaseResource.h"
