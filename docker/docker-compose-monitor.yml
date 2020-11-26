@@ -6,7 +6,7 @@ networks:
 
 services:
     prometheus:
-        image: prom/prometheus:v2.11.1
+        image: prom/prometheus:v2.17.1
         container_name: prometheus
         hostname: prometheus
         restart: always
@@ -30,6 +30,26 @@ services:
         networks:
             - monitor
 
+    nodeexporter:
+        image: prom/node-exporter:v0.18.1
+        container_name: nodeexporter
+        volumes:
+            - /proc:/host/proc:ro
+            - /sys:/host/sys:ro
+            - /:/rootfs:ro
+        command:
+            - '--path.procfs=/host/proc'
+            - '--path.rootfs=/rootfs'
+            - '--path.sysfs=/host/sys'
+            - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+        restart: unless-stopped
+        expose:
+            - 9100
+        networks:
+            - monitor
+        labels:
+            org.label-schema.group: "monitoring"
+
     grafana:
         image: grafana/grafana
         container_name: grafana
@@ -37,22 +57,5 @@ services:
         restart: always
         ports:
             - "3000:3000"
-        networks:
-            - monitor
-
-    milvus_server:
-        runtime: nvidia
-        image: milvusdb/milvus:latest
-        restart: always
-        links:
-            - prometheus
-        environment:
-            WEB_APP: host.docker.internal
-        volumes:
-            - ../core/conf/milvus.yaml:/var/lib/milvus/conf/milvus.yaml
-            - ../core/conf/log_config.conf:/var/lib/milvus/conf/log_config.conf
-        ports:
-            - "8080:8080"
-            - "19530:19530"
         networks:
             - monitor

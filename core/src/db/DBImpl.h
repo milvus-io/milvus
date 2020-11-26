@@ -23,7 +23,7 @@
 
 #include "db/DB.h"
 #include "db/SegmentTaskTracker.h"
-
+#include "metrics/Prometheus.h"
 #include "utils/ThreadPool.h"
 #include "value/config/ConfigMgr.h"
 
@@ -156,6 +156,9 @@ class DBImpl : public DB, public ConfigObserver {
     BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all);
 
     void
+    BackgroundMetricThread();
+
+    void
     WaitMergeFileFinish();
 
     void
@@ -207,6 +210,15 @@ class DBImpl : public DB, public ConfigObserver {
 
     int64_t live_build_num_ = 0;
     std::mutex live_build_count_mutex_;
+
+    // Metrics
+    prometheus::Family<prometheus::Gauge>& db_info_family_ =
+        prometheus::BuildGauge().Name("milvus_db_info").Help("milvus db info").Register(prometheus.registry());
+    prometheus::Gauge& data_size_gauge_ = db_info_family_.Add({{"db_info", "data_size"}});
+
+    prometheus::Family<prometheus::Gauge>& query_info_family_ =
+        prometheus::BuildGauge().Name("milvus_query_info").Help("milvus query info").Register(prometheus.registry());
+    prometheus::Gauge& query_per_second_gauge_ = query_info_family_.Add({});
 };  // SSDBImpl
 
 using DBImplPtr = std::shared_ptr<DBImpl>;

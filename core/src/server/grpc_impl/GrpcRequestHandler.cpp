@@ -808,6 +808,7 @@ GrpcRequestHandler::DropCollection(::grpc::ServerContext* context, const ::milvu
 GrpcRequestHandler::CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
                                 ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request)
+    ScopedTimer scoped_timer([this](double lantency) { this->operation_create_index_histogram_.Observe(lantency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     milvus::json json_params;
@@ -1776,7 +1777,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
 GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
                            ::milvus::grpc::QueryResult* response) {
     CHECK_NULLPTR_RETURN(request);
-    ScopedTimer scoped_timer([this](double lantency) { this->operation_search_histogram_.Observe(lantency); });
+    ScopedTimer scoped_timer([this](double latency) { this->operation_search_histogram_.Observe(latency); });
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
 
     Status status;

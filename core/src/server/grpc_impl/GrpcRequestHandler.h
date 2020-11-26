@@ -365,14 +365,16 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
 
     prometheus::Counter& rpc_requests_total_counter_ = rpc_requests_total_.Add({});
 
-    prometheus::Family<prometheus::Histogram>& operation_lantency_second_family_ =
+    prometheus::Family<prometheus::Histogram>& operation_latency_second_family_ =
         prometheus::BuildHistogram()
-            .Name("milvus_operation_lantency_seconds")
-            .Help("operation_lantency_seconds")
+            .Name("milvus_operation_latency_seconds")
+            .Help("operation_latency_seconds")
             .Register(prometheus.registry());
-    prometheus::Histogram& operation_insert_histogram_ = operation_lantency_second_family_.Add(
+    prometheus::Histogram& operation_insert_histogram_ = operation_latency_second_family_.Add(
         {{"operation", "insert"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
-    prometheus::Histogram& operation_search_histogram_ = operation_lantency_second_family_.Add(
+    prometheus::Histogram& operation_create_index_histogram_ = operation_latency_second_family_.Add(
+        {{"operation", "create_index"}}, prometheus::Histogram::BucketBoundaries{1, 10, 100, 1000});
+    prometheus::Histogram& operation_search_histogram_ = operation_latency_second_family_.Add(
         {{"operation", "search"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
 };
 
