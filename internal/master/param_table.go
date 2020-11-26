@@ -43,6 +43,9 @@ type ParamTable struct {
 	K2SChannelNames               []string
 	QueryNodeStatsChannelName     string
 	MsgChannelSubName             string
+
+	MaxPartitionNum     int64
+	DefaultPartitionTag string
 }
 
 var Params ParamTable
@@ -59,6 +62,10 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 	err = p.LoadYaml("advanced/master.yaml")
+	if err != nil {
+		panic(err)
+	}
+	err = p.LoadYaml("advanced/common.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -91,6 +98,8 @@ func (p *ParamTable) Init() {
 	p.initK2SChannelNames()
 	p.initQueryNodeStatsChannelName()
 	p.initMsgChannelSubName()
+	p.initMaxPartitionNum()
+	p.initDefaultPartitionTag()
 }
 
 func (p *ParamTable) initAddress() {
@@ -360,18 +369,33 @@ func (p *ParamTable) initInsertChannelNames() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	id, err := p.Load("nodeID.queryNodeIDList")
+	channelRange, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
-		log.Panicf("load query node id list error, %s", err.Error())
+		panic(err)
 	}
-	ids := strings.Split(id, ",")
-	channels := make([]string, 0, len(ids))
-	for _, i := range ids {
-		_, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load query node id list error, %s", err.Error())
-		}
-		channels = append(channels, ch+"-"+i)
+
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
 	}
 	p.InsertChannelNames = channels
 }
@@ -395,4 +419,25 @@ func (p *ParamTable) initK2SChannelNames() {
 		channels = append(channels, ch+"-"+i)
 	}
 	p.K2SChannelNames = channels
+}
+
+func (p *ParamTable) initMaxPartitionNum() {
+	str, err := p.Load("master.maxPartitionNum")
+	if err != nil {
+		panic(err)
+	}
+	maxPartitionNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxPartitionNum = maxPartitionNum
+}
+
+func (p *ParamTable) initDefaultPartitionTag() {
+	defaultTag, err := p.Load("common.defaultPartitionTag")
+	if err != nil {
+		panic(err)
+	}
+
+	p.DefaultPartitionTag = defaultTag
 }

@@ -26,3 +26,7 @@ proxy:
 
     timeTick:
       bufSize: 512
+
+  maxNameLength: 255
+  maxFieldNum: 64
+  maxDimension: 32768

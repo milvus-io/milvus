@@ -21,3 +21,5 @@ master:
     maxIDAssignCnt: 16384
     # old name: segmentExpireDuration: 2000
     IDAssignExpiration: 2000 # ms
+
+  maxPartitionNum: 4096
