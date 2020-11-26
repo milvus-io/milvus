@@ -4,17 +4,12 @@ import (
 	"context"
 	"errors"
 	"log"
-	"math"
-	"strconv"
-
-	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
@@ -37,6 +32,7 @@ type BaseInsertTask = msgstream.InsertMsg
 type InsertTask struct {
 	BaseInsertTask
 	Condition
+	ts                    Timestamp
 	result                *servicepb.IntegerRangeResponse
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	ctx                   context.Context
@@ -48,21 +44,15 @@ func (it *InsertTask) SetID(uid UniqueID) {
 }
 
 func (it *InsertTask) SetTs(ts Timestamp) {
-	rowNum := len(it.RowData)
-	it.Timestamps = make([]uint64, rowNum)
-	for index := range it.Timestamps {
-		it.Timestamps[index] = ts
-	}
-	it.BeginTimestamp = ts
-	it.EndTimestamp = ts
+	it.ts = ts
 }
 
 func (it *InsertTask) BeginTs() Timestamp {
-	return it.BeginTimestamp
+	return it.ts
 }
 
 func (it *InsertTask) EndTs() Timestamp {
-	return it.EndTimestamp
+	return it.ts
 }
 
 func (it *InsertTask) ID() UniqueID {
@@ -74,15 +64,6 @@ func (it *InsertTask) Type() internalpb.MsgType {
 }
 
 func (it *InsertTask) PreExecute() error {
-	collectionName := it.BaseInsertTask.CollectionName
-	if err := ValidateCollectionName(collectionName); err != nil {
-		return err
-	}
-	partitionTag := it.BaseInsertTask.PartitionTag
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -139,7 +120,6 @@ type CreateCollectionTask struct {
 	masterClient masterpb.MasterClient
 	result       *commonpb.Status
 	ctx          context.Context
-	schema       *schemapb.CollectionSchema
 }
 
 func (cct *CreateCollectionTask) ID() UniqueID {
@@ -167,55 +147,10 @@ func (cct *CreateCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (cct *CreateCollectionTask) PreExecute() error {
-	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum() {
-		return errors.New("maximum field's number should be limited to " + strconv.FormatInt(Params.MaxFieldNum(), 10))
-	}
-
-	// validate collection name
-	if err := ValidateCollectionName(cct.schema.Name); err != nil {
-		return err
-	}
-
-	// validate field name
-	for _, field := range cct.schema.Fields {
-		if err := ValidateFieldName(field.Name); err != nil {
-			return err
-		}
-		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
-			exist := false
-			var dim int64 = 0
-			for _, param := range field.TypeParams {
-				if param.Key == "dim" {
-					exist = true
-					tmp, err := strconv.ParseInt(param.Value, 10, 64)
-					if err != nil {
-						return err
-					}
-					dim = tmp
-					break
-				}
-			}
-			if !exist {
-				return errors.New("dimension is not defined in field type params")
-			}
-			if field.DataType == schemapb.DataType_VECTOR_FLOAT {
-				if err := ValidateDimension(dim, false); err != nil {
-					return err
-				}
-			} else {
-				if err := ValidateDimension(dim, true); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
 	return nil
 }
 
 func (cct *CreateCollectionTask) Execute() error {
-	schemaBytes, _ := proto.Marshal(cct.schema)
-	cct.CreateCollectionRequest.Schema.Value = schemaBytes
 	resp, err := cct.masterClient.CreateCollection(cct.ctx, &cct.CreateCollectionRequest)
 	if err != nil {
 		log.Printf("create collection failed, error= %v", err)
@@ -266,9 +201,6 @@ func (dct *DropCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *DropCollectionTask) PreExecute() error {
-	if err := ValidateCollectionName(dct.CollectionName.CollectionName); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -297,7 +229,6 @@ type QueryTask struct {
 	resultBuf      chan []*internalpb.SearchResult
 	result         *servicepb.QueryResult
 	ctx            context.Context
-	query          *servicepb.Query
 }
 
 func (qt *QueryTask) ID() UniqueID {
@@ -325,15 +256,6 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 }
 
 func (qt *QueryTask) PreExecute() error {
-	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
-		return err
-	}
-
-	for _, tag := range qt.query.PartitionTags {
-		if err := ValidatePartitionTag(tag, false); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -372,17 +294,7 @@ func (qt *QueryTask) PostExecute() error {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
-			var hits [][]*servicepb.Hits = make([][]*servicepb.Hits, rlen)
-			for i, sr := range searchResults {
-				hits[i] = make([]*servicepb.Hits, n)
-				for j, bs := range sr.Hits {
-					err := proto.Unmarshal(bs, hits[i][j])
-					if err != nil {
-						return err
-					}
-				}
-			}
-			k := len(hits[0][0].IDs)
+			k := len(searchResults[0].Hits[0].IDs) // k
 			queryResult := &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
@@ -395,27 +307,26 @@ func (qt *QueryTask) PostExecute() error {
 			//		len(queryResult.Hits[i].Ids) == k for i in range(n)
 			for i := 0; i < n; n++ { // n
 				locs := make([]int, rlen)
-				reducedHits := &servicepb.Hits{}
+				hits := &servicepb.Hits{}
 				for j := 0; j < k; j++ { // k
-					choice, minDistance := 0, float32(math.MaxFloat32)
+					choice, maxScore := 0, float32(0)
 					for q, loc := range locs { // query num, the number of ways to merge
-						distance := hits[q][i].Scores[loc]
-						if distance < minDistance {
+						score := func(score *servicepb.Score) float32 {
+							// TODO: get score of root
+							return 0.0
+						}(searchResults[q].Hits[i].Scores[loc])
+						if score > maxScore {
 							choice = q
-							minDistance = distance
+							maxScore = score
 						}
 					}
 					choiceOffset := locs[choice]
-					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
-					reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
-					reducedHits.Scores = append(reducedHits.Scores, hits[choice][i].Scores[choiceOffset])
+					hits.IDs = append(hits.IDs, searchResults[choice].Hits[i].IDs[choiceOffset])
+					hits.RowData = append(hits.RowData, searchResults[choice].Hits[i].RowData[choiceOffset])
+					hits.Scores = append(hits.Scores, searchResults[choice].Hits[i].Scores[choiceOffset])
 					locs[choice]++
 				}
-				reducedHitsBs, err := proto.Marshal(reducedHits)
-				if err != nil {
-					return err
-				}
-				queryResult.Hits = append(queryResult.Hits, reducedHitsBs)
+				queryResult.Hits = append(queryResult.Hits, hits)
 			}
 			qt.result = queryResult
 		}
@@ -456,9 +367,6 @@ func (hct *HasCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (hct *HasCollectionTask) PreExecute() error {
-	if err := ValidateCollectionName(hct.CollectionName.CollectionName); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -516,9 +424,6 @@ func (dct *DescribeCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *DescribeCollectionTask) PreExecute() error {
-	if err := ValidateCollectionName(dct.CollectionName.CollectionName); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -627,16 +532,6 @@ func (cpt *CreatePartitionTask) SetTs(ts Timestamp) {
 }
 
 func (cpt *CreatePartitionTask) PreExecute() error {
-	collName, partitionTag := cpt.PartitionName.CollectionName, cpt.PartitionName.Tag
-
-	if err := ValidateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -682,16 +577,6 @@ func (dpt *DropPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (dpt *DropPartitionTask) PreExecute() error {
-	collName, partitionTag := dpt.PartitionName.CollectionName, dpt.PartitionName.Tag
-
-	if err := ValidateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -737,15 +622,6 @@ func (hpt *HasPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (hpt *HasPartitionTask) PreExecute() error {
-	collName, partitionTag := hpt.PartitionName.CollectionName, hpt.PartitionName.Tag
-
-	if err := ValidateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -791,15 +667,6 @@ func (dpt *DescribePartitionTask) SetTs(ts Timestamp) {
 }
 
 func (dpt *DescribePartitionTask) PreExecute() error {
-	collName, partitionTag := dpt.PartitionName.CollectionName, dpt.PartitionName.Tag
-
-	if err := ValidateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := ValidatePartitionTag(partitionTag, true); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -845,9 +712,6 @@ func (spt *ShowPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (spt *ShowPartitionsTask) PreExecute() error {
-	if err := ValidateCollectionName(spt.CollectionName.CollectionName); err != nil {
-		return err
-	}
 	return nil
 }
 

@@ -69,8 +69,3 @@ func TestParamTable_MsgStreamTimeTickBufSize(t *testing.T) {
 	ret := Params.MsgStreamTimeTickBufSize()
 	fmt.Println(ret)
 }
-
-func TestParamTable_defaultPartitionTag(t *testing.T) {
-	ret := Params.defaultPartitionTag()
-	fmt.Println("default partition tag: ", ret)
-}

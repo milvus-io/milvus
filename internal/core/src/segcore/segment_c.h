@@ -14,24 +14,11 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include <stdlib.h>
-#include <stdint.h>
-
 #include "segcore/collection_c.h"
 #include "segcore/plan_c.h"
+#include <stdint.h>
 
 typedef void* CSegmentBase;
-typedef void* CQueryResult;
-
-enum ErrorCode {
-    Success = 0,
-    UnexpectedException = 1,
-};
-
-typedef struct CStatus {
-    int error_code;
-    const char* error_msg;
-} CStatus;
 
 CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id);
@@ -39,12 +26,9 @@ NewSegment(CCollection collection, uint64_t segment_id);
 void
 DeleteSegment(CSegmentBase segment);
 
-void
-DeleteQueryResult(CQueryResult query_result);
-
 //////////////////////////////////////////////////////////////////
 
-CStatus
+int
 Insert(CSegmentBase c_segment,
        int64_t reserved_offset,
        int64_t size,
@@ -57,20 +41,21 @@ Insert(CSegmentBase c_segment,
 int64_t
 PreInsert(CSegmentBase c_segment, int64_t size);
 
-CStatus
+int
 Delete(
     CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps);
 
 int64_t
 PreDelete(CSegmentBase c_segment, int64_t size);
 
-CStatus
+int
 Search(CSegmentBase c_segment,
        CPlan plan,
        CPlaceholderGroup* placeholder_groups,
        uint64_t* timestamps,
        int num_groups,
-       CQueryResult* result);
+       int64_t* result_ids,
+       float* result_distances);
 
 //////////////////////////////////////////////////////////////////
 

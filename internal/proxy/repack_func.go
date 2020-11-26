@@ -1,9 +1,6 @@
 package proxy
 
 import (
-	"log"
-	"sort"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -18,9 +15,6 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 
 	result := make(map[int32]*msgstream.MsgPack)
 
-	channelCountMap := make(map[UniqueID]map[int32]uint32) //  reqID --> channelID to count
-	reqSchemaMap := make(map[UniqueID][]string)
-
 	for i, request := range tsMsgs {
 		if request.Type() != internalpb.MsgType_kInsert {
 			return nil, errors.New(string("msg's must be Insert"))
@@ -29,8 +23,8 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		if !ok {
 			return nil, errors.New(string("msg's must be Insert"))
 		}
-
 		keys := hashKeys[i]
+
 		timestampLen := len(insertRequest.Timestamps)
 		rowIDLen := len(insertRequest.RowIDs)
 		rowDataLen := len(insertRequest.RowData)
@@ -41,102 +35,9 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		}
 
 		reqID := insertRequest.ReqID
-		if _, ok := channelCountMap[reqID]; !ok {
-			channelCountMap[reqID] = make(map[int32]uint32)
-		}
-
-		if _, ok := reqSchemaMap[reqID]; !ok {
-			reqSchemaMap[reqID] = []string{insertRequest.CollectionName, insertRequest.PartitionTag}
-		}
-
-		for _, channelID := range keys {
-			channelCountMap[reqID][channelID]++
-		}
-
-	}
-
-	reqSegCountMap := make(map[UniqueID]map[int32]map[UniqueID]uint32)
-
-	for reqID, countInfo := range channelCountMap {
-		if _, ok := reqSegCountMap[reqID]; !ok {
-			reqSegCountMap[reqID] = make(map[int32]map[UniqueID]uint32)
-		}
-		schema := reqSchemaMap[reqID]
-		collName, partitionTag := schema[0], schema[1]
-		for channelID, count := range countInfo {
-			mapInfo, err := segIDAssigner.GetSegmentID(collName, partitionTag, channelID, count)
-			if err != nil {
-				return nil, err
-			}
-			reqSegCountMap[reqID][channelID] = make(map[UniqueID]uint32)
-			reqSegCountMap[reqID][channelID] = mapInfo
-		}
-	}
-
-	reqSegAccumulateCountMap := make(map[UniqueID]map[int32][]uint32)
-	reqSegIDMap := make(map[UniqueID]map[int32][]UniqueID)
-	reqSegAllocateCounter := make(map[UniqueID]map[int32]uint32)
-
-	for reqID, channelInfo := range reqSegCountMap {
-		if _, ok := reqSegAccumulateCountMap[reqID]; !ok {
-			reqSegAccumulateCountMap[reqID] = make(map[int32][]uint32)
-		}
-		if _, ok := reqSegIDMap[reqID]; !ok {
-			reqSegIDMap[reqID] = make(map[int32][]UniqueID)
-		}
-		if _, ok := reqSegAllocateCounter[reqID]; !ok {
-			reqSegAllocateCounter[reqID] = make(map[int32]uint32)
-		}
-		for channelID, segInfo := range channelInfo {
-			reqSegAllocateCounter[reqID][channelID] = 0
-			keys := make([]UniqueID, len(segInfo))
-			i := 0
-			for key := range segInfo {
-				keys[i] = key
-				i++
-			}
-			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-			accumulate := uint32(0)
-			for _, key := range keys {
-				accumulate += segInfo[key]
-				if _, ok := reqSegAccumulateCountMap[reqID][channelID]; !ok {
-					reqSegAccumulateCountMap[reqID][channelID] = make([]uint32, 0)
-				}
-				reqSegAccumulateCountMap[reqID][channelID] = append(
-					reqSegAccumulateCountMap[reqID][channelID],
-					accumulate,
-				)
-				if _, ok := reqSegIDMap[reqID][channelID]; !ok {
-					reqSegIDMap[reqID][channelID] = make([]UniqueID, 0)
-				}
-				reqSegIDMap[reqID][channelID] = append(
-					reqSegIDMap[reqID][channelID],
-					key,
-				)
-			}
-		}
-	}
-
-	var getSegmentID = func(reqID UniqueID, channelID int32) UniqueID {
-		reqSegAllocateCounter[reqID][channelID]++
-		cur := reqSegAllocateCounter[reqID][channelID]
-		accumulateSlice := reqSegAccumulateCountMap[reqID][channelID]
-		segIDSlice := reqSegIDMap[reqID][channelID]
-		for index, count := range accumulateSlice {
-			if cur <= count {
-				return segIDSlice[index]
-			}
-		}
-		log.Panic("Can't Found SegmentID")
-		return 0
-	}
-
-	for i, request := range tsMsgs {
-		insertRequest := request.(*msgstream.InsertMsg)
-		keys := hashKeys[i]
-		reqID := insertRequest.ReqID
 		collectionName := insertRequest.CollectionName
 		partitionTag := insertRequest.PartitionTag
+		channelID := insertRequest.ChannelID
 		proxyID := insertRequest.ProxyID
 		for index, key := range keys {
 			ts := insertRequest.Timestamps[index]
@@ -147,14 +48,13 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				msgPack := msgstream.MsgPack{}
 				result[key] = &msgPack
 			}
-			segmentID := getSegmentID(reqID, key)
 			sliceRequest := internalpb.InsertRequest{
 				MsgType:        internalpb.MsgType_kInsert,
 				ReqID:          reqID,
 				CollectionName: collectionName,
 				PartitionTag:   partitionTag,
-				SegmentID:      segmentID,
-				ChannelID:      int64(key),
+				SegmentID:      0, // will be assigned later if together
+				ChannelID:      channelID,
 				ProxyID:        proxyID,
 				Timestamps:     []uint64{ts},
 				RowIDs:         []int64{rowID},
@@ -173,8 +73,23 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 					accMsgs.RowData = append(accMsgs.RowData, row)
 				}
 			} else { // every row is a message
+				segID, _ := segIDAssigner.GetSegmentID(collectionName, partitionTag, int32(channelID), 1)
+				insertMsg.SegmentID = segID
 				result[key].Msgs = append(result[key].Msgs, insertMsg)
 			}
+		}
+	}
+
+	if together {
+		for key := range result {
+			insertMsg, _ := result[key].Msgs[0].(*msgstream.InsertMsg)
+			rowNums := len(insertMsg.RowIDs)
+			collectionName := insertMsg.CollectionName
+			partitionTag := insertMsg.PartitionTag
+			channelID := insertMsg.ChannelID
+			segID, _ := segIDAssigner.GetSegmentID(collectionName, partitionTag, int32(channelID), uint32(rowNums))
+			insertMsg.SegmentID = segID
+			result[key].Msgs[0] = insertMsg
 		}
 	}
 

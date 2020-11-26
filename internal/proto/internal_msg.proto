@@ -14,6 +14,7 @@ enum MsgType {
     kHasCollection = 102;
     kDescribeCollection = 103;
     kShowCollections = 104;
+    kGetSysConfigs = 105;
 
     /* Definition Requests: partition */
     kCreatePartition = 200;
@@ -33,6 +34,7 @@ enum MsgType {
     /* System Control */
     kTimeTick = 1200;
     kQueryNodeSegStats = 1201;
+
 }
 
 enum PeerRole {
@@ -223,6 +225,19 @@ message SearchRequest {
 
 }
 
+/**
+ * @brief Request of DescribePartition 
+ */
+message SysConfigRequest {
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    int64 proxyID = 3;
+    uint64 timestamp = 4;
+    repeated string keys = 5;
+    repeated string key_prefixes = 6;
+}
+
+
 message SearchResult {
     MsgType msg_type = 1;
     common.Status status = 2;
@@ -231,7 +246,7 @@ message SearchResult {
     int64 query_nodeID = 5;
     uint64 timestamp = 6;
     int64 result_channelID = 7;
-    repeated bytes hits = 8;
+    repeated service.Hits hits = 8;
 }
 
 message TimeTickMsg {

@@ -186,7 +186,16 @@ type DqTaskQueue struct {
 func (queue *DdTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
-	return queue.BaseTaskQueue.Enqueue(t)
+
+	ts, _ := queue.sched.tsoAllocator.AllocOne()
+	log.Printf("[Proxy] allocate timestamp: %v", ts)
+	t.SetTs(ts)
+
+	reqID, _ := queue.sched.idAllocator.AllocOne()
+	log.Printf("[Proxy] allocate reqID: %v", reqID)
+	t.SetID(reqID)
+
+	return queue.addUnissuedTask(t)
 }
 
 func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {
@@ -360,14 +369,14 @@ func (sched *TaskScheduler) queryLoop() {
 func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
 
+	// TODO: use config instead
 	unmarshal := msgstream.NewUnmarshalDispatcher()
 	queryResultMsgStream := msgstream.NewPulsarMsgStream(sched.ctx, Params.MsgStreamSearchResultBufSize())
 	queryResultMsgStream.SetPulsarClient(Params.PulsarAddress())
-	queryResultMsgStream.CreatePulsarConsumers(Params.searchResultChannelNames(),
+	queryResultMsgStream.CreatePulsarConsumers(Params.SearchResultChannelNames(),
 		Params.ProxySubName(),
 		unmarshal,
 		Params.MsgStreamSearchResultPulsarBufSize())
-	queryNodeNum := Params.queryNodeNum()
 
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
@@ -392,7 +401,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 					queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
 				}
 				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
-				if len(queryResultBuf[reqID]) == queryNodeNum {
+				if len(queryResultBuf[reqID]) == 4 {
+					// TODO: use the number of query node instead
 					t := sched.getTaskByReqID(reqID)
 					if t != nil {
 						qt, ok := t.(*QueryTask)

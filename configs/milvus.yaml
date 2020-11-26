@@ -11,9 +11,9 @@
 
 
 nodeID: # will be deprecated after v0.2
-  proxyIDList: [1]
-  queryNodeIDList: [2]
-  writeNodeIDList: [3]
+  proxyIDList: [1, 2]
+  queryNodeIDList: [3, 4]
+  writeNodeIDList: [5, 6]
 
 etcd:
   address: localhost
