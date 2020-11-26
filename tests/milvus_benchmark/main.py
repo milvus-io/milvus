@@ -12,7 +12,6 @@ from logging import handlers
 from yaml import full_load, dump
 from local_runner import LocalRunner
 from docker_runner import DockerRunner
-from k8s_runner import K8sRunner
 import parser
 
 DEFAULT_IMAGE = "milvusdb/milvus:latest"
@@ -54,6 +53,7 @@ def get_image_tag(image_version, image_type):
 
 
 def queue_worker(queue):
+    from k8s_runner import K8sRunner
     while not queue.empty():
         q = queue.get()
         suite = q["suite"]

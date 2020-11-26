@@ -5,7 +5,8 @@ import pdb
 import string
 import struct
 import logging
-import time, datetime
+import threading
+import time
 import copy
 import numpy as np
 from sklearn import preprocessing
@@ -245,7 +246,7 @@ def gen_default_fields(auto_id=True):
             {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
         ],
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
@@ -258,7 +259,7 @@ def gen_binary_default_fields(auto_id=True):
             {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
         ],
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
@@ -441,7 +442,7 @@ def gen_invalid_range():
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": default_nb//2},
+        {"GT": 0, "LT": default_nb // 2},
         {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
         {"LT": default_nb},
@@ -969,3 +970,20 @@ def restart_server(helm_release_name):
     #     logging.error("Restart pod: %s timeout" % pod_name_tmp)
     #     res = False
     return res
+
+
+class TestThread(threading.Thread):
+    def __init__(self, target, args=()):
+        threading.Thread.__init__(self, target=target, args=args)
+
+    def run(self):
+        self.exc = None
+        try:
+            super(TestThread, self).run()
+        except BaseException as e:
+            self.exc = e
+
+    def join(self):
+        super(TestThread, self).join()
+        if self.exc:
+            raise self.exc

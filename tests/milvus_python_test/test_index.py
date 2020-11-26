@@ -146,7 +146,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.bulk_insert(collection, default_entities)
+        connect.bulk_insert(collection, default_entities)
 
         def build(connect):
             connect.create_index(collection, field_name, default_index)
@@ -155,7 +155,7 @@ class TestIndexBase:
         threads = []
         for i in range(threads_num):
             m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            t = threading.Thread(target=build, args=(m,))
+            t = TestThread(target=build, args=(m,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
@@ -289,7 +289,7 @@ class TestIndexBase:
         method: create collection and add entities in it, create index
         expected: return search success
         '''
-        ids = connect.bulk_insert(collection, default_entities)
+        connect.bulk_insert(collection, default_entities)
 
         def build(connect):
             default_index["metric_type"] = "IP"
@@ -299,7 +299,7 @@ class TestIndexBase:
         threads = []
         for i in range(threads_num):
             m = get_milvus(host=args["ip"], port=args["port"], handler=args["handler"])
-            t = threading.Thread(target=build, args=(m,))
+            t = TestThread(target=build, args=(m,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
