@@ -11,7 +11,7 @@
 #define FAISS_COMMON_H
 
 namespace faiss {
-extern bool STATISTICS_ENABLE;
+extern int STATISTICS_ENABLE;
 }
 
 #endif

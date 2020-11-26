@@ -480,6 +480,8 @@ static void read_RHNSW (RHNSW *rhnsw, IOReader *f) {
             rhnsw->linkLists[i] = (char*)malloc(rhnsw->link_size * rhnsw->levels[i] + 1);
             READANDCHECK( rhnsw->linkLists[i], rhnsw->link_size * rhnsw->levels[i] + 1);
             rhnsw->level_stats[rhnsw->levels[i]] ++;
+        } else {
+            rhnsw->level_stats[0] ++;
         }
     }
 }
