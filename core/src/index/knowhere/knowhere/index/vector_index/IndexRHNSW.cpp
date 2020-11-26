@@ -16,6 +16,7 @@
 #include <iterator>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 #include "faiss/BuilderSuspend.h"
 #include "knowhere/common/Exception.h"
@@ -57,21 +58,24 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         reader.data_ = binary->data.get();
 
         auto idx = faiss::read_index(&reader);
+        auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
         if (STATISTICS_ENABLE) {
             auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
-            auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
-            hnsw_stats->max_level = real_idx->hnsw.max_level;
-            hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-            for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
-                hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
-                    hnsw_stats->target_level = i;
+            if (STATISTICS_ENABLE >= 1) {
             }
-            real_idx->set_target_level(hnsw_stats->target_level);
-            LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-//        hnsw_stats->show();
-            LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+            if (STATISTICS_ENABLE >= 2) {
+                hnsw_stats->max_level = real_idx->hnsw.max_level;
+                hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
+                for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+                    hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
+                    if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                        hnsw_stats->target_level = i;
+                }
+                real_idx->set_target_level(hnsw_stats->target_level);
+            }
         }
+        LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
         index_.reset(idx);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -91,21 +95,24 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR_DATA(dataset_ptr)
 
     index_->add(rows, reinterpret_cast<const float*>(p_data));
+    auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     if (STATISTICS_ENABLE) {
         auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-        auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
-        hnsw_stats->max_level = real_idx->hnsw.max_level;
-        hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-        for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
-            hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-            if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
-                hnsw_stats->target_level = i;
+        if (STATISTICS_ENABLE >= 1) {
         }
-        real_idx->set_target_level(hnsw_stats->target_level);
-        LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Build finished, show statistics:";
-//        hnsw_stats->show();
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        if (STATISTICS_ENABLE >= 2) {
+            hnsw_stats->max_level = real_idx->hnsw.max_level;
+            hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
+            for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+                hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
+                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                    hnsw_stats->target_level = i;
+            }
+            real_idx->set_target_level(hnsw_stats->target_level);
+        }
     }
+    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Build finished, show statistics:";
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
 }
 
 DatasetPtr
@@ -122,11 +129,17 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     if (STATISTICS_ENABLE) {
-        if (bitset)
-            hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
-        else
-            hnsw_stats->bitset_percentage1_sum += 0.0;
-        hnsw_stats->nq_cnt += rows;
+        if (STATISTICS_ENABLE >= 1) {
+            hnsw_stats->nq_cnt += rows;
+            hnsw_stats->batch_cnt += 1;
+            hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            if (bitset)
+                hnsw_stats->filter_percentage_sum += (double)bitset->count_1() / bitset->count();
+            else
+                hnsw_stats->filter_percentage_sum += 0.0;
+        }
     }
     for (auto i = 0; i < k * rows; ++i) {
         p_id[i] = -1;
@@ -135,12 +148,22 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
 
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
 
-    real_index->hnsw.efSearch = (config[IndexParams::ef]);
+    real_index->hnsw.efSearch = (config[IndexParams::ef].get<int64_t>());
+
+    std::chrono::high_resolution_clock::time_point query_start, query_end;
+    query_start = std::chrono::high_resolution_clock::now();
     real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset);
+    query_end = std::chrono::high_resolution_clock::now();
     if (STATISTICS_ENABLE) {
-//        real_index->calculate_stats(hnsw_stats->access_gini_coefficient);
-        LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString(index_type_);
+        if (STATISTICS_ENABLE >= 1) {
+            hnsw_stats->total_query_time += std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);
+        }
     }
+    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

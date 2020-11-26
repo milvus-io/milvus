@@ -128,11 +128,11 @@ KnowhereResource::Initialize() {
     //    NGT_LOG_DEBUG_ = &knowhere::log_debug_;
     if (config.engine.stat_optimizer_enable()) {
         faiss::LOG_DEBUG_ = &knowhere::log_debug_;
-        milvus::knowhere::STATISTICS_ENABLE = true;
-        faiss::STATISTICS_ENABLE = true;
+        milvus::knowhere::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
+        faiss::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
     } else {
-        milvus::knowhere::STATISTICS_ENABLE = false;
-        faiss::STATISTICS_ENABLE = false;
+        milvus::knowhere::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
+        faiss::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
     }
 
     return Status::OK();

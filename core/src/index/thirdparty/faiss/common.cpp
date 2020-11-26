@@ -8,5 +8,5 @@
 // -*- c++ -*-
 
 namespace faiss {
-bool STATISTICS_ENABLE = false;
+int STATISTICS_ENABLE = 0;
 }
