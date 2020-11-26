@@ -52,7 +52,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for _, value := range values {
 		tenantMeta := pb.TenantMeta{}
-		err := proto.Unmarshal([]byte(value), &tenantMeta)
+		err := proto.UnmarshalText(value, &tenantMeta)
 		if err != nil {
 			return err
 		}
@@ -66,7 +66,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for _, value := range values {
 		proxyMeta := pb.ProxyMeta{}
-		err = proto.Unmarshal([]byte(value), &proxyMeta)
+		err = proto.UnmarshalText(value, &proxyMeta)
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for _, value := range values {
 		collectionMeta := pb.CollectionMeta{}
-		err = proto.Unmarshal([]byte(value), &collectionMeta)
+		err = proto.UnmarshalText(value, &collectionMeta)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 	for _, value := range values {
 		segmentMeta := pb.SegmentMeta{}
-		err = proto.Unmarshal([]byte(value), &segmentMeta)
+		err = proto.UnmarshalText(value, &segmentMeta)
 		if err != nil {
 			return err
 		}
@@ -107,10 +107,7 @@ func (mt *metaTable) reloadFromKV() error {
 
 // metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
-	collBytes, err := proto.Marshal(coll)
-	if err != nil {
-		return err
-	}
+	collBytes := proto.MarshalTextString(coll)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 	return mt.client.Save("/collection/"+strconv.FormatInt(coll.ID, 10), string(collBytes))
@@ -118,10 +115,7 @@ func (mt *metaTable) saveCollectionMeta(coll *pb.CollectionMeta) error {
 
 // metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveSegmentMeta(seg *pb.SegmentMeta) error {
-	segBytes, err := proto.Marshal(seg)
-	if err != nil {
-		return err
-	}
+	segBytes := proto.MarshalTextString(seg)
 
 	mt.segID2Meta[seg.SegmentID] = *seg
 
@@ -136,10 +130,7 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 	}
 
 	kvs := make(map[string]string)
-	collStrs, err := proto.Marshal(coll)
-	if err != nil {
-		return err
-	}
+	collStrs := proto.MarshalTextString(coll)
 
 	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collStrs)
 
@@ -159,19 +150,15 @@ func (mt *metaTable) saveCollectionAndDeleteSegmentsMeta(coll *pb.CollectionMeta
 // metaTable.ddLock.Lock() before call this function
 func (mt *metaTable) saveCollectionsAndSegmentsMeta(coll *pb.CollectionMeta, seg *pb.SegmentMeta) error {
 	kvs := make(map[string]string)
-	collBytes, err := proto.Marshal(coll)
-	if err != nil {
-		return err
-	}
+	collBytes := proto.MarshalTextString(coll)
+
 	kvs["/collection/"+strconv.FormatInt(coll.ID, 10)] = string(collBytes)
 
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 
-	segBytes, err := proto.Marshal(seg)
-	if err != nil {
-		return err
-	}
+	segBytes := proto.MarshalTextString(seg)
+
 	kvs["/segment/"+strconv.FormatInt(seg.SegmentID, 10)] = string(segBytes)
 
 	mt.segID2Meta[seg.SegmentID] = *seg
@@ -220,7 +207,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionMeta) error {
 	}
 
 	if len(coll.PartitionTags) == 0 {
-		coll.PartitionTags = append(coll.PartitionTags, Params.DefaultPartitionTag)
+		coll.PartitionTags = append(coll.PartitionTags, "default")
 	}
 	_, ok := mt.collName2ID[coll.Schema.Name]
 	if ok {
@@ -292,10 +279,6 @@ func (mt *metaTable) AddPartition(collID UniqueID, tag string) error {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
-	// number of partition tags (except _default) should be limited to 4096 by default
-	if int64(len(coll.PartitionTags)) > Params.MaxPartitionNum {
-		return errors.New("maximum partition's number should be limit to " + strconv.FormatInt(Params.MaxPartitionNum, 10))
-	}
 	for _, t := range coll.PartitionTags {
 		if t == tag {
 			return errors.Errorf("partition already exists.")
@@ -330,28 +313,16 @@ func (mt *metaTable) DeletePartition(collID UniqueID, tag string) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if tag == Params.DefaultPartitionTag {
-		return errors.New("default partition cannot be deleted")
-	}
-
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
 		return errors.Errorf("can't find collection. id = " + strconv.FormatInt(collID, 10))
 	}
 
-	// check tag exists
-	exist := false
-
 	pt := make([]string, 0, len(collMeta.PartitionTags))
 	for _, t := range collMeta.PartitionTags {
 		if t != tag {
 			pt = append(pt, t)
-		} else {
-			exist = true
 		}
-	}
-	if !exist {
-		return errors.New("partition " + tag + " does not exist")
 	}
 	if len(pt) == len(collMeta.PartitionTags) {
 		return nil
