@@ -69,11 +69,11 @@ SearchTask::OnLoad(LoadType type, uint8_t device_id) {
         } else if (type == LoadType::GPU2CPU) {
             // stat = engine_->CopyToCpu();
             type_str = "GPU2CPU";
-        } else if (type == LoadType::CPU2FPGA) {           
+        } else if (type == LoadType::CPU2FPGA) {
             if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
                 stat = execution_engine_->CopyToFpga();
                 type_str = "CPU2FPGA";
-            }         
+            }
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
