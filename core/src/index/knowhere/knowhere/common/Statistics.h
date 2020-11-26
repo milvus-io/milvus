@@ -85,19 +85,17 @@ public:
         auto gini_len = 100;
         std::vector<int> stat_len(gini_len, 0);
         for (auto i = 1; i < gini_len; ++ i) {
-            stat_len[i] = i;
-        }
-        for (auto i = 1; i < gini_len; ++ i) {
-            stat_len[i] = (int)(((double)stat_len[i] / 100.0) * len);
+            stat_len[i] = (int)(((double)i / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
         access_lorenz_curve.resize(gini_len + 1);
         access_lorenz_curve[0] = 0.0;
         access_lorenz_curve[gini_len] = 1.0;
-        int j = 0;
-        for (auto i = 0; i < len && j < gini_len; ++ i) {
+        int j = 1;
+        size_t i = 0;
+        for (i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / access_total;
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total + access_lorenz_curve[j - 1];
                 tmp_cnt = 0;
                 j ++;
             }
@@ -120,7 +118,7 @@ public:
             ret << "The percentage of 1 in bitset: 0%" << std::endl;
         ret << "Max level: " << max_level << std::endl;
         ret << "Level distribution: " << std::endl;
-        for (auto i = 0; i < max_level; ++ i) {
+        for (auto i = 0; i <= max_level; ++ i) {
             ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
         }
         ret << "There are " << access_total << " times point-access at level " << target_level << std::endl;
@@ -165,11 +163,13 @@ public:
             ret << "The percentage of 1 in bitset: 0%" << std::endl;
         ret << "Max level: " << max_level << std::endl;
         ret << "Level distribution: " << std::endl;
-        for (auto i = 0; i < max_level; ++ i) {
+        for (auto i = 0; i <= max_level; ++ i) {
             ret << "Level " << i << " has " << distribution[i] << " points" << std::endl;
         }
         ret << "There are " << access_total << " times point-access at level " << target_level << std::endl;
         ret << "The distribution of probability density at level " << target_level << ":" << std::endl;
+        if (access_lorenz_curve.size() == 0)
+            access_lorenz_curve.resize(101, 0.0);
         for (auto i = 0; i < access_lorenz_curve.size(); ++ i) {
             ret << "(" << i << "," << access_lorenz_curve[i] << ")";
             if (i < access_lorenz_curve.size())

@@ -69,6 +69,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
+        if (STATISTICS_ENABLE)
+            index_->stats_enable = true;
         index_->loadIndex(reader);
         if (STATISTICS_ENABLE) {
             auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
@@ -183,7 +185,10 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         query_stats.resize(rows);
         for (auto i = 0; i < rows; ++ i)
             query_stats[i].target_level = hnsw_stats->target_level;
-        hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        if (bitset)
+            hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        else
+            hnsw_stats->bitset_percentage1_sum += 0;
         hnsw_stats->nq_cnt += rows;
     }
 
