@@ -149,7 +149,7 @@ if (MILVUS_WITH_AWS)
     add_subdirectory( aws )
 endif ()
 
-# ****************************Thirdparty  armadillo**********************************************
+# ****************************** Thirdparty armadillo ***************************************
 if (MILVUS_WITH_ARMADILLO)
     add_subdirectory( armadillo)
 endif ()

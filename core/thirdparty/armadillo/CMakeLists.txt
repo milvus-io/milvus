@@ -15,8 +15,7 @@
 if (DEFINED ENV{MILVUS_ARMADILLO_URL})
     set(ARMADILLO_SOURCE_URL  "$ENV{MILVUS_ARMADILLO_URL}")
 else ()
-   # set(ARMADILLO_SOURCE_URL  "https://gitlab.com/conradsnicta/armadillo-code/-/archive/9.900.x/armadillo-code-9.900.x.tar.gz")
-   set(ARMADILLO_SOURCE_URL  "/home/aiteam/Downloads/armadillo-code-9.900.x.tar.gz")
+   set(ARMADILLO_SOURCE_URL  "https://gitlab.com/conradsnicta/armadillo-code/-/archive/9.900.x/armadillo-code-9.900.x.tar.gz")
 endif ()
 
 macro(build_armadillo)

@@ -156,20 +156,18 @@ Status
 ExecutionEngineImpl::CopyToFpga() {
 #ifdef MILVUS_FPGA_VERSION
     TimeRecorderAuto rc("ExecutionEngineImpl::CopyToFpga");
-    LOG_ENGINE_ERROR_ << "copy to fpga";
+
     SegmentPtr segment_ptr;
     segment_reader_->GetSegment(segment_ptr);
 
     engine::VECTOR_INDEX_MAP new_map;
     engine::VECTOR_INDEX_MAP& indice = segment_ptr->GetVectorIndice();
-    LOG_ENGINE_ERROR_ << indice.size() << "size";
     bool indexModify = false;
     for (auto& pair : indice) {
         if (pair.second != nullptr) {
             int64_t indexsize = pair.second->IndexSize();
             if (pair.second->index_type() == "FLAT")
                 continue;
-            LOG_ENGINE_ERROR_ << indexsize << "firts:" << pair.first << "type:" << pair.second->index_type();
             std::shared_ptr<knowhere::IVFPQ> ivfpq = std::static_pointer_cast<knowhere::IVFPQ>(pair.second);
             std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
             indexFpga->SetIndexSize(indexsize);
@@ -181,7 +179,6 @@ ExecutionEngineImpl::CopyToFpga() {
             if (indexFpga == nullptr) {
                 new_map.insert(pair);
             } else {
-                LOG_ENGINE_ERROR_ << "new fpga index";
                 new_map.insert(std::make_pair(pair.first, indexFpga));
             }
         }

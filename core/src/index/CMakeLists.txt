@@ -50,7 +50,7 @@ include(ExternalProject)
 include(DefineOptionsCore)
 include(BuildUtilsCore)
 
-if (MILVUS_FPGA_VERSION OR KNOWHERE_FPGA_VERSION)
+if (MILVUS_FPGA_VERSION)
     message(STATUS "Building Knowhere FPGA version")
     add_compile_definitions("MILVUS_FPGA_VERSION")
 else ()
