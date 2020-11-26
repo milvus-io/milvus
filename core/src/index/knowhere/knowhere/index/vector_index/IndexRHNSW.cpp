@@ -59,7 +59,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         auto idx = faiss::read_index(&reader);
         if (STATISTICS_ENABLE) {
             auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
-            auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+            auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
             hnsw_stats->max_level = real_idx->hnsw.max_level;
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
             for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
@@ -93,7 +93,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     index_->add(rows, reinterpret_cast<const float*>(p_data));
     if (STATISTICS_ENABLE) {
         auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+        auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
         hnsw_stats->max_level = real_idx->hnsw.max_level;
         hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
         for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
@@ -122,7 +122,10 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     if (STATISTICS_ENABLE) {
-        hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        if (bitset)
+            hnsw_stats->bitset_percentage1_sum += (double)bitset->count_1() / bitset->count();
+        else
+            hnsw_stats->bitset_percentage1_sum += 0.0;
         hnsw_stats->nq_cnt += rows;
     }
     for (auto i = 0; i < k * rows; ++i) {
