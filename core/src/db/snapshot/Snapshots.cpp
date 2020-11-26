@@ -267,7 +267,7 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     /* std::set_difference(alive_cids_.begin(), alive_cids_.end(), alive_cids.begin(), alive_cids.end(), */
     /*         std::inserter(diff, diff.begin())); */
     std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
-            std::inserter(diff, diff.begin()));
+                        std::inserter(diff, diff.begin()));
     for (auto& cid : diff) {
         ScopedSnapshotT ss;
         status = GetSnapshot(ss, cid);
@@ -294,8 +294,7 @@ Snapshots::OnWriterTimer(const boost::system::error_code& ec) {
     auto it = inactive_holders_.cbegin();
     auto it_next = it;
 
-    for (; it != inactive_holders_.cend(); it = it_next)
-    {
+    for (; it != inactive_holders_.cend(); it = it_next) {
         ++it_next;
         auto status = it->second->ApplyEject();
         if (status.code() == SS_EMPTY_HOLDER) {

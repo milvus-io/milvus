@@ -128,7 +128,8 @@ SnapshotHolder::ApplyEject() {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (active_.size() == 0) {
-            return Status(SS_EMPTY_HOLDER, "SnapshotHolder::ApplyEject: Empty holder found for " + std::to_string(collection_id_));
+            return Status(SS_EMPTY_HOLDER,
+                          "SnapshotHolder::ApplyEject: Empty holder found for " + std::to_string(collection_id_));
         }
         if (!policy_->ShouldEject(active_, false)) {
             return status;
