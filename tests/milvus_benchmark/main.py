@@ -41,10 +41,11 @@ def get_image_tag(image_version, image_type):
     # return "%s-%s-centos7-release" % ("PR-2780", image_type)
 
 
-"""
-using queue to make sure only one test process on each host
-"""
 def queue_worker(queue):
+    """
+    Using queue to make sure only one test process on each host,
+    workers can be run concurrently on different host
+    """
     while not queue.empty():
         q = queue.get()
         suite = q["suite"]

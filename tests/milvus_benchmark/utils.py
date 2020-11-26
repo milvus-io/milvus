@@ -54,7 +54,7 @@ def normalize(metric_type, X):
         X = X.tolist()
     elif metric_type in ["jaccard", "hamming", "sub", "super"]:
         tmp = []
-        for index, item in enumerate(X):
+        for _, item in enumerate(X):
             new_vector = bytes(np.packbits(item, axis=-1).tolist())
             tmp.append(new_vector)
         X = tmp
@@ -175,7 +175,7 @@ def update_values(file_path, deploy_mode, hostname, server_config):
             path_value = v
             if suffix_path:
                 path_value = v + "_" + str(int(time.time()))
-            values_dict["primaryPath"] = path_value 
+            values_dict["primaryPath"] = path_value
             values_dict['wal']['path'] = path_value+"/wal"
             values_dict['logs']['path'] = path_value+"/logs"
         # elif k.find("use_blas_threshold") != -1:
@@ -213,7 +213,6 @@ def update_values(file_path, deploy_mode, hostname, server_config):
     # Using sqlite for single mode
     if deploy_mode == "single":
         values_dict["mysql"]["enabled"] = False
-
     # update values.yaml with the given host
     if hostname:
         config.load_kube_config()
@@ -221,7 +220,6 @@ def update_values(file_path, deploy_mode, hostname, server_config):
         values_dict['nodeSelector'] = {'kubernetes.io/hostname': hostname}
         # node = v1.read_node(hostname)
         cpus = v1.read_node(hostname).status.allocatable.get("cpu")
-
         # set limit/request cpus in resources
         values_dict["image"]['resources'] = {
             "limits": {
@@ -256,7 +254,6 @@ def update_values(file_path, deploy_mode, hostname, server_config):
         'name': 'test',
         'mountPath': '/test'
     }]
-
     # add extra volumes for mysql
     # values_dict['mysql']['persistence']['enabled'] = True
     # values_dict['mysql']['configurationFilesPath'] = "/etc/mysql/mysql.conf.d/"
@@ -273,7 +270,6 @@ def update_values(file_path, deploy_mode, hostname, server_config):
         # mysql_cnf_str = '[mysqld]\npid-file=%s/mysql.pid\ndatadir=%s' % (mount_path, mount_path)
         # values_dict['mysql']['configurationFiles'] = {}
         # values_dict['mysql']['configurationFiles']['mysqld.cnf'] = literal_str(mysql_cnf_str)
-
         values_dict['mysql']['enabled'] = False
         values_dict['externalMysql']['enabled'] = True
         values_dict['externalMysql']["ip"] = "192.168.1.197"
@@ -281,7 +277,6 @@ def update_values(file_path, deploy_mode, hostname, server_config):
         values_dict['externalMysql']["user"] = "root"
         values_dict['externalMysql']["password"] = "Fantast1c"
         values_dict['externalMysql']["database"] = "db"
- 
     logger.debug(values_dict)
     #  print(dump(values_dict))
     with open(file_path, 'w') as f:
@@ -294,10 +289,10 @@ def update_values(file_path, deploy_mode, hostname, server_config):
             logger.debug(line)
 
 
-"""
-Deploy server with helm
-"""
 def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, namespace):
+    """
+    Deploy server with using helm
+    """
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
 
@@ -347,10 +342,11 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
     return host
 
 
-"""
-Delete server iwth helm
-"""
 def helm_del_server(name, namespace):
+    """
+    Delete server with using helm uninstall,
+    return status if uninstall successfully or not
+    """
     # logger.debug("Sleep 600s before uninstall server")
     # time.sleep(600)
     del_cmd = "helm uninstall -n milvus %s" % name

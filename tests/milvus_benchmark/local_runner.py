@@ -20,15 +20,15 @@ logger = logging.getLogger("milvus_benchmark.local_runner")
 
 
 class LocalRunner(Runner):
-    """run local mode"""
     def __init__(self, host, port):
+        """
+        Run tests at local mode,
+        make sure the server has started
+        """
         super(LocalRunner, self).__init__()
         self.host = host
         self.port = port
 
-    """
-    override runner.run
-    """
     def run(self, run_type, collection):
         logger.debug(run_type)
         logger.debug(collection)
@@ -66,17 +66,17 @@ class LocalRunner(Runner):
                 logger.error(milvus_instance.show_collections())
                 logger.warning("Table: %s not found" % collection_name)
                 return
-            length = milvus_instance.count() 
+            length = milvus_instance.count()
             ids = [i for i in range(length)] 
             loops = int(length / ni_per)
             for i in range(loops):
                 delete_ids = ids[i*ni_per : i*ni_per+ni_per]
                 logger.debug("Delete %d - %d" % (delete_ids[0], delete_ids[-1]))
                 milvus_instance.delete(delete_ids)
-                milvus_instance.flush() 
+                milvus_instance.flush()
                 logger.debug("Table row counts: %d" % milvus_instance.count())
             logger.debug("Table row counts: %d" % milvus_instance.count())
-            milvus_instance.flush() 
+            milvus_instance.flush()
             logger.debug("Table row counts: %d" % milvus_instance.count())
 
         elif run_type == "build_performance":
@@ -156,7 +156,6 @@ class LocalRunner(Runner):
             # #####
             ni_per = collection["ni_per"]
             build_index = collection["build_index"]
-            TODO: debug
             for c_name in collection_names:
                 milvus_instance = MilvusClient(collection_name=c_name, host=self.host, port=self.port)
                 if milvus_instance.exists_collection(collection_name=c_name):
@@ -228,7 +227,6 @@ class QueryTask(User):
             except Exception as e:
                 logger.error(str(e))
                 return
-            
             #. retrieve and collect test statistics
             metric = None
             with open(task_file_csv, newline='') as fd:
@@ -239,7 +237,7 @@ class QueryTask(User):
                     metric = row
             logger.info(metric)
             # clean up temp files
-                    
+
         elif run_type == "search_ids_stability":
             (data_type, collection_size, index_file_size, dimension, metric_type) = parser.collection_parser(collection_name)
             search_params = collection["search_params"]
@@ -301,7 +299,7 @@ class QueryTask(User):
                 for nq in nqs:
                     mem_usage = milvus_instance.get_mem_info()["memory_used"]
                     logger.info(mem_usage)
-                    query_vectors = self.normalize(metric_type, np.array(dataset["test"][:nq])) 
+                    query_vectors = self.normalize(metric_type, np.array(dataset["test"][:nq]))
                     logger.debug(search_params)
                     for search_param in search_params:
                         logger.info("Search param: %s" % json.dumps(search_param))
@@ -447,6 +445,7 @@ class QueryTask(User):
             # init data
             milvus_instance.clean_db()
             pull_interval = collection["pull_interval"]
+            pull_interval_seconds = pull_interval * 60
             collection_num = collection["collection_num"]
             dimension = collection["dimension"] if "dimension" in collection else 128
             insert_xb = collection["insert_xb"] if "insert_xb" in collection else 100000
@@ -496,7 +495,6 @@ class QueryTask(User):
             (data_type, collection_size, index_file_size, dimension, metric_type) = parser.collection_parser(collection_name)
             # ni_per = collection["ni_per"]
             # build_index = collection["build_index"]
-            # # TODO: debug
             # if milvus_instance.exists_collection():
             #     milvus_instance.drop()
             #     time.sleep(10)
@@ -527,23 +525,23 @@ class QueryTask(User):
             during_time = task["during_time"]
             def_strs = ""
             for task_type in task_types:
-                type = task_type["type"]
+                _type = task_type["type"]
                 weight = task_type["weight"]
-                if type == "flush":
+                if _type == "flush":
                     def_str = """
     @task(%d)
     def flush(self):
         client = get_client(collection_name)
         client.flush(collection_name=collection_name)
                     """ % weight
-                if type == "compact":
+                if _type == "compact":
                     def_str = """
     @task(%d)
     def compact(self):
         client = get_client(collection_name)
         client.compact(collection_name)
                     """ % weight
-                if type == "query":
+                if _type == "query":
                     def_str = """
     @task(%d)
     def query(self):
@@ -552,7 +550,7 @@ class QueryTask(User):
         X = [[random.random() for i in range(dim)] for i in range(params["nq"])]
         client.query(X, params["top_k"], params["search_param"], collection_name=collection_name)
                     """ % (weight, task_type["params"])
-                if type == "insert":
+                if _type == "insert":
                     def_str = """
     @task(%d)
     def insert(self):
@@ -562,7 +560,7 @@ class QueryTask(User):
         X = [[random.random() for i in range(dim)] for i in range(params["nb"])]
         client.insert(X,ids=ids, collection_name=collection_name)
                 """ % (weight, task_type["params"])
-                if type == "delete":
+                if _type == "delete":
                     def_str = """
     @task(%d)
     def delete(self):

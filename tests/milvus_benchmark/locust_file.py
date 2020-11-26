@@ -27,4 +27,4 @@ class MyUser(HttpUser):
     @task
     def search(self):
         response = self.client.put(url=url, json=data, headers=headers, timeout=2)
-        print(response) 
+        print(response)

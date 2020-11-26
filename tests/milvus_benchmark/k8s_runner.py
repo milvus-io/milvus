@@ -11,7 +11,7 @@ import csv
 from multiprocessing import Process
 import numpy as np
 from yaml import full_load, dump
-import concurrent.futures
+from concurrent import futures
 from client import MilvusClient
 import parser
 from runner import Runner
@@ -30,8 +30,11 @@ default_path = "/var/lib/milvus"
 
 
 class K8sRunner(Runner):
-    """run docker mode"""
     def __init__(self):
+        """
+        Run with helm mode, 
+        upload test result after tests finished
+        """
         super(K8sRunner, self).__init__()
         self.service_name = utils.get_unique_name()
         self.host = None
@@ -41,7 +44,8 @@ class K8sRunner(Runner):
         
     def init_env(self, server_config, server_host, deploy_mode, image_type, image_tag):
         """
-        start server with using helm
+        Deploy start server with using helm,
+        clean up env if deploy or start failed
         """
         logger.debug("Tests run on server host:")
         logger.debug(server_host)
@@ -352,11 +356,11 @@ class K8sRunner(Runner):
             search_params = {}
             logger.info(milvus_instance.count())
             index_info = milvus_instance.describe_index()
-            logger.info(index_info)  
+            logger.info(index_info)
             for ids_num in ids_length_per_segment:
                 segment_num, get_ids = milvus_instance.get_rand_ids_each_segment(ids_num)
                 start_time = time.time()
-                get_res = milvus_instance.get_entities(get_ids)
+                _ = milvus_instance.get_entities(get_ids)
                 total_time = time.time() - start_time
                 avg_time = total_time / segment_num
                 run_params = {"ids_num": ids_num}
@@ -566,7 +570,7 @@ class QueryTask(User):
                     "qps": locust_stats["Requests/s"],
                     "min_response_time": int(locust_stats["Min Response Time"]),
                     "max_response_time": int(locust_stats["Max Response Time"]),
-                    "min_response_time": int(locust_stats["Median Response Time"]),
+                    "median_response_time": int(locust_stats["Median Response Time"]),
                     "avg_response_time": int(locust_stats["Average Response Time"])
                 }
             }
@@ -822,7 +826,7 @@ class QueryTask(User):
             milvus_instances_map = {}
             insert_vectors = [[random.random() for _ in range(dimension)] for _ in range(insert_xb)]
             for i in range(collection_num):
-                name = utils.get_unique_name(prefix="collection_") 
+                name = utils.get_unique_name(prefix="collection_")
                 collection_names.append(name)
                 metric_type = random.choice(["l2", "ip"])
                 index_file_size = random.randint(10, 20)
@@ -835,7 +839,7 @@ class QueryTask(User):
                 milvus_instance.insert(insert_vectors)
                 milvus_instance.flush()
                 milvus_instances_map.update({name: milvus_instance})
-                logger.info(milvus_instance.describe_index()) 
+                logger.info(milvus_instance.describe_index())
                 logger.info(milvus_instance.describe())
 
             # loop time unit: min -> s
@@ -848,7 +852,7 @@ class QueryTask(User):
                 while time.time() - start_time < pull_interval_seconds:
                     if concurrent:
                         mp = []
-                        for item in range(concurrent_num):
+                        for _ in range(concurrent_num):
                             tmp_collection_name = random.choice(collection_names)
                             task_name = random.choice(tasks)
                             mp.append((tmp_collection_name, task_name))
@@ -986,23 +990,23 @@ class QueryTask(User):
             during_time = task["during_time"]
             def_strs = ""
             for task_type in task_types:
-                type = task_type["type"]
+                _type = task_type["type"]
                 weight = task_type["weight"]
-                if type == "flush":
+                if _type == "flush":
                     def_str = """
     @task(%d)
     def flush(self):
         client = get_client(collection_name)
         client.flush(collection_name=collection_name)
                             """ % weight
-                if type == "compact":
+                if _type == "compact":
                     def_str = """
     @task(%d)
     def compact(self):
         client = get_client(collection_name)
         client.compact(collection_name)
                             """ % weight
-                if type == "query":
+                if _type == "query":
                     def_str = """
     @task(%d)
     def query(self):
@@ -1011,7 +1015,7 @@ class QueryTask(User):
         X = [[random.random() for i in range(dim)] for i in range(params["nq"])]
         client.query(X, params["top_k"], params["search_param"], collection_name=collection_name)
                     """ % (weight, task_type["params"])
-                if type == "insert":
+                if _type == "insert":
                     def_str = """
     @task(%d)
     def insert(self):
@@ -1021,7 +1025,7 @@ class QueryTask(User):
         X = [[random.random() for i in range(dim)] for i in range(params["nb"])]
         client.insert(X,ids=ids, collection_name=collection_name)
                         """ % (weight, task_type["params"])
-                if type == "delete":
+                if _type == "delete":
                     def_str = """
     @task(%d)
     def delete(self):

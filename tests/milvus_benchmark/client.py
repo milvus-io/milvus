@@ -11,7 +11,6 @@ import utils
 logger = logging.getLogger("milvus_benchmark.client")
 
 SERVER_HOST_DEFAULT = "127.0.0.1"
-# SERVER_HOST_DEFAULT = "192.168.1.130"
 SERVER_PORT_DEFAULT = 19530
 INDEX_MAP = {
     "flat": IndexType.FLAT,
@@ -50,6 +49,10 @@ def time_wrapper(func):
 
 class MilvusClient(object):
     def __init__(self, collection_name=None, host=None, port=None, timeout=60):
+        """
+        Milvus client wrapper for python-sdk,
+        default timeout set 60s
+        """
         self._collection_name = collection_name
         try:
             start_time = time.time()
@@ -64,10 +67,10 @@ class MilvusClient(object):
             while time.time() < start_time + timeout:
                 try:
                     self._milvus = Milvus(
-                        host = host,
-                        port = port, 
-                        try_connect = False, 
-                        pre_ping = False)
+                        host=host,
+                        port=port, 
+                        try_connect=False, 
+                        pre_ping=False)
                     if self._milvus.server_status():
                         logger.debug("Try connect times: %d, %s" % (i, round(time.time() - start_time, 2)))
                         break
@@ -82,13 +85,13 @@ class MilvusClient(object):
             raise e
         self._metric_type = None
         if self._collection_name and self.exists_collection():
-            self._metric_type = self._metric_type_to_str(self.describe()[1].metric_type)
+            self._metric_type = self.metric_type_to_str(self.describe()[1].metric_type)
             self._dimension = self.describe()[1].dimension
 
     def __str__(self):
         return 'Milvus collection %s' % self._collection_name
 
-    def _metric_type_to_str(self, metric_type):
+    def metric_type_to_str(self, metric_type):
         for key, value in METRIC_MAP.items():
             if value == metric_type:
                 return key
@@ -135,6 +138,7 @@ class MilvusClient(object):
 
     def list_partitions(self):
         status, tags = self._milvus.list_partitions(self._collection_name)
+        self.check_status(status)
         return tags
 
     @time_wrapper
@@ -150,10 +154,11 @@ class MilvusClient(object):
         X = [[random.random() for _ in range(self._dimension)] for _ in range(insert_xb)]
         X = utils.normalize(self._metric_type, X)
         count_before = self.count()
-        status, ids = self.insert(X)
+        status, _ = self.insert(X)
         self.check_status(status)
         self.flush()
-        assert count_before + insert_xb == self.count()
+        if count_before + insert_xb != self.count():
+            raise Exception("Assert failed after inserting")
 
     def get_rand_ids(self, length):
         while True:
@@ -216,8 +221,10 @@ class MilvusClient(object):
         status, get_res = self._milvus.get_entity_by_id(self._collection_name, delete_ids)
         self.check_status(status)
         for item in get_res:
-            assert not item
-        assert count_before - len(delete_ids) == self.count()
+            if item:
+                raise Exception("Assert failed after delete")
+        if count_before - len(delete_ids) != self.count():
+            raise Exception("Assert failed after delete")
 
     @time_wrapper
     def flush(self, collection_name=None):
@@ -268,9 +275,9 @@ class MilvusClient(object):
         nq = random.randint(1, 100)
         nprobe = random.randint(1, 100)
         search_param = {"nprobe": nprobe}
-        ids, X = self.get_rand_entities(nq)
+        _, X = self.get_rand_entities(nq)
         logger.info("%s, Search nq: %d, top_k: %d, nprobe: %d" % (self._collection_name, nq, top_k, nprobe))
-        status, search_res = self._milvus.search(self._collection_name, top_k, query_records=X, params=search_param)
+        status, _ = self._milvus.search(self._collection_name, top_k, query_records=X, params=search_param)
         self.check_status(status)
         # for i, item in enumerate(search_res):
         #     if item[0].id != ids[i]:

@@ -27,9 +27,9 @@ class MixTask(User):
 
     @task(10)
     def insert(self):
-        id = random.randint(10000000, 10000000000)
+        _id = random.randint(10000000, 10000000000)
         X = [[random.random() for i in range(dim)] for i in range(1)]
-        self.client.insert(X, ids=[id])
+        self.client.insert(X, ids=[_id])
 
     @task(5)
     def flush(self):

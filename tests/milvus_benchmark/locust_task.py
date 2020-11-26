@@ -1,14 +1,18 @@
 import time
-import random
-from locust import User, events
+from locust import events
 from client import MilvusClient
 
 
 class MilvusTask(object):
     """
-    generate milvus client for locust
+    Generate milvus client for locust,
+    to make sure we can use the same function name in client as task name in Taskset/User
     """
     def __init__(self, connection_type="single", **kwargs):
+        """
+        Params: connection_type, single/multi is optional
+        other args: host/port/collection_name
+        """
         self.request_type = "grpc"
         if connection_type == "single":
             self.m = kwargs.get("m")
@@ -18,11 +22,11 @@ class MilvusTask(object):
             collection_name = kwargs.get("collection_name")
             self.m = MilvusClient(host=host, port=port, collection_name=collection_name)
 
-    """
-    register success and failure event with using locust.events
-    make sure the task function name in locust equals to te name of function in MilvusClient
-    """
     def __getattr__(self, name):
+        """
+        register success and failure event with using locust.events
+        make sure the task function name in locust equals to te name of function in MilvusClient
+        """
         func = getattr(self.m, name)
 
         def wrapper(*args, **kwargs):
