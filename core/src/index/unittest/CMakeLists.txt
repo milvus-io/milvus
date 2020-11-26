@@ -8,6 +8,7 @@ set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss fiu
         ngt
+        index_log
         )
 if (FAISS_WITH_MKL)
     set(depend_libs ${depend_libs}
@@ -29,7 +30,6 @@ set(basic_libs
         )
 
 set(util_srcs
-        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
