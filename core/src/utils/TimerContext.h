@@ -56,7 +56,11 @@ struct TimerContext {
 
 inline void
 TimerContext::Reschedule(const boost::system::error_code& ec) {
-    pool_->enqueue(handler_, ec);
+    try {
+        pool_->enqueue(handler_, ec);
+    } catch (std::exception& ex) {
+        LOG_SERVER_ERROR_ << "Fail to enqueue handler: " << std::string(ex.what());
+    }
     boost::system::error_code e;
     auto new_expires = timer_.expires_at() + interval_;
     timer_.expires_at(new_expires, e);

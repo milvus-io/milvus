@@ -49,14 +49,28 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     op->Push();
     auto status = op->GetStatus();
 
-    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
-    alive_cids_.erase(context.collection->GetID());
-    name_id_map_.erase(context.collection->GetName());
-    auto h = holders_.find(context.collection->GetID());
-    if (h != holders_.end()) {
-        inactive_holders_[h->first] = h->second;
-        holders_.erase(h);
+    std::vector<SnapshotHolderPtr> holders;
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        alive_cids_.erase(context.collection->GetID());
+        name_id_map_.erase(context.collection->GetName());
+        /* holders_.erase(context.collection->GetID()); */
+        auto h = holders_.find(context.collection->GetID());
+        if (h != holders_.end()) {
+            /* inactive_holders_[h->first] = h->second; */
+            holders.push_back(h->second);
+            holders_.erase(h);
+        }
     }
+
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(inactive_mtx_);
+        for (auto& h : holders) {
+            inactive_holders_[h->GetID()] = h;
+        }
+        holders.clear();
+    }
+
     return status;
 }
 
@@ -271,11 +285,12 @@ void
 Snapshots::OnWriterTimer(const boost::system::error_code& ec) {
     // Single mode
     if (!config.cluster.enable()) {
+        std::unique_lock<std::shared_timed_mutex> lock(inactive_mtx_);
         inactive_holders_.clear();
         return;
     }
     // Cluster RW mode
-    std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+    std::unique_lock<std::shared_timed_mutex> lock(inactive_mtx_);
     auto it = inactive_holders_.cbegin();
     auto it_next = it;
 
