@@ -666,25 +666,16 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	searchTimestamp := Timestamp(1020)
-	cPlan := CreatePlan(*collection, dslString)
-	topK := cPlan.GetTopK()
-	cPlaceholderGroup := ParserPlaceholderGroup(cPlan, placeHolderGroupBlob)
+	plan := createPlan(*collection, dslString)
+	holder := parserPlaceholderGroup(plan, placeHolderGroupBlob)
 	placeholderGroups := make([]*PlaceholderGroup, 0)
-	placeholderGroups = append(placeholderGroups, cPlaceholderGroup)
+	placeholderGroups = append(placeholderGroups, holder)
 
-	var numQueries int64 = 0
-	for _, pg := range placeholderGroups {
-		numQueries += pg.GetNumOfQuery()
-	}
-	resultIds := make([]IntPrimaryKey, topK*numQueries)
-	resultDistances := make([]float32, topK*numQueries)
-	for i := range resultDistances {
-		resultDistances[i] = math.MaxFloat32
-	}
+	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+	assert.Nil(t, err)
 
-	err = segment.segmentSearch(cPlan, placeholderGroups, []Timestamp{searchTimestamp}, resultIds, resultDistances, numQueries, topK)
-	assert.NoError(t, err)
-
+	plan.delete()
+	holder.delete()
 	deleteSegment(segment)
 	deleteCollection(collection)
 }

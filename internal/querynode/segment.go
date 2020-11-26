@@ -7,7 +7,6 @@ package querynode
 #cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
 
@@ -189,11 +188,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 
 func (s *Segment) segmentSearch(plan *Plan,
 	placeHolderGroups []*PlaceholderGroup,
-	timestamp []Timestamp,
-	resultIds []IntPrimaryKey,
-	resultDistances []float32,
-	numQueries int64,
-	topK int64) error {
+	timestamp []Timestamp) (*SearchResult, error) {
 	/*
 		CStatus
 		Search(void* plan,
@@ -204,36 +199,25 @@ func (s *Segment) segmentSearch(plan *Plan,
 			float* result_distances);
 	*/
 
-	newResultIds := make([]IntPrimaryKey, topK*numQueries)
-	NewResultDistances := make([]float32, topK*numQueries)
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeHolderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
 	}
 
+	var searchResult SearchResult
 	var cTimestamp = (*C.ulong)(&timestamp[0])
-	var cResultIds = (*C.long)(&resultIds[0])
-	var cResultDistances = (*C.float)(&resultDistances[0])
-	var cNewResultIds = (*C.long)(&newResultIds[0])
-	var cNewResultDistances = (*C.float)(&NewResultDistances[0])
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
+	cQueryResult := (*C.CQueryResult)(&searchResult.cQueryResult)
 
-	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cNewResultIds, cNewResultDistances)
+	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cQueryResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Search failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("Search failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	cNumQueries := C.long(numQueries)
-	cTopK := C.long(topK)
-	// reduce search result
-	mergeStatus := C.MergeInto(cNumQueries, cTopK, cResultDistances, cResultIds, cNewResultDistances, cNewResultIds)
-	if mergeStatus != 0 {
-		return errors.New("merge search result failed, error code = " + strconv.Itoa(int(mergeStatus)))
-	}
-	return nil
+	return &searchResult, nil
 }

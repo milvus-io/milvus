@@ -137,23 +137,12 @@ message PartitionDescription {
 
 
 /**
- * @brief Scores of a query. 
- *        The default value of tag is "root". 
- *        It corresponds to the final score of each hit.
- */
-message Score {
-    string tag = 1;
-    repeated float values = 2;
-}
-
-
-/**
  * @brief Entities hit by query
  */
 message Hits {
     repeated int64 IDs = 1;
-    repeated common.Blob row_data = 2;
-    repeated Score scores = 3;
+    repeated bytes row_data = 2;
+    repeated float scores = 3;
 }
 
 
@@ -162,6 +151,6 @@ message Hits {
  */
 message QueryResult {
     common.Status status = 1;
-    repeated Hits hits = 2;
+    repeated bytes hits = 2;
 }
 
