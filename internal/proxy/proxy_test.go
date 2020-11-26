@@ -229,7 +229,7 @@ func TestProxy_Insert(t *testing.T) {
 		collectionName := "CreateCollection" + strconv.FormatInt(int64(i), 10)
 		req := &servicepb.RowBatch{
 			CollectionName: collectionName,
-			PartitionTag:   "",
+			PartitionTag:   "haha",
 			RowData:        make([]*commonpb.Blob, 0),
 			HashKeys:       make([]int32, 0),
 		}
@@ -237,6 +237,7 @@ func TestProxy_Insert(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
+			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
 				resp, err := proxyClient.Insert(ctx, req)

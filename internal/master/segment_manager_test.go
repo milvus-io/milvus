@@ -261,6 +261,9 @@ func startupMaster() {
 		K2SChannelNames:               []string{"k2s0", "k2s1"},
 		QueryNodeStatsChannelName:     "statistic",
 		MsgChannelSubName:             Params.MsgChannelSubName,
+
+		MaxPartitionNum:     int64(4096),
+		DefaultPartitionTag: "_default",
 	}
 
 	master, err = CreateServer(ctx)

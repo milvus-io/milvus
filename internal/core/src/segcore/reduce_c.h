@@ -15,9 +15,36 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "segcore/segment_c.h"
+
+typedef void* CMarshaledHits;
+
+void
+DeleteMarshaledHits(CMarshaledHits c_marshaled_hits);
 
 int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
+
+CQueryResult
+ReduceQueryResults(CQueryResult* query_results, int64_t num_segments);
+
+CMarshaledHits
+ReorganizeQueryResults(CQueryResult query_result,
+                       CPlan c_plan,
+                       CPlaceholderGroup* c_placeholder_groups,
+                       int64_t num_groups);
+
+int64_t
+GetHitsBlobSize(CMarshaledHits c_marshaled_hits);
+
+void
+GetHitsBlob(CMarshaledHits c_marshaled_hits, const void* hits);
+
+int64_t
+GetNumQueriesPeerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index);
+
+void
+GetHitSizePeerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query);
 
 #ifdef __cplusplus
 }
