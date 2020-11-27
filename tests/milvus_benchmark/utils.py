@@ -45,8 +45,8 @@ yaml.add_representer(literal_str, represent_literal_str)
 
 
 def normalize(metric_type, X):
-    """Normalize the vectors,
-    if type equals ip, using sklearn.preprocessing.normalize to convert it
+    """Normalize the vectors.  
+    If type equals ip, using sklearn.preprocessing.normalize to convert it
     """
     if metric_type == "ip":
         logger.info("Set normalize for metric_type: %s" % metric_type)
@@ -290,7 +290,7 @@ def update_values(file_path, deploy_mode, hostname, server_config):
 
 
 def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, namespace):
-    """Deploy server with using helm
+    """Deploy server with using helm.  
     """
     from kubernetes import client, config
     client.rest.logger.setLevel(logging.WARNING)
@@ -342,9 +342,8 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
 
 
 def helm_del_server(name, namespace):
-    """
-    Delete server with using helm uninstall,
-    return status if uninstall successfully or not
+    """Delete server with using helm uninstall.  
+    Return status if uninstall successfully or not
     """
     # logger.debug("Sleep 600s before uninstall server")
     # time.sleep(600)

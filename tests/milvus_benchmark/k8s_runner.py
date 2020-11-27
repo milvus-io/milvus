@@ -31,8 +31,8 @@ default_path = "/var/lib/milvus"
 
 class K8sRunner(Runner):
     def __init__(self):
-        """Run with helm mode,
-        upload test result after tests finished
+        """Run with helm mode.  
+        Upload test result after tests finished
         """
         super(K8sRunner, self).__init__()
         self.service_name = utils.get_unique_name()
@@ -42,7 +42,7 @@ class K8sRunner(Runner):
         self.env_value = None
         
     def init_env(self, server_config, server_host, deploy_mode, image_type, image_tag):
-        """Deploy start server with using helm, clean up env
+        """Deploy start server with using helm and clean up env.  
         if deploy or start failed
         """
         logger.debug("Tests run on server host:")
@@ -72,8 +72,7 @@ class K8sRunner(Runner):
         return True
 
     def clean_up(self):
-        """
-        stop server with using helm
+        """Stop server with using helm.  
         """
         logger.debug("Start clean up: %s" % self.service_name)
         utils.helm_del_server(self.service_name, namespace)
@@ -180,7 +179,7 @@ class K8sRunner(Runner):
                 i = i + 1
                 logger.debug(i)
                 logger.debug("Row count: %d" % milvus_instance.count())
-                status, res = milvus_instance.insert(insert_vectors)
+                milvus_instance.insert(insert_vectors)
                 time.sleep(0.1)
 
         elif run_type == "insert_performance_multi_collections":
