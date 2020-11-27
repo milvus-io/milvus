@@ -31,7 +31,8 @@ default_path = "/var/lib/milvus"
 
 class K8sRunner(Runner):
     def __init__(self):
-        """Run with helm mode.
+        """
+        Run with helm mode.
 
         Upload test result after tests finished
         """
@@ -43,9 +44,10 @@ class K8sRunner(Runner):
         self.env_value = None
         
     def init_env(self, server_config, server_host, deploy_mode, image_type, image_tag):
-        """Deploy start server with using helm and clean up env.
+        """
+        Deploy start server with using helm and clean up env.
 
-        if deploy or start failed
+        If deploy or start failed
         """
         logger.debug("Tests run on server host:")
         logger.debug(server_host)
@@ -74,7 +76,8 @@ class K8sRunner(Runner):
         return True
 
     def clean_up(self):
-        """Stop server with using helm.
+        """
+        Stop server with using helm.
 
         """
         logger.debug("Start clean up: %s" % self.service_name)

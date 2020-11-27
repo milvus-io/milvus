@@ -45,7 +45,8 @@ yaml.add_representer(literal_str, represent_literal_str)
 
 
 def normalize(metric_type, X):
-    """Normalize the vectors.
+    """
+    Normalize the vectors.
 
     If type equals ip, using sklearn.preprocessing.normalize to convert it
     """
@@ -343,7 +344,8 @@ def helm_install_server(helm_path, deploy_mode, image_tag, image_type, name, nam
 
 
 def helm_del_server(name, namespace):
-    """Delete server with using helm uninstall.
+    """
+    Delete server with using helm uninstall.
 
     Return status if uninstall successfully or not
     """

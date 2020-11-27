@@ -13,7 +13,8 @@ def operations_parser(operations):
 
 
 def collection_parser(collection_name):
-    """Parse the collection name defined in the suites.
+    """
+    Parse the collection name defined in the suites.
     
     Return data info with the given collection_name
     """
@@ -51,7 +52,8 @@ def parse_ann_collection_name(collection_name):
 
 
 def search_params_parser(param):
-    """Parse the params on search field defined in suites.
+    """
+    Parse the params on search field defined in suites.
     
     Return search params: nq/top-k/nprobe
     """

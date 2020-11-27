@@ -4,10 +4,9 @@ from client import MilvusClient
 
 
 class MilvusTask(object):
-    """
-    """
     def __init__(self, connection_type="single", **kwargs):
-        """Generate milvus client for locust.
+        """
+        Generate milvus client for locust.
         
         To make sure we can use the same function name in client as task name in Taskset/User.
         Params: connection_type, single/multi is optional
@@ -23,7 +22,8 @@ class MilvusTask(object):
             self.m = MilvusClient(host=host, port=port, collection_name=collection_name)
 
     def __getattr__(self, name):
-        """Register success and failure event with using locust.events.
+        """
+        Register success and failure event with using locust.events.
 
         Make sure the task function name in locust equals to te name of function in MilvusClient
         """
