@@ -38,6 +38,9 @@ class MockEngine : public MetaEngine {
     Query(const MetaQueryContext& context, AttrsMapList& attrs) override;
 
     Status
+    Filter(const MetaFilterContext& context, AttrsMapList& attrs) override;
+
+    Status
     ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) override;
 
     Status
@@ -49,6 +52,9 @@ class MockEngine : public MetaEngine {
 
     Status
     QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs);
+
+    Status
+    FilterNoLock(const MetaFilterContext &context, AttrsMapList &attrs);
 
     Status
     AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw);

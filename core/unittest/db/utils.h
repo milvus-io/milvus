@@ -80,6 +80,7 @@ using Queue = milvus::BlockingQueue<ID_TYPE>;
 using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 using ParamsField = milvus::engine::snapshot::ParamsField;
+using IdField = milvus::engine::snapshot::IdField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;

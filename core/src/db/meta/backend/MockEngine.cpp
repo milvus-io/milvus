@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "db/meta/MetaNames.h"
+#include "db/meta/condition/MetaCombination.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::meta {
@@ -108,6 +109,22 @@ MockEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
+MockEngine::FilterNoLock(const MetaFilterContext &context, AttrsMapList& attrs) {
+    if (resources_.find(context.table_) == resources_.end()) {
+        return Status(0, "Collection " + context.table_ + " is empty.");
+    }
+
+    const auto& candidate_raws = resources_[context.table_];
+    for (auto& raw : candidate_raws) {
+        if (context.combination_->FieldsFind(raw)) {
+            attrs.push_back(raw);
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 MockEngine::AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw) {
     if (max_ip_map_.find(add_context.table_) == max_ip_map_.end() ||
         resources_.find(add_context.table_) == resources_.end()) {
@@ -173,6 +190,12 @@ Status
 MockEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(mutex_);
     return QueryNoLock(context, attrs);
+}
+
+Status
+MockEngine::Filter(const MetaFilterContext &context, AttrsMapList& attrs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return FilterNoLock(context, attrs);
 }
 
 Status

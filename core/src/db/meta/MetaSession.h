@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <any>
 #include <memory>
 #include <set>
 #include <string>
@@ -51,7 +50,12 @@ class MetaSession {
     template <typename T>
     Status
     Query(const MetaCombinationPtr filter, std::vector<typename T::Ptr>& resources) {
-        return Status::OK();
+        MetaFilterContext context;
+        context.table_ = T::Name;
+        context.combination_ = std::move(filter);
+        AttrsMapList attrs;
+        auto status = db_engine_->Filter(context, attrs);
+        return status;
     }
 
     template <typename ResourceT>

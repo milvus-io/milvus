@@ -27,6 +27,9 @@ class MetaHelper {
     MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
 
     static Status
+    MetaFilterContextToSql(const MetaFilterContext& context, std::string& sql);
+
+    static Status
     MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
 };
 
