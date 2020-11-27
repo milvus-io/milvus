@@ -47,6 +47,12 @@ class MetaSession {
     Select(const std::string& field, const std::vector<U>& value, const std::vector<std::string>& target_attrs,
            std::vector<typename ResourceT::Ptr>& resources);
 
+    template<typename T>
+    Status
+    Query(const MetaCombinationPtr filter, std::vector<typename T::Ptr>& resources) {
+        return Status::OK();
+    }
+
     template <typename ResourceT>
     Status
     Apply(snapshot::ResourceContextPtr<ResourceT> resp);
@@ -91,6 +97,7 @@ class MetaSession {
     int64_t pos_;
     MetaEnginePtr db_engine_;
 };
+
 
 template <typename T, typename U>
 Status
@@ -240,7 +247,7 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
         if (ftype_p != nullptr) {
             iter = raw.find(F_FTYPE);
             if (iter != raw.end()) {
-                auto ftype = (FTYPE_TYPE)std::stol(iter->second);
+                auto ftype = static_cast<FTYPE_TYPE>(std::stol(iter->second));
                 ftype_p->SetFtype(ftype);
             }
         }
@@ -249,7 +256,7 @@ MetaSession::Select(const std::string& field, const std::vector<U>& values,
         if (fetype_p != nullptr) {
             iter = raw.find(F_FETYPE);
             if (iter != raw.end()) {
-                auto fetype = (FETYPE_TYPE)std::stol(iter->second);
+                auto fetype = static_cast<FETYPE_TYPE>(std::stol(iter->second));
                 fetype_p->SetFEtype(fetype);
             }
         }
