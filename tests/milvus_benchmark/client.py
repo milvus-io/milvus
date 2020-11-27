@@ -57,7 +57,7 @@ def metric_type_to_str(metric_type):
 class MilvusClient(object):
     def __init__(self, collection_name=None, host=None, port=None, timeout=60):
         """
-        Milvus client wrapper for python-sdk. 
+        Milvus client wrapper for python-sdk.
 
         Default timeout set 60s
         """

@@ -89,8 +89,8 @@ def get_vectors_from_binary(nq, dimension, data_type):
 
 class Runner(object):
     def __init__(self):
-        """Run each tests defined in the suites. 
-        
+        """Run each tests defined in the suites.
+
         """
         pass
 
