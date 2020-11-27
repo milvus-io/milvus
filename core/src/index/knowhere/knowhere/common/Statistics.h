@@ -21,24 +21,28 @@ namespace knowhere {
 
 class Statistics {
 public:
-    Statistics(std::string &idx_t):index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0), total_query_time(0.0) {}
+    Statistics(std::string &idx_t):index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0),
+                                   total_query_time(0.0) { filter_cdf.resize(21, 0); }
     virtual ~Statistics() = default;
     virtual std::string ToString(const std::string &index_name) = 0;
     virtual void Clear() {
         filter_percentage_sum = total_query_time = 0.0;
         nq_cnt = batch_cnt = 0;
+        filter_cdf.resize(21, 0);
     }
     std::string IndexType() { return index_type; }
     double Qps() { return nq_cnt ? total_query_time / nq_cnt : 0.0; }
     int64_t BatchCount() { return batch_cnt; }
     int64_t QueryCount() { return nq_cnt; }
     double AvgValidFilter() { return filter_percentage_sum; }
+    const std::vector<int>& FilterCDF() { return filter_cdf; }
 
     std::string &index_type;
     double filter_percentage_sum; // the sum of percentage of 1 in bitset before search
     int64_t nq_cnt;
     int64_t batch_cnt;
     double total_query_time;
+    std::vector<int> filter_cdf;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
