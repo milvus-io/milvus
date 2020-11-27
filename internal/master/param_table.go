@@ -17,8 +17,7 @@ type ParamTable struct {
 	Port    int
 
 	EtcdAddress   string
-	MetaRootPath  string
-	KvRootPath    string
+	EtcdRootPath  string
 	PulsarAddress string
 
 	// nodeID
@@ -76,8 +75,7 @@ func (p *ParamTable) Init() {
 	p.initPort()
 
 	p.initEtcdAddress()
-	p.initMetaRootPath()
-	p.initKvRootPath()
+	p.initEtcdRootPath()
 	p.initPulsarAddress()
 
 	p.initProxyIDList()
@@ -140,28 +138,12 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = addr
 }
 
-func (p *ParamTable) initMetaRootPath() {
-	rootPath, err := p.Load("etcd.rootPath")
+func (p *ParamTable) initEtcdRootPath() {
+	path, err := p.Load("etcd.rootpath")
 	if err != nil {
 		panic(err)
 	}
-	subPath, err := p.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *ParamTable) initKvRootPath() {
-	rootPath, err := p.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = rootPath + "/" + subPath
+	p.EtcdRootPath = path
 }
 
 func (p *ParamTable) initTopicNum() {

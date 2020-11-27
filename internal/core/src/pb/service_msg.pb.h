@@ -50,7 +50,7 @@ struct TableStruct_service_5fmsg_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[15]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[16]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -105,6 +105,9 @@ extern StringListResponseDefaultTypeInternal _StringListResponse_default_instanc
 class StringResponse;
 class StringResponseDefaultTypeInternal;
 extern StringResponseDefaultTypeInternal _StringResponse_default_instance_;
+class SysConfigResponse;
+class SysConfigResponseDefaultTypeInternal;
+extern SysConfigResponseDefaultTypeInternal _SysConfigResponse_default_instance_;
 }  // namespace service
 }  // namespace proto
 }  // namespace milvus
@@ -124,6 +127,7 @@ template<> ::milvus::proto::service::QueryResult* Arena::CreateMaybeMessage<::mi
 template<> ::milvus::proto::service::RowBatch* Arena::CreateMaybeMessage<::milvus::proto::service::RowBatch>(Arena*);
 template<> ::milvus::proto::service::StringListResponse* Arena::CreateMaybeMessage<::milvus::proto::service::StringListResponse>(Arena*);
 template<> ::milvus::proto::service::StringResponse* Arena::CreateMaybeMessage<::milvus::proto::service::StringResponse>(Arena*);
+template<> ::milvus::proto::service::SysConfigResponse* Arena::CreateMaybeMessage<::milvus::proto::service::SysConfigResponse>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
 namespace proto {
@@ -2154,6 +2158,178 @@ class PartitionDescription :
 };
 // -------------------------------------------------------------------
 
+class SysConfigResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.service.SysConfigResponse) */ {
+ public:
+  SysConfigResponse();
+  virtual ~SysConfigResponse();
+
+  SysConfigResponse(const SysConfigResponse& from);
+  SysConfigResponse(SysConfigResponse&& from) noexcept
+    : SysConfigResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline SysConfigResponse& operator=(const SysConfigResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SysConfigResponse& operator=(SysConfigResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const SysConfigResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const SysConfigResponse* internal_default_instance() {
+    return reinterpret_cast<const SysConfigResponse*>(
+               &_SysConfigResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    13;
+
+  friend void swap(SysConfigResponse& a, SysConfigResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(SysConfigResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline SysConfigResponse* New() const final {
+    return CreateMaybeMessage<SysConfigResponse>(nullptr);
+  }
+
+  SysConfigResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<SysConfigResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const SysConfigResponse& from);
+  void MergeFrom(const SysConfigResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(SysConfigResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.service.SysConfigResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_service_5fmsg_2eproto);
+    return ::descriptor_table_service_5fmsg_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeysFieldNumber = 2,
+    kValuesFieldNumber = 3,
+    kStatusFieldNumber = 1,
+  };
+  // repeated string keys = 2;
+  int keys_size() const;
+  void clear_keys();
+  const std::string& keys(int index) const;
+  std::string* mutable_keys(int index);
+  void set_keys(int index, const std::string& value);
+  void set_keys(int index, std::string&& value);
+  void set_keys(int index, const char* value);
+  void set_keys(int index, const char* value, size_t size);
+  std::string* add_keys();
+  void add_keys(const std::string& value);
+  void add_keys(std::string&& value);
+  void add_keys(const char* value);
+  void add_keys(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& keys() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_keys();
+
+  // repeated string values = 3;
+  int values_size() const;
+  void clear_values();
+  const std::string& values(int index) const;
+  std::string* mutable_values(int index);
+  void set_values(int index, const std::string& value);
+  void set_values(int index, std::string&& value);
+  void set_values(int index, const char* value);
+  void set_values(int index, const char* value, size_t size);
+  std::string* add_values();
+  void add_values(const std::string& value);
+  void add_values(std::string&& value);
+  void add_values(const char* value);
+  void add_values(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& values() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_values();
+
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.service.SysConfigResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> keys_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> values_;
+  ::milvus::proto::common::Status* status_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_service_5fmsg_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Hits :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.service.Hits) */ {
  public:
@@ -2196,7 +2372,7 @@ class Hits :
                &_Hits_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    14;
 
   friend void swap(Hits& a, Hits& b) {
     a.Swap(&b);
@@ -2367,7 +2543,7 @@ class QueryResult :
                &_QueryResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    15;
 
   friend void swap(QueryResult& a, QueryResult& b) {
     a.Swap(&b);
@@ -3880,6 +4056,185 @@ PartitionDescription::statistics() const {
 
 // -------------------------------------------------------------------
 
+// SysConfigResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool SysConfigResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& SysConfigResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.service.SysConfigResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* SysConfigResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.service.SysConfigResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* SysConfigResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.service.SysConfigResponse.status)
+  return status_;
+}
+inline void SysConfigResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.service.SysConfigResponse.status)
+}
+
+// repeated string keys = 2;
+inline int SysConfigResponse::keys_size() const {
+  return keys_.size();
+}
+inline void SysConfigResponse::clear_keys() {
+  keys_.Clear();
+}
+inline const std::string& SysConfigResponse::keys(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.service.SysConfigResponse.keys)
+  return keys_.Get(index);
+}
+inline std::string* SysConfigResponse::mutable_keys(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.service.SysConfigResponse.keys)
+  return keys_.Mutable(index);
+}
+inline void SysConfigResponse::set_keys(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.service.SysConfigResponse.keys)
+  keys_.Mutable(index)->assign(value);
+}
+inline void SysConfigResponse::set_keys(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.service.SysConfigResponse.keys)
+  keys_.Mutable(index)->assign(std::move(value));
+}
+inline void SysConfigResponse::set_keys(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  keys_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.service.SysConfigResponse.keys)
+}
+inline void SysConfigResponse::set_keys(int index, const char* value, size_t size) {
+  keys_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.service.SysConfigResponse.keys)
+}
+inline std::string* SysConfigResponse::add_keys() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.service.SysConfigResponse.keys)
+  return keys_.Add();
+}
+inline void SysConfigResponse::add_keys(const std::string& value) {
+  keys_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.service.SysConfigResponse.keys)
+}
+inline void SysConfigResponse::add_keys(std::string&& value) {
+  keys_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.service.SysConfigResponse.keys)
+}
+inline void SysConfigResponse::add_keys(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  keys_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.service.SysConfigResponse.keys)
+}
+inline void SysConfigResponse::add_keys(const char* value, size_t size) {
+  keys_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.service.SysConfigResponse.keys)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+SysConfigResponse::keys() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.service.SysConfigResponse.keys)
+  return keys_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+SysConfigResponse::mutable_keys() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.service.SysConfigResponse.keys)
+  return &keys_;
+}
+
+// repeated string values = 3;
+inline int SysConfigResponse::values_size() const {
+  return values_.size();
+}
+inline void SysConfigResponse::clear_values() {
+  values_.Clear();
+}
+inline const std::string& SysConfigResponse::values(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.service.SysConfigResponse.values)
+  return values_.Get(index);
+}
+inline std::string* SysConfigResponse::mutable_values(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.service.SysConfigResponse.values)
+  return values_.Mutable(index);
+}
+inline void SysConfigResponse::set_values(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.service.SysConfigResponse.values)
+  values_.Mutable(index)->assign(value);
+}
+inline void SysConfigResponse::set_values(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.service.SysConfigResponse.values)
+  values_.Mutable(index)->assign(std::move(value));
+}
+inline void SysConfigResponse::set_values(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  values_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.service.SysConfigResponse.values)
+}
+inline void SysConfigResponse::set_values(int index, const char* value, size_t size) {
+  values_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.service.SysConfigResponse.values)
+}
+inline std::string* SysConfigResponse::add_values() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.service.SysConfigResponse.values)
+  return values_.Add();
+}
+inline void SysConfigResponse::add_values(const std::string& value) {
+  values_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.service.SysConfigResponse.values)
+}
+inline void SysConfigResponse::add_values(std::string&& value) {
+  values_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.service.SysConfigResponse.values)
+}
+inline void SysConfigResponse::add_values(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  values_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.service.SysConfigResponse.values)
+}
+inline void SysConfigResponse::add_values(const char* value, size_t size) {
+  values_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.service.SysConfigResponse.values)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+SysConfigResponse::values() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.service.SysConfigResponse.values)
+  return values_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+SysConfigResponse::mutable_values() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.service.SysConfigResponse.values)
+  return &values_;
+}
+
+// -------------------------------------------------------------------
+
 // Hits
 
 // repeated int64 IDs = 1;
@@ -4124,6 +4479,8 @@ QueryResult::mutable_hits() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

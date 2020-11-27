@@ -82,8 +82,8 @@ func Init() {
 func CreateServer(ctx context.Context) (*Master, error) {
 	//Init(etcdAddr, kvRootPath)
 	etcdAddress := Params.EtcdAddress
-	metaRootPath := Params.MetaRootPath
-	kvRootPath := Params.KvRootPath
+	metaRootPath := Params.EtcdRootPath
+	kvRootPath := Params.EtcdRootPath
 	pulsarAddr := Params.PulsarAddress
 
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
