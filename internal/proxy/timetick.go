@@ -43,7 +43,7 @@ func newTimeTick(ctx context.Context,
 		cancel:       cancel,
 		tsoAllocator: tsoAllocator,
 		interval:     interval,
-		peerID:       1,
+		peerID:       Params.ProxyID(),
 		checkFunc:    checkFunc,
 	}
 
