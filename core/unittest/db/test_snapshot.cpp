@@ -44,25 +44,25 @@ TEST_F(SnapshotTest, ResourcesTest) {
 TEST_F(SnapshotTest, ReferenceProxyTest) {
     std::string status("raw");
     const std::string CALLED = "CALLED";
-    auto callback = [&]() {
+    auto callback = [&](ReferenceProxy::Ptr) {
         status = CALLED;
     };
 
-    auto proxy = ReferenceProxy();
-    ASSERT_EQ(proxy.ref_count(), 0);
+    auto proxy = std::make_shared<ReferenceProxy>();
+    ASSERT_EQ(proxy->ref_count(), 0);
 
     int refcnt = 3;
     for (auto i = 0; i < refcnt; ++i) {
-        proxy.Ref();
+        proxy->Ref();
     }
-    ASSERT_EQ(proxy.ref_count(), refcnt);
+    ASSERT_EQ(proxy->ref_count(), refcnt);
 
-    proxy.RegisterOnNoRefCB(callback);
+    proxy->RegisterOnNoRefCB(callback);
 
     for (auto i = 0; i < refcnt; ++i) {
-        proxy.UnRef();
+        proxy->UnRef();
     }
-    ASSERT_EQ(proxy.ref_count(), 0);
+    ASSERT_EQ(proxy->ref_count(), 0);
     ASSERT_EQ(status, CALLED);
 }
 
