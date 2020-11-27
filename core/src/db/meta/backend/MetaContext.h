@@ -11,10 +11,13 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "db/meta/MetaFilter.h"
 
 namespace milvus::engine::meta {
 
@@ -25,6 +28,11 @@ struct MetaQueryContext {
     bool all_required_ = true;
     std::vector<std::string> query_fields_;
     std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
+};
+
+struct MetaFilterContext {
+    std::string table_;
+//    MetaCombinationPtr combination_;
 };
 
 struct MetaApplyContext {

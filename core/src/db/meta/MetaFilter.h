@@ -245,10 +245,10 @@ class MetaRelationCombination : public MetaBaseCombination {
 
 ////////////////////////////////////////////
 MetaCombinationPtr
-AND_(const MetaConditionPtr& lcond, const MetaConditionPtr rcond);
+AND_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
 
 MetaCombinationPtr
-OR_(const MetaConditionPtr& lcond, const MetaConditionPtr rcond);
+OR_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
 
 MetaCombinationPtr
 ONE_(const MetaFilterPtr& filter);
