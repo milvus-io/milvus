@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "db/meta/MetaNames.h"
+#include "db/meta/Utils.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Json.h"
@@ -39,41 +40,6 @@ Status
 ResourceAttrMapOf(const std::string& table, std::vector<std::string>& attrs);
 
 //////////////////////////////////////////////////////////////////
-inline void
-int2str(const int64_t& ival, std::string& val) {
-    val = std::to_string(ival);
-}
-
-inline void
-uint2str(const uint64_t& uival, std::string& val) {
-    val = std::to_string(uival);
-}
-
-inline void
-state2str(const snapshot::State& sval, std::string& val) {
-    val = std::to_string(sval);
-}
-
-inline void
-mappings2str(const MappingT& mval, std::string& val) {
-    auto value_json = json::array();
-    for (auto& m : mval) {
-        value_json.emplace_back(m);
-    }
-
-    val = "\'" + value_json.dump() + "\'";
-}
-
-inline void
-str2str(const std::string& sval, std::string& val) {
-    val = "\'" + sval + "\'";
-}
-
-inline void
-json2str(const json& jval, std::string& val) {
-    val = "\'" + jval.dump() + "\'";
-}
-
 template <typename ResourceT>
 inline Status
 AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string& attr, std::string& value) {
@@ -110,11 +76,11 @@ AttrValue2Str(typename ResourceContext<ResourceT>::ResPtr src, const std::string
         int2str(int_value, value);
     } else if (F_FTYPE == attr) {
         auto ftype_field = std::dynamic_pointer_cast<snapshot::FtypeField>(src);
-        int_value = (int)ftype_field->GetFtype();
+        int_value = static_cast<int>(ftype_field->GetFtype());
         int2str(int_value, value);
     } else if (F_FETYPE == attr) {
         auto fetype_field = std::dynamic_pointer_cast<snapshot::FEtypeField>(src);
-        int_value = (int)fetype_field->GetFEtype();
+        int_value = static_cast<int>(fetype_field->GetFEtype());
         int2str(int_value, value);
     } else if (F_FIELD_ID == attr) {
         auto field_id_field = std::dynamic_pointer_cast<snapshot::FieldIdField>(src);
