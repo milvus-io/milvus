@@ -11,6 +11,8 @@
 
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaContext.h"
+#include "db/meta/condition/MetaFilter.h"
+#include "db/meta/condition/MetaRelation.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/utils.h"
 #include "utils/Json.h"
@@ -24,6 +26,18 @@ using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 using Op = milvus::engine::meta::MetaContextOp;
 using State = milvus::engine::snapshot::State;
+
+template <typename R, typename F, typename T>
+using RangeFilter = milvus::engine::meta::MetaRangeFilter<R, F, T>;
+using Range = milvus::engine::meta::Range;
+using milvus::engine::meta::AND_;
+using milvus::engine::meta::OR_;
+using milvus::engine::meta::ONE_;
+
+using milvus::engine::meta::Range_;
+using milvus::engine::meta::Between_;
+using milvus::engine::meta::In_;
+
 
 TEST_F(MetaTest, ApplyTest) {
     ID_TYPE result_id;
@@ -302,4 +316,26 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
     for (auto& t : cc_threads) {
         t.join();
     }
+}
+
+TEST_F(MetaTest, FilterTest) {
+    ID_TYPE result_id;
+
+    auto collection = std::make_shared<Collection>("meta_test_filter_c1");
+    ASSERT_TRUE(collection->Activate());
+    auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
+    auto status = meta_->Execute<Collection>(c_ctx, result_id);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_GT(result_id, 0);
+    collection->SetID(result_id);
+
+//    auto relation = milvus::engine::meta::ONE_(std::make_shared<RangeFilter<Collection, IdField, ID_TYPE>>(Range::EQ, result_id));
+    auto range_relation = ONE_(Range_<Collection, IdField>(Range::EQ, result_id));
+    auto between_relation = ONE_(Between_<Collection, IdField>(0, 10));
+    std::vector<ID_TYPE> ids = {result_id};
+    auto in_relation = ONE_(In_<Collection, IdField>(ids));
+    auto session = meta_->CreateSession();
+    std::vector<Collection::Ptr> collections;
+    status = session->Query<Collection>(range_relation, collections);
+    ASSERT_TRUE(status.ok()) << status.ToString();
 }

@@ -15,6 +15,7 @@
 
 #include "db/meta/condition/MetaBaseCombination.h"
 #include "db/meta/condition/MetaBaseFilter.h"
+#include "db/meta/condition/MetaFinder.h"
 
 namespace milvus::engine::meta {
 
@@ -24,6 +25,9 @@ class MetaFilterCombination : public MetaBaseCombination {
     }
 
     ~MetaFilterCombination() override = default;
+
+    bool
+    FieldsFind(const Fields& fields) const override;
 
     std::string
     Dump() const override;
@@ -37,6 +41,9 @@ class MetaRelationCombination : public MetaBaseCombination {
     MetaRelationCombination(Comb comb, MetaConditionPtr lcond, MetaConditionPtr rcond);
 
     ~MetaRelationCombination() override = default;
+
+    bool
+    FieldsFind(const Fields& fields) const override;
 
     std::string
     Dump() const override;

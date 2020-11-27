@@ -273,6 +273,70 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
+MySqlEngine::Filter(const MetaFilterContext &context, AttrsMapList& attrs) {
+    auto status = Status::OK();
+    mysqlpp::Connection::thread_start();
+
+    try {
+        mysqlpp::ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
+        if (connectionPtr == nullptr || !connectionPtr->connected()) {
+            mysqlpp::Connection::thread_end();
+            return Status(SS_TIMEOUT, "Mysql server is not accessed");
+        }
+
+        std::string sql;
+        status = MetaHelper::MetaFilterContextToSql(context, sql);
+        if (!status.ok()) {
+            mysqlpp::Connection::thread_end();
+            return status;
+        }
+
+        // std::lock_guard<std::mutex> lock(meta_mutex_);
+        mysqlpp::Query query = connectionPtr->query(sql);
+        auto res = query.store();
+        if (!res) {
+            mysqlpp::Connection::thread_end();
+            std::stringstream ss;
+            ss << "Mysql query fail: (" << query.errnum() << ": " << query.error() << ")";
+            std::string err_msg = ss.str();
+            LOG_ENGINE_ERROR_ << err_msg;
+            return Status(DB_ERROR, err_msg);
+        }
+
+        auto names = res.field_names();
+        for (auto& row : res) {
+            AttrsMap attrs_map;
+            for (auto& name : *names) {
+                attrs_map.insert(std::make_pair(name, row[name.c_str()]));
+            }
+            attrs.push_back(attrs_map);
+        }
+    } catch (const mysqlpp::ConnectionFailed& er) {
+        status = Status(SS_TIMEOUT, er.what());
+    } catch (const mysqlpp::BadQuery& er) {
+        LOG_ENGINE_ERROR_ << "Query error: " << er.what();
+        if (er.errnum() == 2006) {
+            status = Status(SS_TIMEOUT, er.what());
+        } else {
+            status = Status(DB_ERROR, er.what());
+        }
+    } catch (const mysqlpp::BadConversion& er) {
+        // Handle bad conversions
+        //        cerr << "Conversion error: " << er.what() << endl <<
+        //             "\tretrieved data size: " << er.retrieved <<
+        //             ", actual size: " << er.actual_size << endl;
+        status = Status(DB_ERROR, er.what());
+    } catch (const mysqlpp::Exception& er) {
+        // Catch-all for any other MySQL++ exceptions
+        //        cerr << "Error: " << er.what() << endl;
+        status = Status(DB_ERROR, er.what());
+    }
+
+    mysqlpp::Connection::thread_end();
+    return status;
+}
+
+Status
 MySqlEngine::ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) {
     Status status;
     mysqlpp::Connection::thread_start();

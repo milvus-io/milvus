@@ -11,40 +11,17 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-
-#include "db/meta/condition/MetaBaseCondition.h"
-#include "db/meta/condition/MetaFinder.h"
-
 namespace milvus::engine::meta {
 
-enum Comb { and_, or_, one_ };
-
-class MetaBaseCombination : public MetaBaseCondition, public FieldsFinder {
+template <typename T>
+class Determiner {
  public:
-    explicit MetaBaseCombination(Comb cond) : cond_(cond) {
-    }
+    virtual
+    ~Determiner() = default;
 
-    ~MetaBaseCombination() override = default;
+    virtual bool
+    InRange(const T& v) const = 0;
 
- protected:
-    std::string
-    Relation() const {
-        switch (cond_) {
-            case and_:
-                return "AND";
-            case or_:
-                return "OR";
-            default:
-                return "";
-        }
-    }
-
- protected:
-    Comb cond_;
 };
-
-using MetaCombinationPtr = std::shared_ptr<MetaBaseCombination>;
 
 }  // namespace milvus::engine::meta

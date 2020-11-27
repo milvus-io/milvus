@@ -15,6 +15,17 @@
 
 namespace milvus::engine::meta {
 
+bool
+MetaFilterCombination::FieldsFind(const Fields& fields) const {
+    for (auto& field : fields) {
+        if (filter_->FieldFind(field.first, field.second)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::string
 MetaFilterCombination::Dump() const {
     return filter_->Dump();
@@ -25,6 +36,28 @@ MetaRelationCombination::MetaRelationCombination(Comb comb, MetaConditionPtr lco
     if (comb != and_ && comb != or_) {
         throw std::runtime_error("Invalid combination relation");
     }
+}
+
+bool
+MetaRelationCombination::FieldsFind(const Fields& fields) const {
+    auto find = [](MetaConditionPtr cond, const Fields& sfields) -> bool {
+        if (auto filter = std::dynamic_pointer_cast<MetaBaseFilter>(cond)) {
+            auto filter_comb = std::make_shared<MetaFilterCombination>(filter);
+            return filter_comb->FieldsFind(sfields);
+        }
+
+        if (auto filter_comb = std::dynamic_pointer_cast<MetaFilterCombination>(cond)) {
+            return filter_comb->FieldsFind(sfields);
+        }
+
+        if (auto relation_comb = std::dynamic_pointer_cast<MetaRelationCombination>(cond)) {
+            return relation_comb->FieldsFind(sfields);
+        }
+
+        return false;
+    };
+
+    return find(lcond_, fields) && find(rcond_, fields);
 }
 
 std::string

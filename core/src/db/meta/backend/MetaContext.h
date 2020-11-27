@@ -17,8 +17,9 @@
 #include <utility>
 #include <vector>
 
-//#include "db/meta/condition/MetaFilter.h"
+#include "db/meta/condition/MetaCombination.h"
 
+// TODO(yhz): Move to meta foler
 namespace milvus::engine::meta {
 
 enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
@@ -32,7 +33,7 @@ struct MetaQueryContext {
 
 struct MetaFilterContext {
     std::string table_;
-    //    MetaCombinationPtr combination_;
+    MetaCombinationPtr combination_;
 };
 
 struct MetaApplyContext {
