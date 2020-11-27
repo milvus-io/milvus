@@ -21,6 +21,7 @@
 
 #include "db/meta/MetaResourceAttrs.h"
 #include "db/meta/backend/MetaEngine.h"
+#include "db/meta/condition/MetaRelation.h"
 #include "db/snapshot/BaseResource.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -47,7 +48,7 @@ class MetaSession {
     Select(const std::string& field, const std::vector<U>& value, const std::vector<std::string>& target_attrs,
            std::vector<typename ResourceT::Ptr>& resources);
 
-    template<typename T>
+    template <typename T>
     Status
     Query(const MetaCombinationPtr filter, std::vector<typename T::Ptr>& resources) {
         return Status::OK();
@@ -97,7 +98,6 @@ class MetaSession {
     int64_t pos_;
     MetaEnginePtr db_engine_;
 };
-
 
 template <typename T, typename U>
 Status

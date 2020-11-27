@@ -13,35 +13,37 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
-//#include "db/meta/condition/MetaFilter.h"
+#include "db/meta/condition/MetaBaseCondition.h"
 
 namespace milvus::engine::meta {
 
-enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
+enum Comb { and_, or_, one_ };
 
-struct MetaQueryContext {
-    std::string table_;
-    bool all_required_ = true;
-    std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
+class MetaBaseCombination : public MetaBaseCondition {
+ public:
+    explicit MetaBaseCombination(Comb cond) : cond_(cond) {
+    }
+
+    ~MetaBaseCombination() override = default;
+
+ protected:
+    std::string
+    Relation() const {
+        switch (cond_) {
+            case and_:
+                return "AND";
+            case or_:
+                return "OR";
+            default:
+                return "";
+        }
+    }
+
+ protected:
+    Comb cond_;
 };
 
-struct MetaFilterContext {
-    std::string table_;
-    //    MetaCombinationPtr combination_;
-};
-
-struct MetaApplyContext {
-    std::string table_;
-    MetaContextOp op_ = oAdd;
-    int64_t id_ = 0;
-    std::unordered_map<std::string, std::string> attrs_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-    std::string sql_;
-};
+using MetaCombinationPtr = std::shared_ptr<MetaBaseCombination>;
 
 }  // namespace milvus::engine::meta

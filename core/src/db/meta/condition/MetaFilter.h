@@ -16,62 +16,25 @@
 #include <utility>
 #include <vector>
 
-#include "db/meta/MetaResourceAttrs.h"
-#include "db/snapshot/ResourceTypes.h"
+#include "db/meta/condition/MetaBaseFilter.h"
+#include "db/meta/condition/MetaConditionHelper.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::meta {
 
-template <typename V>
-inline std::string
-FieldValue2Str(const V& v) {
-    return std::to_string(v);
-}
-
-template <>
-inline std::string
-FieldValue2Str<std::string>(const std::string& v) {
-    return v;
-}
-
-template <>
-inline std::string
-FieldValue2Str<snapshot::FTYPE_TYPE>(const snapshot::FTYPE_TYPE& v) {
-    return std::to_string(static_cast<int>(v));
-}
-
-template <>
-inline std::string
-FieldValue2Str<snapshot::FETYPE_TYPE>(const snapshot::FETYPE_TYPE& v) {
-    return std::to_string(static_cast<int>(v));
-}
-
-template <>
-inline std::string
-FieldValue2Str<snapshot::MappingT>(const snapshot::MappingT& v) {
-    std::string value;
-    mappings2str(v, value);
-    return value;
-}
-
 ///////////////////////////////////////
-class MetaBaseCondition {
- public:
-    virtual std::string
-    Dump() const = 0;
-};
 
-using MetaConditionPtr = std::shared_ptr<MetaBaseCondition>;
-
-class MetaBaseFilter : public MetaBaseCondition {};
+/***
+ * Range Filter
+ */
 
 enum Range {
     LT,  /*less than*/
     LTE, /*less than or equal*/
     GT,  /*greater than*/
     GTE, /*greater than or equal*/
-    EQ,
-    NE
+    EQ,  /*equal*/
+    NE   /*not equal*/
 };
 
 template <typename R, typename F, typename T>
@@ -80,6 +43,8 @@ class MetaRangeFilter : public MetaBaseFilter {
     MetaRangeFilter(Range range, const T& value)
         : res_name_(R::Name), field_name_(F::Name), range_(range), value_(value) {
     }
+
+    ~MetaRangeFilter() override = default;
 
     std::string
     Dump() const override {
@@ -121,12 +86,17 @@ class MetaRangeFilter : public MetaBaseFilter {
     const T value_;
 };
 
+/***
+ * Between Filter
+ */
 template <typename R, typename F, typename T>
 class MetaBetweenFilter : public MetaBaseFilter {
  public:
     MetaBetweenFilter(const T& lvalue, const T& rvalue, bool in = true)
         : res_name_(R::Name), field_name_(F::Name), lvalue_(lvalue), rvalue_(rvalue), in_(in) {
     }
+
+    ~MetaBetweenFilter() override = default;
 
     std::string
     Dump() const override {
@@ -149,6 +119,8 @@ class MetaInFilter : public MetaBaseFilter {
         : res_name_(R::Name), field_name_(F::Name), values_(values), in_(in) {
     }
 
+    ~MetaInFilter() override = default;
+
     std::string
     Dump() const override {
         std::vector<std::string> svalues(values_.size());
@@ -168,89 +140,5 @@ class MetaInFilter : public MetaBaseFilter {
     const std::vector<T>& values_;
     bool in_;
 };
-
-////////////////////////////////////////////////////////////////////
-using MetaFilterPtr = std::shared_ptr<MetaBaseFilter>;
-
-enum Cond { and_, or_, one_ };
-
-class MetaBaseCombination : public MetaBaseCondition {
- protected:
-    using Ptr = std::shared_ptr<MetaBaseCombination>;
-
- public:
-    explicit MetaBaseCombination(Cond cond) : cond_(cond) {
-    }
-
- protected:
-    std::string
-    Relation() const {
-        switch (cond_) {
-            case and_:
-                return "AND";
-            case or_:
-                return "OR";
-            default:
-                return "";
-        }
-    }
-
- protected:
-    Cond cond_;
-};
-
-using MetaCombinationPtr = std::shared_ptr<MetaBaseCombination>;
-
-class MetaFilterCombination : public MetaBaseCombination {
- public:
-    explicit MetaFilterCombination(MetaFilterPtr filter) : MetaBaseCombination(one_), filter_(filter) {
-    }
-
-    std::string
-    Dump() const override {
-        return filter_->Dump();
-    }
-
- private:
-    MetaFilterPtr filter_;
-};
-
-class MetaRelationCombination : public MetaBaseCombination {
- public:
-    MetaRelationCombination(Cond cond, MetaConditionPtr lcond, MetaConditionPtr rcond)
-        : MetaBaseCombination(cond), lcond_(std::move(lcond)), rcond_(std::move(rcond)) {
-        if (cond != and_ && cond != or_) {
-            throw std::runtime_error("Invalid combination relation");
-        }
-    }
-
-    std::string
-    Dump() const override {
-        std::string l_dump_str = lcond_->Dump();
-        if (std::dynamic_pointer_cast<MetaRelationCombination>(lcond_)) {
-            l_dump_str = "(" + l_dump_str + ")";
-        }
-
-        std::string r_dump_str = rcond_->Dump();
-        if (std::dynamic_pointer_cast<MetaRelationCombination>(rcond_)) {
-            r_dump_str = "(" + r_dump_str + ")";
-        }
-        return l_dump_str + " " + Relation() + " " + r_dump_str;
-    }
-
- private:
-    MetaConditionPtr lcond_;
-    MetaConditionPtr rcond_;
-};
-
-////////////////////////////////////////////
-MetaCombinationPtr
-AND_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
-
-MetaCombinationPtr
-OR_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
-
-MetaCombinationPtr
-ONE_(const MetaFilterPtr& filter);
 
 }  // namespace milvus::engine::meta

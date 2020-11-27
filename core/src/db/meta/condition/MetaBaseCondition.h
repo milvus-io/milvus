@@ -13,35 +13,17 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-//#include "db/meta/condition/MetaFilter.h"
 
 namespace milvus::engine::meta {
 
-enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
+class MetaBaseCondition {
+ public:
+    virtual ~MetaBaseCondition() = default;
 
-struct MetaQueryContext {
-    std::string table_;
-    bool all_required_ = true;
-    std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
+    virtual std::string
+    Dump() const = 0;
 };
 
-struct MetaFilterContext {
-    std::string table_;
-    //    MetaCombinationPtr combination_;
-};
-
-struct MetaApplyContext {
-    std::string table_;
-    MetaContextOp op_ = oAdd;
-    int64_t id_ = 0;
-    std::unordered_map<std::string, std::string> attrs_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-    std::string sql_;
-};
+using MetaConditionPtr = std::shared_ptr<MetaBaseCondition>;
 
 }  // namespace milvus::engine::meta
