@@ -135,10 +135,13 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
         }
         if (STATISTICS_ENABLE >= 2) {
-            if (bitset)
-                hnsw_stats->filter_percentage_sum += (double)bitset->count_1() / bitset->count();
+            double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
+            hnsw_stats->filter_percentage_sum += fps;
+            if (fps > 1.0 || fps < 0.0)
+                LOG_KNOWHERE_ERROR_ << "in IndexRHNSW::Query, the percentage of 1 in bitset is " << fps
+                                    << ", which is exceed 100% or negative!";
             else
-                hnsw_stats->filter_percentage_sum += 0.0;
+                hnsw_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
         }
     }
     for (auto i = 0; i < k * rows; ++i) {
