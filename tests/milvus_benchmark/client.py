@@ -326,7 +326,7 @@ class MilvusClient(object):
     def exists_collection(self, collection_name=None):
         if collection_name is None:
             collection_name = self._collection_name
-        status, res = self._milvus.has_collection(collection_name)
+        _, res = self._milvus.has_collection(collection_name)
         # self.check_status(status)
         return res
 
@@ -343,7 +343,7 @@ class MilvusClient(object):
         return status
 
     def get_server_version(self):
-        status, res = self._milvus.server_version()
+        _, res = self._milvus.server_version()
         return res
 
     def get_server_mode(self):

@@ -414,7 +414,7 @@ class QueryTask(User):
             query_vectors = [[random.random() for _ in range(dimension)] for _ in range(10000)]
             while time.time() < start_time + during_time * 60:
                 i = i + 1
-                for j in range(insert_interval):
+                for _ in range(insert_interval):
                     top_k = random.randint(l_top_k, g_top_k)
                     nq = random.randint(l_nq, g_nq)
                     search_param = {}
@@ -425,7 +425,7 @@ class QueryTask(User):
                 count = milvus_instance.count()
                 insert_ids = [(count+x) for x in range(len(insert_vectors))]
                 ids.extend(insert_ids)
-                status, res = milvus_instance.insert(insert_vectors, ids=insert_ids)
+                _, res = milvus_instance.insert(insert_vectors, ids=insert_ids)
                 logger.debug("%d, row_count: %d" % (i, milvus_instance.count()))
                 milvus_instance.delete(ids[-delete_xb:])
                 milvus_instance.flush()

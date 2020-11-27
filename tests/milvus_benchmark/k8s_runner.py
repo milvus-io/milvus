@@ -596,8 +596,8 @@ class QueryTask(User):
             logger.info(index_info)
             g_top_k = int(collection["top_ks"].split("-")[1])
             l_top_k = int(collection["top_ks"].split("-")[0])
-            g_id = int(ids.split("-")[1])
-            l_id = int(ids.split("-")[0])
+            # g_id = int(ids.split("-")[1])
+            # l_id = int(ids.split("-")[0])
             g_id_length = int(ids_length.split("-")[1])
             l_id_length = int(ids_length.split("-")[0])
 
@@ -654,14 +654,14 @@ class QueryTask(User):
             for search_param in search_params:
                 for top_k in top_ks:
                     for nq in nqs:
-                        total = 0
+                        # total = 0
                         search_param_group = {
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param
                         }
                         logger.info("Query params: %s" % json.dumps(search_param_group))
-                        result_ids, result_distances = self.do_query_ids(milvus_instance, collection_name, top_k, nq, search_param=search_param)
+                        result_ids, _ = self.do_query_ids(milvus_instance, collection_name, top_k, nq, search_param=search_param)
                         acc_value = self.get_recall_value(true_ids_all[:nq, :top_k].tolist(), result_ids)
                         logger.info("Query accuracy: %s" % acc_value)
                         metric = self.report_wrapper(milvus_instance, self.env_value, self.hostname, collection_info, index_info, search_param_group)

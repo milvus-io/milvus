@@ -109,9 +109,8 @@ def modify_config(k, v, type=None, file_path="conf/server_config.yaml", db_slave
             config_dict['gpu_resource_config']['build_index_resources'] = v
         elif k.find("search_resources") != -1:  
             config_dict['resource_config']['resources'] = v
-
-        if db_slave:
-            config_dict['db_config']['db_slave_path'] = MULTI_DB_SLAVE_PATH
+        # if db_slave:
+        #     config_dict['db_config']['db_slave_path'] = MULTI_DB_SLAVE_PATH
         with open(file_path, 'w') as f:
             dump(config_dict, f, default_flow_style=False)
         f.close()
