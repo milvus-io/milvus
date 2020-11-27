@@ -57,8 +57,9 @@ def metric_type_to_str(metric_type):
 class MilvusClient(object):
     def __init__(self, collection_name=None, host=None, port=None, timeout=60):
         """
-        Milvus client wrapper for python-sdk,
-        default timeout set 60s
+        Milvus client wrapper for python-sdk. 
+
+        Default timeout set 60s
         """
         self._collection_name = collection_name
         try:
@@ -73,11 +74,7 @@ class MilvusClient(object):
             i = 0
             while time.time() < start_time + timeout:
                 try:
-                    self._milvus = Milvus(
-                        host=host,
-                        port=port, 
-                        try_connect=False, 
-                        pre_ping=False)
+                    self._milvus = Milvus(host=host, port=port, try_connect=False, pre_ping=False)
                     if self._milvus.server_status():
                         logger.debug("Try connect times: %d, %s" % (i, round(time.time() - start_time, 2)))
                         break

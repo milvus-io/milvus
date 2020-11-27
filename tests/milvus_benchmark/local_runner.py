@@ -21,8 +21,9 @@ logger = logging.getLogger("milvus_benchmark.local_runner")
 
 class LocalRunner(Runner):
     def __init__(self, host, port):
-        """Run tests at local mode.  Make
-        sure the server has started
+        """Run tests at local mode. 
+        
+        Make sure the server has started
         """
         super(LocalRunner, self).__init__()
         self.host = host
