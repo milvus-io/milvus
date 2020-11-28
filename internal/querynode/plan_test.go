@@ -16,9 +16,8 @@ import (
 
 func TestPlan_Plan(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -28,9 +27,8 @@ func TestPlan_Plan(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -40,8 +38,7 @@ func TestPlan_Plan(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name:   "collection0",
-		AutoID: true,
+		Name: "collection0",
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
@@ -74,9 +71,8 @@ func TestPlan_Plan(t *testing.T) {
 
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -86,9 +82,8 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -98,8 +93,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name:   "collection0",
-		AutoID: true,
+		Name: "collection0",
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},

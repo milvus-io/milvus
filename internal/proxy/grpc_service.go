@@ -117,6 +117,7 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 }
 
 func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.QueryResult, error) {
+	log.Printf("receive search request: %v", req)
 	qt := &QueryTask{
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: internalpb.SearchRequest{

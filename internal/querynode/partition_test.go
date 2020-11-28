@@ -17,9 +17,8 @@ func TestPartition_Segments(t *testing.T) {
 
 	collectionName := "collection0"
 	fieldVec := schemapb.FieldSchema{
-		Name:         "vec",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		Name:     "vec",
+		DataType: schemapb.DataType_VECTOR_FLOAT,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -29,9 +28,8 @@ func TestPartition_Segments(t *testing.T) {
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		Name:         "age",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_INT32,
+		Name:     "age",
+		DataType: schemapb.DataType_INT32,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -41,8 +39,7 @@ func TestPartition_Segments(t *testing.T) {
 	}
 
 	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
-		AutoID: true,
+		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},

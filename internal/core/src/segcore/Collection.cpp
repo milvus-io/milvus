@@ -139,7 +139,27 @@ Collection::parse() {
     }
 
     collection_name_ = collection_meta.schema().name();
-    schema_ = Schema::ParseFrom(collection_meta.schema());
+    // TODO: delete print
+    std::cout << "create collection " << collection_meta.schema().name() << std::endl;
+
+    auto schema = std::make_shared<Schema>();
+    for (const milvus::proto::schema::FieldSchema& child : collection_meta.schema().fields()) {
+        const auto& type_params = child.type_params();
+        int64_t dim = 16;
+        for (const auto& type_param : type_params) {
+            if (type_param.key() == "dim") {
+                dim = strtoll(type_param.value().c_str(), nullptr, 10);
+            }
+        }
+        std::cout << "add Field, name :" << child.name() << ", datatype :" << child.data_type() << ", dim :" << dim
+                  << std::endl;
+        schema->AddField(std::string_view(child.name()), DataType(child.data_type()), dim);
+    }
+    /*
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::INT32);
+    */
+    schema_ = schema;
 }
 
 }  // namespace milvus::segcore
