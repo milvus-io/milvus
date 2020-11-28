@@ -248,7 +248,6 @@ SqliteEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
     QueryData = nullptr;
 
     return status;
-    return Status::OK();
 }
 
 Status
