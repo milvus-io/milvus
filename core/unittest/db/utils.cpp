@@ -250,7 +250,10 @@ MetaTest::SetUp() {
     auto engine = std::make_shared<milvus::engine::meta::MockEngine>();
 //    milvus::engine::DBMetaOptions options;
 //    options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3309/milvus";
+//    options.backend_uri_ = "sqlite://:@:/";
+//    options.path_ = "/tmp/milvus-master/db";
 //    auto engine = std::make_shared<milvus::engine::meta::MySqlEngine>(options);
+//    auto engine = std::make_shared<milvus::engine::meta::SqliteEngine>(options);
     meta_ = std::make_shared<milvus::engine::meta::MetaAdapter>(engine);
     meta_->TruncateAll();
 }

@@ -60,7 +60,11 @@ class MetaSession {
         if (status.ok()) {
             for (auto raw : attrs) {
                 auto resource = snapshot::CreateResPtr<T>();
-                AttrMap2Resource<T>(raw, resource);
+                status = AttrMap2Resource<T>(raw, resource);
+                if (!status.ok()) {
+                    resources.clear();
+                    return status;
+                }
                 resources.push_back(std::move(resource));
             }
         }
