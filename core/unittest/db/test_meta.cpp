@@ -330,12 +330,13 @@ TEST_F(MetaTest, FilterTest) {
     collection->SetID(result_id);
 
 //    auto relation = milvus::engine::meta::ONE_(std::make_shared<RangeFilter<Collection, IdField, ID_TYPE>>(Range::EQ, result_id));
-    auto range_relation = ONE_(Range_<Collection, IdField>(Range::EQ, result_id));
-    auto between_relation = ONE_(Between_<Collection, IdField>(0, 10));
-    std::vector<ID_TYPE> ids = {result_id};
-    auto in_relation = ONE_(In_<Collection, IdField>(ids));
+//    auto range_relation = ONE_(Range_<Collection, IdField>(Range::EQ, result_id));
+//    auto between_relation = ONE_(Between_<Collection, IdField>(0, 10));
+//    std::vector<ID_TYPE> ids = {result_id};
+//    auto in_relation = ONE_(In_<Collection, IdField>(ids));
+    auto relation = AND_(Range_<Collection, IdField>(Range::EQ, result_id), Between_<Collection, IdField>(0, 10));
     auto session = meta_->CreateSession();
     std::vector<Collection::Ptr> collections;
-    status = session->Query<Collection>(range_relation, collections);
+    status = session->Query<Collection>(relation, collections);
     ASSERT_TRUE(status.ok()) << status.ToString();
 }

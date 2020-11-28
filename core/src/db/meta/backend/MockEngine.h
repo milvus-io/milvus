@@ -54,7 +54,7 @@ class MockEngine : public MetaEngine {
     QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs);
 
     Status
-    FilterNoLock(const MetaFilterContext &context, AttrsMapList &attrs);
+    FilterNoLock(const MetaFilterContext& context, AttrsMapList& attrs);
 
     Status
     AddNoLock(const MetaApplyContext& add_context, int64_t& result_id, TableRaw& pre_raw);

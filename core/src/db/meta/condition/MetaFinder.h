@@ -18,8 +18,7 @@ namespace milvus::engine::meta {
 
 class Finder {
  public:
-    virtual
-    ~Finder() = default;
+    virtual ~Finder() = default;
 
     virtual bool
     StrFind(const std::string& v) const = 0;
@@ -33,7 +32,7 @@ class FieldsFinder {
     FieldsFind(const Fields& fields) const = 0;
 };
 
-//class MetaFinder {
+// class MetaFinder {
 // public:
 //    virtual
 //    ~MetaFinder() = default;

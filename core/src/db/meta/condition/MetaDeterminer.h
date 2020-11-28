@@ -16,12 +16,10 @@ namespace milvus::engine::meta {
 template <typename T>
 class Determiner {
  public:
-    virtual
-    ~Determiner() = default;
+    virtual ~Determiner() = default;
 
     virtual bool
     InRange(const T& v) const = 0;
-
 };
 
 }  // namespace milvus::engine::meta

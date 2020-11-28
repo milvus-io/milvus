@@ -53,7 +53,7 @@ MetaHelper::MetaQueryContextToSql(const MetaQueryContext& context, std::string& 
 }
 
 Status
-MetaHelper::MetaFilterContextToSql(const MetaFilterContext &context, std::string &sql) {
+MetaHelper::MetaFilterContextToSql(const MetaFilterContext& context, std::string& sql) {
     sql.clear();
     sql = "SELECT * FROM " + context.table_ + " WHERE " + context.combination_->Dump() + ";";
 

@@ -273,7 +273,7 @@ MySqlEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-MySqlEngine::Filter(const MetaFilterContext &context, AttrsMapList& attrs) {
+MySqlEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
     auto status = Status::OK();
     mysqlpp::Connection::thread_start();
 

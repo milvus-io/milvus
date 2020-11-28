@@ -12,6 +12,7 @@
 #pragma once
 
 #include <limits>
+#include <set>
 #include <string>
 
 #include "db/meta/Utils.h"
@@ -108,6 +109,23 @@ Str2FieldValue<snapshot::State>(const std::string& s) {
 template <>
 inline snapshot::MappingT
 Str2FieldValue<snapshot::MappingT>(const std::string& s) {
+    std::string so = s;
+    if (*s.begin() == '\'' && *s.rbegin() == '\'') {
+        StringHelpFunctions::TrimStringQuote(so, "\'");
+    }
+
+    auto mapping_json = json::parse(so);
+    std::set<int64_t> mappings;
+    for (auto& ele : mapping_json) {
+        mappings.insert(ele.get<int64_t>());
+    }
+
+    return mappings;
+}
+
+template <>
+inline json
+Str2FieldValue<json>(const std::string& s) {
     std::string so = s;
     if (*s.begin() == '\'' && *s.rbegin() == '\'') {
         StringHelpFunctions::TrimStringQuote(so, "\'");
