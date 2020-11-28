@@ -43,7 +43,7 @@ func newTimeTick(ctx context.Context,
 		cancel:       cancel,
 		tsoAllocator: tsoAllocator,
 		interval:     interval,
-		peerID:       1,
+		peerID:       Params.ProxyID(),
 		checkFunc:    checkFunc,
 	}
 
@@ -56,7 +56,6 @@ func newTimeTick(ctx context.Context,
 }
 
 func (tt *timeTick) tick() error {
-
 	if tt.lastTick == tt.currentTick {
 		ts, err := tt.tsoAllocator.AllocOne()
 		if err != nil {
@@ -84,7 +83,7 @@ func (tt *timeTick) tick() error {
 	if err != nil {
 		log.Printf("proxy send time tick error: %v", err)
 	} else {
-		log.Printf("proxy send time tick message")
+		//log.Printf("proxy send time tick message")
 	}
 	tt.lastTick = tt.currentTick
 	return nil

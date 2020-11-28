@@ -32,7 +32,8 @@ func TestMaster_CreateCollection(t *testing.T) {
 		Port:    Params.Port,
 
 		EtcdAddress:   Params.EtcdAddress,
-		EtcdRootPath:  "/test/root",
+		MetaRootPath:  "/test/root/meta",
+		KvRootPath:    "/test/root/kv",
 		PulsarAddress: Params.PulsarAddress,
 
 		ProxyIDList:     []typeutil.UniqueID{1, 2},

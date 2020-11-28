@@ -82,17 +82,8 @@ func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []strin
 func (gp *BaseTable) LoadYaml(fileName string) error {
 	config := viper.New()
 	_, fpath, _, _ := runtime.Caller(0)
-	configFile := path.Dir(fpath) + "/../../../configs/" + fileName
-	_, err := os.Stat(configFile)
-	if os.IsNotExist(err) {
-		runPath, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-		configFile = runPath + "/configs/" + fileName
-	}
-
-	config.SetConfigFile(configFile)
+	configPath := path.Dir(fpath) + "/../../../configs/"
+	config.SetConfigFile(configPath + fileName)
 	if err := config.ReadInConfig(); err != nil {
 		panic(err)
 	}

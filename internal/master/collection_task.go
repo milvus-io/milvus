@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"github.com/golang/protobuf/proto"
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -86,23 +85,8 @@ func (t *createCollectionTask) Execute() error {
 		// TODO: initial partition?
 		PartitionTags: make([]string, 0),
 	}
-	err = t.mt.AddCollection(&collection)
-	if err != nil {
-		return err
-	}
 
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		BeginTimestamp: t.req.Timestamp,
-		EndTimestamp:   t.req.Timestamp,
-		HashValues:     []int32{0},
-	}
-	timeTickMsg := &ms.CreateCollectionMsg{
-		BaseMsg:                 baseMsg,
-		CreateCollectionRequest: *t.req,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	return t.sch.ddMsgStream.Broadcast(&msgPack)
+	return t.mt.AddCollection(&collection)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -118,7 +102,7 @@ func (t *dropCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return Timestamp(t.req.Timestamp), nil
 }
 
 func (t *dropCollectionTask) Execute() error {
@@ -134,29 +118,7 @@ func (t *dropCollectionTask) Execute() error {
 
 	collectionID := collectionMeta.ID
 
-	err = t.mt.DeleteCollection(collectionID)
-	if err != nil {
-		return err
-	}
-
-	ts, err := t.Ts()
-	if err != nil {
-		return err
-	}
-
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []int32{0},
-	}
-	timeTickMsg := &ms.DropCollectionMsg{
-		BaseMsg:               baseMsg,
-		DropCollectionRequest: *t.req,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	return t.sch.ddMsgStream.Broadcast(&msgPack)
-
+	return t.mt.DeleteCollection(collectionID)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -172,7 +134,7 @@ func (t *hasCollectionTask) Ts() (Timestamp, error) {
 	if t.req == nil {
 		return 0, errors.New("null request")
 	}
-	return t.req.Timestamp, nil
+	return Timestamp(t.req.Timestamp), nil
 }
 
 func (t *hasCollectionTask) Execute() error {
@@ -185,8 +147,8 @@ func (t *hasCollectionTask) Execute() error {
 	if err == nil {
 		t.hasCollection = true
 	}
-	return nil
 
+	return nil
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -219,7 +181,6 @@ func (t *describeCollectionTask) Execute() error {
 	t.description.Schema = collection.Schema
 
 	return nil
-
 }
 
 //////////////////////////////////////////////////////////////////////////
