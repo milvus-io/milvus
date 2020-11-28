@@ -10,7 +10,7 @@ type tSafeWatcher struct {
 
 func newTSafeWatcher() *tSafeWatcher {
 	return &tSafeWatcher{
-		notifyChan: make(chan bool, 1),
+		notifyChan: make(chan bool),
 	}
 }
 

@@ -3,6 +3,7 @@ package allocator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -214,6 +215,7 @@ func (ta *Allocator) sync(timeout bool) {
 	if !timeout {
 		ta.tChan.Reset()
 	}
+	fmt.Println("synced")
 }
 
 func (ta *Allocator) finishSyncRequest() {

@@ -236,8 +236,7 @@ func startupMaster() {
 		Port:    Params.Port,
 
 		EtcdAddress:   Params.EtcdAddress,
-		MetaRootPath:  "/test/root/meta",
-		KvRootPath:    "/test/root/kv",
+		EtcdRootPath:  rootPath,
 		PulsarAddress: Params.PulsarAddress,
 
 		ProxyIDList:     []typeutil.UniqueID{1, 2},

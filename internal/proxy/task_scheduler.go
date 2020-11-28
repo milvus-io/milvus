@@ -437,6 +437,6 @@ func (sched *TaskScheduler) Close() {
 func (sched *TaskScheduler) TaskDoneTest(ts Timestamp) bool {
 	ddTaskDone := sched.DdQueue.TaskDoneTest(ts)
 	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
-	//dqTaskDone := sched.DqQueue.TaskDoneTest(ts)
-	return ddTaskDone && dmTaskDone && true
+	dqTaskDone := sched.DqQueue.TaskDoneTest(ts)
+	return ddTaskDone && dmTaskDone && dqTaskDone
 }

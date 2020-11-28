@@ -64,24 +64,24 @@ func TestMetaService_getSegmentObjId(t *testing.T) {
 }
 
 func TestMetaService_isCollectionObj(t *testing.T) {
-	var key = "by-dev/meta/collection/collection0"
+	var key = "by-dev/collection/collection0"
 	var b1 = isCollectionObj(key)
 
 	assert.Equal(t, b1, true)
 
-	key = "by-dev/meta/segment/segment0"
+	key = "by-dev/segment/segment0"
 	var b2 = isCollectionObj(key)
 
 	assert.Equal(t, b2, false)
 }
 
 func TestMetaService_isSegmentObj(t *testing.T) {
-	var key = "by-dev/meta/segment/segment0"
+	var key = "by-dev/segment/segment0"
 	var b1 = isSegmentObj(key)
 
 	assert.Equal(t, b1, true)
 
-	key = "by-dev/meta/collection/collection0"
+	key = "by-dev/collection/collection0"
 	var b2 = isSegmentObj(key)
 
 	assert.Equal(t, b2, false)
@@ -295,7 +295,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/meta/collection/0"
+	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -327,7 +327,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	key2 := "by-dev/meta/segment/0"
+	key2 := "by-dev/segment/0"
 	msg2 := `partition_tag: "default"
 				channel_start: 0
 				channel_end: 1
@@ -529,7 +529,7 @@ func TestMetaService_processModify(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/meta/collection/0"
+	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -576,7 +576,7 @@ func TestMetaService_processModify(t *testing.T) {
 	hasPartition = (*node.replica).hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, false)
 
-	key2 := "by-dev/meta/segment/0"
+	key2 := "by-dev/segment/0"
 	msg2 := `partition_tag: "p1"
 				channel_start: 0
 				channel_end: 1
@@ -772,7 +772,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	node := NewQueryNode(ctx, 0)
 	node.metaService = newMetaService(ctx, node.replica)
 
-	key1 := "by-dev/meta/collection/0"
+	key1 := "by-dev/collection/0"
 	msg1 := `schema: <
 				name: "test"
 				fields: <
@@ -804,7 +804,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
-	key2 := "by-dev/meta/segment/0"
+	key2 := "by-dev/segment/0"
 	msg2 := `partition_tag: "default"
 				channel_start: 0
 				channel_end: 1

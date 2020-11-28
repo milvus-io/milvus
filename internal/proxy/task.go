@@ -334,17 +334,6 @@ func (qt *QueryTask) PreExecute() error {
 			return err
 		}
 	}
-	qt.MsgType = internalpb.MsgType_kSearch
-	if qt.query.PartitionTags == nil || len(qt.query.PartitionTags) <= 0 {
-		qt.query.PartitionTags = []string{Params.defaultPartitionTag()}
-	}
-	queryBytes, err := proto.Marshal(qt.query)
-	if err != nil {
-		return err
-	}
-	qt.Query = &commonpb.Blob{
-		Value: queryBytes,
-	}
 	return nil
 }
 
@@ -352,7 +341,6 @@ func (qt *QueryTask) Execute() error {
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: qt.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
-			HashValues:     []int32{int32(Params.ProxyID())},
 			BeginTimestamp: qt.Timestamp,
 			EndTimestamp:   qt.Timestamp,
 		},
@@ -363,12 +351,8 @@ func (qt *QueryTask) Execute() error {
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := qt.queryMsgStream.Produce(msgPack)
-	log.Printf("[Proxy] length of searchMsg: %v", len(msgPack.Msgs))
-	if err != nil {
-		log.Printf("[Proxy] send search request failed: %v", err)
-	}
-	return err
+	qt.queryMsgStream.Produce(msgPack)
+	return nil
 }
 
 func (qt *QueryTask) PostExecute() error {
@@ -388,11 +372,10 @@ func (qt *QueryTask) PostExecute() error {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
-			hits := make([][]*servicepb.Hits, rlen)
-			for i, searchResult := range searchResults {
+			var hits [][]*servicepb.Hits = make([][]*servicepb.Hits, rlen)
+			for i, sr := range searchResults {
 				hits[i] = make([]*servicepb.Hits, n)
-				for j, bs := range searchResult.Hits {
-					hits[i][j] = &servicepb.Hits{}
+				for j, bs := range sr.Hits {
 					err := proto.Unmarshal(bs, hits[i][j])
 					if err != nil {
 						return err
@@ -404,20 +387,15 @@ func (qt *QueryTask) PostExecute() error {
 				Status: &commonpb.Status{
 					ErrorCode: 0,
 				},
-				Hits: make([][]byte, 0),
 			}
 			// reduce by score, TODO: use better algorithm
 			// use merge-sort here, the number of ways to merge is `rlen`
 			// in this process, we must make sure:
 			//		len(queryResult.Hits) == n
 			//		len(queryResult.Hits[i].Ids) == k for i in range(n)
-			for i := 0; i < n; i++ { // n
+			for i := 0; i < n; n++ { // n
 				locs := make([]int, rlen)
-				reducedHits := &servicepb.Hits{
-					IDs:     make([]int64, 0),
-					RowData: make([][]byte, 0),
-					Scores:  make([]float32, 0),
-				}
+				reducedHits := &servicepb.Hits{}
 				for j := 0; j < k; j++ { // k
 					choice, minDistance := 0, float32(math.MaxFloat32)
 					for q, loc := range locs { // query num, the number of ways to merge
@@ -429,9 +407,7 @@ func (qt *QueryTask) PostExecute() error {
 					}
 					choiceOffset := locs[choice]
 					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
-					if hits[choice][i].RowData != nil && len(hits[choice][i].RowData) > 0 {
-						reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
-					}
+					reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
 					reducedHits.Scores = append(reducedHits.Scores, hits[choice][i].Scores[choiceOffset])
 					locs[choice]++
 				}
