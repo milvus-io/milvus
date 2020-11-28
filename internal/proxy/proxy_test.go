@@ -37,13 +37,13 @@ var testNum = 10
 func startMaster(ctx context.Context) {
 	master.Init()
 	etcdAddr := master.Params.EtcdAddress
-	rootPath := master.Params.EtcdRootPath
+	metaRootPath := master.Params.MetaRootPath
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	if err != nil {
 		panic(err)
 	}
-	_, err = etcdCli.Delete(context.TODO(), rootPath, clientv3.WithPrefix())
+	_, err = etcdCli.Delete(context.TODO(), metaRootPath, clientv3.WithPrefix())
 	if err != nil {
 		panic(err)
 	}

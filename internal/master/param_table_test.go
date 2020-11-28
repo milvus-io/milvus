@@ -22,10 +22,16 @@ func TestParamTable_Port(t *testing.T) {
 	assert.Equal(t, port, 53100)
 }
 
-func TestParamTable_EtcdRootPath(t *testing.T) {
+func TestParamTable_MetaRootPath(t *testing.T) {
 	Params.Init()
-	addr := Params.EtcdRootPath
-	assert.Equal(t, addr, "by-dev")
+	path := Params.MetaRootPath
+	assert.Equal(t, path, "by-dev/meta")
+}
+
+func TestParamTable_KVRootPath(t *testing.T) {
+	Params.Init()
+	path := Params.KvRootPath
+	assert.Equal(t, path, "by-dev/kv")
 }
 
 func TestParamTable_TopicNum(t *testing.T) {

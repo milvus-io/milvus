@@ -33,7 +33,8 @@ func TestMaster_CollectionTask(t *testing.T) {
 		Port:    Params.Port,
 
 		EtcdAddress:   Params.EtcdAddress,
-		EtcdRootPath:  "/test/root",
+		MetaRootPath:  "/test/root/meta",
+		KvRootPath:    "/test/root/kv",
 		PulsarAddress: Params.PulsarAddress,
 
 		ProxyIDList:     []typeutil.UniqueID{1, 2},
@@ -54,7 +55,6 @@ func TestMaster_CollectionTask(t *testing.T) {
 		// msgChannel
 		ProxyTimeTickChannelNames:     []string{"proxy1", "proxy2"},
 		WriteNodeTimeTickChannelNames: []string{"write3", "write4"},
-		DDChannelNames:                []string{"dd1", "dd2"},
 		InsertChannelNames:            []string{"dm0", "dm1"},
 		K2SChannelNames:               []string{"k2s0", "k2s1"},
 		QueryNodeStatsChannelName:     "statistic",
