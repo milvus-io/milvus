@@ -232,7 +232,7 @@ SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-SqliteEngine::Filter(const MetaFilterContext &context, AttrsMapList& attrs) {
+SqliteEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
     std::string sql;
 
     STATUS_CHECK(MetaHelper::MetaFilterContextToSql(context, sql));

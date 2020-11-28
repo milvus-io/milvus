@@ -16,8 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "db/meta/MetaFieldHelper.h"
 #include "db/meta/condition/MetaBaseFilter.h"
-#include "db/meta/condition/MetaConditionHelper.h"
 #include "db/meta/condition/MetaDeterminer.h"
 #include "db/meta/condition/MetaFinder.h"
 #include "utils/StringHelpFunctions.h"
@@ -29,7 +29,6 @@ template <typename T>
 class ComparableFilter : public MetaBaseFilter, public Determiner<T> {
  public:
     explicit ComparableFilter(const std::string& field) : MetaBaseFilter(field), Determiner<T>() {
-
     }
 
     ~ComparableFilter() override = default;
@@ -130,7 +129,7 @@ class MetaRangeFilter : public ComparableFilter<T> {
  * Between Filter
  */
 template <typename R, typename F, typename T>
- class MetaBetweenFilter : public ComparableFilter<T> {
+class MetaBetweenFilter : public ComparableFilter<T> {
  public:
     MetaBetweenFilter(const T& lvalue, const T& rvalue, bool in = true)
         : ComparableFilter<T>(F::Name), res_name_(R::Name), lvalue_(lvalue), rvalue_(rvalue), in_(in) {

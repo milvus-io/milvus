@@ -22,7 +22,6 @@ namespace milvus::engine::meta {
 class MetaBaseFilter : public MetaBaseCondition, public Finder {
  public:
     explicit MetaBaseFilter(const std::string& field) : field_(field) {
-
     }
 
     ~MetaBaseFilter() override = default;

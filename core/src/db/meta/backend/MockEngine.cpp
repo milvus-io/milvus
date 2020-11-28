@@ -109,7 +109,7 @@ MockEngine::QueryNoLock(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-MockEngine::FilterNoLock(const MetaFilterContext &context, AttrsMapList& attrs) {
+MockEngine::FilterNoLock(const MetaFilterContext& context, AttrsMapList& attrs) {
     if (resources_.find(context.table_) == resources_.end()) {
         return Status(0, "Collection " + context.table_ + " is empty.");
     }
@@ -193,7 +193,7 @@ MockEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
 }
 
 Status
-MockEngine::Filter(const MetaFilterContext &context, AttrsMapList& attrs) {
+MockEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(mutex_);
     return FilterNoLock(context, attrs);
 }
