@@ -97,7 +97,7 @@
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>fastjson</artifactId>
-            <version>1.2.74</version>
+            <version>1.2.75</version>
         </dependency>
 
 
