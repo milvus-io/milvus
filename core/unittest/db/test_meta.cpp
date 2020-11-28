@@ -339,4 +339,6 @@ TEST_F(MetaTest, FilterTest) {
     std::vector<Collection::Ptr> collections;
     status = session->Query<Collection>(relation, collections);
     ASSERT_TRUE(status.ok()) << status.ToString();
+    ASSERT_EQ(collections.size(), 1);
+    ASSERT_EQ(collections[0]->GetID(), result_id);
 }
