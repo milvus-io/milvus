@@ -85,6 +85,11 @@ class SegmentNaive : public SegmentBase {
     BuildIndex(IndexMetaPtr index_meta) override;
 
     Status
+    FillTargetEntry(const query::Plan* Plan, QueryResult& results) override {
+        PanicInfo("unimplemented");
+    }
+
+    Status
     DropRawData(std::string_view field_name) override {
         // TODO: NO-OP
         return Status::OK();

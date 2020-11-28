@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strconv"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -122,8 +120,8 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 	qt := &QueryTask{
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: internalpb.SearchRequest{
-			MsgType: internalpb.MsgType_kSearch,
-			Query:   &commonpb.Blob{},
+			ProxyID:         Params.ProxyID(),
+			ResultChannelID: Params.ProxyID(),
 		},
 		queryMsgStream: p.queryMsgStream,
 		resultBuf:      make(chan []*internalpb.SearchResult),
@@ -131,11 +129,6 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 	}
 	var cancel func()
 	qt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
-	// Hack with test, shit here but no other ways
-	reqID, _ := strconv.Atoi(req.CollectionName[len(req.CollectionName)-1:])
-	qt.ReqID = int64(reqID)
-	queryBytes, _ := proto.Marshal(req)
-	qt.SearchRequest.Query.Value = queryBytes
 	log.Printf("grpc address of query task: %p", qt)
 	defer cancel()
 
