@@ -4,9 +4,10 @@ import "C"
 import (
 	"context"
 	"errors"
-	"github.com/golang/protobuf/proto"
 	"log"
 	"sync"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -145,7 +146,7 @@ func (ss *searchService) receiveSearchMsg() {
 					log.Println("publish FailedSearchResult failed, error message: ", err)
 				}
 			}
-			log.Println("ReceiveSearchMsg, do search done, num of searchMsg = ", len(searchMsg))
+			log.Println("Do search done, num of searchMsg = ", len(searchMsg))
 		}
 	}
 }
@@ -172,16 +173,17 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 			}
 
 			for {
-				msgBufferLength := len(ss.msgBuffer)
-				if msgBufferLength <= 0 {
-					break
-				}
 				msg := <-ss.msgBuffer
 				if msg.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, msg)
 					continue
 				}
 				ss.unsolvedMsg = append(ss.unsolvedMsg, msg)
+
+				msgBufferLength := len(ss.msgBuffer)
+				if msgBufferLength <= 0 {
+					break
+				}
 			}
 
 			if len(searchMsg) <= 0 {
@@ -197,7 +199,7 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 					log.Println("publish FailedSearchResult failed, error message: ", err)
 				}
 			}
-			log.Println("doUnsolvedMsgSearch, do search done, num of searchMsg = ", len(searchMsg))
+			log.Println("Do search done, num of searchMsg = ", len(searchMsg))
 		}
 	}
 }
@@ -239,24 +241,12 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			return err
 		}
 		for _, segment := range partition.segments {
-			//fmt.Println("dsl = ", dsl)
-
 			searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
-
 			if err != nil {
 				return err
 			}
 			searchResults = append(searchResults, searchResult)
 		}
-	}
-
-	if len(searchResults) <= 0 {
-		log.Println("search Failed, invalid partitionTag")
-		err = ss.publishFailedSearchResult(msg)
-		if err != nil {
-			log.Println("publish FailedSearchResult failed, error message: ", err)
-		}
-		return err
 	}
 
 	reducedSearchResult := reduceSearchResults(searchResults, int64(len(searchResults)))

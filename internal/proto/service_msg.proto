@@ -135,6 +135,14 @@ message PartitionDescription {
     repeated common.KeyValuePair statistics = 3;
 }
 
+/**
+ * @brief Response of GetSysConfig
+ */
+message SysConfigResponse {
+    common.Status status = 1;
+    repeated string keys = 2;
+    repeated string values = 3;
+}
 
 /**
  * @brief Entities hit by query

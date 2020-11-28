@@ -38,12 +38,7 @@ func (pt *ParamTable) Init() {
 
 	proxyIDStr := os.Getenv("PROXY_ID")
 	if proxyIDStr == "" {
-		proxyIDList := pt.ProxyIDList()
-		if len(proxyIDList) <= 0 {
-			proxyIDStr = "0"
-		} else {
-			proxyIDStr = strconv.Itoa(int(proxyIDList[0]))
-		}
+		proxyIDStr = "2"
 	}
 	pt.Save("_proxyID", proxyIDStr)
 }
