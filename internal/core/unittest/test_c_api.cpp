@@ -14,7 +14,6 @@
 #include <random>
 #include <gtest/gtest.h>
 
-#include "segcore/collection_c.h"
 #include "pb/service_msg.pb.h"
 #include "segcore/reduce_c.h"
 
@@ -151,8 +150,15 @@ TEST(CApiTest, SearchTest) {
     }
     auto blob = raw_group.SerializeAsString();
 
-    auto plan = CreatePlan(collection, dsl_string);
-    auto placeholderGroup = ParsePlaceholderGroup(plan, blob.data(), blob.length());
+    void* plan = nullptr;
+
+    auto status = CreatePlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    assert(status.error_code == Success);
+
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     timestamps.clear();
@@ -611,8 +617,15 @@ TEST(CApiTest, Reduce) {
     }
     auto blob = raw_group.SerializeAsString();
 
-    auto plan = CreatePlan(collection, dsl_string);
-    auto placeholderGroup = ParsePlaceholderGroup(plan, blob.data(), blob.length());
+    void* plan = nullptr;
+
+    auto status = CreatePlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    assert(status.error_code == Success);
+
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     timestamps.clear();

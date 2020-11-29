@@ -2,14 +2,12 @@
 
 set -ex
 
-export CCACHE_COMPRESS=1
-export CCACHE_COMPRESSLEVEL=5
-export CCACHE_COMPILERCHECK=content
-export PATH=/usr/lib/ccache/:$PATH
-export CCACHE_BASEDIR=${WORKSPACE:=""}
+export CCACHE_COMPRESS=${CCACHE_COMPRESS:="1"}
+export CCACHE_COMPRESSLEVEL=${CCACHE_COMPRESSLEVEL:="5"}
+export CCACHE_COMPILERCHECK=${CCACHE_COMPILERCHECK:="content"}
+export CCACHE_MAXSIZE=${CCACHE_MAXSIZE:="2G"}
 export CCACHE_DIR=${CCACHE_DIR:="${HOME}/.ccache"}
-export CCACHE_COMPRESS_PACKAGE_FILE=${CCACHE_COMPRESS_PACKAGE_FILE:="ccache-${OS_NAME}-${BUILD_ENV_IMAGE_ID}.tar.gz"}
-export CUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_DOWNLOAD_PATH:="${HOME}/3rdparty_download"}
-export THIRDPARTY_COMPRESS_PACKAGE_FILE=${THIRDPARTY_COMPRESS_PACKAGE_FILE:="thirdparty-download.tar.gz"}
+export http_proxy="http://proxy.zilliz.tech:1088"
+export https_proxy="http://proxy.zilliz.tech:1088"
 
 set +ex

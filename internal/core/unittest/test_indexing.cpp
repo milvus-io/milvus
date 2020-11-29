@@ -32,6 +32,8 @@
 #include <chrono>
 #include "test_utils/Timer.h"
 #include "segcore/Reduce.h"
+#include "test_utils/DataGen.h"
+#include "query/BruteForceSearch.h"
 
 using std::cin;
 using std::cout;
@@ -55,7 +57,7 @@ generate_data(int N) {
         uids.push_back(10 * N + i);
         timestamps.push_back(0);
         // append vec
-        float vec[DIM];
+        vector<float> vec(DIM);
         for (auto& x : vec) {
             x = distribution(er);
         }
@@ -81,6 +83,7 @@ TEST(Indexing, SmartBruteForce) {
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     auto total_count = DIM * TOPK;
     auto raw = (const float*)raw_data.data();
+    AssertInfo(raw, "wtf");
 
     constexpr int64_t queries = 3;
     auto heap = faiss::float_maxheap_array_t{};
@@ -230,4 +233,107 @@ TEST(Indexing, IVFFlatNM) {
     for (int i = 0; i < std::min(num_query * K, 100); ++i) {
         cout << ids[i] << "->" << dis[i] << endl;
     }
+}
+
+TEST(Indexing, DISABLED_BinaryBruteForce) {
+    int64_t N = 100000;
+    int64_t num_queries = 10;
+    int64_t topk = 5;
+    int64_t dim = 64;
+    auto result_count = topk * num_queries;
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("vecbin", DataType::VECTOR_BINARY, dim);
+    schema->AddField("age", DataType::INT64);
+    auto dataset = DataGen(schema, N, 10);
+    vector<float> distances(result_count);
+    vector<int64_t> ids(result_count);
+    auto bin_vec = dataset.get_col<uint8_t>(0);
+    auto line_sizeof = schema->operator[](0).get_sizeof();
+    auto query_data = 1024 * line_sizeof + bin_vec.data();
+    query::BinarySearchBruteForce(faiss::MetricType::METRIC_Jaccard, line_sizeof, bin_vec.data(), N, topk, num_queries,
+                                  query_data, distances.data(), ids.data());
+    QueryResult qr;
+    qr.num_queries_ = num_queries;
+    qr.topK_ = topk;
+    qr.internal_seg_offsets_ = ids;
+    qr.result_distances_ = distances;
+
+    auto json = QueryResultToJson(qr);
+    auto ref = Json::parse(R"(
+[
+  [
+    [
+      "1024->0.000000",
+      "86966->0.395349",
+      "24843->0.404762",
+      "13806->0.416667",
+      "44313->0.421053"
+    ],
+    [
+      "1025->0.000000",
+      "14226->0.348837",
+      "1488->0.365854",
+      "47337->0.377778",
+      "20913->0.377778"
+    ],
+    [
+      "1026->0.000000",
+      "81882->0.386364",
+      "9215->0.409091",
+      "95024->0.409091",
+      "54987->0.414634"
+    ],
+    [
+      "1027->0.000000",
+      "68981->0.394737",
+      "75528->0.404762",
+      "68794->0.405405",
+      "21975->0.425000"
+    ],
+    [
+      "1028->0.000000",
+      "90290->0.375000",
+      "34309->0.394737",
+      "58559->0.400000",
+      "33865->0.400000"
+    ],
+    [
+      "1029->0.000000",
+      "62722->0.388889",
+      "89070->0.394737",
+      "18528->0.414634",
+      "94971->0.421053"
+    ],
+    [
+      "1030->0.000000",
+      "67402->0.333333",
+      "3988->0.347826",
+      "86376->0.354167",
+      "84381->0.361702"
+    ],
+    [
+      "1031->0.000000",
+      "81569->0.325581",
+      "12715->0.347826",
+      "40332->0.363636",
+      "21037->0.372093"
+    ],
+    [
+      "1032->0.000000",
+      "60536->0.428571",
+      "93293->0.432432",
+      "70969->0.435897",
+      "64048->0.450000"
+    ],
+    [
+      "1033->0.000000",
+      "99022->0.394737",
+      "11763->0.405405",
+      "50073->0.428571",
+      "97118->0.428571"
+    ]
+  ]
+]
+)");
+    ASSERT_EQ(json, ref);
 }

@@ -129,8 +129,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	for i := 0; i < msgLength; i++ {
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
-				HashValues: []int32{
-					int32(i), int32(i),
+				HashValues: []uint32{
+					uint32(i), uint32(i),
 				},
 			},
 			InsertRequest: internalPb.InsertRequest{
@@ -163,7 +163,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{0},
+		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,

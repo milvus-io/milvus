@@ -93,8 +93,8 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
         }
         segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
     }
-
-    auto vec_ptr = record.get_vec_entity<float>(vecfield_offset);
+    using segcore::FloatVector;
+    auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
     // step 4: brute force search where small indexing is unavailable
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);

@@ -10,7 +10,9 @@ set(MILVUS_TEST_FILES
         test_indexing.cpp
         test_query.cpp
         test_expr.cpp
-        test_bitmap.cpp)
+        test_bitmap.cpp 
+        test_binary.cpp
+        )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )

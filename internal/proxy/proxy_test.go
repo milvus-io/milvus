@@ -231,7 +231,7 @@ func TestProxy_Insert(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionTag:   "haha",
 			RowData:        make([]*commonpb.Blob, 0),
-			HashKeys:       make([]int32, 0),
+			HashKeys:       make([]uint32, 0),
 		}
 
 		wg.Add(1)
@@ -281,7 +281,7 @@ func TestProxy_Search(t *testing.T) {
 				for j := 0; j < 4; j++ {
 					searchResultMsg := &msgstream.SearchResultMsg{
 						BaseMsg: msgstream.BaseMsg{
-							HashValues: []int32{1},
+							HashValues: []uint32{1},
 						},
 						SearchResult: internalpb.SearchResult{
 							MsgType: internalpb.MsgType_kSearchResult,

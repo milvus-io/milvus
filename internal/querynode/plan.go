@@ -10,6 +10,8 @@ package querynode
 */
 import "C"
 import (
+	"errors"
+	"strconv"
 	"unsafe"
 )
 
@@ -17,11 +19,21 @@ type Plan struct {
 	cPlan C.CPlan
 }
 
-func createPlan(col Collection, dsl string) *Plan {
+func createPlan(col Collection, dsl string) (*Plan, error) {
 	cDsl := C.CString(dsl)
-	cPlan := C.CreatePlan(col.collectionPtr, cDsl)
+	var cPlan C.CPlan
+	status := C.CreatePlan(col.collectionPtr, cDsl, &cPlan)
+
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
 	var newPlan = &Plan{cPlan: cPlan}
-	return newPlan
+	return newPlan, nil
 }
 
 func (plan *Plan) getTopK() int64 {
@@ -37,12 +49,22 @@ type PlaceholderGroup struct {
 	cPlaceholderGroup C.CPlaceholderGroup
 }
 
-func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) *PlaceholderGroup {
+func parserPlaceholderGroup(plan *Plan, placeHolderBlob []byte) (*PlaceholderGroup, error) {
 	var blobPtr = unsafe.Pointer(&placeHolderBlob[0])
 	blobSize := C.long(len(placeHolderBlob))
-	cPlaceholderGroup := C.ParsePlaceholderGroup(plan.cPlan, blobPtr, blobSize)
+	var cPlaceholderGroup C.CPlaceholderGroup
+	status := C.ParsePlaceholderGroup(plan.cPlan, blobPtr, blobSize, &cPlaceholderGroup)
+
+	errorCode := status.error_code
+
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
 	var newPlaceholderGroup = &PlaceholderGroup{cPlaceholderGroup: cPlaceholderGroup}
-	return newPlaceholderGroup
+	return newPlaceholderGroup, nil
 }
 
 func (pg *PlaceholderGroup) getNumOfQuery() int64 {
