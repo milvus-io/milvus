@@ -132,7 +132,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             if (rows > 2048)
                 hnsw_stats->nq_fd[12] ++;
             else
-                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))];
+                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))] ++;
         }
         if (STATISTICS_ENABLE >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;

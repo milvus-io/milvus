@@ -383,22 +383,22 @@ struct RHNSWStatistics {
         size_t len = cnts.size();
         auto gini_len = 100;
         std::vector<int> stat_len(gini_len, 0);
-        for (auto i = 1; i < gini_len; ++ i) {
-            stat_len[i] = (int)(((double)i / 100.0) * len);
+        for (auto i = 0; i < gini_len; ++ i) {
+            stat_len[i] = (int)(((double)(i + 1) / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
         access_lorenz_curve.resize(gini_len);
         access_lorenz_curve[gini_len] = 1.0;
         int j = 0;
-        for (auto i = 0; i < len && j < gini_len; ++ i) {
-            if (i > stat_len[j]) {
+        for (auto i = 1; i <= len && j < gini_len; ++ i) {
+            tmp_cnt += cnts[i];
+            if (i >= stat_len[j]) {
                 access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
                 tmp_cnt = 0;
                 j ++;
             }
             if (j >= gini_len)
                 break;
-            tmp_cnt += cnts[i];
         }
     }
 
