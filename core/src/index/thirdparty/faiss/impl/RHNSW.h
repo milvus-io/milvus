@@ -387,13 +387,12 @@ struct RHNSWStatistics {
             stat_len[i] = (int)(((double)i / 100.0) * len);
         }
         int64_t tmp_cnt = 0;
-        access_lorenz_curve.resize(gini_len + 1);
-        access_lorenz_curve[0] = 0.0;
+        access_lorenz_curve.resize(gini_len);
         access_lorenz_curve[gini_len] = 1.0;
-        int j = 1;
+        int j = 0;
         for (auto i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / access_total + access_lorenz_curve[j - 1];
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
                 tmp_cnt = 0;
                 j ++;
             }
