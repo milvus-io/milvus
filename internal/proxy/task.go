@@ -291,7 +291,7 @@ func (dct *DropCollectionTask) Execute() error {
 }
 
 func (dct *DropCollectionTask) PostExecute() error {
-	return nil
+	return globalMetaCache.Remove(dct.CollectionName.CollectionName)
 }
 
 type QueryTask struct {
@@ -329,6 +329,18 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 }
 
 func (qt *QueryTask) PreExecute() error {
+	collectionName := qt.query.CollectionName
+	if !globalMetaCache.Hit(collectionName) {
+		err := globalMetaCache.Update(collectionName)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := globalMetaCache.Get(collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+
 	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
 		return err
 	}
@@ -382,22 +394,37 @@ func (qt *QueryTask) PostExecute() error {
 			log.Print("wait to finish failed, timeout!")
 			return errors.New("wait to finish failed, timeout")
 		case searchResults := <-qt.resultBuf:
-			rlen := len(searchResults) // query num
-			if rlen <= 0 {
-				qt.result = &servicepb.QueryResult{}
-				return nil
+			filterSearchResult := make([]*internalpb.SearchResult, 0)
+			var filterReason string
+			for _, partialSearchResult := range searchResults {
+				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_SUCCESS {
+					filterSearchResult = append(filterSearchResult, partialSearchResult)
+				} else {
+					filterReason += partialSearchResult.Status.Reason + "\n"
+				}
 			}
 
-			n := len(searchResults[0].Hits) // n
+			rlen := len(filterSearchResult) // query node num
+			if rlen <= 0 {
+				qt.result = &servicepb.QueryResult{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+						Reason:    filterReason,
+					},
+				}
+				return errors.New(filterReason)
+			}
+
+			n := len(filterSearchResult[0].Hits) // n
 			if n <= 0 {
 				qt.result = &servicepb.QueryResult{}
 				return nil
 			}
 
 			hits := make([][]*servicepb.Hits, rlen)
-			for i, searchResult := range searchResults {
+			for i, partialSearchResult := range filterSearchResult {
 				hits[i] = make([]*servicepb.Hits, n)
-				for j, bs := range searchResult.Hits {
+				for j, bs := range partialSearchResult.Hits {
 					hits[i][j] = &servicepb.Hits{}
 					err := proto.Unmarshal(bs, hits[i][j])
 					if err != nil {
@@ -433,6 +460,17 @@ func (qt *QueryTask) PostExecute() error {
 						}
 					}
 					choiceOffset := locs[choice]
+					// check if distance is valid, `invalid` here means very very big,
+					// in this process, distance here is the smallest, so the rest of distance are all invalid
+					if hits[choice][i].Scores[choiceOffset] >= float32(math.MaxFloat32) {
+						qt.result = &servicepb.QueryResult{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+								Reason:    "topk in dsl greater than the row nums of collection",
+							},
+						}
+						return nil
+					}
 					reducedHits.IDs = append(reducedHits.IDs, hits[choice][i].IDs[choiceOffset])
 					if hits[choice][i].RowData != nil && len(hits[choice][i].RowData) > 0 {
 						reducedHits.RowData = append(reducedHits.RowData, hits[choice][i].RowData[choiceOffset])
