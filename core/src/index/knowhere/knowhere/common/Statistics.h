@@ -34,8 +34,8 @@ public:
     double Qps() { return nq_cnt ? total_query_time / nq_cnt : 0.0; }
     int64_t BatchCount() { return batch_cnt; }
     int64_t QueryCount() { return nq_cnt; }
-    double AvgValidFilter() { return filter_percentage_sum; }
-    const std::vector<int>& FilterCDF() { return filter_cdf; }
+    const std::vector<int>& FilterHistograms() { return filter_cdf; }
+    const std::vector<int>& NqFD() { return nq_fd; }
 
     std::string &index_type;
     double filter_percentage_sum; // the sum of percentage of 1 in bitset before search
@@ -43,6 +43,7 @@ public:
     int64_t batch_cnt;
     double total_query_time;
     std::vector<int> filter_cdf;
+    std::vector<int> nq_fd;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
@@ -81,14 +82,13 @@ public:
         auto gini_len = 100;
 //        std::vector<int> stat_len(gini_len, 0);
         int64_t tmp_cnt = 0;
-        access_lorenz_curve.resize(gini_len + 1);
-        access_lorenz_curve[0] = 0.0;
-        access_lorenz_curve[gini_len] = 1.0;
-        int j = 1;
+        access_lorenz_curve.resize(gini_len);
+        access_lorenz_curve[gini_len - 1] = 1.0;
+        int j = 0;
         size_t i = 0;
         for (i = 0; i < len && j < gini_len; ++ i) {
             if (i > stat_len[j]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / access_total + access_lorenz_curve[j - 1];
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
                 tmp_cnt = 0;
                 j ++;
             }
@@ -151,7 +151,10 @@ public:
     std::vector<double>
     AccessCDF() {
         std::vector<double> access_lorenz_curve;
-        std::vector<int> split_idx(100, 0);
+        std::vector<int> split_idx(20, 0);
+        for (auto i = 0; i < 20; ++ i) {
+            split_idx[i] = (i + 1 ) * 5;
+        }
         GenSplitIdx(split_idx, access_cnt.size());
         CaculateStatistics(access_lorenz_curve, split_idx);
         return access_lorenz_curve;
@@ -240,7 +243,11 @@ public:
 
     std::vector<double>
     AccessCDF() {
-        return access_lorenz_curve;
+        std::vector<double> ret(20, 0.0);
+        for (auto i = 0; i < 20; ++ i) {
+            ret[i] = access_lorenz_curve[i * 5 + 4];
+        }
+        return ret;
     }
 
     std::vector<double>
