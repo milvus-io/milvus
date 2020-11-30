@@ -24,5 +24,6 @@ target_link_libraries(all_tests
         knowhere
         log
         pthread
+        milvus_utils
         )
 install (TARGETS all_tests DESTINATION unittest)

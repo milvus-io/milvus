@@ -107,6 +107,83 @@ TEST(Expr, Range) {
     std::cout << out.dump(4);
 }
 
+TEST(Expr, InvalidRange) {
+    SUCCEED();
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::string dsl_string = R"(
+{
+    "bool": {
+        "must": [
+            {
+                "range": {
+                    "age": {
+                        "GT": 1,
+                        "LT": "100"
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::INT32);
+    ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
+}
+
+TEST(Expr, InvalidDSL) {
+    SUCCEED();
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::string dsl_string = R"(
+{
+    "float": {
+        "must": [
+            {
+                "range": {
+                    "age": {
+                        "GT": 1,
+                        "LT": 100
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("age", DataType::INT32);
+    ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
+}
+
 TEST(Expr, ShowExecutor) {
     using namespace milvus::query;
     using namespace milvus::segcore;
