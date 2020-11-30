@@ -297,7 +297,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			Hits:            hits,
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg:      msgstream.BaseMsg{HashValues: []int32{0}},
+			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
 			SearchResult: results,
 		}
 		err = ss.publishSearchResult(searchResultMsg)
@@ -342,7 +342,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
 	}
 
 	tsMsg := &msgstream.SearchResultMsg{
-		BaseMsg:      msgstream.BaseMsg{HashValues: []int32{0}},
+		BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{0}},
 		SearchResult: results,
 	}
 	msgPack.Msgs = append(msgPack.Msgs, tsMsg)

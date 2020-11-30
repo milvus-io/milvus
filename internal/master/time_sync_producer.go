@@ -60,7 +60,7 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 			baseMsg := ms.BaseMsg{
 				BeginTimestamp: timetick,
 				EndTimestamp:   timetick,
-				HashValues:     []int32{0},
+				HashValues:     []uint32{0},
 			}
 			timeTickResult := internalPb.TimeTickMsg{
 				MsgType:   internalPb.MsgType_kTimeTick,

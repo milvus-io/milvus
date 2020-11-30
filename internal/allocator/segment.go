@@ -175,7 +175,7 @@ func (sa *SegIDAssigner) syncSegments() {
 	resp, err := sa.masterClient.AssignSegmentID(ctx, req)
 
 	if resp.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
-		log.Panic("GRPC AssignSegmentID Failed")
+		log.Println("GRPC AssignSegmentID Failed", resp, err)
 		return
 	}
 

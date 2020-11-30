@@ -16,7 +16,7 @@ import (
 
 func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) ms.TsMsg {
 	baseMsg := ms.BaseMsg{
-		HashValues: []int32{int32(peerID)},
+		HashValues: []uint32{uint32(peerID)},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,

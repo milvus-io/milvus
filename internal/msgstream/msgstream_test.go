@@ -36,11 +36,11 @@ func repackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	return result, nil
 }
 
-func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
+func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{hashValue},
+		HashValues:     []uint32{hashValue},
 	}
 	switch msgType {
 	case internalPb.MsgType_kInsert:
@@ -129,11 +129,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue int32) TsMsg {
 	return nil
 }
 
-func getTimeTickMsg(reqID UniqueID, hashValue int32, time uint64) TsMsg {
+func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{hashValue},
+		HashValues:     []uint32{hashValue},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
 		MsgType:   internalPb.MsgType_kTimeTick,
@@ -369,7 +369,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{1, 3},
+		HashValues:     []uint32{1, 3},
 	}
 
 	insertRequest := internalPb.InsertRequest{
@@ -422,7 +422,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []int32{1, 3},
+		HashValues:     []uint32{1, 3},
 	}
 
 	deleteRequest := internalPb.DeleteRequest{

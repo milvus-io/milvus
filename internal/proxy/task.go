@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -102,12 +104,17 @@ func (it *InsertTask) Execute() error {
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	if autoID || true {
+		if it.HashValues == nil || len(it.HashValues) == 0 {
+			it.HashValues = make([]uint32, 0)
+		}
 		rowNums := len(it.BaseInsertTask.RowData)
 		rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
 		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 		for i := rowIDBegin; i < rowIDEnd; i++ {
 			offset := i - rowIDBegin
 			it.BaseInsertTask.RowIDs[offset] = i
+			hashValue, _ := typeutil.Hash32Int64(i)
+			it.HashValues = append(it.HashValues, hashValue)
 		}
 	}
 
@@ -180,6 +187,14 @@ func (cct *CreateCollectionTask) PreExecute() error {
 		return err
 	}
 
+	if err := ValidateDuplicatedFieldName(cct.schema.Fields); err != nil {
+		return err
+	}
+
+	if err := ValidatePrimaryKey(cct.schema); err != nil {
+		return err
+	}
+
 	// validate field name
 	for _, field := range cct.schema.Fields {
 		if err := ValidateFieldName(field.Name); err != nil {
@@ -211,6 +226,9 @@ func (cct *CreateCollectionTask) PreExecute() error {
 					return err
 				}
 			}
+		}
+		if err := ValidateVectorFieldMetricType(field); err != nil {
+			return err
 		}
 	}
 
@@ -368,7 +386,7 @@ func (qt *QueryTask) Execute() error {
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: qt.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
-			HashValues:     []int32{int32(Params.ProxyID())},
+			HashValues:     []uint32{uint32(Params.ProxyID())},
 			BeginTimestamp: qt.Timestamp,
 			EndTimestamp:   qt.Timestamp,
 		},
@@ -395,24 +413,16 @@ func (qt *QueryTask) PostExecute() error {
 			return errors.New("wait to finish failed, timeout")
 		case searchResults := <-qt.resultBuf:
 			filterSearchResult := make([]*internalpb.SearchResult, 0)
-			var filterReason string
 			for _, partialSearchResult := range searchResults {
 				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_SUCCESS {
 					filterSearchResult = append(filterSearchResult, partialSearchResult)
-				} else {
-					filterReason += partialSearchResult.Status.Reason + "\n"
 				}
 			}
 
-			rlen := len(filterSearchResult) // query node num
+			rlen := len(filterSearchResult) // query num
 			if rlen <= 0 {
-				qt.result = &servicepb.QueryResult{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-						Reason:    filterReason,
-					},
-				}
-				return errors.New(filterReason)
+				qt.result = &servicepb.QueryResult{}
+				return nil
 			}
 
 			n := len(filterSearchResult[0].Hits) // n

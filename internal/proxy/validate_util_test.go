@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestValidateCollectionName(t *testing.T) {
@@ -94,4 +96,85 @@ func TestValidateDimension(t *testing.T) {
 	assert.NotNil(t, ValidateDimension(-1, false))
 	assert.NotNil(t, ValidateDimension(Params.MaxDimension()+1, false))
 	assert.NotNil(t, ValidateDimension(9, true))
+}
+
+func TestValidateVectorFieldMetricType(t *testing.T) {
+	field1 := &schemapb.FieldSchema{
+		Name:         "",
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_INT64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+	assert.Nil(t, ValidateVectorFieldMetricType(field1))
+	field1.DataType = schemapb.DataType_VECTOR_FLOAT
+	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
+	field1.IndexParams = []*commonpb.KeyValuePair{
+		&commonpb.KeyValuePair{
+			Key:   "abcdefg",
+			Value: "",
+		},
+	}
+	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
+	field1.IndexParams = append(field1.IndexParams, &commonpb.KeyValuePair{
+		Key:   "metric_type",
+		Value: "",
+	})
+	assert.Nil(t, ValidateVectorFieldMetricType(field1))
+}
+
+func TestValidateDuplicatedFieldName(t *testing.T) {
+	fields := []*schemapb.FieldSchema{
+		{Name: "abc"},
+		{Name: "def"},
+	}
+	assert.Nil(t, ValidateDuplicatedFieldName(fields))
+	fields = append(fields, &schemapb.FieldSchema{
+		Name: "abc",
+	})
+	assert.NotNil(t, ValidateDuplicatedFieldName(fields))
+}
+
+func TestValidatePrimaryKey(t *testing.T) {
+	coll := schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      true,
+		Fields:      nil,
+	}
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:         "f1",
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     0,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	})
+	assert.Nil(t, ValidatePrimaryKey(&coll))
+	pf := &schemapb.FieldSchema{
+		Name:         "f2",
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     0,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+	coll.Fields = append(coll.Fields, pf)
+	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	coll.AutoID = false
+	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	pf.DataType = schemapb.DataType_BOOL
+	assert.NotNil(t, ValidatePrimaryKey(&coll))
+	pf.DataType = schemapb.DataType_INT64
+	assert.Nil(t, ValidatePrimaryKey(&coll))
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		Name:         "",
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     0,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	})
+	assert.NotNil(t, ValidatePrimaryKey(&coll))
 }
