@@ -150,12 +150,12 @@ TEST(CApiTest, SearchTest) {
     }
     auto blob = raw_group.SerializeAsString();
 
-    void *plan = nullptr;
+    void* plan = nullptr;
 
     auto status = CreatePlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
-    void *placeholderGroup = nullptr;
+    void* placeholderGroup = nullptr;
     status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
     assert(status.error_code == Success);
 
@@ -617,12 +617,12 @@ TEST(CApiTest, Reduce) {
     }
     auto blob = raw_group.SerializeAsString();
 
-    void *plan = nullptr;
+    void* plan = nullptr;
 
     auto status = CreatePlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
-    void *placeholderGroup = nullptr;
+    void* placeholderGroup = nullptr;
     status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
     assert(status.error_code == Success);
 
