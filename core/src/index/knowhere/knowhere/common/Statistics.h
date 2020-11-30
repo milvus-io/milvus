@@ -81,7 +81,7 @@ public:
     }
 
     void GenSplitIdx(std::vector<int> &split_idx, size_t len) {
-        for (auto i = 1; i < split_idx.size(); ++ i) {
+        for (auto i = 0; i < split_idx.size(); ++ i) {
             split_idx[i] = (int)(((double)split_idx[i] / 100.0) * len);
         }
     }
@@ -103,15 +103,15 @@ public:
         access_lorenz_curve[gini_len - 1] = 1.0;
         int j = 0;
         size_t i = 0;
-        for (i = 0; i < len && j < gini_len; ++ i) {
-            if (i > stat_len[j]) {
+        for (i = 1; i <= len && j < gini_len; ++ i) {
+            tmp_cnt += cnts[i];
+            if (i >= stat_len[j]) {
                 access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
                 tmp_cnt = 0;
                 j ++;
             }
             if (j >= gini_len)
                 break;
-            tmp_cnt += cnts[i];
         }
     };
 
@@ -149,7 +149,7 @@ public:
             std::vector<double> access_lorenz_curve;
             std::vector<int> split_idx(100); // default log 101 idx
             for (auto i = 0; i < 100; ++ i)
-                split_idx[i] = i;
+                split_idx[i] = i + 1;
             GenSplitIdx(split_idx, access_cnt.size());
             CaculateStatistics(access_lorenz_curve, split_idx);
             ret << "Max level: " << max_level << std::endl;
@@ -240,7 +240,6 @@ public:
             for (auto i = 2; i < 12; ++ i)
                 ret << "[" << ((1<<(i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
             ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
-            ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total ef: " << ef_sum << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
