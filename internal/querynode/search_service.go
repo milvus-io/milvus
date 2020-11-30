@@ -225,9 +225,15 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 	collectionID := collection.ID()
 	dsl := query.Dsl
-	plan := createPlan(*collection, dsl)
+	plan, err := createPlan(*collection, dsl)
+	if err != nil {
+		return err
+	}
 	placeHolderGroupBlob := query.PlaceholderGroup
-	placeholderGroup := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+	placeholderGroup, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+	if err != nil {
+		return err
+	}
 	placeholderGroups := make([]*PlaceholderGroup, 0)
 	placeholderGroups = append(placeholderGroups, placeholderGroup)
 

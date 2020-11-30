@@ -71,7 +71,7 @@ Insert(CSegmentBase c_segment,
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::runtime_error& e) {
+    } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedException;
         status.error_msg = strdup(e.what());
@@ -103,7 +103,7 @@ Delete(
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::runtime_error& e) {
+    } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedException;
         status.error_msg = strdup(e.what());
@@ -141,7 +141,7 @@ Search(CSegmentBase c_segment,
         auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, *query_result);
         status.error_code = Success;
         status.error_msg = "";
-    } catch (std::runtime_error& e) {
+    } catch (std::exception& e) {
         status.error_code = UnexpectedException;
         status.error_msg = strdup(e.what());
     }
