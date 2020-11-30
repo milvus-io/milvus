@@ -61,9 +61,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
         if (STATISTICS_ENABLE) {
             auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
-            if (STATISTICS_ENABLE >= 1) {
-            }
-            if (STATISTICS_ENABLE >= 2) {
+            if (STATISTICS_ENABLE >= 3) {
                 hnsw_stats->max_level = real_idx->hnsw.max_level;
                 hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
                 for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
@@ -98,9 +96,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     if (STATISTICS_ENABLE) {
         auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-        if (STATISTICS_ENABLE >= 1) {
-        }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_ENABLE >= 3) {
             hnsw_stats->max_level = real_idx->hnsw.max_level;
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
             for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
@@ -133,6 +129,10 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->nq_cnt += rows;
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
+            if (rows > 2048)
+                hnsw_stats->nq_fd[12] ++;
+            else
+                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))];
         }
         if (STATISTICS_ENABLE >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
@@ -161,7 +161,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         if (STATISTICS_ENABLE >= 1) {
             hnsw_stats->total_query_time += std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_ENABLE >= 3) {
             real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);
         }
     }

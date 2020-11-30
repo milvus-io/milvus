@@ -19,16 +19,33 @@
 namespace milvus {
 namespace knowhere {
 
+
+inline uint64_t upper_bound_of_pow2(uint64_t x) {
+    -- x;
+    x |= (x >> 1);
+    x |= (x >> 2);
+    x |= (x >> 4);
+    x |= (x >> 8);
+    x |= (x >> 16);
+    x |= (x >> 32);
+    return x + 1;
+}
+
+inline int len_of_pow2(uint64_t x) {
+    return __builtin_popcountl(x - 1);
+}
+
 class Statistics {
 public:
     Statistics(std::string &idx_t):index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0),
-                                   total_query_time(0.0) { filter_cdf.resize(21, 0); }
+                                   total_query_time(0.0) { filter_cdf.resize(21, 0); nq_fd.resize(13, 0); }
     virtual ~Statistics() = default;
     virtual std::string ToString(const std::string &index_name) = 0;
     virtual void Clear() {
         filter_percentage_sum = total_query_time = 0.0;
         nq_cnt = batch_cnt = 0;
         filter_cdf.resize(21, 0);
+        nq_fd.resize(13, 0);
     }
     std::string IndexType() { return index_type; }
     double Qps() { return nq_cnt ? total_query_time / nq_cnt : 0.0; }
@@ -108,21 +125,33 @@ public:
         }
         if (STATISTICS_ENABLE >= 1) {
             ret << "Total queries: " << nq_cnt << std::endl;
+            ret << "The frequency distribution of the num of queries:" << std::endl;
+            ret << "[1, 1].count = " << nq_fd[0] << std::endl;
+            ret << "[2, 2].count = " << nq_fd[1] << std::endl;
+            for (auto i = 2; i < 12; ++ i)
+                ret << "[" << ((1<<(i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
+            ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total ef: " << ef_sum << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
         }
         if (STATISTICS_ENABLE >= 2) {
+            if (nq_cnt)
+                ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+            else
+                ret << "The average percentage of filter in bitset: 0%" << std::endl;
+            ret << "The frequency distribution of filter: " << std::endl;
+            for (auto i = 0; i < 20; ++ i) {
+                ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
+            }
+        }
+        if (STATISTICS_ENABLE >= 3) {
             std::vector<double> access_lorenz_curve;
             std::vector<int> split_idx(100); // default log 101 idx
             for (auto i = 0; i < 100; ++ i)
                 split_idx[i] = i;
             GenSplitIdx(split_idx, access_cnt.size());
             CaculateStatistics(access_lorenz_curve, split_idx);
-            if (nq_cnt)
-                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
-            else
-                ret << "The percentage of 1 in bitset: 0%" << std::endl;
             ret << "Max level: " << max_level << std::endl;
             ret << "Level distribution: " << std::endl;
             int64_t point_cnt = 0;
@@ -205,6 +234,13 @@ public:
         }
         if (STATISTICS_ENABLE >= 1) {
             ret << "Total queries: " << nq_cnt << std::endl;
+            ret << "The frequency distribution of the num of queries:" << std::endl;
+            ret << "[1, 1].count = " << nq_fd[0] << std::endl;
+            ret << "[2, 2].count = " << nq_fd[1] << std::endl;
+            for (auto i = 2; i < 12; ++ i)
+                ret << "[" << ((1<<(i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
+            ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
+            ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total ef: " << ef_sum << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
@@ -214,6 +250,12 @@ public:
                 ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
             else
                 ret << "The percentage of 1 in bitset: 0%" << std::endl;
+            ret << "The frequency distribution of filter: " << std::endl;
+            for (auto i = 0; i < 20; ++ i) {
+                ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
+            }
+        }
+        if (STATISTICS_ENABLE >= 3) {
             ret << "Max level: " << max_level << std::endl;
             ret << "Level distribution: " << std::endl;
             int64_t point_cnt = 0;
