@@ -1,6 +1,5 @@
 import logging
 import pytest
-import requests
 from utils import *
 from constants import *
 
