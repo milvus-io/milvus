@@ -64,8 +64,7 @@ func TestPlan_Plan(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 
-	plan, err := createPlan(*collection, dslString)
-	assert.NoError(t, err)
+	plan := createPlan(*collection, dslString)
 	assert.NotEqual(t, plan, nil)
 	topk := plan.getTopK()
 	assert.Equal(t, int(topk), 10)
@@ -123,8 +122,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 
-	plan, err := createPlan(*collection, dslString)
-	assert.NoError(t, err)
+	plan := createPlan(*collection, dslString)
 	assert.NotNil(t, plan)
 
 	var searchRawData1 []byte
@@ -153,8 +151,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	assert.Nil(t, err)
-	holder, err := parserPlaceholderGroup(plan, placeGroupByte)
-	assert.NoError(t, err)
+	holder := parserPlaceholderGroup(plan, placeGroupByte)
 	assert.NotNil(t, holder)
 	numQueries := holder.getNumOfQuery()
 	assert.Equal(t, int(numQueries), 2)

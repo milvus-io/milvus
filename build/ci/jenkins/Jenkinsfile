@@ -23,7 +23,7 @@ pipeline {
         stage ('Build and UnitTest') {
             agent {
                 kubernetes {
-                    label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-build"
+                    label "${env.PROJECT_NAME}-${env.BUILD_NUMBER}-build"
                     defaultContainer 'build-env'
                     customWorkspace '/home/jenkins/agent/workspace'
                     yamlFile "build/ci/jenkins/pod/build-env.yaml"
@@ -46,7 +46,7 @@ pipeline {
         stage ('Publish Docker Images') {
             agent {
                 kubernetes {
-                    label "${env.PROJECT_NAME}-${SEMVER}-${env.BUILD_NUMBER}-publish"
+                    label "${env.PROJECT_NAME}-${env.BUILD_NUMBER}-publish"
                     defaultContainer 'publish-images'
                     yamlFile "build/ci/jenkins/pod/docker-pod.yaml"
                 }

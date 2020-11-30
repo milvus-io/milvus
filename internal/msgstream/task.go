@@ -11,7 +11,7 @@ type TsMsg interface {
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
-	HashKeys() []uint32
+	HashKeys() []int32
 	Marshal(TsMsg) ([]byte, error)
 	Unmarshal([]byte) (TsMsg, error)
 }
@@ -19,7 +19,7 @@ type TsMsg interface {
 type BaseMsg struct {
 	BeginTimestamp Timestamp
 	EndTimestamp   Timestamp
-	HashValues     []uint32
+	HashValues     []int32
 }
 
 func (bm *BaseMsg) BeginTs() Timestamp {
@@ -30,7 +30,7 @@ func (bm *BaseMsg) EndTs() Timestamp {
 	return bm.EndTimestamp
 }
 
-func (bm *BaseMsg) HashKeys() []uint32 {
+func (bm *BaseMsg) HashKeys() []int32 {
 	return bm.HashValues
 }
 

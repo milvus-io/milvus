@@ -74,7 +74,7 @@ func (sService *statsService) sendSegmentStatistic() {
 func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSegStats) {
 	var msg msgstream.TsMsg = &msgstream.QueryNodeSegStatsMsg{
 		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
+			HashValues: []int32{0},
 		},
 		QueryNodeSegStats: *statistic,
 	}

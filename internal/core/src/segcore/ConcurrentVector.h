@@ -109,20 +109,20 @@ class VectorBase {
 };
 
 template <typename Type, bool is_scalar = false, ssize_t ElementsPerChunk = DefaultElementPerChunk>
-class ConcurrentVectorImpl : public VectorBase {
+class ConcurrentVector : public VectorBase {
  public:
     // constants
     using Chunk = FixedVector<Type>;
-    ConcurrentVectorImpl(ConcurrentVectorImpl&&) = delete;
-    ConcurrentVectorImpl(const ConcurrentVectorImpl&) = delete;
+    ConcurrentVector(ConcurrentVector&&) = delete;
+    ConcurrentVector(const ConcurrentVector&) = delete;
 
-    ConcurrentVectorImpl&
-    operator=(ConcurrentVectorImpl&&) = delete;
-    ConcurrentVectorImpl&
-    operator=(const ConcurrentVectorImpl&) = delete;
+    ConcurrentVector&
+    operator=(ConcurrentVector&&) = delete;
+    ConcurrentVector&
+    operator=(const ConcurrentVector&) = delete;
 
  public:
-    explicit ConcurrentVectorImpl(ssize_t dim = 1) : Dim(is_scalar ? 1 : dim), SizePerChunk(Dim * ElementsPerChunk) {
+    explicit ConcurrentVector(ssize_t dim = 1) : Dim(is_scalar ? 1 : dim), SizePerChunk(Dim * ElementsPerChunk) {
         Assert(is_scalar ? dim == 1 : dim != 1);
     }
 
@@ -219,30 +219,6 @@ class ConcurrentVectorImpl : public VectorBase {
 
  private:
     ThreadSafeVector<Chunk> chunks_;
-};
-
-template <typename Type>
-class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
-    using ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl;
-};
-
-class FloatVector {};
-class BinaryVector {};
-
-template <>
-class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> {
-    using ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl;
-};
-
-template <>
-class ConcurrentVector<BinaryVector> : public ConcurrentVectorImpl<uint8_t, false> {
- public:
-    explicit ConcurrentVector(int64_t dim) : binary_dim_(dim), ConcurrentVectorImpl(dim / 8) {
-        Assert(dim % 8 == 0);
-    }
-
- private:
-    int64_t binary_dim_;
 };
 
 }  // namespace milvus::segcore

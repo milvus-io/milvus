@@ -9,7 +9,6 @@ set(MILVUS_QUERY_SRCS
         visitors/ExecExprVisitor.cpp
         Plan.cpp
         Search.cpp
-        BruteForceSearch.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
 target_link_libraries(milvus_query milvus_proto)

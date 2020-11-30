@@ -143,7 +143,7 @@ func TestSearch_Search(t *testing.T) {
 
 	searchMsg := &msgstream.SearchMsg{
 		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
+			HashValues: []int32{0},
 		},
 		SearchRequest: internalpb.SearchRequest{
 			MsgType:         internalpb.MsgType_kSearch,
@@ -188,8 +188,8 @@ func TestSearch_Search(t *testing.T) {
 
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{
-					uint32(i),
+				HashValues: []int32{
+					int32(i),
 				},
 			},
 			InsertRequest: internalpb.InsertRequest{
@@ -221,7 +221,7 @@ func TestSearch_Search(t *testing.T) {
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
-		HashValues:     []uint32{0},
+		HashValues:     []int32{0},
 	}
 	timeTickResult := internalpb.TimeTickMsg{
 		MsgType:   internalpb.MsgType_kTimeTick,

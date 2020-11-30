@@ -13,4 +13,3 @@ formatThis() {
 formatThis "${CorePath}/src"
 formatThis "${CorePath}/unittest"
 
-${CorePath}/build-support/add_license.sh ${CorePath}/build-support/cpp_license.txt ${CorePath}

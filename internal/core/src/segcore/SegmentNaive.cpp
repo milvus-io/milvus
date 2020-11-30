@@ -249,8 +249,7 @@ SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestam
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
     Assert(the_offset_opt.has_value());
     Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr =
-        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
     auto index_entry = index_meta_->lookup_by_field(query_info->field_name);
     auto conf = index_entry.config;
 
@@ -309,8 +308,7 @@ SegmentNaive::QueryBruteForceImpl(query::QueryDeprecatedPtr query_info, Timestam
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
     Assert(the_offset_opt.has_value());
     Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr =
-        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
 
     std::vector<int64_t> final_uids(total_count);
     std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
@@ -366,8 +364,7 @@ SegmentNaive::QuerySlowImpl(query::QueryDeprecatedPtr query_info, Timestamp time
     auto the_offset_opt = schema_->get_offset(query_info->field_name);
     Assert(the_offset_opt.has_value());
     Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr =
-        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
+    auto vec_ptr = std::static_pointer_cast<ConcurrentVector<float>>(record_.entity_vec_.at(the_offset_opt.value()));
     std::vector<std::priority_queue<std::pair<float, int>>> records(num_queries);
 
     auto get_L2_distance = [dim](const float* a, const float* b) {
@@ -470,7 +467,7 @@ SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     auto chunk_size = record_.uids_.chunk_size();
 
     auto& uids = record_.uids_;
-    auto entities = record_.get_entity<FloatVector>(offset);
+    auto entities = record_.get_vec_entity<float>(offset);
 
     std::vector<knowhere::DatasetPtr> datasets;
     for (int chunk_id = 0; chunk_id < uids.chunk_size(); ++chunk_id) {
