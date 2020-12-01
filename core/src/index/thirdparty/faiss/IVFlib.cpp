@@ -339,7 +339,11 @@ void search_with_parameters (const Index *index,
     index_ivf->quantizer->search(n, x, params->nprobe,
                                  Dq.data(), Iq.data());
     double t1 = getmillisecs();
-    indexIVF_stats.quantization_time += t1 - t0;
+
+    if(STATISTICS_ENABLE)
+    {
+        index_ivf->index_ivf_stats.quantization_time += t1 - t0;
+    }
 
     if (nb_dis_ptr) {
         size_t nb_dis = 0;
@@ -356,7 +360,12 @@ void search_with_parameters (const Index *index,
                                   distances, labels,
                                   false, params);
     double t2 = getmillisecs();
-    indexIVF_stats.search_time += t2 - t1;
+
+    if (STATISTICS_ENABLE)
+    {
+        index_ivf->index_ivf_stats.search_time += t2 - t1;
+    }
+
 }
 
 

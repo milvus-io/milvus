@@ -471,8 +471,6 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                        mode_str_map[query_mode].c_str(), t_nq, t_k, nprobe);
                 printf("================================================================================\n");
                 for (size_t s = 0; s < bitset_array.size(); s++) {
-                    faiss::indexIVF_stats.quantization_time = 0.0;
-                    faiss::indexIVF_stats.search_time = 0.0;
 
                     double t_start = elapsed(), t_end;
                     for (int loop = 0; loop < search_loops; loop++) {
@@ -491,10 +489,8 @@ test_with_nprobes(const std::string& ann_test_name, const std::string& index_key
                     // k = 100 for ground truth
                     int32_t hit = GetResultHitCount(gt, I, GK, t_k, t_nq, index_add_loops);
 
-                    printf("bitset = %3s%%, elapse = %.4fs (quant = %.4fs, search = %.4fs), R@ = %.4f\n",
+                    printf("bitset = %3s%%, elapse = %.4fs ), R@ = %.4f\n",
                            bitset_array[s].first.c_str(), (t_end - t_start) / search_loops,
-                           faiss::indexIVF_stats.quantization_time / 1000 / search_loops,
-                           faiss::indexIVF_stats.search_time / 1000 / search_loops,
                            (hit / float(t_nq * std::min(GK, t_k) / index_add_loops)));
                 }
                 printf("================================================================================\n");
