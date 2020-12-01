@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <boost/filesystem.hpp>
 #include <cstring>
+#include <memory>
 #include <unordered_map>
 
 #include "db/snapshot/Snapshots.h"
@@ -203,7 +204,15 @@ Server::Start() {
 
         SystemInfoCollector::GetInstance().Start();
 
-        return StartService();
+        STATUS_CHECK(StartService());
+
+        // TODO: Pool size should be configurable
+        STATUS_CHECK(SetPoolSize(2));
+        STATUS_CHECK(engine::snapshot::Snapshots::GetInstance().RegisterTimers(this));
+        STATUS_CHECK(TimerManager::Start());
+        STATUS_CHECK(TimerManager::Run());
+
+        return Status::OK();
     } catch (std::exception& ex) {
         std::string str = "Milvus server encounter exception: " + std::string(ex.what());
         return Status(SERVER_UNEXPECTED_ERROR, str);
@@ -303,6 +312,8 @@ Server::StopService() {
     //   get error message "Milvus server is shutdown!"
 
     // storage::S3ClientWrapper::GetInstance().StopService();
+    TimerManager::Stop();
+
     DBWrapper::GetInstance().StopService();
     web::WebServer::GetInstance().Stop();
     grpc::GrpcServer::GetInstance().Stop();

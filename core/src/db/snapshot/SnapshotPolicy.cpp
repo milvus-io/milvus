@@ -20,7 +20,7 @@ SnapshotNumPolicy::SnapshotNumPolicy(size_t num) : num_(num) {
 }
 
 bool
-SnapshotNumPolicy::ShouldEject(const MapT& ids) {
+SnapshotNumPolicy::ShouldEject(const MapT& ids, bool alive) {
     bool should = true;
     if (ids.size() <= num_) {
         should = false;
@@ -32,8 +32,8 @@ SnapshotDurationPolicy::SnapshotDurationPolicy(TS_TYPE us) : us_(us) {
 }
 
 bool
-SnapshotDurationPolicy::ShouldEject(const MapT& ids) {
-    if (ids.size() <= 1) {
+SnapshotDurationPolicy::ShouldEject(const MapT& ids, bool alive) {
+    if (ids.size() == 0 || (alive && ids.size() <= 1)) {
         return false;
     }
     bool should = true;

@@ -11,15 +11,19 @@
 
 #pragma once
 
+#include <boost/asio.hpp>
 #include <string>
 #include <vector>
 
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
+#include "utils/TimerContext.h"
+#include "utils/TimerManager.h"
 #include "value/config/ServerConfig.h"
 
 namespace milvus::server {
 
-class Server {
+class Server : public TimerManager {
  public:
     static Server&
     GetInstance();
@@ -28,9 +32,9 @@ class Server {
     Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
 
     Status
-    Start();
+    Start() override;
     void
-    Stop();
+    Stop() override;
 
  private:
     Server() = default;

@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -22,6 +23,8 @@
 #include "db/snapshot/SnapshotHolder.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
+#include "utils/ThreadPool.h"
+#include "utils/TimerManager.h"
 
 namespace milvus::engine::snapshot {
 
@@ -61,13 +64,14 @@ class Snapshots {
 
     Status
     NumOfSnapshot(const std::string& collection_name, int& num) const;
-    /* int */
-    /* NumOfSnapshot(ID_TYPE collection_id) const; */
 
     Status
     Reset();
 
     Status Init(StorePtr);
+
+    Status
+    RegisterTimers(TimerManager* mgr);
 
  public:
     Status
@@ -83,6 +87,11 @@ class Snapshots {
     Status
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
 
+    void
+    OnReaderTimer(const boost::system::error_code&);
+    void
+    OnWriterTimer(const boost::system::error_code&);
+
     Status
     LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
     Status
@@ -90,8 +99,11 @@ class Snapshots {
 
     mutable std::shared_timed_mutex mutex_;
     std::map<ID_TYPE, SnapshotHolderPtr> holders_;
+    std::set<ID_TYPE> alive_cids_;
     std::map<std::string, ID_TYPE> name_id_map_;
-    std::vector<Snapshot::Ptr> to_release_;
+    mutable std::shared_timed_mutex inactive_mtx_;
+    std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
+    StorePtr store_;
 };
 
 }  // namespace milvus::engine::snapshot
