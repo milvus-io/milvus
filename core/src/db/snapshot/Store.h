@@ -180,6 +180,13 @@ class Store : public std::enable_shared_from_this<Store> {
 
     template <typename ResourceT>
     Status
+    GetActiveResources(std::vector<typename ResourceT::Ptr>& return_vs) {
+        std::vector<State> filter_states = {State::ACTIVE};
+        return adapter_->SelectBy<ResourceT>(StateField::Name, filter_states, return_vs);
+    }
+
+    template <typename ResourceT>
+    Status
     RemoveResource(ID_TYPE id) {
         auto rc_ctx_p =
             ResourceContextBuilder<ResourceT>(meta::oDelete).SetTable(ResourceT::Name).SetID(id).CreatePtr();
