@@ -63,7 +63,7 @@ func (ta *TimestampAllocator) syncTs() {
 
 	cancel()
 	if err != nil {
-		log.Panic("syncID Failed!!!!!")
+		log.Println("syncTimestamp Failed!!!!!")
 		return
 	}
 	ta.lastTsBegin = resp.GetTimestamp()
