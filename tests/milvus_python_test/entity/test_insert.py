@@ -409,7 +409,7 @@ class TestInsertInvalid(object):
         tmp_entity = copy.deepcopy(default_entity_row)
         tmp_entity[0]["string"] = "string"
         with pytest.raises(Exception):
-            connect.insert(collection, default_entity_row)
+            connect.insert(collection, tmp_entity)
 
     def test_insert_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
