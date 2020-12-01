@@ -17,9 +17,12 @@
 #include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
+#include "faiss/common.h"
 #include "faiss/FaissHook.h"
 #include "faiss/utils/utils.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/ConfigUtils.h"
@@ -118,8 +121,14 @@ KnowhereResource::Initialize() {
 
     faiss::LOG_ERROR_ = &knowhere::log_error_;
     faiss::LOG_WARNING_ = &knowhere::log_warning_;
+    std::cout << "config.engine.stat_optimizer_enable() = " << config.engine.stat_optimizer_enable() << std::endl;
     if (config.engine.stat_optimizer_enable()) {
         faiss::LOG_DEBUG_ = &knowhere::log_debug_;
+        milvus::knowhere::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
+        faiss::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
+    } else {
+        milvus::knowhere::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
+        faiss::STATISTICS_ENABLE = config.engine.stat_optimizer_enable();
     }
 
     return Status::OK();

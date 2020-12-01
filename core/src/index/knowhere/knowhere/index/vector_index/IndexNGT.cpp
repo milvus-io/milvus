@@ -197,5 +197,16 @@ IndexNGT::Dim() {
     return index_->getDimension();
 }
 
+StatisticsPtr
+IndexNGT::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNGT has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
+void
+IndexNGT::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNGT has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

@@ -17,6 +17,7 @@
 #include <faiss/IndexIVF.h>
 #include <faiss/Clustering.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/common.h>
 
 
 namespace faiss {
@@ -55,6 +56,8 @@ struct IndexBinaryIVF : IndexBinary {
 
     ClusteringParameters cp; ///< to override default clustering params
     Index *clustering_index; ///< to override index used during clustering
+    mutable std::vector<int> nprobe_statistics;
+    mutable IndexIVFStats index_ivf_stats;
 
     /** The Inverted file takes a quantizer (an IndexBinary) on input,
      * which implements the function mapping a vector to a list
@@ -115,6 +118,7 @@ struct IndexBinaryIVF : IndexBinary {
     void search(idx_t n, const uint8_t *x, idx_t k,
                 int32_t *distances, idx_t *labels, ConcurrentBitsetPtr bitset = nullptr) const override;
 
+
 #if 0
     /** get raw vectors by ids */
     void get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, ConcurrentBitsetPtr bitset = nullptr) override;
@@ -174,6 +178,13 @@ struct IndexBinaryIVF : IndexBinary {
 
     size_t get_list_size(size_t list_no) const
     { return invlists->list_size(list_no); }
+
+    /// clear nprobe statistics:
+    void clear_nprobe_statistics()
+    {
+        nprobe_statistics.clear();
+    }
+
 
     /** intialize a direct map
      *

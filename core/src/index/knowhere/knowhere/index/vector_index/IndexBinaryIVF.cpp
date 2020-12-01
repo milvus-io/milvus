@@ -40,6 +40,15 @@ void
 BinaryIVF::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
+
+    index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    if (STATISTICS_ENABLE) {
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
+        ivf_index->nprobe_statistics.resize(ivf_index->nlist);
+        ivf_index->nprobe_statistics.assign(ivf_index->nlist, 0);
+        stats->Clear();
+    }
 }
 
 DatasetPtr
@@ -104,6 +113,25 @@ BinaryIVF::UpdateIndexSize() {
     index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
+StatisticsPtr
+BinaryIVF::GetStatistics() {
+    if (!STATISTICS_ENABLE)
+        return nullptr;
+    return stats;
+}
+
+void
+BinaryIVF::ClearStatistics() {
+    if (!STATISTICS_ENABLE) {
+        return;
+    }
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    ivf_stats->Clear();
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    ivf_index->clear_nprobe_statistics();
+    ivf_index->index_ivf_stats.reset();
+}
+
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GET_TENSOR(dataset_ptr)
@@ -134,15 +162,46 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
 
     stdclock::time_point before = stdclock::now();
     auto i_distances = reinterpret_cast<int32_t*>(distances);
+
     index_->search(n, data, k, i_distances, labels, bitset);
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost
-                        << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                        << ", data search cost: " << faiss::indexIVF_stats.search_time;
-    faiss::indexIVF_stats.quantization_time = 0;
-    faiss::indexIVF_stats.search_time = 0;
+    if (STATISTICS_ENABLE) {
+        auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+        if (STATISTICS_ENABLE >= 1) {
+            ivf_stats->nq_cnt += n;
+            ivf_stats->batch_cnt += 1;
+            ivf_stats-> nprobe_access_count = ivf_index->index_ivf_stats.nlist;
+
+            if (n > 2048)
+                ivf_stats->nq_fd[12]++;
+            else
+                ivf_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
+
+            LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
+                                << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
+                                << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_quantizer_search_time += ivf_index->index_ivf_stats.quantization_time;
+            ivf_stats->total_data_search_time += ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_query_time += ivf_index->index_ivf_stats.quantization_time +
+                    ivf_index->index_ivf_stats.search_time;
+            ivf_index->index_ivf_stats.quantization_time = 0;
+            ivf_index->index_ivf_stats.search_time = 0;
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
+            ivf_stats->filter_percentage_sum += fps;
+            if (fps > 1.0 || fps < 0.0)
+                LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
+                                    << ", which is exceed 100% or negative!";
+            else
+                ivf_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
+        }
+        if (STATISTICS_ENABLE >= 3) {
+            ivf_stats->CaculateStatistics(ivf_index->nprobe_statistics);
+        }
+    }
 
     // if hamming, it need transform int32 to float
     if (ivf_index->metric_type == faiss::METRIC_Hamming) {

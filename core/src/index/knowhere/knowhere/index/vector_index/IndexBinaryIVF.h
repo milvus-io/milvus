@@ -29,10 +29,12 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIVF() : FaissBaseBinaryIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit BinaryIVF(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -70,6 +72,12 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>

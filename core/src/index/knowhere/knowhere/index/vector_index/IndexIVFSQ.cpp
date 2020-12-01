@@ -84,5 +84,6 @@ IVFSQ::UpdateIndexSize() {
     index_size_ = nb * code_size + nb * sizeof(int64_t) + 2 * d * sizeof(float) + nlist * d * sizeof(float);
 }
 
+
 }  // namespace knowhere
 }  // namespace milvus

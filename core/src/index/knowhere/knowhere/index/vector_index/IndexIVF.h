@@ -29,10 +29,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
  public:
     IVF() : FaissBaseIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -53,6 +55,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr&) override;
 
+
 #if 0
     DatasetPtr
     QueryById(const DatasetPtr& dataset, const Config& config) override;
@@ -66,6 +69,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
 #if 0
     DatasetPtr

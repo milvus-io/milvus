@@ -103,5 +103,6 @@ IVFPQ::UpdateIndexSize() {
     index_size_ = capacity + centroid_table + precomputed_table;
 }
 
+
 }  // namespace knowhere
 }  // namespace milvus

@@ -181,5 +181,16 @@ NSG_NM::UpdateIndexSize() {
     index_size_ = index_->GetSize() + Dim() * Count() * sizeof(float);
 }
 
+StatisticsPtr
+NSG_NM::GetStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNSG_NM has not implement interface GetStatistics yet";
+    return nullptr;
+}
+
+void
+NSG_NM::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexNSG_NM has not implement interface ClearStatistics yet";
+}
+
 }  // namespace knowhere
 }  // namespace milvus

@@ -78,6 +78,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         mult_ = 1 / log(1.0 * M_);
         revSize_ = 1.0 / mult_;
         level_stats_.resize(10);
+        stats_enable = false;
     }
 
     struct CompareByFirst {
@@ -134,6 +135,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     char **linkLists_;
     std::vector<int> element_levels_;
     std::vector<int> level_stats_;
+    bool stats_enable = false;
 
     size_t data_size_;
 
@@ -266,15 +268,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
           if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
-              if (has_deletions_)
-                  stats.bitset_access_cnt ++;
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
         } else {
-              stats.bitset_access_cnt ++;
-              stats.bitset_hit_cnt ++;
             lowerBound = std::numeric_limits<dist_t>::max();
             candidate_set.emplace(-lowerBound, ep_id);
         }
@@ -327,13 +325,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
                         if (!has_deletions || (!bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
-                            if (has_deletions_)
-                                stats.bitset_access_cnt ++;
                             top_candidates.emplace(dist, candidate_id);
                         }
                         else {
-                            stats.bitset_hit_cnt ++;
-                            stats.bitset_access_cnt ++;
                         }
 
                         if (top_candidates.size() > ef)
@@ -723,7 +717,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
-        level_stats_ = std::vector<int>(maxlevel_ + 1, 0);
+        if (stats_enable)
+            level_stats_ = std::vector<int>(maxlevel_ + 1, 0);
         revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
@@ -732,12 +727,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
                 element_levels_[i] = 0;
-                level_stats_[0] ++;
+                if (stats_enable)
+                    level_stats_[0] ++;
 
                 linkLists_[i] = nullptr;
             } else {
                 element_levels_[i] = linkListSize / size_links_per_element_;
-                level_stats_[element_levels_[i]] ++;
+                if (stats_enable)
+                    level_stats_[element_levels_[i]] ++;
                 linkLists_[i] = (char *) malloc(linkListSize);
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
@@ -997,10 +994,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         element_levels_[cur_c] = curlevel;
 
         std::unique_lock <std::mutex> templock(global);
-        if (curlevel >= level_stats_.size()) {
-            level_stats_.resize(curlevel + 1, 0);
+        if (stats_enable) {
+            if (curlevel >= level_stats_.size()) {
+                level_stats_.resize(curlevel + 1, 0);
+            }
+            level_stats_[curlevel] ++;
         }
-        level_stats_[curlevel] ++;
         int maxlevelcopy = maxlevel_;
         if (curlevel <= maxlevelcopy)
             templock.unlock();
@@ -1101,7 +1100,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     tableint cand = datal[i];
                     if (cand < 0 || cand > max_elements_)
                         throw std::runtime_error("cand error");
-                    if (level == 1) {
+                    if (stats_enable && level == stats.target_level) {
                         stats.accessed_points.push_back(cand);
                     }
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);

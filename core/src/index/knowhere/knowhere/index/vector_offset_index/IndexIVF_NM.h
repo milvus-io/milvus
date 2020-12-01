@@ -29,10 +29,12 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
  public:
     IVF_NM() : OffsetBaseIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVF_NM(std::shared_ptr<faiss::Index> index) : OffsetBaseIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -66,6 +68,12 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
 #if 0
     DatasetPtr

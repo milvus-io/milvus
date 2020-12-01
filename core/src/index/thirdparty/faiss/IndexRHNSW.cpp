@@ -193,6 +193,40 @@ void IndexRHNSW::init_hnsw() {
     hnsw.init(ntotal);
 }
 
+void
+IndexRHNSW::calculate_stats(std::vector<double> &ret, int64_t &tot) {
+    if (STATISTICS_ENABLE != 3)
+        return;
+    stats.CaculateStatistics(ret, tot);
+}
+
+void
+IndexRHNSW::set_target_level(const int tl) {
+    hnsw.target_level = tl;
+}
+
+void
+IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
+    if (STATISTICS_ENABLE != 3)
+        return;
+    for (auto i = 0; i < n; ++ i) {
+        for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
+            auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
+            if (tgt == stats.access_cnt.end())
+                stats.access_cnt[query_stats[i].access_points[j]] = 1;
+            else
+                tgt->second += 1;
+        }
+    }
+}
+
+void
+IndexRHNSW::clear_stats() {
+    if (STATISTICS_ENABLE != 3)
+        return;
+    stats.Clear();
+}
+
 void IndexRHNSW::train(idx_t n, const float* x)
 {
     FAISS_THROW_IF_NOT_MSG(storage,
@@ -213,6 +247,10 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
     idx_t check_period = InterruptCallback::get_period_hint (
           hnsw.max_level * d * hnsw.efSearch);
 
+    std::vector<RHNSWStatInfo> query_stats;
+    if (STATISTICS_ENABLE == 3)
+        query_stats.resize(n);
+
     for (idx_t i0 = 0; i0 < n; i0 += check_period) {
         idx_t i1 = std::min(i0 + check_period, n);
 
@@ -230,7 +268,12 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                hnsw.searchKnn(*dis, k, idxi, simi, bitset);
+                if (STATISTICS_ENABLE == 3)
+                    hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
+                else {
+                    auto dummy_stat = RHNSWStatInfo();
+                    hnsw.searchKnn(*dis, k, idxi, simi, dummy_stat, bitset);
+                }
 
                 maxheap_reorder (k, simi, idxi);
 
@@ -257,6 +300,18 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
         // we need to revert the negated distances
         for (size_t i = 0; i < k * n; i++) {
             distances[i] = -distances[i];
+        }
+    }
+//    update_stats(n, query_stats);
+    if (STATISTICS_ENABLE == 3) {
+        for (auto i = 0; i < n; ++ i) {
+            for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
+                auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
+                if (tgt == stats.access_cnt.end())
+                    stats.access_cnt[query_stats[i].access_points[j]] = 1;
+                else
+                    tgt->second += 1;
+            }
         }
     }
 

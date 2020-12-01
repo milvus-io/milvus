@@ -67,6 +67,12 @@ class NSG : public VecIndex {
     int64_t
     Dim() override;
 
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
+
  private:
     std::mutex mutex_;
     int64_t gpu_;

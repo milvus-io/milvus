@@ -70,6 +70,16 @@ IVF_NM::Load(const BinarySet& binary_set) {
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
 
+    if (STATISTICS_ENABLE) {
+        ivf_index->nprobe_statistics.resize(invlists->nlist);
+        ivf_index->nprobe_statistics.assign(invlists->nlist, 0);
+        index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
+        stats->Clear();
+    }
+    //statistics logging :
+
+
 #ifndef MILVUS_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
     size_t nb = binary->size / invlists->code_size;
@@ -323,16 +333,46 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
 #else
     auto data = static_cast<const uint8_t*>(ro_codes->data);
 #endif
-
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
     ivf_index->search_without_codes(n, reinterpret_cast<const float*>(query), data, prefix_sum, is_sq8, k, distances,
                                     labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
-                        << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                        << ", data search cost: " << faiss::indexIVF_stats.search_time;
-    faiss::indexIVF_stats.quantization_time = 0;
-    faiss::indexIVF_stats.search_time = 0;
+    if (STATISTICS_ENABLE) {
+        if (STATISTICS_ENABLE >= 1) {
+            ivf_stats->nq_cnt += n;
+            ivf_stats->batch_cnt += 1;
+            ivf_stats-> nprobe_access_count = ivf_index->index_ivf_stats.nlist;
+
+            if (n > 2048) {
+                ivf_stats->nq_fd[12]++;
+            } else {
+                ivf_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
+            }
+
+            LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
+                                << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
+                                << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_quantizer_search_time += ivf_index->index_ivf_stats.quantization_time;
+            ivf_stats->total_data_search_time += ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_query_time += ivf_index->index_ivf_stats.quantization_time +
+                    ivf_index->index_ivf_stats.search_time;
+            ivf_index->index_ivf_stats.quantization_time = 0;
+            ivf_index->index_ivf_stats.search_time = 0;
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
+            ivf_stats->filter_percentage_sum += fps;
+            if (fps > 1.0 || fps < 0.0)
+                LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
+                                    << ", which is exceed 100% or negative!";
+            else
+                ivf_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
+        }
+        if (STATISTICS_ENABLE >= 3) {
+            ivf_stats->CaculateStatistics(ivf_index->nprobe_statistics);
+        }
+    }
 }
 
 void
@@ -373,6 +413,25 @@ IVF_NM::UpdateIndexSize() {
     auto code_size = ivf_index->code_size;
     // ivf codes, ivf ids and quantizer
     index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
+}
+
+StatisticsPtr
+IVF_NM::GetStatistics() {
+    if (!STATISTICS_ENABLE)
+        return nullptr;
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    return ivf_stats;
+}
+
+void
+IVF_NM::ClearStatistics() {
+    if (!STATISTICS_ENABLE)
+        return;
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    ivf_stats->Clear();
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->clear_nprobe_statistics();
+    ivf_index->index_ivf_stats.reset();
 }
 
 }  // namespace knowhere

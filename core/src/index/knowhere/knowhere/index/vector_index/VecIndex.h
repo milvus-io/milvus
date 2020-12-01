@@ -68,6 +68,12 @@ class VecIndex : public Index {
     virtual int64_t
     Count() = 0;
 
+    virtual StatisticsPtr
+    GetStatistics() = 0;
+
+    virtual void
+    ClearStatistics() = 0;
+
     virtual IndexType
     index_type() const {
         return index_type_;

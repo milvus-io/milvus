@@ -12,7 +12,9 @@
 #include <vector>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <queue>
+#include <algorithm>
 
 #include <omp.h>
 
@@ -20,6 +22,7 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/common.h>
 
 
 namespace faiss {
@@ -44,6 +47,8 @@ namespace faiss {
 
 struct DistanceComputer; // from AuxIndexStructures
 class VisitedListPool;
+struct RHNSWStatistics;
+struct RHNSWStatInfo;
 
 struct RHNSW {
   /// internal storage of vectors (32 bits: this is expensive)
@@ -153,6 +158,8 @@ struct RHNSW {
 
   /// level of each vector (base level = 1), size = ntotal
   std::vector<int> levels;
+  std::vector<int> level_stats;
+  int target_level;
 
   /// number of entry points in levels > 0.
   int upper_beam;
@@ -237,7 +244,7 @@ struct RHNSW {
 
   /// search interface inspired by hnswlib
   void searchKnn(DistanceComputer& qdis, int k,
-                 idx_t *I, float *D,
+                 idx_t *I, float *D, RHNSWStatInfo &rsi,
                  ConcurrentBitsetPtr bitset = nullptr) const;
 
   size_t cal_size();
@@ -358,6 +365,53 @@ struct RHNSWStats {
     nreorder = 0;
     view = false;
   }
+};
+
+struct RHNSWStatistics {
+    RHNSWStatistics():max_level(0) {}
+    int max_level;
+    std::vector<int> distribution;
+    std::unordered_map<unsigned int, uint64_t> access_cnt;
+    void CaculateStatistics(std::vector<double> &access_lorenz_curve, int64_t &access_total) {
+        std::vector<int64_t> cnts;
+        access_total = 0;
+        for (auto &elem : access_cnt) {
+            cnts.push_back(elem.second);
+            access_total += elem.second;
+        }
+        std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
+        size_t len = cnts.size();
+        auto gini_len = 100;
+        std::vector<int> stat_len(gini_len, 0);
+        for (auto i = 0; i < gini_len; ++ i) {
+            stat_len[i] = (int)(((double)(i + 1) / 100.0) * len);
+        }
+        int64_t tmp_cnt = 0;
+        access_lorenz_curve.resize(gini_len);
+        access_lorenz_curve[gini_len] = 1.0;
+        int j = 0;
+        for (auto i = 1; i <= len && j < gini_len; ++ i) {
+            tmp_cnt += cnts[i];
+            if (i >= stat_len[j]) {
+                access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
+                tmp_cnt = 0;
+                j ++;
+            }
+            if (j >= gini_len)
+                break;
+        }
+    }
+
+    void
+    Clear() {
+        max_level = 0;
+        distribution.clear();
+        access_cnt.clear();
+    }
+};
+
+struct RHNSWStatInfo {
+    std::vector<unsigned int> access_points;
 };
 
 // global var that collects them all
