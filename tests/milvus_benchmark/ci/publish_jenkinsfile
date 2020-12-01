@@ -9,6 +9,7 @@ pipeline {
         string defaultValue: 'registry.zilliz.com', description: 'Local Docker registry URL', name: 'LOCAL_DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'registry-1.docker.io', description: 'Remote Docker registry URL', name: 'REMOTE_DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'milvus-docker-access-token', description: 'Remote Docker credentials id', name: 'REMOTE_DOCKER_CREDENTIALS_ID', trim: true
+        string(defaultValue: "master", description: 'Milvus server version', name: 'BRANCH')
     }
 
     environment {
@@ -41,9 +42,9 @@ pipeline {
                 stages {
                     stage("Publish Docker Images") {
                         environment {
-                            DOCKER_VERSION = "master-${BINARY_VERSION}-${OS_NAME}-release"
-                            REMOTE_DOCKER_VERSION = "${OS_NAME}-${BINARY_VERSION}-${DAILY_BUILD_VERSION}"
-                            REMOTE_DOCKER_LATEST_VERSION = "${OS_NAME}-${BINARY_VERSION}-latest"
+                            DOCKER_VERSION = "${params.BRANCH}-${BINARY_VERSION}-${OS_NAME}-release"
+                            REMOTE_DOCKER_VERSION = "${params.BRANCH}-${OS_NAME}-${BINARY_VERSION}-${DAILY_BUILD_VERSION}"
+                            REMOTE_DOCKER_LATEST_VERSION = "${params.BRANCH}-${OS_NAME}-${BINARY_VERSION}-latest"
                         }
 
                         agent {

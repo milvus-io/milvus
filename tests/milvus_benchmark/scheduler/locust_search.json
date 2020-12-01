@@ -1,12 +1,11 @@
 [
     {
-        "server": "poseidon",
+        "server": "athena",
         "suite_params": [
             {
-                "suite": "070_gpu_build.yaml",
+                "suite": "locust_search.yaml",
                 "image_type": "gpu"
             }
         ]
     }
 ]
-

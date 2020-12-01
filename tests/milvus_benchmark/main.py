@@ -38,14 +38,20 @@ def positive_int(s):
 def get_image_tag(image_version, image_type):
     return "%s-%s-centos7-release" % (image_version, image_type)
     # return "%s-%s-centos7-release" % ("0.7.1", image_type)
-    # return "%s-%s-centos7-release" % ("PR-2159", image_type)
+    # return "%s-%s-centos7-release" % ("PR-2780", image_type)
 
 
 def queue_worker(queue):
+    """
+    Using queue to make sure only one test process on each host.
+
+    Workers can be run concurrently on different host
+    """
     while not queue.empty():
         q = queue.get()
         suite = q["suite"]
         server_host = q["server_host"]
+        deploy_mode = q["deploy_mode"]
         image_type = q["image_type"]
         image_tag = q["image_tag"]
 
@@ -58,10 +64,10 @@ def queue_worker(queue):
         collections = run_params["collections"]
         for collection in collections:
             # run tests
-            server_config = collection["server"]
+            server_config = collection["server"] if "server" in collection else None
             logger.debug(server_config)
             runner = K8sRunner()
-            if runner.init_env(server_config, server_host, image_type, image_tag):
+            if runner.init_env(server_config, server_host, deploy_mode, image_type, image_tag):
                 logger.debug("Start run tests")
                 try:
                     runner.run(run_type, collection)
@@ -69,10 +75,12 @@ def queue_worker(queue):
                     logger.error(str(e))
                     logger.error(traceback.format_exc())
                 finally:
+                    time.sleep(10)
                     runner.clean_up()
             else:
                 logger.error("Runner init failed")
-    logger.debug("All task finished in queue: %s" % server_host)
+    if server_host:
+        logger.debug("All task finished in queue: %s" % server_host)
 
 
 def main():
@@ -88,6 +96,10 @@ def main():
         metavar='FILE',
         default='',
         help="load test schedule from FILE")
+    arg_parser.add_argument(
+        "--deploy-mode",
+        default='',
+        help="single or shards")
 
     # local mode
     arg_parser.add_argument(
@@ -116,15 +128,17 @@ def main():
         if not args.image_version:
             raise Exception("Image version not given")
         image_version = args.image_version
+        deploy_mode = args.deploy_mode
         with open(args.schedule_conf) as f:
             schedule_config = full_load(f)
             f.close()
         queues = []
-        server_names = set()
+        # server_names = set()
+        server_names = []
         for item in schedule_config:
-            server_host = item["server"]
+            server_host = item["server"] if "server" in item else ""
             suite_params = item["suite_params"]
-            server_names.add(server_host)
+            server_names.append(server_host)
             q = Queue()
             for suite_param in suite_params:
                 suite = "suites/"+suite_param["suite"]
@@ -133,11 +147,12 @@ def main():
                 q.put({
                     "suite": suite,
                     "server_host": server_host,
+                    "deploy_mode": deploy_mode,
                     "image_tag": image_tag,
                     "image_type": image_type
                 })
             queues.append(q)
-        logger.debug(server_names)
+        logging.error(queues)
         thread_num = len(server_names)
         processes = []
 
@@ -145,7 +160,7 @@ def main():
             x = Process(target=queue_worker, args=(queues[i], ))
             processes.append(x)
             x.start()
-            time.sleep(5)
+            time.sleep(10)
         for x in processes:
             x.join()
 

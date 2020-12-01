@@ -89,6 +89,9 @@ def get_vectors_from_binary(nq, dimension, data_type):
 
 class Runner(object):
     def __init__(self):
+        """Run each tests defined in the suites.
+
+        """
         pass
 
     def normalize(self, metric_type, X):
@@ -100,7 +103,7 @@ class Runner(object):
             X = X.astype(np.float32)
         elif metric_type in ["jaccard", "hamming", "sub", "super"]:
             tmp = []
-            for index, item in enumerate(X):
+            for _, item in enumerate(X):
                 new_vector = bytes(np.packbits(item, axis=-1).tolist())
                 tmp.append(new_vector)
             X = tmp
@@ -170,7 +173,7 @@ class Runner(object):
                     end_id = start_id + len(vectors)
                     logger.info("Start id: %s, end id: %s" % (start_id, end_id))
                     ids = [k for k in range(start_id, end_id)]
-                    status, ids = milvus.insert(vectors, ids=ids)
+                    _, ids = milvus.insert(vectors, ids=ids)
                     # milvus.flush()
                     logger.debug(milvus.count())
                     ni_end_time = time.time()
@@ -191,13 +194,13 @@ class Runner(object):
             tmp_res = []
             vectors = base_query_vectors[0:nq]
             for top_k in top_ks:
-                avg_query_time = 0.0
+                # avg_query_time = 0.0
                 min_query_time = 0.0
                 logger.info("Start query, query params: top-k: {}, nq: {}, actually length of vectors: {}".format(top_k, nq, len(vectors)))
                 for i in range(run_count):
                     logger.info("Start run query, run %d of %s" % (i+1, run_count))
                     start_time = time.time()
-                    query_res = milvus.query(vectors, top_k, search_param=search_param)
+                    milvus.query(vectors, top_k, search_param=search_param)
                     interval_time = time.time() - start_time
                     if (i == 0) or (min_query_time > interval_time):
                         min_query_time = interval_time
@@ -208,7 +211,7 @@ class Runner(object):
 
     def do_query_qps(self, milvus, query_vectors, top_k, search_param):
         start_time = time.time()
-        result = milvus.query(query_vectors, top_k, search_param) 
+        milvus.query(query_vectors, top_k, search_param) 
         end_time = time.time()
         return end_time - start_time
 

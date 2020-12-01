@@ -1,6 +1,6 @@
 [
     {
-        "server": "athena",
+        "server": "eros",
         "suite_params": [
             {
                 "suite": "080_gpu_accuracy.yaml",

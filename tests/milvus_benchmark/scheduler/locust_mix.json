@@ -1,9 +1,9 @@
 [
     {
-        "server": "eros",
+        "server": "athena",
         "suite_params": [
             {
-                "suite": "070_ann.yaml",
+                "suite": "locust_mix.yaml",
                 "image_type": "gpu"
             }
         ]

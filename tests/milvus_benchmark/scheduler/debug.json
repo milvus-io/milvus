@@ -3,8 +3,12 @@
         "server": "poseidon",
         "suite_params": [
             {
-                "suite": "debug.yaml",
+                "suite": "080_gpu_build_debug.yaml",
                 "image_type": "gpu"
+            },
+            {
+                "suite": "080_cpu_search_debug.yaml",
+                "image_type": "cpu"
             }
         ]
     }

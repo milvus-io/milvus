@@ -1,12 +1,12 @@
 try {
-    def result = sh script: "helm status benchmark-test-${env.JOB_NAME}-${env.BUILD_NUMBER}", returnStatus: true
+    def result = sh script: "helm status -n milvus ${env.HELM_RELEASE_NAME}", returnStatus: true
     if (!result) {
-        sh "helm del --purge benchmark-test-${env.JOB_NAME}-${env.BUILD_NUMBER}"
+        sh "helm uninstall -n milvus ${env.HELM_RELEASE_NAME}"
     }
 } catch (exc) {
-    def result = sh script: "helm status benchmark-test-${env.JOB_NAME}-${env.BUILD_NUMBER}", returnStatus: true
+    def result = sh script: "helm status -n milvus ${env.HELM_RELEASE_NAME}", returnStatus: true
     if (!result) {
-        sh "helm del --purge benchmark-test-${env.JOB_NAME}-${env.BUILD_NUMBER}"
+        sh "helm uninstall -n milvus ${env.HELM_RELEASE_NAME}"
     }
     throw exc
 }

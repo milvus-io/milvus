@@ -3,15 +3,15 @@
         "server": "athena",
         "suite_params": [
             {
-                "suite": "080_gpu_accuracy.yaml",
+                "suite": "011_gpu_accuracy.yaml",
                 "image_type": "gpu"
             },
             {
-                "suite": "080_search_stability.yaml",
+                "suite": "011_search_stability.yaml",
                 "image_type": "gpu"
             },
             {
-                "suite": "gpu_accuracy_ann.yaml",
+                "suite": "011_gpu_accuracy_ann.yaml",
                 "image_type": "gpu"
             }
         ]
@@ -20,23 +20,23 @@
         "server": "poseidon",
         "suite_params": [
             {
-                "suite": "080_gpu_search.yaml",
+                "suite": "011_gpu_search.yaml",
                 "image_type": "gpu"
             },
             {
-                "suite": "080_cpu_search.yaml",
+                "suite": "011_cpu_search.yaml",
                 "image_type": "cpu"
             },
             {
-                "suite": "080_gpu_build.yaml",
+                "suite": "011_gpu_build.yaml",
                 "image_type": "gpu"
             },
             {
-                "suite": "080_cpu_accuracy.yaml",
+                "suite": "011_cpu_accuracy.yaml",
                 "image_type": "cpu"
             },
             {
-                "suite": "locust_search.yaml",
+                "suite": "011_locust_search.yaml",
                 "image_type": "cpu"
             }
         ]
@@ -49,15 +49,15 @@
                 "image_type": "cpu"
             },
             {
-                "suite": "080_cpu_build.yaml",
+                "suite": "011_cpu_build.yaml",
                 "image_type": "cpu"
             },
             {
-                "suite": "080_insert_performance.yaml",
+                "suite": "011_insert_performance.yaml",
                 "image_type": "cpu"
             },
             {
-                "suite": "add_flush_performance.yaml",
+                "suite": "011_add_flush_performance.yaml",
                 "image_type": "cpu"
             }
         ]
