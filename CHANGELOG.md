@@ -4,18 +4,18 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.10.4 (TBD)
 ## Bug
--   \#3626 Fix server crash when searching with IVF_PQ on GPU.
--   \#3903 The performance of IVF_SQ8H in 0.10.3 is degraded.
--   \#3906 Fix the delete task state to avoid server crash.
--   \#4012 Milvus hangs when continually creating and dropping partitions.
--   \#4174 Fix out of memory caused by too many data loaded to GPU.
--   \#4318 Fix memory leak in IVF indexes.
+-   \#3626 Fix server crash when searching with IVF_PQ on GPU
+-   \#3903 The performance of IVF_SQ8H in 0.10.3 is degraded
+-   \#3906 Fix the delete task state to avoid server crash
+-   \#4012 Milvus hangs when continually creating and dropping partitions
+-   \#4174 Fix out of memory caused by too many data loaded to GPU
+-   \#4318 Fix memory leak in IVF indexes
 
 ## Feature
--   \#3773 Support IVF_PQ to run on FPGA.
+-   \#3773 Support IVF_PQ to run on FPGA
 
 ## Improvement
--   \#3775 Improve search performance in the case that no item deleted.
+-   \#3775 Improve search performance in the case that no item deleted
 -   \#4075 Improve performance for create large amount of partitions
 
 ## Task
