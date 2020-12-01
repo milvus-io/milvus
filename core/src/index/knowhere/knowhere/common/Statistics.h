@@ -11,17 +11,21 @@
 
 #pragma once
 
+#include <src/index/knowhere/knowhere/index/IndexType.h>
+#include <algorithm>
+#include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
-#include <src/index/knowhere/knowhere/index/IndexType.h>
+#include <vector>
 #include "Log.h"
 
 namespace milvus {
 namespace knowhere {
 
-
-inline uint64_t upper_bound_of_pow2(uint64_t x) {
-    -- x;
+inline uint64_t
+upper_bound_of_pow2(uint64_t x) {
+    --x;
     x |= (x >> 1);
     x |= (x >> 2);
     x |= (x >> 4);
@@ -31,31 +35,55 @@ inline uint64_t upper_bound_of_pow2(uint64_t x) {
     return x + 1;
 }
 
-inline int len_of_pow2(uint64_t x) {
+inline int
+len_of_pow2(uint64_t x) {
     return __builtin_popcountl(x - 1);
 }
 
 class Statistics {
-public:
-    Statistics(std::string &idx_t):index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0),
-                                   total_query_time(0.0) { filter_cdf.resize(21, 0); nq_fd.resize(13, 0); }
+ public:
+    explicit Statistics(std::string& idx_t)
+        : index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0), total_query_time(0.0) {
+        filter_cdf.resize(21, 0);
+        nq_fd.resize(13, 0);
+    }
     virtual ~Statistics() = default;
-    virtual std::string ToString(const std::string &index_name) = 0;
-    virtual void Clear() {
+    virtual std::string
+    ToString(const std::string& index_name) = 0;
+    virtual void
+    Clear() {
         filter_percentage_sum = total_query_time = 0.0;
         nq_cnt = batch_cnt = 0;
         filter_cdf.resize(21, 0);
         nq_fd.resize(13, 0);
     }
-    std::string IndexType() { return index_type; }
-    double Qps() { return nq_cnt ? total_query_time / nq_cnt : 0.0; }
-    int64_t BatchCount() { return batch_cnt; }
-    int64_t QueryCount() { return nq_cnt; }
-    const std::vector<int>& FilterHistograms() { return filter_cdf; }
-    const std::vector<int>& NqFD() { return nq_fd; }
+    std::string
+    IndexType() {
+        return index_type;
+    }
+    double
+    Qps() {
+        return nq_cnt ? total_query_time / nq_cnt : 0.0;
+    }
+    int64_t
+    BatchCount() {
+        return batch_cnt;
+    }
+    int64_t
+    QueryCount() {
+        return nq_cnt;
+    }
+    const std::vector<int>&
+    FilterHistograms() {
+        return filter_cdf;
+    }
+    const std::vector<int>&
+    NqFD() {
+        return nq_fd;
+    }
 
-    std::string &index_type;
-    double filter_percentage_sum; // the sum of percentage of 1 in bitset before search
+    std::string& index_type;
+    double filter_percentage_sum;  // the sum of percentage of 1 in bitset before search
     int64_t nq_cnt;
     int64_t batch_cnt;
     double total_query_time;
@@ -65,9 +93,10 @@ public:
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
 class HNSWStatistics : public Statistics {
-public:
-    HNSWStatistics(std::string &idx_t):Statistics(idx_t), max_level(0), access_total(0),
-                                       target_level(1), ef_sum(0) {}
+ public:
+    explicit HNSWStatistics(std::string& idx_t)
+        : Statistics(idx_t), max_level(0), access_total(0), target_level(1), ef_sum(0) {
+    }
 
     void
     Clear() override {
@@ -80,43 +109,44 @@ public:
         ef_sum = 0;
     }
 
-    void GenSplitIdx(std::vector<int> &split_idx, size_t len) {
-        for (auto i = 0; i < split_idx.size(); ++ i) {
+    void
+    GenSplitIdx(std::vector<int>& split_idx, size_t len) {
+        for (auto i = 0; i < split_idx.size(); ++i) {
             split_idx[i] = (int)(((double)split_idx[i] / 100.0) * len);
         }
     }
 
     void
-    CaculateStatistics(std::vector<double> &access_lorenz_curve, const std::vector<int> &stat_len) {
+    CaculateStatistics(std::vector<double>& access_lorenz_curve, const std::vector<int>& stat_len) {
         std::vector<int64_t> cnts;
         access_total = 0;
-        for (auto &elem : access_cnt) {
+        for (auto& elem : access_cnt) {
             cnts.push_back(elem.second);
             access_total += elem.second;
         }
         std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
         size_t len = cnts.size();
         auto gini_len = 100;
-//        std::vector<int> stat_len(gini_len, 0);
+        //        std::vector<int> stat_len(gini_len, 0);
         int64_t tmp_cnt = 0;
         access_lorenz_curve.resize(gini_len);
         access_lorenz_curve[gini_len - 1] = 1.0;
         int j = 0;
         size_t i = 0;
-        for (i = 1; i <= len && j < gini_len; ++ i) {
+        for (i = 1; i <= len && j < gini_len; ++i) {
             tmp_cnt += cnts[i];
             if (i >= stat_len[j]) {
                 access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
                 tmp_cnt = 0;
-                j ++;
+                j++;
             }
             if (j >= gini_len)
                 break;
         }
-    };
+    }
 
     std::string
-    ToString(const std::string &index_name) override {
+    ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         if (STATISTICS_ENABLE == 0) {
@@ -128,8 +158,8 @@ public:
             ret << "The frequency distribution of the num of queries:" << std::endl;
             ret << "[1, 1].count = " << nq_fd[0] << std::endl;
             ret << "[2, 2].count = " << nq_fd[1] << std::endl;
-            for (auto i = 2; i < 12; ++ i)
-                ret << "[" << ((1<<(i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
+            for (auto i = 2; i < 12; ++i)
+                ret << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
             ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total ef: " << ef_sum << std::endl;
@@ -137,31 +167,31 @@ public:
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+                ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%"
+                    << std::endl;
             else
                 ret << "The average percentage of filter in bitset: 0%" << std::endl;
             ret << "The frequency distribution of filter: " << std::endl;
-            for (auto i = 0; i < 20; ++ i) {
+            for (auto i = 0; i < 20; ++i) {
                 ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
             }
         }
         if (STATISTICS_ENABLE >= 3) {
             std::vector<double> access_lorenz_curve;
-            std::vector<int> split_idx(100); // default log 101 idx
-            for (auto i = 0; i < 100; ++ i)
-                split_idx[i] = i + 1;
+            std::vector<int> split_idx(100);  // default log 101 idx
+            for (auto i = 0; i < 100; ++i) split_idx[i] = i + 1;
             GenSplitIdx(split_idx, access_cnt.size());
             CaculateStatistics(access_lorenz_curve, split_idx);
             ret << "Max level: " << max_level << std::endl;
             ret << "Level distribution: " << std::endl;
             int64_t point_cnt = 0;
-            for (auto i = max_level; i >= 0; -- i) {
+            for (auto i = max_level; i >= 0; --i) {
                 point_cnt += distribution[i];
                 ret << "Level " << i << " has " << point_cnt << " points" << std::endl;
             }
             ret << "There are " << access_total << " times point-access at level " << target_level << std::endl;
             ret << "The distribution of probability density at level " << target_level << ":" << std::endl;
-            for (auto i = 0; i < access_lorenz_curve.size(); ++ i) {
+            for (auto i = 0; i < access_lorenz_curve.size(); ++i) {
                 ret << "(" << i << "," << access_lorenz_curve[i] << ")";
                 if (i < access_lorenz_curve.size())
                     ret << " ";
@@ -173,16 +203,21 @@ public:
     }
 
     const std::vector<int64_t>&
-    LevelNodesNum() { return distribution; }
+    LevelNodesNum() {
+        return distribution;
+    }
 
-    double AvgSearchEf() { return nq_cnt ? ef_sum / nq_cnt : 0; }
+    double
+    AvgSearchEf() {
+        return nq_cnt ? ef_sum / nq_cnt : 0;
+    }
 
     std::vector<double>
     AccessCDF() {
         std::vector<double> access_lorenz_curve;
         std::vector<int> split_idx(20, 0);
-        for (auto i = 0; i < 20; ++ i) {
-            split_idx[i] = (i + 1 ) * 5;
+        for (auto i = 0; i < 20; ++i) {
+            split_idx[i] = (i + 1) * 5;
         }
         GenSplitIdx(split_idx, access_cnt.size());
         CaculateStatistics(access_lorenz_curve, split_idx);
@@ -190,10 +225,9 @@ public:
     }
 
     std::vector<double>
-    AccessCDF(const std::vector<int64_t> &axis_x) {
+    AccessCDF(const std::vector<int64_t>& axis_x) {
         std::vector<int> split_idx(axis_x.size(), 0);
-        for (auto i = 0; i < axis_x.size(); ++ i)
-            split_idx[i] = (int)axis_x[i];
+        for (auto i = 0; i < axis_x.size(); ++i) split_idx[i] = (int)axis_x[i];
         GenSplitIdx(split_idx, access_cnt.size());
         std::vector<double> access_lorenz_curve;
         CaculateStatistics(access_lorenz_curve, split_idx);
@@ -209,9 +243,10 @@ public:
 };
 
 class RHNSWStatistics : public Statistics {
-public:
-    RHNSWStatistics(std::string &idx_t):Statistics(idx_t), max_level(0), access_total(0),
-                                        target_level(1), ef_sum(0) {}
+ public:
+    explicit RHNSWStatistics(std::string& idx_t)
+        : Statistics(idx_t), max_level(0), access_total(0), target_level(1), ef_sum(0) {
+    }
 
     void
     Clear() override {
@@ -225,7 +260,7 @@ public:
     }
 
     std::string
-    ToString(const std::string &index_name) override {
+    ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         if (STATISTICS_ENABLE == 0) {
@@ -237,8 +272,8 @@ public:
             ret << "The frequency distribution of the num of queries:" << std::endl;
             ret << "[1, 1].count = " << nq_fd[0] << std::endl;
             ret << "[2, 2].count = " << nq_fd[1] << std::endl;
-            for (auto i = 2; i < 12; ++ i)
-                ret << "[" << ((1<<(i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
+            for (auto i = 2; i < 12; ++i)
+                ret << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
             ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total ef: " << ef_sum << std::endl;
@@ -246,11 +281,11 @@ public:
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%" << std::endl;
             else
                 ret << "The percentage of 1 in bitset: 0%" << std::endl;
             ret << "The frequency distribution of filter: " << std::endl;
-            for (auto i = 0; i < 20; ++ i) {
+            for (auto i = 0; i < 20; ++i) {
                 ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
             }
         }
@@ -258,7 +293,7 @@ public:
             ret << "Max level: " << max_level << std::endl;
             ret << "Level distribution: " << std::endl;
             int64_t point_cnt = 0;
-            for (auto i = max_level; i >= 0; -- i) {
+            for (auto i = max_level; i >= 0; --i) {
                 point_cnt += distribution[i];
                 ret << "Level " << i << " has " << point_cnt << " points" << std::endl;
             }
@@ -266,7 +301,7 @@ public:
             ret << "The distribution of probability density at level " << target_level << ":" << std::endl;
             if (access_lorenz_curve.empty())
                 access_lorenz_curve.resize(101, 0.0);
-            for (auto i = 0; i < access_lorenz_curve.size(); ++ i) {
+            for (auto i = 0; i < access_lorenz_curve.size(); ++i) {
                 ret << "(" << i << "," << access_lorenz_curve[i] << ")";
                 if (i < access_lorenz_curve.size())
                     ret << " ";
@@ -278,27 +313,32 @@ public:
     }
 
     const std::vector<int64_t>&
-    LevelNodesNum() { return distribution; }
+    LevelNodesNum() {
+        return distribution;
+    }
 
-    double AvgSearchEf() { return nq_cnt ? ef_sum / nq_cnt : 0; }
+    double
+    AvgSearchEf() {
+        return nq_cnt ? ef_sum / nq_cnt : 0;
+    }
 
     std::vector<double>
     AccessCDF() {
         std::vector<double> ret(20, 0.0);
-        for (auto i = 0; i < 20; ++ i) {
+        for (auto i = 0; i < 20; ++i) {
             ret[i] = access_lorenz_curve[i * 5 + 4];
         }
         return ret;
     }
 
     std::vector<double>
-    AccessCDF(const std::vector<int64_t> &axis_x) {
+    AccessCDF(const std::vector<int64_t>& axis_x) {
         std::vector<double> ret(axis_x.size());
         int j = 0;
-        for (auto i = 0; i < axis_x.size(); ++ j) {
+        for (auto i = 0; i < axis_x.size(); ++j) {
             if (j == (int)axis_x[i]) {
                 ret.push_back(access_lorenz_curve[j]);
-                i ++;
+                i++;
             }
         }
         return ret;
@@ -311,7 +351,6 @@ public:
     int target_level;
     int64_t ef_sum;
 };
-
 
 }  // namespace knowhere
 }  // namespace milvus

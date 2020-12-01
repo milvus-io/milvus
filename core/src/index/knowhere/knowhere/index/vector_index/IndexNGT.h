@@ -62,10 +62,10 @@ class IndexNGT : public VecIndex {
     int64_t
     Dim() override;
 
-    virtual StatisticsPtr
+    StatisticsPtr
     GetStatistics() override;
 
-    virtual void
+    void
     ClearStatistics() override;
 
  protected:
