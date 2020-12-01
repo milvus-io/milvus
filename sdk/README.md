@@ -42,6 +42,7 @@ Run C++ example:
  # copy necessary files
  $ cp [Milvus root path]/sdk/cmake_build/libmilvus_sdk.so .
  $ cp -r [Milvus root path]/sdk/include .
+ $ cp -r [Milvus root path]/sdk/thirdparty .
 ```
 
 - Create file `main.cpp` in the project folder, and copy the following code into it:
@@ -69,6 +70,8 @@ int main() {
  cmake_minimum_required(VERSION 3.14)
  project(test)
  set(CMAKE_CXX_STANDARD 17)
+
+ include_directories(${PROJECT_SOURCE_DIR})
 
  add_executable(milvus_client main.cpp)
  target_link_libraries(milvus_client
