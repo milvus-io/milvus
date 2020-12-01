@@ -17,6 +17,7 @@
 #include <faiss/utils/distances.h>
 
 #include "config/ServerConfig.h"
+#include "faiss/common.h"
 #include "faiss/FaissHook.h"
 #include "faiss/common.h"
 #include "faiss/utils/utils.h"

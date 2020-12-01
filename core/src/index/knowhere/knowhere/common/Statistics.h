@@ -16,9 +16,18 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
+#include <memory>
+#include <utility>
+#include <stdio.h>
+#include <algorithm>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 #include "Log.h"
+
+#include <faiss/IVFlib.h>
+#include <faiss/IndexIVF.h>
 
 namespace milvus {
 namespace knowhere {
@@ -57,6 +66,7 @@ class Statistics {
         filter_cdf.resize(21, 0);
         nq_fd.resize(13, 0);
     }
+
     std::string
     IndexType() {
         return index_type;
@@ -127,7 +137,6 @@ class HNSWStatistics : public Statistics {
         std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
         size_t len = cnts.size();
         auto gini_len = 100;
-        //        std::vector<int> stat_len(gini_len, 0);
         int64_t tmp_cnt = 0;
         access_lorenz_curve.resize(gini_len);
         access_lorenz_curve[gini_len - 1] = 1.0;
@@ -350,6 +359,147 @@ class RHNSWStatistics : public Statistics {
     int64_t access_total;
     int target_level;
     int64_t ef_sum;
+};
+  
+class IVFStatistics : public Statistics {
+ public:
+    std::vector<double> cdf;
+    std::vector<std::pair<int64_t, int64_t>> nprobe_count;
+    int64_t nprobe_access_count;
+    double total_quantizer_search_time;
+    double total_data_search_time;
+
+    explicit IVFStatistics(std::string &idx_t):Statistics(idx_t), total_quantizer_search_time(0),
+    total_data_search_time(0), nprobe_access_count(0) {}
+
+    std::vector<std::pair<int64_t, int64_t>>
+    SearchNprobe() {
+        return nprobe_count;
+    }
+
+    const std::vector<double>
+    AccessCDF(const std::vector<int64_t>& axis_x) {
+        std::vector<double> cdfresult;
+        for (auto x : axis_x) {
+            cdfresult.push_back(cdf[x]);
+        }
+        return cdfresult;
+    }
+
+    const std::vector<double>
+    AccessCDF() {
+        std::vector<double> cdfresult;
+        for (int i=5; i <= 100; i += 5) {
+            cdfresult.push_back(cdf[i]);
+        }
+        return cdfresult;
+    }
+
+    void
+    CaculateStatistics(std::vector<int> nprobe_statistics) {
+        nprobe_count.clear();
+        for (int i=0; i < nprobe_statistics.size(); i++) {
+            nprobe_count.push_back(std::pair<int64_t, int64_t>(i, nprobe_statistics[i]));
+        }
+        std::sort(nprobe_statistics.begin(), nprobe_statistics.end());
+        std::reverse(nprobe_statistics.begin(), nprobe_statistics.end());
+
+        int sum_id = 0;
+        int total = 0;
+        cdf.clear();
+        for (int i=1; i <= 100; i++) {
+            while (sum_id < int(nprobe_statistics.size()*0.01*i)) {
+                total += nprobe_statistics[sum_id++];
+            }
+            cdf.push_back(total/(double)nprobe_access_count);
+        }
+
+        return;
+    }
+
+    void
+    Clear() {
+        Statistics::Clear();
+        cdf.assign(cdf.size(), 0);
+        nprobe_count.assign(nprobe_count.size(), std::pair<int, int>(0, 0));
+        nprobe_access_count = 0;
+        total_quantizer_search_time = 0;
+        total_data_search_time = 0;
+    }
+
+    void
+    show() {
+        LOG_KNOWHERE_DEBUG_ << "IVFStatistics:";
+
+        if (STATISTICS_ENABLE == 0) {
+            LOG_KNOWHERE_DEBUG_  << "There is nothing because configuration STATISTICS_ENABLE = 0";
+        }
+        if (STATISTICS_ENABLE >= 1) {
+            LOG_KNOWHERE_DEBUG_  << "Total queries: " << nq_cnt;
+            LOG_KNOWHERE_DEBUG_  << "The frequency distribution of the num of queries:";
+            LOG_KNOWHERE_DEBUG_  << "[1, 1].count = " << nq_fd[0];
+            LOG_KNOWHERE_DEBUG_  << "[2, 2].count = " << nq_fd[1];
+            for (auto i = 2; i < 12; ++i)
+                LOG_KNOWHERE_DEBUG_  << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i];
+            LOG_KNOWHERE_DEBUG_  << "[2048, +00).count = " << nq_fd[12];
+
+            LOG_KNOWHERE_DEBUG_  << "Total batches: " << batch_cnt;
+
+            LOG_KNOWHERE_DEBUG_  << "Total query_time: " << total_query_time << " ms";
+            LOG_KNOWHERE_DEBUG_  << "Total quantizer search time: " << total_quantizer_search_time << " ms";
+            LOG_KNOWHERE_DEBUG_  << "Total data search time: " << total_data_search_time << " ms";
+            LOG_KNOWHERE_DEBUG_  << "The total number of nprobe access: " << nprobe_access_count;
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            if (nq_cnt)
+                LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%";
+            else
+                LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: 0%";
+        }
+        if (STATISTICS_ENABLE >= 3) {
+            LOG_KNOWHERE_DEBUG_  << "Total queries: " << nq_cnt;
+            for (int i = 0; i < cdf.size(); i++) {
+                LOG_KNOWHERE_DEBUG_  << "Top " << i+1 << "% access count " << cdf[i];
+            }
+        }
+    }
+
+    std::string
+    ToString(const std::string &index_name) override {
+        std::ostringstream ret;
+        ret << "IVFStatistics:";
+        if (STATISTICS_ENABLE == 0) {
+            ret << "There is nothing because configuration STATISTICS_ENABLE = 0" << std::endl;
+        }
+        if (STATISTICS_ENABLE >= 1) {
+            ret << "Total queries: " << nq_cnt << std::endl;
+            ret << "The frequency distribution of the num of queries:" << std::endl;
+            ret << "[1, 1].count = " << nq_fd[0] << std::endl;
+            ret << "[2, 2].count = " << nq_fd[1] << std::endl;
+            for (auto i = 2; i < 12; ++i)
+                ret << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i] << std::endl;
+            ret << "[2048, +00).count = " << nq_fd[12] << std::endl;
+
+            ret << "Total batches: " << batch_cnt << std::endl;
+            ret << "Total query_time: " << total_query_time << " ms" << std::endl;
+            ret << "Total quantizer search time: " <<total_quantizer_search_time << " ms" << std::endl;
+            ret << "Total data search time" << total_data_search_time << " ms" << std::endl;
+            ret << "The total number of nprobe access: " <<nprobe_access_count;
+        }
+        if (STATISTICS_ENABLE >= 2) {
+            if (nq_cnt)
+                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+            else
+                ret << "The percentage of 1 in bitset: 0%" << std::endl;
+        }
+        if (STATISTICS_ENABLE >= 3) {
+            ret << "Total queries: " << nq_cnt << std::endl;
+            for (int i = 0; i < cdf.size(); i++) {
+                ret << "Top " << i+1 << "% access count " << cdf[i];
+            }
+        }
+        return ret.str();
+    }
 };
 
 }  // namespace knowhere

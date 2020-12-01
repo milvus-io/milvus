@@ -180,6 +180,7 @@ InitConfig() {
         {"engine.simd_type",
          CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
 
+
         //        {"engine.stat_optimizer_enable",
         //         CreateBoolConfig("engine.stat_optimizer_enable", &config.engine.stat_optimizer_enable.value, true)},
 

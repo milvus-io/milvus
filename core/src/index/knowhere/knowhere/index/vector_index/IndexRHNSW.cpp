@@ -17,6 +17,7 @@
 #include <iterator>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 #include "faiss/BuilderSuspend.h"
 #include "knowhere/common/Exception.h"

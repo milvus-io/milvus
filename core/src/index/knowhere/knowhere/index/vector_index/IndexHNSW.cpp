@@ -18,6 +18,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 #include "faiss/BuilderSuspend.h"
 #include "hnswlib/hnswalg.h"
