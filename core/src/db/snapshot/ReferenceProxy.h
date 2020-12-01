@@ -44,6 +44,7 @@ class ReferenceProxy : public std::enable_shared_from_this<ReferenceProxy> {
             for (auto& cb : on_no_ref_cbs_) {
                 cb(this->shared_from_this());
             }
+            on_no_ref_cbs_.clear();
         }
     }
 

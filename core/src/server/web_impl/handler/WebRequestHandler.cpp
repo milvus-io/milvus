@@ -776,13 +776,13 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         field_type_.insert({field.first, field.second.field_type_});
     }
 
+    auto query_json = json["query"];
     milvus::json extra_params;
-    if (json.contains("fields")) {
-        if (json["fields"].is_array()) {
-            extra_params["fields"] = json["fields"];
+    if (query_json.contains("fields")) {
+        if (query_json["fields"].is_array()) {
+            extra_params["fields"] = query_json["fields"];
         }
     }
-    auto query_json = json["query"];
 
     std::vector<std::string> partition_tags;
     if (query_json.contains("partition_tags")) {

@@ -688,31 +688,6 @@ $ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/partitions"
 
 The deletion is successful if no information is returned.
 
-### `/collections/{collection_name}/partitions/{partition_tag}/entities?offset=0&page_size=1` (GET)
-##### Response
-
-```json
-{
-    "code": 0,
-    "message": "OK",
-    "data": {
-        "entities": [
-            {
-                "__id": "1578989029645098000",
-                "field_1": 1,
-                "field_vec": []
-            },
-            {
-                "__id": "1578989029645098001",
-                "field_1": 2,
-                "field_vec": []
-            }
-        ]
-    }
-}
-```
-
-
 ### `/collections/{collection_name}/segments/{segment_name}/ids` (GET)
 
 Gets all vector ids of segment in a collection starting from `offset` and ends with `page_size`.
