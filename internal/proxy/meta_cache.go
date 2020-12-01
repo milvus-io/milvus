@@ -4,26 +4,30 @@ import (
 	"context"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 type Cache interface {
 	Hit(collectionName string) bool
 	Get(collectionName string) (*servicepb.CollectionDescription, error)
-	Sync(collectionName string) error
-	Update(collectionName string, desc *servicepb.CollectionDescription) error
+	Update(collectionName string) error
 	Remove(collectionName string) error
 }
 
 var globalMetaCache Cache
 
 type SimpleMetaCache struct {
-	mu            sync.RWMutex
-	metas         map[string]*servicepb.CollectionDescription // collection name to schema
-	ctx           context.Context
-	proxyInstance *Proxy
+	mu             sync.RWMutex
+	proxyID        UniqueID
+	metas          map[string]*servicepb.CollectionDescription // collection name to schema
+	masterClient   masterpb.MasterClient
+	reqIDAllocator *allocator.IDAllocator
+	tsoAllocator   *allocator.TimestampAllocator
+	ctx            context.Context
 }
 
 func (metaCache *SimpleMetaCache) Hit(collectionName string) bool {
@@ -43,34 +47,58 @@ func (metaCache *SimpleMetaCache) Get(collectionName string) (*servicepb.Collect
 	return schema, nil
 }
 
-func (metaCache *SimpleMetaCache) Sync(collectionName string) error {
-	dct := &DescribeCollectionTask{
-		Condition: NewTaskCondition(metaCache.ctx),
-		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
-			MsgType: internalpb.MsgType_kDescribeCollection,
-			CollectionName: &servicepb.CollectionName{
-				CollectionName: collectionName,
-			},
-		},
-		masterClient: metaCache.proxyInstance.masterClient,
+func (metaCache *SimpleMetaCache) Update(collectionName string) error {
+	reqID, err := metaCache.reqIDAllocator.AllocOne()
+	if err != nil {
+		return err
 	}
-	var cancel func()
-	dct.ctx, cancel = context.WithTimeout(metaCache.ctx, reqTimeoutInterval)
-	defer cancel()
+	ts, err := metaCache.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	hasCollectionReq := &internalpb.HasCollectionRequest{
+		MsgType:   internalpb.MsgType_kHasCollection,
+		ReqID:     reqID,
+		Timestamp: ts,
+		ProxyID:   metaCache.proxyID,
+		CollectionName: &servicepb.CollectionName{
+			CollectionName: collectionName,
+		},
+	}
+	has, err := metaCache.masterClient.HasCollection(metaCache.ctx, hasCollectionReq)
+	if err != nil {
+		return err
+	}
+	if !has.Value {
+		return errors.New("collection " + collectionName + " not exists")
+	}
 
-	err := metaCache.proxyInstance.sched.DdQueue.Enqueue(dct)
+	reqID, err = metaCache.reqIDAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	ts, err = metaCache.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	req := &internalpb.DescribeCollectionRequest{
+		MsgType:   internalpb.MsgType_kDescribeCollection,
+		ReqID:     reqID,
+		Timestamp: ts,
+		ProxyID:   metaCache.proxyID,
+		CollectionName: &servicepb.CollectionName{
+			CollectionName: collectionName,
+		},
+	}
+	resp, err := metaCache.masterClient.DescribeCollection(metaCache.ctx, req)
 	if err != nil {
 		return err
 	}
 
-	return dct.WaitToFinish()
-}
-
-func (metaCache *SimpleMetaCache) Update(collectionName string, desc *servicepb.CollectionDescription) error {
 	metaCache.mu.Lock()
 	defer metaCache.mu.Unlock()
+	metaCache.metas[collectionName] = resp
 
-	metaCache.metas[collectionName] = desc
 	return nil
 }
 
@@ -87,14 +115,23 @@ func (metaCache *SimpleMetaCache) Remove(collectionName string) error {
 	return nil
 }
 
-func newSimpleMetaCache(ctx context.Context, proxyInstance *Proxy) *SimpleMetaCache {
+func newSimpleMetaCache(ctx context.Context,
+	mCli masterpb.MasterClient,
+	idAllocator *allocator.IDAllocator,
+	tsoAllocator *allocator.TimestampAllocator) *SimpleMetaCache {
 	return &SimpleMetaCache{
-		metas:         make(map[string]*servicepb.CollectionDescription),
-		proxyInstance: proxyInstance,
-		ctx:           ctx,
+		metas:          make(map[string]*servicepb.CollectionDescription),
+		masterClient:   mCli,
+		reqIDAllocator: idAllocator,
+		tsoAllocator:   tsoAllocator,
+		proxyID:        Params.ProxyID(),
+		ctx:            ctx,
 	}
 }
 
-func initGlobalMetaCache(ctx context.Context, proxyInstance *Proxy) {
-	globalMetaCache = newSimpleMetaCache(ctx, proxyInstance)
+func initGlobalMetaCache(ctx context.Context,
+	mCli masterpb.MasterClient,
+	idAllocator *allocator.IDAllocator,
+	tsoAllocator *allocator.TimestampAllocator) {
+	globalMetaCache = newSimpleMetaCache(ctx, mCli, idAllocator, tsoAllocator)
 }

@@ -91,7 +91,7 @@ func (it *InsertTask) PreExecute() error {
 func (it *InsertTask) Execute() error {
 	collectionName := it.BaseInsertTask.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
+		err := globalMetaCache.Update(collectionName)
 		if err != nil {
 			return err
 		}
@@ -352,7 +352,7 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 func (qt *QueryTask) PreExecute() error {
 	collectionName := qt.query.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
-		err := globalMetaCache.Sync(collectionName)
+		err := globalMetaCache.Update(collectionName)
 		if err != nil {
 			return err
 		}
@@ -605,9 +605,14 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 }
 
 func (dct *DescribeCollectionTask) Execute() error {
+	if !globalMetaCache.Hit(dct.CollectionName.CollectionName) {
+		err := globalMetaCache.Update(dct.CollectionName.CollectionName)
+		if err != nil {
+			return err
+		}
+	}
 	var err error
-	dct.result, err = dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
-	globalMetaCache.Update(dct.CollectionName.CollectionName, dct.result)
+	dct.result, err = globalMetaCache.Get(dct.CollectionName.CollectionName)
 	return err
 }
 
