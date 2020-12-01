@@ -31,6 +31,8 @@ ParseVecNode(Plan* plan, const Json& out_body) {
     std::string field_name = iter.key();
     auto& vec_info = iter.value();
     auto topK = vec_info["topk"];
+    AssertInfo(topK > 0, "topK must greater than 0");
+    AssertInfo(topK < 16384, "topK is too large");
     vec_node->query_info_.topK_ = topK;
     vec_node->query_info_.metric_type_ = vec_info["metric_type"];
     vec_node->query_info_.search_params_ = vec_info["params"];
