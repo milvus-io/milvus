@@ -139,7 +139,7 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
+					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -191,7 +191,7 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
+					err = ss.publishFailedSearchResult(msg)
 					if err != nil {
 						log.Println("publish FailedSearchResult failed, error message: ", err)
 					}
@@ -346,7 +346,7 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	return nil
 }
 
-func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
+func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg) error {
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
@@ -354,7 +354,7 @@ func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg s
 	}
 	var results = internalpb.SearchResult{
 		MsgType:         internalpb.MsgType_kSearchResult,
-		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR, Reason: errMsg},
+		Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		ReqID:           searchMsg.ReqID,
 		ProxyID:         searchMsg.ProxyID,
 		QueryNodeID:     searchMsg.ProxyID,

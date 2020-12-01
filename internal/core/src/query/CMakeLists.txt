@@ -12,4 +12,4 @@ set(MILVUS_QUERY_SRCS
         BruteForceSearch.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
-target_link_libraries(milvus_query milvus_proto milvus_utils)
+target_link_libraries(milvus_query milvus_proto)
