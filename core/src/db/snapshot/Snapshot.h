@@ -273,7 +273,6 @@ class Snapshot : public ReferenceProxy {
         ReferenceProxy::UnRef();
         if (ref_count_ == 0) {
             UnRefAll();
-            std::apply([](auto&... holder) { ((holder.clear()), ...); }, resources_);
         }
     }
 
