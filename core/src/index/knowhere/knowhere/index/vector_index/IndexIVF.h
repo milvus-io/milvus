@@ -55,7 +55,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
     DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr&) override;
 
-
 #if 0
     DatasetPtr
     QueryById(const DatasetPtr& dataset, const Config& config) override;

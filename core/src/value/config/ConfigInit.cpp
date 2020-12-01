@@ -162,7 +162,7 @@ InitConfig() {
         Integer(engine.omp_thread_num, 0, std::numeric_limits<int64_t>::max(), 0),
         Enum(engine.clustering_type, &ClusteringMap, ClusteringType::K_MEANS),
         Enum(engine.simd_type, &SimdMap, SimdType::AUTO),
-        //Bool(engine.stat_optimizer_enable, true),
+        // Bool(engine.stat_optimizer_enable, true),
         Integer(engine.stat_optimizer_enable, 0, std::numeric_limits<int64_t>::max(), 1),
 
         Bool(system.lock.enable, true),

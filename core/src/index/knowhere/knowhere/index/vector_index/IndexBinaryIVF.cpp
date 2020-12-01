@@ -172,7 +172,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
         if (STATISTICS_ENABLE >= 1) {
             ivf_stats->nq_cnt += n;
             ivf_stats->batch_cnt += 1;
-            ivf_stats-> nprobe_access_count = ivf_index->index_ivf_stats.nlist;
+            ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
 
             if (n > 2048)
                 ivf_stats->nq_fd[12]++;
@@ -184,8 +184,8 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
                                 << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
             ivf_stats->total_quantizer_search_time += ivf_index->index_ivf_stats.quantization_time;
             ivf_stats->total_data_search_time += ivf_index->index_ivf_stats.search_time;
-            ivf_stats->total_query_time += ivf_index->index_ivf_stats.quantization_time +
-                    ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_query_time +=
+                ivf_index->index_ivf_stats.quantization_time + ivf_index->index_ivf_stats.search_time;
             ivf_index->index_ivf_stats.quantization_time = 0;
             ivf_index->index_ivf_stats.search_time = 0;
         }

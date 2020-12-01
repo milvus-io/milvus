@@ -65,10 +65,10 @@ class IndexNGT : public VecIndex {
     void
     UpdateIndexSize() override;
 
-    virtual StatisticsPtr
+    StatisticsPtr
     GetStatistics() override;
 
-    virtual void
+    void
     ClearStatistics() override;
 
  protected:

@@ -77,8 +77,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
         stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
         stats->Clear();
     }
-    //statistics logging :
-
+    // statistics logging :
 
 #ifndef MILVUS_GPU_VERSION
     auto ails = dynamic_cast<faiss::ArrayInvertedLists*>(invlists);
@@ -342,7 +341,7 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
         if (STATISTICS_ENABLE >= 1) {
             ivf_stats->nq_cnt += n;
             ivf_stats->batch_cnt += 1;
-            ivf_stats-> nprobe_access_count = ivf_index->index_ivf_stats.nlist;
+            ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
 
             if (n > 2048) {
                 ivf_stats->nq_fd[12]++;
@@ -355,8 +354,8 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
                                 << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
             ivf_stats->total_quantizer_search_time += ivf_index->index_ivf_stats.quantization_time;
             ivf_stats->total_data_search_time += ivf_index->index_ivf_stats.search_time;
-            ivf_stats->total_query_time += ivf_index->index_ivf_stats.quantization_time +
-                    ivf_index->index_ivf_stats.search_time;
+            ivf_stats->total_query_time +=
+                ivf_index->index_ivf_stats.quantization_time + ivf_index->index_ivf_stats.search_time;
             ivf_index->index_ivf_stats.quantization_time = 0;
             ivf_index->index_ivf_stats.search_time = 0;
         }

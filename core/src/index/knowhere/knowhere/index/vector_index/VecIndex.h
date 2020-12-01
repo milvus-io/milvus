@@ -18,8 +18,8 @@
 
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/common/Typedef.h"
 #include "knowhere/common/Statistics.h"
+#include "knowhere/common/Typedef.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
 

@@ -17,9 +17,8 @@
 #include <faiss/utils/distances.h>
 
 #include "NGT/lib/NGT/defines.h"
-#include "config/ServerConfig.h"
-#include "faiss/common.h"
 #include "faiss/FaissHook.h"
+#include "faiss/common.h"
 #include "faiss/utils/utils.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"

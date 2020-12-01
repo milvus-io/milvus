@@ -11,15 +11,15 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-#include <memory>
-#include <utility>
+#include <src/index/knowhere/knowhere/index/IndexType.h>
 #include <stdio.h>
 #include <algorithm>
 #include <functional>
+#include <memory>
+#include <string>
 #include <unordered_map>
-#include <src/index/knowhere/knowhere/index/IndexType.h>
+#include <utility>
+#include <vector>
 #include "Log.h"
 
 #include <faiss/IVFlib.h>
@@ -28,8 +28,8 @@
 namespace milvus {
 namespace knowhere {
 
-
-inline uint64_t upper_bound_of_pow2(uint64_t x) {
+inline uint64_t
+upper_bound_of_pow2(uint64_t x) {
     --x;
     x |= (x >> 1);
     x |= (x >> 2);
@@ -40,31 +40,55 @@ inline uint64_t upper_bound_of_pow2(uint64_t x) {
     return x + 1;
 }
 
-inline int len_of_pow2(uint64_t x) {
+inline int
+len_of_pow2(uint64_t x) {
     return __builtin_popcountl(x - 1);
 }
 
 class Statistics {
  public:
-    explicit Statistics(std::string &idx_t):index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0),
-                                   total_query_time(0.0) { filter_cdf.resize(21, 0); nq_fd.resize(13, 0); }
+    explicit Statistics(std::string& idx_t)
+        : index_type(idx_t), filter_percentage_sum(0.0), nq_cnt(0), batch_cnt(0), total_query_time(0.0) {
+        filter_cdf.resize(21, 0);
+        nq_fd.resize(13, 0);
+    }
     virtual ~Statistics() = default;
-    virtual std::string ToString(const std::string &index_name) = 0;
-    virtual void Clear() {
+    virtual std::string
+    ToString(const std::string& index_name) = 0;
+    virtual void
+    Clear() {
         filter_percentage_sum = total_query_time = 0.0;
         nq_cnt = batch_cnt = 0;
         filter_cdf.resize(21, 0);
         nq_fd.resize(13, 0);
     }
-    std::string IndexType() { return index_type; }
-    double Qps() { return nq_cnt ? total_query_time / nq_cnt : 0.0; }
-    int64_t BatchCount() { return batch_cnt; }
-    int64_t QueryCount() { return nq_cnt; }
-    const std::vector<int>& FilterHistograms() { return filter_cdf; }
-    const std::vector<int>& NqFD() { return nq_fd; }
+    std::string
+    IndexType() {
+        return index_type;
+    }
+    double
+    Qps() {
+        return nq_cnt ? total_query_time / nq_cnt : 0.0;
+    }
+    int64_t
+    BatchCount() {
+        return batch_cnt;
+    }
+    int64_t
+    QueryCount() {
+        return nq_cnt;
+    }
+    const std::vector<int>&
+    FilterHistograms() {
+        return filter_cdf;
+    }
+    const std::vector<int>&
+    NqFD() {
+        return nq_fd;
+    }
 
-    std::string &index_type;
-    double filter_percentage_sum; // the sum of percentage of 1 in bitset before search
+    std::string& index_type;
+    double filter_percentage_sum;  // the sum of percentage of 1 in bitset before search
     int64_t nq_cnt;
     int64_t batch_cnt;
     double total_query_time;
@@ -75,8 +99,9 @@ using StatisticsPtr = std::shared_ptr<Statistics>;
 
 class HNSWStatistics : public Statistics {
  public:
-    explicit HNSWStatistics(std::string &idx_t):Statistics(idx_t), max_level(0), access_total(0),
-                                       target_level(1), ef_sum(0) {}
+    explicit HNSWStatistics(std::string& idx_t)
+        : Statistics(idx_t), max_level(0), access_total(0), target_level(1), ef_sum(0) {
+    }
 
     void
     Clear() override {
@@ -89,24 +114,25 @@ class HNSWStatistics : public Statistics {
         ef_sum = 0;
     }
 
-    void GenSplitIdx(std::vector<int> &split_idx, size_t len) {
+    void
+    GenSplitIdx(std::vector<int>& split_idx, size_t len) {
         for (auto i = 0; i < split_idx.size(); ++i) {
             split_idx[i] = (int)(((double)split_idx[i] / 100.0) * len);
         }
     }
 
     void
-    CaculateStatistics(std::vector<double> &access_lorenz_curve, const std::vector<int> &stat_len) {
+    CaculateStatistics(std::vector<double>& access_lorenz_curve, const std::vector<int>& stat_len) {
         std::vector<int64_t> cnts;
         access_total = 0;
-        for (auto &elem : access_cnt) {
+        for (auto& elem : access_cnt) {
             cnts.push_back(elem.second);
             access_total += elem.second;
         }
         std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
         size_t len = cnts.size();
         auto gini_len = 100;
-//        std::vector<int> stat_len(gini_len, 0);
+        //        std::vector<int> stat_len(gini_len, 0);
         int64_t tmp_cnt = 0;
         access_lorenz_curve.resize(gini_len);
         access_lorenz_curve[gini_len - 1] = 1.0;
@@ -125,7 +151,7 @@ class HNSWStatistics : public Statistics {
     }
 
     std::string
-    ToString(const std::string &index_name) override {
+    ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         if (STATISTICS_ENABLE == 0) {
@@ -146,8 +172,8 @@ class HNSWStatistics : public Statistics {
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" <<
-                std::endl;
+                ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%"
+                    << std::endl;
             else
                 ret << "The average percentage of filter in bitset: 0%" << std::endl;
             ret << "The frequency distribution of filter: " << std::endl;
@@ -157,9 +183,8 @@ class HNSWStatistics : public Statistics {
         }
         if (STATISTICS_ENABLE >= 3) {
             std::vector<double> access_lorenz_curve;
-            std::vector<int> split_idx(100); // default log 101 idx
-            for (auto i = 0; i < 100; ++i)
-                split_idx[i] = i + 1;
+            std::vector<int> split_idx(100);  // default log 101 idx
+            for (auto i = 0; i < 100; ++i) split_idx[i] = i + 1;
             GenSplitIdx(split_idx, access_cnt.size());
             CaculateStatistics(access_lorenz_curve, split_idx);
             ret << "Max level: " << max_level << std::endl;
@@ -183,9 +208,14 @@ class HNSWStatistics : public Statistics {
     }
 
     const std::vector<int64_t>&
-    LevelNodesNum() { return distribution; }
+    LevelNodesNum() {
+        return distribution;
+    }
 
-    double AvgSearchEf() { return nq_cnt ? ef_sum / nq_cnt : 0; }
+    double
+    AvgSearchEf() {
+        return nq_cnt ? ef_sum / nq_cnt : 0;
+    }
 
     std::vector<double>
     AccessCDF() {
@@ -200,10 +230,9 @@ class HNSWStatistics : public Statistics {
     }
 
     std::vector<double>
-    AccessCDF(const std::vector<int64_t> &axis_x) {
+    AccessCDF(const std::vector<int64_t>& axis_x) {
         std::vector<int> split_idx(axis_x.size(), 0);
-        for (auto i = 0; i < axis_x.size(); ++i)
-            split_idx[i] = (int)axis_x[i];
+        for (auto i = 0; i < axis_x.size(); ++i) split_idx[i] = (int)axis_x[i];
         GenSplitIdx(split_idx, access_cnt.size());
         std::vector<double> access_lorenz_curve;
         CaculateStatistics(access_lorenz_curve, split_idx);
@@ -218,11 +247,11 @@ class HNSWStatistics : public Statistics {
     int64_t ef_sum;
 };
 
-
 class RHNSWStatistics : public Statistics {
  public:
-    explicit RHNSWStatistics(std::string &idx_t):Statistics(idx_t), max_level(0), access_total(0),
-                                        target_level(1), ef_sum(0) {}
+    explicit RHNSWStatistics(std::string& idx_t)
+        : Statistics(idx_t), max_level(0), access_total(0), target_level(1), ef_sum(0) {
+    }
 
     void
     Clear() override {
@@ -236,7 +265,7 @@ class RHNSWStatistics : public Statistics {
     }
 
     std::string
-    ToString(const std::string &index_name) override {
+    ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
         if (STATISTICS_ENABLE == 0) {
@@ -257,7 +286,7 @@ class RHNSWStatistics : public Statistics {
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%" << std::endl;
             else
                 ret << "The percentage of 1 in bitset: 0%" << std::endl;
             ret << "The frequency distribution of filter: " << std::endl;
@@ -289,9 +318,14 @@ class RHNSWStatistics : public Statistics {
     }
 
     const std::vector<int64_t>&
-    LevelNodesNum() { return distribution; }
+    LevelNodesNum() {
+        return distribution;
+    }
 
-    double AvgSearchEf() { return nq_cnt ? ef_sum / nq_cnt : 0; }
+    double
+    AvgSearchEf() {
+        return nq_cnt ? ef_sum / nq_cnt : 0;
+    }
 
     std::vector<double>
     AccessCDF() {
@@ -303,7 +337,7 @@ class RHNSWStatistics : public Statistics {
     }
 
     std::vector<double>
-    AccessCDF(const std::vector<int64_t> &axis_x) {
+    AccessCDF(const std::vector<int64_t>& axis_x) {
         std::vector<double> ret(axis_x.size());
         int j = 0;
         for (auto i = 0; i < axis_x.size(); ++j) {
@@ -331,8 +365,9 @@ class IVFStatistics : public Statistics {
     double total_quantizer_search_time;
     double total_data_search_time;
 
-    explicit IVFStatistics(std::string &idx_t):Statistics(idx_t), total_quantizer_search_time(0),
-    total_data_search_time(0), nprobe_access_count(0) {}
+    explicit IVFStatistics(std::string& idx_t)
+        : Statistics(idx_t), total_quantizer_search_time(0), total_data_search_time(0), nprobe_access_count(0) {
+    }
 
     std::vector<std::pair<int64_t, int64_t>>
     SearchNprobe() {
@@ -351,7 +386,7 @@ class IVFStatistics : public Statistics {
     const std::vector<double>
     AccessCDF() {
         std::vector<double> cdfresult;
-        for (int i=5; i <= 100; i += 5) {
+        for (int i = 5; i <= 100; i += 5) {
             cdfresult.push_back(cdf[i]);
         }
         return cdfresult;
@@ -360,7 +395,7 @@ class IVFStatistics : public Statistics {
     void
     CaculateStatistics(std::vector<int> nprobe_statistics) {
         nprobe_count.clear();
-        for (int i=0; i < nprobe_statistics.size(); i++) {
+        for (int i = 0; i < nprobe_statistics.size(); i++) {
             nprobe_count.push_back(std::pair<int64_t, int64_t>(i, nprobe_statistics[i]));
         }
         std::sort(nprobe_statistics.begin(), nprobe_statistics.end());
@@ -369,11 +404,11 @@ class IVFStatistics : public Statistics {
         int sum_id = 0;
         int total = 0;
         cdf.clear();
-        for (int i=1; i <= 100; i++) {
-            while (sum_id < int(nprobe_statistics.size()*0.01*i)) {
+        for (int i = 1; i <= 100; i++) {
+            while (sum_id < int(nprobe_statistics.size() * 0.01 * i)) {
                 total += nprobe_statistics[sum_id++];
             }
-            cdf.push_back(total/(double)nprobe_access_count);
+            cdf.push_back(total / (double)nprobe_access_count);
         }
 
         return;
@@ -394,40 +429,40 @@ class IVFStatistics : public Statistics {
         LOG_KNOWHERE_DEBUG_ << "IVFStatistics:";
 
         if (STATISTICS_ENABLE == 0) {
-            LOG_KNOWHERE_DEBUG_  << "There is nothing because configuration STATISTICS_ENABLE = 0";
+            LOG_KNOWHERE_DEBUG_ << "There is nothing because configuration STATISTICS_ENABLE = 0";
         }
         if (STATISTICS_ENABLE >= 1) {
-            LOG_KNOWHERE_DEBUG_  << "Total queries: " << nq_cnt;
-            LOG_KNOWHERE_DEBUG_  << "The frequency distribution of the num of queries:";
-            LOG_KNOWHERE_DEBUG_  << "[1, 1].count = " << nq_fd[0];
-            LOG_KNOWHERE_DEBUG_  << "[2, 2].count = " << nq_fd[1];
+            LOG_KNOWHERE_DEBUG_ << "Total queries: " << nq_cnt;
+            LOG_KNOWHERE_DEBUG_ << "The frequency distribution of the num of queries:";
+            LOG_KNOWHERE_DEBUG_ << "[1, 1].count = " << nq_fd[0];
+            LOG_KNOWHERE_DEBUG_ << "[2, 2].count = " << nq_fd[1];
             for (auto i = 2; i < 12; ++i)
-                LOG_KNOWHERE_DEBUG_  << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i];
-            LOG_KNOWHERE_DEBUG_  << "[2048, +00).count = " << nq_fd[12];
+                LOG_KNOWHERE_DEBUG_ << "[" << ((1 << (i - 1)) | 1) << ", " << (1 << i) << "].count = " << nq_fd[i];
+            LOG_KNOWHERE_DEBUG_ << "[2048, +00).count = " << nq_fd[12];
 
-            LOG_KNOWHERE_DEBUG_  << "Total batches: " << batch_cnt;
+            LOG_KNOWHERE_DEBUG_ << "Total batches: " << batch_cnt;
 
-            LOG_KNOWHERE_DEBUG_  << "Total query_time: " << total_query_time << " ms";
-            LOG_KNOWHERE_DEBUG_  << "Total quantizer search time: " << total_quantizer_search_time << " ms";
-            LOG_KNOWHERE_DEBUG_  << "Total data search time: " << total_data_search_time << " ms";
-            LOG_KNOWHERE_DEBUG_  << "The total number of nprobe access: " << nprobe_access_count;
+            LOG_KNOWHERE_DEBUG_ << "Total query_time: " << total_query_time << " ms";
+            LOG_KNOWHERE_DEBUG_ << "Total quantizer search time: " << total_quantizer_search_time << " ms";
+            LOG_KNOWHERE_DEBUG_ << "Total data search time: " << total_data_search_time << " ms";
+            LOG_KNOWHERE_DEBUG_ << "The total number of nprobe access: " << nprobe_access_count;
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%";
+                LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%";
             else
                 LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: 0%";
         }
         if (STATISTICS_ENABLE >= 3) {
-            LOG_KNOWHERE_DEBUG_  << "Total queries: " << nq_cnt;
+            LOG_KNOWHERE_DEBUG_ << "Total queries: " << nq_cnt;
             for (int i = 0; i < cdf.size(); i++) {
-                LOG_KNOWHERE_DEBUG_  << "Top " << i+1 << "% access count " << cdf[i];
+                LOG_KNOWHERE_DEBUG_ << "Top " << i + 1 << "% access count " << cdf[i];
             }
         }
     }
 
     std::string
-    ToString(const std::string &index_name) override {
+    ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << "IVFStatistics:";
         if (STATISTICS_ENABLE == 0) {
@@ -444,20 +479,20 @@ class IVFStatistics : public Statistics {
 
             ret << "Total batches: " << batch_cnt << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
-            ret << "Total quantizer search time: " <<total_quantizer_search_time << " ms" << std::endl;
+            ret << "Total quantizer search time: " << total_quantizer_search_time << " ms" << std::endl;
             ret << "Total data search time" << total_data_search_time << " ms" << std::endl;
-            ret << "The total number of nprobe access: " <<nprobe_access_count;
+            ret << "The total number of nprobe access: " << nprobe_access_count;
         }
         if (STATISTICS_ENABLE >= 2) {
             if (nq_cnt)
-                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100/ nq_cnt << "%" << std::endl;
+                ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%" << std::endl;
             else
                 ret << "The percentage of 1 in bitset: 0%" << std::endl;
         }
         if (STATISTICS_ENABLE >= 3) {
             ret << "Total queries: " << nq_cnt << std::endl;
             for (int i = 0; i < cdf.size(); i++) {
-                ret << "Top " << i+1 << "% access count " << cdf[i];
+                ret << "Top " << i + 1 << "% access count " << cdf[i];
             }
         }
         return ret.str();
