@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -64,7 +65,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
             if (STATISTICS_ENABLE >= 3) {
                 hnsw_stats->max_level = real_idx->hnsw.max_level;
                 hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-                for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+                for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                     hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
                     if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
                         hnsw_stats->target_level = i;
@@ -99,7 +100,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         if (STATISTICS_ENABLE >= 3) {
             hnsw_stats->max_level = real_idx->hnsw.max_level;
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-            for (auto i = 0; i <= real_idx->hnsw.max_level; ++ i) {
+            for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                 hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
                 if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
                     hnsw_stats->target_level = i;
@@ -130,9 +131,9 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
             if (rows > 2048)
-                hnsw_stats->nq_fd[12] ++;
+                hnsw_stats->nq_fd[12]++;
             else
-                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))] ++;
+                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
         }
         if (STATISTICS_ENABLE >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
@@ -159,7 +160,8 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     query_end = std::chrono::high_resolution_clock::now();
     if (STATISTICS_ENABLE) {
         if (STATISTICS_ENABLE >= 1) {
-            hnsw_stats->total_query_time += std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
+            hnsw_stats->total_query_time +=
+                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
         if (STATISTICS_ENABLE >= 3) {
             real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);

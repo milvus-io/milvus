@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -78,7 +79,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
             if (STATISTICS_ENABLE >= 3) {
                 hnsw_stats->max_level = index_->maxlevel_;
                 hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-                for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+                for (auto i = 0; i <= index_->maxlevel_; ++i) {
                     hnsw_stats->distribution[i] = index_->level_stats_[i];
                     if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
                         hnsw_stats->target_level = i;
@@ -158,7 +159,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         if (STATISTICS_ENABLE >= 3) {
             hnsw_stats->max_level = index_->maxlevel_;
             hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-            for (auto i = 0; i <= index_->maxlevel_; ++ i) {
+            for (auto i = 0; i <= index_->maxlevel_; ++i) {
                 hnsw_stats->distribution[i] = index_->level_stats_[i];
                 if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
                     hnsw_stats->target_level = i;
@@ -189,9 +190,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
             if (rows > 2048)
-                hnsw_stats->nq_fd[12] ++;
+                hnsw_stats->nq_fd[12]++;
             else
-                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))] ++;
+                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
         }
         if (STATISTICS_ENABLE >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
@@ -204,8 +205,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         }
         if (STATISTICS_ENABLE >= 3) {
             query_stats.resize(rows);
-            for (auto i = 0; i < rows; ++ i)
-                query_stats[i].target_level = hnsw_stats->target_level;
+            for (auto i = 0; i < rows; ++i) query_stats[i].target_level = hnsw_stats->target_level;
         }
     }
 
@@ -231,8 +231,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         // }
         if (STATISTICS_ENABLE >= 3) {
             ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
-        }
-        else {
+        } else {
             auto dummy_stat = hnswlib::StatisticsInfo();
             ret = index_->searchKnn(single_query, k, compare, bitset, dummy_stat);
         }
@@ -260,11 +259,12 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
 
     if (STATISTICS_ENABLE) {
         if (STATISTICS_ENABLE >= 1) {
-            hnsw_stats->total_query_time += std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
+            hnsw_stats->total_query_time +=
+                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
         if (STATISTICS_ENABLE >= 3) {
-            for (auto i = 0; i < rows; ++ i) {
-                for (auto j = 0; j < query_stats[i].accessed_points.size(); ++ j) {
+            for (auto i = 0; i < rows; ++i) {
+                for (auto j = 0; j < query_stats[i].accessed_points.size(); ++j) {
                     auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
                     if (tgt == hnsw_stats->access_cnt.end())
                         hnsw_stats->access_cnt[query_stats[i].accessed_points[j]] = 1;

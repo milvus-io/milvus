@@ -239,6 +239,7 @@ IDMAP::GetStatistics() {
 
 void
 IDMAP::ClearStatistics() {
+    LOG_KNOWHERE_DEBUG_ << "IndexIDMAP has not implement interface ClearStatistics yet";
 }
 
 }  // namespace knowhere

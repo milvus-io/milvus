@@ -180,9 +180,9 @@ InitConfig() {
         {"engine.simd_type",
          CreateEnumConfig("engine.simd_type", &SimdMap, &config.engine.simd_type.value, SimdType::AUTO)},
 
-        {"engine.stat_optimizer_enable",
-         CreateIntegerConfig("engine.stat_optimizer_enable",0,std::numeric_limits<int64_t>::max(),
-                 &config.engine.stat_optimizer_enable.value, 2)},
+
+        //        {"engine.stat_optimizer_enable",
+        //         CreateBoolConfig("engine.stat_optimizer_enable", &config.engine.stat_optimizer_enable.value, true)},
 
         {"engine.stat_optimizer_enable",
          CreateIntegerConfig("engine.stat_optimizer_enable", 0, std::numeric_limits<int64_t>::max(),
