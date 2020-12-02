@@ -416,6 +416,24 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == 0
 
+    def test_count_delete_loop(self, connect, collection):
+        """
+        target: test loop search and delete entities
+        method: loop search and delete cross segments
+        expected: ok
+        """
+        loop = 2
+        ids = connect.bulk_insert(collection, default_entities)
+        connect.flush([collection])
+        ni = default_nb // loop
+        for i in range(loop):
+            connect.count_entities(collection)
+            status = connect.delete_entity_by_id(collection, ids[i * ni:(i + 1) * ni])
+            assert status
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
 
 class TestDeleteInvalid(object):
     """
