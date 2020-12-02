@@ -670,8 +670,10 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
             auto id = segment_visitor_->GetSegment()->GetID();
             auto sc = segment_visitor_->GetSnapshot()->GetSegmentCommitBySegmentId(id);
-            if (sc) {
-                deleted_docs_ptr->GenBlacklist(sc->GetRowCount());
+            // The black list size must be equal to total entity count containing deleted count
+            // and segment row count.
+            if (sc != nullptr && deleted_docs_ptr != nullptr) {
+                deleted_docs_ptr->GenBlacklist(sc->GetRowCount() + deleted_docs_ptr->GetCount());
             }
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
