@@ -11,20 +11,11 @@
 
 #include <iostream>
 #include "EasyAssert.h"
+// #define BOOST_STACKTRACE_USE_ADDR2LINE
 #define BOOST_STACKTRACE_USE_BACKTRACE
 #include <boost/stacktrace.hpp>
-#include <sstream>
 
 namespace milvus::impl {
-
-std::string
-EasyStackTrace() {
-    auto stack_info = boost::stacktrace::stacktrace();
-    std::ostringstream ss;
-    ss << stack_info;
-    return ss.str();
-}
-
 void
 EasyAssertInfo(
     bool value, std::string_view expr_str, std::string_view filename, int lineno, std::string_view extra_info) {
@@ -35,15 +26,11 @@ EasyAssertInfo(
         if (!extra_info.empty()) {
             info += " => " + std::string(extra_info);
         }
-
-        throw std::runtime_error(info + "\n" + EasyStackTrace());
+        auto fuck = boost::stacktrace::stacktrace();
+        std::cout << fuck;
+        // std::string s = fuck;
+        // info += ;
+        throw std::runtime_error(info);
     }
 }
-
-[[noreturn]] void
-ThrowWithTrace(const std::exception& exception) {
-    auto err_msg = exception.what() + std::string("\n") + EasyStackTrace();
-    throw std::runtime_error(err_msg);
-}
-
 }  // namespace milvus::impl

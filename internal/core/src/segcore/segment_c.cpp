@@ -155,24 +155,6 @@ Search(CSegmentBase c_segment,
     return status;
 }
 
-CStatus
-FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::engine::QueryResult*)c_result;
-
-    auto status = CStatus();
-    try {
-        auto res = segment->FillTargetEntry(plan, *result);
-        status.error_code = Success;
-        status.error_msg = "";
-    } catch (std::runtime_error& e) {
-        status.error_code = UnexpectedException;
-        status.error_msg = strdup(e.what());
-    }
-    return status;
-}
-
 //////////////////////////////////////////////////////////////////
 
 int

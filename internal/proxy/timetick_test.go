@@ -27,7 +27,7 @@ func TestTimeTick_Start(t *testing.T) {
 
 func TestTimeTick_Start2(t *testing.T) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	masterAddr := Params.MasterAddress()
 	tsoAllocator, err := allocator.NewTimestampAllocator(ctx, masterAddr)
 	assert.Nil(t, err)

@@ -5,7 +5,6 @@ import (
 	"log"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
@@ -70,22 +69,11 @@ func (ms *PulsarMsgStream) SetPulsarClient(address string) {
 
 func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 	for i := 0; i < len(channels); i++ {
-		fn := func() error {
-			pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
-			if err != nil {
-				return err
-			}
-			if pp == nil {
-				return errors.New("pulsar is not ready, producer is nil")
-			}
-			ms.producers = append(ms.producers, &pp)
-			return nil
-		}
-		err := Retry(10, time.Millisecond*200, fn)
+		pp, err := (*ms.client).CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
 		if err != nil {
-			errMsg := "Failed to create producer " + channels[i] + ", error = " + err.Error()
-			panic(errMsg)
+			log.Printf("Failed to create querynode producer %s, error = %v", channels[i], err)
 		}
+		ms.producers = append(ms.producers, &pp)
 	}
 }
 
@@ -95,29 +83,18 @@ func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 	pulsarBufSize int64) {
 	ms.unmarshal = unmarshal
 	for i := 0; i < len(channels); i++ {
-		fn := func() error {
-			receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
-			pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
-				Topic:                       channels[i],
-				SubscriptionName:            subName,
-				Type:                        pulsar.KeyShared,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
-				MessageChannel:              receiveChannel,
-			})
-			if err != nil {
-				return err
-			}
-			if pc == nil {
-				return errors.New("pulsar is not ready, consumer is nil")
-			}
-			ms.consumers = append(ms.consumers, &pc)
-			return nil
-		}
-		err := Retry(10, time.Millisecond*200, fn)
+		receiveChannel := make(chan pulsar.ConsumerMessage, pulsarBufSize)
+		pc, err := (*ms.client).Subscribe(pulsar.ConsumerOptions{
+			Topic:                       channels[i],
+			SubscriptionName:            subName,
+			Type:                        pulsar.KeyShared,
+			SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+			MessageChannel:              receiveChannel,
+		})
 		if err != nil {
-			errMsg := "Failed to create consumer " + channels[i] + ", error = " + err.Error()
-			panic(errMsg)
+			log.Printf("Failed to subscribe topic, error = %v", err)
 		}
+		ms.consumers = append(ms.consumers, &pc)
 	}
 }
 

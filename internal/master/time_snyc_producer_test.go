@@ -81,13 +81,18 @@ func receiveMsg(stream *ms.MsgStream) []uint64 {
 func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	Init()
 	pulsarAddress := Params.PulsarAddress
-
-	producerChannels := []string{"proxyTtBarrier"}
-	consumerChannels := []string{"proxyTtBarrier"}
-	consumerSubName := "proxyTtBarrier"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	proxyTtInputStream, proxyTtOutputStream := initTestPulsarStream(ctx, pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+
+	producerChannels := []string{"proxyDMTtBarrier"}
+	consumerChannels := []string{"proxyDMTtBarrier"}
+	consumerSubName := "proxyDMTtBarrier"
+	proxyDMTtInputStream, proxyDMTtOutputStream := initTestPulsarStream(ctx, pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+
+	producerChannels = []string{"proxyDDTtBarrier"}
+	consumerChannels = []string{"proxyDDTtBarrier"}
+	consumerSubName = "proxyDDTtBarrier"
+	proxyDDTtInputStream, proxyDDTtOutputStream := initTestPulsarStream(ctx, pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 
 	producerChannels = []string{"writeNodeBarrier"}
 	consumerChannels = []string{"writeNodeBarrier"}
@@ -97,14 +102,20 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	timeSyncProducer, _ := NewTimeSyncMsgProducer(ctx)
 	timeSyncProducer.SetProxyTtBarrier(&TestTickBarrier{ctx: ctx})
 	timeSyncProducer.SetWriteNodeTtBarrier(&TestTickBarrier{ctx: ctx})
-	timeSyncProducer.SetDMSyncStream(*proxyTtInputStream)
+	timeSyncProducer.SetDMSyncStream(*proxyDMTtInputStream)
+	timeSyncProducer.SetDDSyncStream(*proxyDDTtInputStream)
 	timeSyncProducer.SetK2sSyncStream(*writeNodeInputStream)
-	(*proxyTtOutputStream).Start()
+	(*proxyDMTtOutputStream).Start()
+	(*proxyDDTtOutputStream).Start()
 	(*writeNodeOutputStream).Start()
 	timeSyncProducer.Start()
 	expected := []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	result1 := receiveMsg(proxyTtOutputStream)
+	result1 := receiveMsg(proxyDMTtOutputStream)
 	assert.Equal(t, expected, result1)
+	expected = []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	result1 = receiveMsg(proxyDDTtOutputStream)
+	assert.Equal(t, expected, result1)
+	expected = []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	result2 := receiveMsg(writeNodeOutputStream)
 	assert.Equal(t, expected, result2)
 

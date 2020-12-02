@@ -12,7 +12,6 @@ package querynode
 */
 import "C"
 import (
-	"fmt"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"log"
 	"strconv"
@@ -230,7 +229,6 @@ func (colReplica *collectionReplicaImpl) addPartitionsByCollectionMeta(colMeta *
 		if err != nil {
 			log.Println(err)
 		}
-		fmt.Println("add partition: ", tag)
 	}
 
 	return nil
@@ -264,7 +262,6 @@ func (colReplica *collectionReplicaImpl) removePartitionsByCollectionMeta(colMet
 		if err != nil {
 			log.Println(err)
 		}
-		fmt.Println("delete partition: ", tag)
 	}
 
 	return nil

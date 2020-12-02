@@ -143,7 +143,6 @@ endif ()
 
 target_link_libraries(
         knowhere
-        milvus_utils
         ${depend_libs}
 )
 
