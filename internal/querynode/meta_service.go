@@ -145,7 +145,7 @@ func printSegmentStruct(obj *etcdpb.SegmentMeta) {
 }
 
 func (mService *metaService) processCollectionCreate(id string, value string) {
-	println(fmt.Sprintf("Create Collection:$%s$", id))
+	//println(fmt.Sprintf("Create Collection:$%s$", id))
 
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
@@ -163,7 +163,7 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 }
 
 func (mService *metaService) processSegmentCreate(id string, value string) {
-	println("Create Segment: ", id)
+	//println("Create Segment: ", id)
 
 	seg := mService.segmentUnmarshal(value)
 	if !isSegmentChannelRangeInQueryNodeChannelRange(seg) {
@@ -182,7 +182,7 @@ func (mService *metaService) processSegmentCreate(id string, value string) {
 }
 
 func (mService *metaService) processCreate(key string, msg string) {
-	println("process create", key)
+	//println("process create", key)
 	if isCollectionObj(key) {
 		objID := GetCollectionObjID(key)
 		mService.processCollectionCreate(objID, msg)
@@ -214,7 +214,7 @@ func (mService *metaService) processSegmentModify(id string, value string) {
 }
 
 func (mService *metaService) processCollectionModify(id string, value string) {
-	println("Modify Collection: ", id)
+	//println("Modify Collection: ", id)
 
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
@@ -242,7 +242,7 @@ func (mService *metaService) processModify(key string, msg string) {
 }
 
 func (mService *metaService) processSegmentDelete(id string) {
-	println("Delete segment: ", id)
+	//println("Delete segment: ", id)
 
 	var segmentID, err = strconv.ParseInt(id, 10, 64)
 	if err != nil {
@@ -257,7 +257,7 @@ func (mService *metaService) processSegmentDelete(id string) {
 }
 
 func (mService *metaService) processCollectionDelete(id string) {
-	println("Delete collection: ", id)
+	//println("Delete collection: ", id)
 
 	var collectionID, err = strconv.ParseInt(id, 10, 64)
 	if err != nil {
@@ -272,7 +272,7 @@ func (mService *metaService) processCollectionDelete(id string) {
 }
 
 func (mService *metaService) processDelete(key string) {
-	println("process delete")
+	//println("process delete")
 
 	if isCollectionObj(key) {
 		objID := GetCollectionObjID(key)
