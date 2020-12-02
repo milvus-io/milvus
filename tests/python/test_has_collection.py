@@ -55,7 +55,7 @@ class TestHasCollection:
             assert connect.has_collection(collection_name)
             # assert not assert_collection(connect, collection_name)
         for i in range(threads_num):
-            t = TestThread(target=has, args=())
+            t = MilvusTestThread(target=has, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)

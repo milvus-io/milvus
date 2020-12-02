@@ -4,7 +4,6 @@ from .constants import *
 
 uid = "create_collection"
 
-
 class TestCreateCollection:
     """
     ******************************************************************
