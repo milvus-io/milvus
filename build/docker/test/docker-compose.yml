@@ -1,0 +1,20 @@
+version: '3.5'
+
+services:
+  regression:
+    image: ${TARGET_REPO}/pytest:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/test/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}/pytest:${SOURCE_TAG}
+    volumes:
+      - ../../..:/milvus-distributed:delegated
+    working_dir: "/milvus-distributed/tests/python"
+    command: >
+      /bin/bash -c "pytest --ip proxy"
+    networks:
+      - milvus
+
+networks:
+  milvus:
