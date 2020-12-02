@@ -103,17 +103,20 @@ func (it *InsertTask) Execute() error {
 	autoID := description.Schema.AutoID
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
-	if autoID || true {
+	rowNums := len(it.BaseInsertTask.RowData)
+	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
+	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		offset := i - rowIDBegin
+		it.BaseInsertTask.RowIDs[offset] = i
+	}
+
+	if autoID {
 		if it.HashValues == nil || len(it.HashValues) == 0 {
 			it.HashValues = make([]uint32, 0)
 		}
-		rowNums := len(it.BaseInsertTask.RowData)
-		rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
-		it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
-		for i := rowIDBegin; i < rowIDEnd; i++ {
-			offset := i - rowIDBegin
-			it.BaseInsertTask.RowIDs[offset] = i
-			hashValue, _ := typeutil.Hash32Int64(i)
+		for _, rowID := range it.RowIDs {
+			hashValue, _ := typeutil.Hash32Int64(rowID)
 			it.HashValues = append(it.HashValues, hashValue)
 		}
 	}
@@ -126,6 +129,7 @@ func (it *InsertTask) Execute() error {
 	}
 	msgPack.Msgs[0] = tsMsg
 	err = it.manipulationMsgStream.Produce(msgPack)
+
 	it.result = &servicepb.IntegerRangeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
