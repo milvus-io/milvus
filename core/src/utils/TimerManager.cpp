@@ -47,6 +47,7 @@ TimerManager::Start() {
     for (auto& timer : timers_) {
         timer->timer_.async_wait(std::bind(&TimerContext::Reschedule, timer, std::placeholders::_1));
     }
+    return Status::OK();
 }
 
 void

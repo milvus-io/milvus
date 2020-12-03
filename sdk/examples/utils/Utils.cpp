@@ -444,21 +444,32 @@ Utils::GenSpecificDSLJson(nlohmann::json& dsl_json, int64_t topk, const std::str
 }
 
 void
-Utils::GenPureVecDSLJson(nlohmann::json& dsl_json, nlohmann::json& vector_param_json, const std::string metric_type) {
-    nlohmann::json bool_json, vector_json;
-    std::string placeholder = "placeholder_1";
-    vector_json["vector"] = placeholder;
-    bool_json["must"].push_back(vector_json);
+Utils::GenBinDSLJson(nlohmann::json& dsl_json, int64_t topk, const std::string metric_type,
+                     std::vector<std::vector<uint8_t>>& vectors) {
+    auto dsl = R"({
+        "bool": {
+            "must": [
+                {
+                    "vector": {
+                        "field_vec": {
+                            "topk": "topk",
+                            "query": "placeholder",
+                            "metric_type": "metric_type"
+                        }
+                    }
+                }
+            ]
+        }
+    })";
+    dsl_json = nlohmann::json::parse(dsl);
 
-    dsl_json["bool"] = bool_json;
-
-    nlohmann::json query_vector_json, vector_extra_params;
-    int64_t topk = 10;
+    nlohmann::json vector_extra_params;
+    nlohmann::json& query_vector_json = dsl_json["bool"]["must"][0]["vector"]["field_vec"];
     query_vector_json["topk"] = topk;
     query_vector_json["metric_type"] = metric_type;
+    query_vector_json["query"] = vectors;
     vector_extra_params["nprobe"] = 32;
     query_vector_json["params"] = vector_extra_params;
-    vector_param_json[placeholder]["field_vec"] = query_vector_json;
 }
 
 void
@@ -469,6 +480,9 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
             std::cout << "- id: " << topk_query_result[i].ids[j] << std::endl;
             std::cout << "- distance: " << topk_query_result[i].distances[j] << std::endl;
 
+            if (entities.empty()) {
+                continue;
+            }
             for (const auto& data : entities[j].scalar_data) {
                 if (data.first == "duration" || data.first == "release_year") {
                     std::cout << "- " << data.first << ": " << std::any_cast<int32_t>(data.second) << std::endl;

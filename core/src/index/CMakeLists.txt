@@ -51,6 +51,7 @@ include(DefineOptionsCore)
 include(BuildUtilsCore)
 
 using_ccache_if_defined( KNOWHERE_USE_CCACHE )
+set_directory_properties(PROPERTIES  RULE_LAUNCH_COMPILE "")
 
 if (MILVUS_GPU_VERSION)
     message(STATUS "Building Knowhere GPU version")

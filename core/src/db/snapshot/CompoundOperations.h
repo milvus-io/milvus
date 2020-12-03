@@ -323,7 +323,7 @@ class GetCollectionIDsOperation : public Operations {
     GetIDs() const;
 
  protected:
-    bool reversed_;
+    bool reversed_ = true;
     IDS_TYPE ids_;
 };
 
