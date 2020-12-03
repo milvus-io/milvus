@@ -212,13 +212,15 @@ class DBImpl : public DB, public ConfigObserver {
     std::mutex live_build_count_mutex_;
 
     // Metrics
-    prometheus::Family<prometheus::Gauge>& db_info_family_ =
-        prometheus::BuildGauge().Name("milvus_db_info").Help("milvus db info").Register(prometheus.registry());
-    prometheus::Gauge& data_size_gauge_ = db_info_family_.Add({{"db_info", "data_size"}});
+    PROMETHEUS_GAUGE(db_info_family_, data_size_gauge_, "milvus_data_size", "milvus data size");
 
-    prometheus::Family<prometheus::Gauge>& query_info_family_ =
-        prometheus::BuildGauge().Name("milvus_query_info").Help("milvus query info").Register(prometheus.registry());
-    prometheus::Gauge& query_per_second_gauge_ = query_info_family_.Add({});
+    PROMETHEUS_GAUGE(insert_entities_family_, insert_entities_size_gauge_,
+                     "milvus_insert_entities_throughput_per_microsecond", "insert entities throughput per microsecond");
+
+    PROMETHEUS_SUMMARY(query_count_family_, query_count_summary_, "milvus_query_count_summary", "query count summary");
+
+    PROMETHEUS_SUMMARY(query_response_family_, query_response_summary_, "milvus_query_response_summary",
+                       "query response summary");
 };  // SSDBImpl
 
 using DBImplPtr = std::shared_ptr<DBImpl>;

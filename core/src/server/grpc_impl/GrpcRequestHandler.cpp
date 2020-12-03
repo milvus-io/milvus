@@ -932,48 +932,6 @@ GrpcRequestHandler::GetEntityIDs(::grpc::ServerContext* context, const ::milvus:
     return ::grpc::Status::OK;
 }
 
-//::grpc::Status
-// GrpcRequestHandler::Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
-//                           ::milvus::grpc::QueryResult* response) {
-//    CHECK_NULLPTR_RETURN(request);
-//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->ReqID().c_str(), __func__);
-//
-//    // step 1: copy vector data
-//    engine::VectorsData vectors;
-//    CopyRowRecords(request->query_record_array(), google::protobuf::RepeatedField<google::protobuf::int64>(),
-//    vectors);
-//
-//    // step 2: partition tags
-//    std::vector<std::string> partitions;
-//    std::copy(request->partition_tag_array().begin(), request->partition_tag_array().end(),
-//              std::back_inserter(partitions));
-//
-//    // step 3: parse extra parameters
-//    milvus::json json_params;
-//    for (int i = 0; i < request->extra_params_size(); i++) {
-//        const ::milvus::grpc::KeyValuePair& extra = request->extra_params(i);
-//        if (extra.key() == EXTRA_PARAM_KEY) {
-//            json_params = json::parse(extra.value());
-//        }
-//    }
-//
-//    // step 4: search vectors
-//    std::vector<std::string> file_ids;
-//    TopKQueryResult result;
-//    fiu_do_on("GrpcRequestHandler.Search.not_empty_file_ids", file_ids.emplace_back("test_file_id"));
-//
-//    Status status = req_handler_.Search(GetContext(context), request->collection_name(), vectors, request->topk(),
-//                                            json_params, partitions, file_ids, result);
-//
-//    // step 5: construct and return result
-//    ConstructResults(result, response);
-//
-//    LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->ReqID().c_str(), __func__);
-//    SET_RESPONSE(response->mutable_status(), status, context);
-//
-//    return ::grpc::Status::OK;
-//}
-
 ::grpc::Status
 GrpcRequestHandler::SearchInSegment(::grpc::ServerContext* context, const ::milvus::grpc::SearchInSegmentParam* request,
                                     ::milvus::grpc::QueryResult* response) {
@@ -1755,6 +1713,7 @@ GrpcRequestHandler::DeserializeJsonToBoolQuery(
             CopyRowRecords(vector_param.row_record().records(),
                            google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
             vector_query->query_vector.vector_count = vector_data.vector_count_;
+            vector_query->nq = vector_data.vector_count_;
             vector_query->query_vector.binary_data.swap(vector_data.binary_data_);
             vector_query->query_vector.float_data.swap(vector_data.float_data_);
 

@@ -358,18 +358,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     int64_t max_concurrent_insert_request_size = 0;
 
     /* prometheus */
-    prometheus::Family<prometheus::Counter>& rpc_requests_total_ = prometheus::BuildCounter()
-                                                                       .Name("milvus_rpc_requests_total")
-                                                                       .Help("the number of rpc requests")
-                                                                       .Register(prometheus.registry());
+    PROMETHEUS_COUNT(rpc_requests_total_, rpc_requests_total_counter_, "milvus_rpc_requests_total",
+                     "the number of rpc requests");
 
-    prometheus::Counter& rpc_requests_total_counter_ = rpc_requests_total_.Add({});
-
-    prometheus::Family<prometheus::Histogram>& operation_latency_second_family_ =
-        prometheus::BuildHistogram()
-            .Name("milvus_operation_latency_seconds")
-            .Help("operation_latency_seconds")
-            .Register(prometheus.registry());
+    PROMETHEUS_HISTOGRAM(operation_latency_second_family_, "milvus_operation_latency_seconds",
+                         "operation_latency_seconds");
     prometheus::Histogram& operation_insert_histogram_ = operation_latency_second_family_.Add(
         {{"operation", "insert"}}, prometheus::Histogram::BucketBoundaries{0.001, 0.01, 0.1, 1});
     prometheus::Histogram& operation_create_index_histogram_ = operation_latency_second_family_.Add(

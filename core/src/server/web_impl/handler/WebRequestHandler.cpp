@@ -659,6 +659,7 @@ WebRequestHandler::ProcessLeafQueryJson(const nlohmann::json& json, milvus::quer
 
             auto& values = vector_param_it.value()["query"];
             vector_query->query_vector.vector_count = values.size();
+            vector_query->nq = values.size();
             for (auto& vector_records : values) {
                 if (field_type_.find(vector_name) != field_type_.end()) {
                     if (field_type_.at(vector_name) == engine::DataType::VECTOR_FLOAT) {

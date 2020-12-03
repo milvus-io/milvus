@@ -92,9 +92,9 @@ class SystemInfoCollector {
     Gauge& cpu_utilization_ratio_ = cpu_utilization_ratio_family_.Add({});
 
     Family<Gauge>& cpu_temperature_family_ = prometheus::BuildGauge()
-                                                  .Name("milvus_cpu_temperature_celsius")
-                                                  .Help("cpu_temperature")
-                                                  .Register(prometheus.registry());
+                                                 .Name("milvus_cpu_temperature_celsius")
+                                                 .Help("cpu_temperature")
+                                                 .Register(prometheus.registry());
     Gauge& cpu_temperature_ = cpu_temperature_family_.Add({});
 
     Family<Gauge>& mem_usage_family_ =

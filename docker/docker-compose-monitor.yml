@@ -4,6 +4,10 @@ networks:
     monitor:
         driver: bridge
 
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+
 services:
     prometheus:
         image: prom/prometheus:v2.17.1
@@ -11,6 +15,8 @@ services:
         hostname: prometheus
         restart: always
         volumes:
+            - ./prometheus:/etc/prometheus
+            - prometheus_data:/prometheus
             - ./prometheus.yml:/etc/prometheus/prometheus.yml
             - ./server_down.yml:/etc/prometheus/node_down.yml
         ports:
@@ -51,10 +57,19 @@ services:
             org.label-schema.group: "monitoring"
 
     grafana:
-        image: grafana/grafana
+        image: grafana/grafana:6.7.2
         container_name: grafana
+        volumes:
+            - grafana_data:/var/lib/grafana
+            - ./grafana/provisioning:/etc/grafana/provisioning
+        environment:
+            - GF_SECURITY_ADMIN_USER=${ADMIN_USER}
+            - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+            - GF_USERS_ALLOW_SIGN_UP=false
+        restart: unless-stopped
+        expose:
+            - 3000
         hostname: grafana
-        restart: always
         ports:
             - "3000:3000"
         networks:

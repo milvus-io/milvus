@@ -470,7 +470,10 @@ Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                idx_t op_id) {
     CHECK_AVAILABLE
-
+    ScopedTimer scope_timer([data_chunk, this](double latency) {
+        auto size = utils::GetSizeOfChunk(data_chunk);
+        this->insert_entities_size_gauge_.Set(size / latency);
+    });
     if (data_chunk == nullptr) {
         return Status(DB_ERROR, "Null pointer");
     }
@@ -648,7 +651,13 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     }
 
     auto vector_param = query_ptr->vectors.begin()->second;
-    query_per_second_gauge_.Set(vector_param->nq);
+    auto nq = vector_param->nq;
+    ScopedTimer scoped_timer([nq, this](double latency) {
+        for (int64_t i = 0; i < nq; ++i) {
+            this->query_count_summary_.Observe(latency / nq);
+            this->query_response_summary_.Observe(latency);
+        }
+    });
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
 
