@@ -340,7 +340,7 @@ void search_with_parameters (const Index *index,
                                  Dq.data(), Iq.data());
     double t1 = getmillisecs();
 
-    if(STATISTICS_ENABLE)
+    if(STATISTICS_LEVEL)
     {
         index_ivf->index_ivf_stats.quantization_time += t1 - t0;
     }
@@ -361,7 +361,7 @@ void search_with_parameters (const Index *index,
                                   false, params);
     double t2 = getmillisecs();
 
-    if (STATISTICS_ENABLE)
+    if (STATISTICS_LEVEL)
     {
         index_ivf->index_ivf_stats.search_time += t2 - t1;
     }

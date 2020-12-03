@@ -70,12 +70,12 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-        if (STATISTICS_ENABLE >= 3)
+        if (STATISTICS_LEVEL >= 3)
             index_->stats_enable = true;
         index_->loadIndex(reader);
         auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-        if (STATISTICS_ENABLE) {
-            if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL) {
+            if (STATISTICS_LEVEL >= 3) {
                 hnsw_stats->max_level = index_->maxlevel_;
                 hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
                 for (auto i = 0; i <= index_->maxlevel_; ++i) {
@@ -112,7 +112,7 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
-        if (STATISTICS_ENABLE >= 3)
+        if (STATISTICS_LEVEL >= 3)
             index_->stats_enable = true;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -153,9 +153,9 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::BuilderSuspend::check_wait();
         index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
-    if (STATISTICS_ENABLE) {
+    if (STATISTICS_LEVEL) {
         auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             hnsw_stats->max_level = index_->maxlevel_;
             hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
             for (auto i = 0; i <= index_->maxlevel_; ++i) {
@@ -183,8 +183,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     std::vector<hnswlib::StatisticsInfo> query_stats;
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
-    if (STATISTICS_ENABLE) {
-        if (STATISTICS_ENABLE >= 1) {
+    if (STATISTICS_LEVEL) {
+        if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->nq_cnt += rows;
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
@@ -193,7 +193,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             else
                 hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
             hnsw_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
@@ -202,7 +202,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             else
                 hnsw_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             query_stats.resize(rows);
             for (auto i = 0; i < rows; ++i) query_stats[i].target_level = hnsw_stats->target_level;
         }
@@ -228,7 +228,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         // } else {
         //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
         // }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
         } else {
             auto dummy_stat = hnswlib::StatisticsInfo();
@@ -256,12 +256,12 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     }
     query_end = std::chrono::high_resolution_clock::now();
 
-    if (STATISTICS_ENABLE) {
-        if (STATISTICS_ENABLE >= 1) {
+    if (STATISTICS_LEVEL) {
+        if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->total_query_time +=
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             for (auto i = 0; i < rows; ++i) {
                 for (auto j = 0; j < query_stats[i].accessed_points.size(); ++j) {
                     auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
@@ -313,7 +313,7 @@ IndexHNSW::GetStatistics() {
 
 void
 IndexHNSW::ClearStatistics() {
-    if (!STATISTICS_ENABLE)
+    if (!STATISTICS_LEVEL)
         return;
     auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
     hnsw_stats->Clear();

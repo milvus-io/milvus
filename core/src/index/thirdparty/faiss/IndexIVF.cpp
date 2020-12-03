@@ -182,7 +182,7 @@ IndexIVF::IndexIVF (Index * quantizer, size_t d,
     if (metric_type == METRIC_INNER_PRODUCT) {
         cp.spherical = true;
     }
-    if(STATISTICS_ENABLE)
+    if(STATISTICS_LEVEL)
     {
         nprobe_statistics.resize(nlist);
         nprobe_statistics.assign(nprobe_statistics.size(),0);
@@ -199,7 +199,7 @@ IndexIVF::IndexIVF ():
 void IndexIVF::add (idx_t n, const float * x)
 {
     add_with_ids (n, x, nullptr);
-    if(STATISTICS_ENABLE)
+    if(STATISTICS_LEVEL)
     {
         nprobe_statistics.resize(nlist);
         nprobe_statistics.assign(nprobe_statistics.size(),0);
@@ -333,7 +333,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.quantization_time += getmillisecs() - t0;
     }
@@ -343,7 +343,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false, nullptr, bitset);
-    if (STATISTICS_ENABLE>=1)
+    if (STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.search_time += getmillisecs() - t0;
     }
@@ -376,7 +376,7 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    if(STATISTICS_ENABLE)
+    if(STATISTICS_LEVEL)
     {
         index_ivf_stats.quantization_time += getmillisecs() - t0;
     }
@@ -387,7 +387,7 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
 
     search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, is_sq8, k, idx.get(), coarse_dis.get(),
                                       distances, labels, false, nullptr, bitset);
-    if (STATISTICS_ENABLE)
+    if (STATISTICS_LEVEL)
     {
         index_ivf_stats.search_time += getmillisecs() - t0;
     }
@@ -564,7 +564,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                 for (size_t ik = 0; ik < nprobe; ik++) {
 #pragma omp critical
                     {
-                        if(STATISTICS_ENABLE>=3)
+                        if(STATISTICS_LEVEL>=3)
                         {
                             nprobe_statistics[keys [i * nprobe + ik]]++;
                         }
@@ -601,7 +601,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                 for (size_t ik = 0; ik < nprobe; ik++) {
 #pragma omp critical
                     {
-                        if(STATISTICS_ENABLE>=3)
+                        if(STATISTICS_LEVEL>=3)
                         {
                             nprobe_statistics[keys [i * nprobe + ik]]++;
                         }
@@ -648,7 +648,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         FAISS_THROW_MSG ("computation interrupted");
     }
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
@@ -787,7 +787,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
                 for (size_t ik = 0; ik < nprobe; ik++) {
 #pragma omp critical
                 {
-                    if(STATISTICS_ENABLE>=3)
+                    if(STATISTICS_LEVEL>=3)
                     {
                         nprobe_statistics[keys [i * nprobe + ik]]++;
                     }
@@ -825,7 +825,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
                 for (size_t ik = 0; ik < nprobe; ik++) {
 #pragma omp critical
                     {
-                        if(STATISTICS_ENABLE>=3)
+                        if(STATISTICS_LEVEL>=3)
                         {
                             nprobe_statistics[keys [i * nprobe + ik]]++;
                         }
@@ -872,7 +872,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
         FAISS_THROW_MSG ("computation interrupted");
     }
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
@@ -892,7 +892,7 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 
     double t0 = getmillisecs();
     quantizer->search (nx, x, nprobe, coarse_dis.get (), keys.get ());
-    if (STATISTICS_ENABLE)
+    if (STATISTICS_LEVEL)
     {
         index_ivf_stats.quantization_time += getmillisecs() - t0;
     }
@@ -902,7 +902,7 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 
     range_search_preassigned (nx, x, radius, keys.get (), coarse_dis.get (),
                               result, bitset);
-    if (STATISTICS_ENABLE)
+    if (STATISTICS_LEVEL)
     {
         index_ivf_stats.search_time += getmillisecs() - t0;
     }
@@ -1008,7 +1008,7 @@ void IndexIVF::range_search_preassigned (
         }
     }
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += nx;
         index_ivf_stats.nlist += nlistv;

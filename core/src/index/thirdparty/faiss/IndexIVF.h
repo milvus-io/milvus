@@ -359,7 +359,7 @@ struct IndexIVF: Index, Level1Quantizer {
     /// clear nprobe statistics
     void clear_nprobe_statistics()
     {
-        if(!STATISTICS_ENABLE)
+        if(!STATISTICS_LEVEL)
             return ;
         nprobe_statistics.clear();
     }

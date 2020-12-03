@@ -108,7 +108,7 @@ struct ServerConfig {
         Integer omp_thread_num;
         Integer clustering_type;
         Integer simd_type;
-        Integer stat_optimizer_enable;
+        Integer statistics_level;
     } engine;
 
     struct GPU {

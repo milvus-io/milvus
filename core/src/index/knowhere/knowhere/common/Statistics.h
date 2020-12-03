@@ -154,11 +154,11 @@ class HNSWStatistics : public Statistics {
     ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
-        if (STATISTICS_ENABLE == 0) {
-            ret << "There is nothing because configuration STATISTICS_ENABLE = 0" << std::endl;
+        if (STATISTICS_LEVEL == 0) {
+            ret << "There is nothing because configuration STATISTICS_LEVEL = 0" << std::endl;
             return ret.str();
         }
-        if (STATISTICS_ENABLE >= 1) {
+        if (STATISTICS_LEVEL >= 1) {
             ret << "Total queries: " << nq_cnt << std::endl;
             ret << "The frequency distribution of the num of queries:" << std::endl;
             ret << "[1, 1].count = " << nq_fd[0] << std::endl;
@@ -170,7 +170,7 @@ class HNSWStatistics : public Statistics {
             ret << "Total ef: " << ef_sum << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             if (nq_cnt)
                 ret << "The average percentage of filter in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%"
                     << std::endl;
@@ -181,7 +181,7 @@ class HNSWStatistics : public Statistics {
                 ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
             }
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             std::vector<double> access_lorenz_curve;
             std::vector<int> split_idx(100);  // default log 101 idx
             for (auto i = 0; i < 100; ++i) split_idx[i] = i + 1;
@@ -268,11 +268,11 @@ class RHNSWStatistics : public Statistics {
     ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << index_name << " Statistics:" << std::endl;
-        if (STATISTICS_ENABLE == 0) {
-            ret << "There is nothing because configuration STATISTICS_ENABLE = 0" << std::endl;
+        if (STATISTICS_LEVEL == 0) {
+            ret << "There is nothing because configuration STATISTICS_LEVEL = 0" << std::endl;
             return ret.str();
         }
-        if (STATISTICS_ENABLE >= 1) {
+        if (STATISTICS_LEVEL >= 1) {
             ret << "Total queries: " << nq_cnt << std::endl;
             ret << "The frequency distribution of the num of queries:" << std::endl;
             ret << "[1, 1].count = " << nq_fd[0] << std::endl;
@@ -284,7 +284,7 @@ class RHNSWStatistics : public Statistics {
             ret << "Total ef: " << ef_sum << std::endl;
             ret << "Total query_time: " << total_query_time << " ms" << std::endl;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             if (nq_cnt)
                 ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%" << std::endl;
             else
@@ -294,7 +294,7 @@ class RHNSWStatistics : public Statistics {
                 ret << "[" << i * 5 << "%, " << i * 5 + 5 << "%).count = " << filter_cdf[i] << std::endl;
             }
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             ret << "Max level: " << max_level << std::endl;
             ret << "Level distribution: " << std::endl;
             int64_t point_cnt = 0;
@@ -428,10 +428,10 @@ class IVFStatistics : public Statistics {
     show() {
         LOG_KNOWHERE_DEBUG_ << "IVFStatistics:";
 
-        if (STATISTICS_ENABLE == 0) {
-            LOG_KNOWHERE_DEBUG_ << "There is nothing because configuration STATISTICS_ENABLE = 0";
+        if (STATISTICS_LEVEL == 0) {
+            LOG_KNOWHERE_DEBUG_ << "There is nothing because configuration STATISTICS_LEVEL = 0";
         }
-        if (STATISTICS_ENABLE >= 1) {
+        if (STATISTICS_LEVEL >= 1) {
             LOG_KNOWHERE_DEBUG_ << "Total queries: " << nq_cnt;
             LOG_KNOWHERE_DEBUG_ << "The frequency distribution of the num of queries:";
             LOG_KNOWHERE_DEBUG_ << "[1, 1].count = " << nq_fd[0];
@@ -447,13 +447,13 @@ class IVFStatistics : public Statistics {
             LOG_KNOWHERE_DEBUG_ << "Total data search time: " << total_data_search_time << " ms";
             LOG_KNOWHERE_DEBUG_ << "The total number of nprobe access: " << nprobe_access_count;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             if (nq_cnt)
                 LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%";
             else
                 LOG_KNOWHERE_DEBUG_ << "The percentage of 1 in bitset: 0%";
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             LOG_KNOWHERE_DEBUG_ << "Total queries: " << nq_cnt;
             for (int i = 0; i < cdf.size(); i++) {
                 LOG_KNOWHERE_DEBUG_ << "Top " << i + 1 << "% access count " << cdf[i];
@@ -465,10 +465,10 @@ class IVFStatistics : public Statistics {
     ToString(const std::string& index_name) override {
         std::ostringstream ret;
         ret << "IVFStatistics:";
-        if (STATISTICS_ENABLE == 0) {
-            ret << "There is nothing because configuration STATISTICS_ENABLE = 0" << std::endl;
+        if (STATISTICS_LEVEL == 0) {
+            ret << "There is nothing because configuration STATISTICS_LEVEL = 0" << std::endl;
         }
-        if (STATISTICS_ENABLE >= 1) {
+        if (STATISTICS_LEVEL >= 1) {
             ret << "Total queries: " << nq_cnt << std::endl;
             ret << "The frequency distribution of the num of queries:" << std::endl;
             ret << "[1, 1].count = " << nq_fd[0] << std::endl;
@@ -483,13 +483,13 @@ class IVFStatistics : public Statistics {
             ret << "Total data search time" << total_data_search_time << " ms" << std::endl;
             ret << "The total number of nprobe access: " << nprobe_access_count;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             if (nq_cnt)
                 ret << "The percentage of 1 in bitset: " << filter_percentage_sum * 100 / nq_cnt << "%" << std::endl;
             else
                 ret << "The percentage of 1 in bitset: 0%" << std::endl;
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             ret << "Total queries: " << nq_cnt << std::endl;
             for (int i = 0; i < cdf.size(); i++) {
                 ret << "Top " << i + 1 << "% access count " << cdf[i];

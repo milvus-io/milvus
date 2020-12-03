@@ -45,7 +45,7 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist)
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_ENABLE)
+  if(STATISTICS_LEVEL)
   {
       nprobe_statistics.resize(nlist);
       nprobe_statistics.assign(nprobe_statistics.size(),0);
@@ -67,7 +67,7 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, M
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_ENABLE)
+  if(STATISTICS_LEVEL)
   {
       nprobe_statistics.resize(nlist);
       nprobe_statistics.assign(nprobe_statistics.size(),0);
@@ -159,7 +159,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 
   double t0 = getmillisecs();
   quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-  if(STATISTICS_ENABLE)
+  if(STATISTICS_LEVEL)
   {
       index_ivf_stats.quantization_time += getmillisecs() - t0;
   }
@@ -170,7 +170,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 
   search_preassigned(n, x, k, idx.get(), coarse_dis.get(),
                      distances, labels, false, nullptr, bitset);
-  if(STATISTICS_ENABLE)
+  if(STATISTICS_LEVEL)
   {
       index_ivf_stats.search_time += getmillisecs() - t0;
   }
@@ -576,7 +576,7 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
                 }
 #pragma omp critical
                 {
-                    if(STATISTICS_ENABLE>=3)
+                    if(STATISTICS_LEVEL>=3)
                     {
                         nprobe_statistics[key]++;
                     }
@@ -618,7 +618,7 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
         } // parallel for
     } // parallel
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
@@ -678,7 +678,7 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
                 }
 #pragma omp critical
                 {
-                    if(STATISTICS_ENABLE>=3)
+                    if(STATISTICS_LEVEL>=3)
                     {
                         nprobe_statistics[key]++;
                     }
@@ -716,7 +716,7 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
         } // parallel for
     } // parallel
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
@@ -773,7 +773,7 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
       }
 #pragma omp critical
         {
-          if(STATISTICS_ENABLE>=3)
+          if(STATISTICS_LEVEL>=3)
           {
               nprobe_statistics[key]++;
           }
@@ -823,7 +823,7 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
     }
   }
 
-  if(STATISTICS_ENABLE>=1)
+  if(STATISTICS_LEVEL>=1)
   {
       index_ivf_stats.nq += nx;
       index_ivf_stats.nlist += nlistv;
@@ -958,7 +958,7 @@ void IndexBinaryIVF::range_search(
     double t0 = getmillisecs();
 
     quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-    if (STATISTICS_ENABLE>=1)
+    if (STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.quantization_time += getmillisecs() - t0;
     }
@@ -1019,7 +1019,7 @@ void IndexBinaryIVF::range_search(
 
     }
 
-    if(STATISTICS_ENABLE>=1)
+    if(STATISTICS_LEVEL>=1)
     {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;

@@ -17,7 +17,7 @@
 namespace milvus {
 namespace knowhere {
 
-int STATISTICS_ENABLE = 0;
+int STATISTICS_LEVEL = 0;
 
 /* used in 0.8.0 */
 namespace IndexEnum {

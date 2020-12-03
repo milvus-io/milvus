@@ -195,7 +195,7 @@ void IndexRHNSW::init_hnsw() {
 
 void
 IndexRHNSW::calculate_stats(std::vector<double> &ret, int64_t &tot) {
-    if (STATISTICS_ENABLE != 3)
+    if (STATISTICS_LEVEL != 3)
         return;
     stats.CaculateStatistics(ret, tot);
 }
@@ -207,7 +207,7 @@ IndexRHNSW::set_target_level(const int tl) {
 
 void
 IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
-    if (STATISTICS_ENABLE != 3)
+    if (STATISTICS_LEVEL != 3)
         return;
     for (auto i = 0; i < n; ++ i) {
         for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
@@ -222,7 +222,7 @@ IndexRHNSW::update_stats(idx_t n, std::vector<RHNSWStatInfo>& query_stats) {
 
 void
 IndexRHNSW::clear_stats() {
-    if (STATISTICS_ENABLE != 3)
+    if (STATISTICS_LEVEL != 3)
         return;
     stats.Clear();
 }
@@ -248,7 +248,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
           hnsw.max_level * d * hnsw.efSearch);
 
     std::vector<RHNSWStatInfo> query_stats;
-    if (STATISTICS_ENABLE == 3)
+    if (STATISTICS_LEVEL == 3)
         query_stats.resize(n);
 
     for (idx_t i0 = 0; i0 < n; i0 += check_period) {
@@ -268,7 +268,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
                 maxheap_heapify (k, simi, idxi);
 
-                if (STATISTICS_ENABLE == 3)
+                if (STATISTICS_LEVEL == 3)
                     hnsw.searchKnn(*dis, k, idxi, simi, query_stats[i], bitset);
                 else {
                     auto dummy_stat = RHNSWStatInfo();
@@ -303,7 +303,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
         }
     }
 //    update_stats(n, query_stats);
-    if (STATISTICS_ENABLE == 3) {
+    if (STATISTICS_LEVEL == 3) {
         for (auto i = 0; i < n; ++ i) {
             for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
                 auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);

@@ -65,7 +65,7 @@ IVF::Load(const BinarySet& binary_set) {
     stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     auto ivf_index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
     LoadImpl(binary_set, index_type_);
-    if (STATISTICS_ENABLE) {
+    if (STATISTICS_LEVEL) {
         ivf_index->nprobe_statistics.resize(ivf_index->nlist);
         ivf_index->nprobe_statistics.assign(ivf_index->nlist, 0);
         stats->Clear();
@@ -344,8 +344,8 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     ivf_index->search(n, data, k, distances, labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    if (STATISTICS_ENABLE) {
-        if (STATISTICS_ENABLE >= 1) {
+    if (STATISTICS_LEVEL) {
+        if (STATISTICS_LEVEL >= 1) {
             ivf_stats->nq_cnt += n;
             ivf_stats->batch_cnt += 1;
             ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
@@ -365,7 +365,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
             ivf_index->index_ivf_stats.quantization_time = 0;
             ivf_index->index_ivf_stats.search_time = 0;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
             ivf_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
@@ -374,7 +374,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
             else
                 ivf_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             ivf_stats->CaculateStatistics(ivf_index->nprobe_statistics);
         }
     }
@@ -393,14 +393,14 @@ IVF::SealImpl() {
 
 StatisticsPtr
 IVF::GetStatistics() {
-    if (!STATISTICS_ENABLE)
+    if (!STATISTICS_LEVEL)
         return nullptr;
     return stats;
 }
 
 void
 IVF::ClearStatistics() {
-    if (!STATISTICS_ENABLE)
+    if (!STATISTICS_LEVEL)
         return;
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
     ivf_stats->Clear();

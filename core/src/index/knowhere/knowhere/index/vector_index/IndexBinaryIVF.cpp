@@ -43,7 +43,7 @@ BinaryIVF::Load(const BinarySet& index_binary) {
 
     index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
-    if (STATISTICS_ENABLE) {
+    if (STATISTICS_LEVEL) {
         stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
         ivf_index->nprobe_statistics.resize(ivf_index->nlist);
         ivf_index->nprobe_statistics.assign(ivf_index->nlist, 0);
@@ -115,14 +115,14 @@ BinaryIVF::UpdateIndexSize() {
 
 StatisticsPtr
 BinaryIVF::GetStatistics() {
-    if (!STATISTICS_ENABLE)
+    if (!STATISTICS_LEVEL)
         return nullptr;
     return stats;
 }
 
 void
 BinaryIVF::ClearStatistics() {
-    if (!STATISTICS_ENABLE) {
+    if (!STATISTICS_LEVEL) {
         return;
     }
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
@@ -168,9 +168,9 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    if (STATISTICS_ENABLE) {
+    if (STATISTICS_LEVEL) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-        if (STATISTICS_ENABLE >= 1) {
+        if (STATISTICS_LEVEL >= 1) {
             ivf_stats->nq_cnt += n;
             ivf_stats->batch_cnt += 1;
             ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
@@ -190,7 +190,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             ivf_index->index_ivf_stats.quantization_time = 0;
             ivf_index->index_ivf_stats.search_time = 0;
         }
-        if (STATISTICS_ENABLE >= 2) {
+        if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
             ivf_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
@@ -199,7 +199,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             else
                 ivf_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
         }
-        if (STATISTICS_ENABLE >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
             ivf_stats->CaculateStatistics(ivf_index->nprobe_statistics);
         }
     }
