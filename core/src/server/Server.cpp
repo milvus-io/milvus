@@ -160,7 +160,7 @@ Server::Start() {
         STATUS_CHECK(Timezone::SetTimezone(config.general.timezone()));
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.logs.level(), config.logs.path(),
+        STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.log.min_messages(), config.logs.path(),
                                      config.logs.max_log_file_size(), config.logs.log_rotate_num(),
                                      config.logs.log_to_stdout(), config.logs.log_to_file()));
 
