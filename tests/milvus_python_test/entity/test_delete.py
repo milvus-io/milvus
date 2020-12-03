@@ -18,12 +18,14 @@ default_single_query = {
     }
 }
 
+
 class TestDeleteBase:
     """
     ******************************************************************
       The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -141,7 +143,7 @@ class TestDeleteBase:
         target: test delete entity
         method: add one entity and delete two ids
         expected: error raised
-        '''        
+        '''
         ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         delete_ids = [ids[0], 1]
@@ -313,6 +315,7 @@ class TestDeleteBase:
       The following cases are used to test `delete_entity_by_id` function, with tags
     ******************************************************************
     """
+
     def test_insert_tag_delete(self, connect, collection):
         '''
         method: add entitys with given tag, delete entities with the return ids
@@ -362,10 +365,10 @@ class TestDeleteBase:
         assert res_count == 2 * (default_nb - 1)
 
     def test_insert_tags_index_delete(self, connect, collection, get_simple_index):
-        '''
+        """
         method: add entitys with given tag, create index, delete entities with the return ids
         expected: entities deleted
-        '''
+        """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
@@ -380,12 +383,63 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == 2 * (default_nb - 1)
 
+    def test_insert_delete_loop(self, connect, collection):
+        """
+        target: test loop insert and delete entities
+        method: loop insert entities into two segments, and delete entities cross segments.
+        expected: count is correct
+        """
+        loop = 2
+        for i in range(loop):
+            ids = connect.bulk_insert(collection, default_entities)
+            connect.flush([collection])
+            status = connect.delete_entity_by_id(collection, ids[100:default_nb - 100])
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == loop * 200
+
+    def test_search_delete_loop(self, connect, collection):
+        """
+        target: test loop search and delete entities
+        method: loop search and delete cross segments
+        expected: ok
+        """
+        loop = 2
+        ids = connect.bulk_insert(collection, default_entities)
+        connect.flush([collection])
+        ni = default_nb // loop
+        for i in range(loop):
+            res = connect.search(collection, default_single_query)
+            status = connect.delete_entity_by_id(collection, ids[i * ni:(i + 1) * ni])
+            assert status
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
+    def test_count_delete_loop(self, connect, collection):
+        """
+        target: test loop search and delete entities
+        method: loop search and delete cross segments
+        expected: ok
+        """
+        loop = 2
+        ids = connect.bulk_insert(collection, default_entities)
+        connect.flush([collection])
+        ni = default_nb // loop
+        for i in range(loop):
+            connect.count_entities(collection)
+            status = connect.delete_entity_by_id(collection, ids[i * ni:(i + 1) * ni])
+            assert status
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
 
 class TestDeleteInvalid(object):
-
     """
     Test adding vectors with invalid vectors
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_ints()
@@ -416,4 +470,3 @@ class TestDeleteInvalid(object):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection_name, [1])
-
