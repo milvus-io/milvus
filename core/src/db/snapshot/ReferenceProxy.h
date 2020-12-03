@@ -18,10 +18,10 @@
 
 namespace milvus::engine::snapshot {
 
-using OnNoRefCBF = std::function<void(void)>;
-
-class ReferenceProxy {
+class ReferenceProxy : public std::enable_shared_from_this<ReferenceProxy> {
  public:
+    using Ptr = std::shared_ptr<ReferenceProxy>;
+    using OnNoRefCBF = std::function<void(Ptr)>;
     ReferenceProxy() = default;
     virtual ~ReferenceProxy() = default;
 
@@ -42,8 +42,9 @@ class ReferenceProxy {
         }
         if (ref_count_.fetch_sub(1) == 1) {
             for (auto& cb : on_no_ref_cbs_) {
-                cb();
+                cb(this->shared_from_this());
             }
+            on_no_ref_cbs_.clear();
         }
     }
 

@@ -112,6 +112,7 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::IndexBinary* coarse_quantizer = new faiss::IndexBinaryFlat(dim, metric_type);
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
+    index->own_fields = true;
     index->train(rows, static_cast<const uint8_t*>(p_data));
     index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;

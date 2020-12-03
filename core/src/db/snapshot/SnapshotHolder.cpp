@@ -26,9 +26,9 @@ SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, 
 
 SnapshotHolder::~SnapshotHolder() {
     bool release = false;
-    for (auto& ss_kv : active_) {
-        if (!ss_kv.second->GetCollection()->IsActive()) {
-            ReadyForRelease(ss_kv.second);
+    for (auto& [_, ss] : active_) {
+        if (!ss->GetCollection()->IsActive()) {
+            ReadyForRelease(ss);
             release = true;
         }
     }
@@ -119,6 +119,30 @@ bool
 SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
     auto collection = ss->GetCollection();
     return collection && collection->IsActive();
+}
+
+Status
+SnapshotHolder::ApplyEject() {
+    Status status;
+    Snapshot::Ptr oldest_ss;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (active_.size() == 0) {
+            return Status(SS_EMPTY_HOLDER,
+                          "SnapshotHolder::ApplyEject: Empty holder found for " + std::to_string(collection_id_));
+        }
+        if (!policy_->ShouldEject(active_, false)) {
+            return status;
+        }
+        auto oldest_it = active_.find(min_id_);
+        oldest_ss = oldest_it->second;
+        active_.erase(oldest_it);
+        if (active_.size() > 0) {
+            min_id_ = active_.begin()->first;
+        }
+    }
+    ReadyForRelease(oldest_ss);
+    return status;
 }
 
 Status

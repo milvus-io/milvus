@@ -53,7 +53,7 @@ DBWrapper::StartService() {
     }
 
     // wal
-    opt.wal_enable_ = config.wal.enable();
+    opt.wal_enable_ = config.wal.enable() && (opt.mode_ != engine::DBOptions::CLUSTER_READONLY);
     if (opt.wal_enable_) {
         opt.wal_path_ = config.wal.path();
     }

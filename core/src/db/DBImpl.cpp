@@ -49,11 +49,22 @@ constexpr uint64_t BACKGROUND_INDEX_INTERVAL = 1;
 constexpr uint64_t WAIT_BUILD_INDEX_INTERVAL = 5;
 
 static const Status SHUTDOWN_ERROR = Status(DB_ERROR, "Milvus server is shutdown!");
+static const Status PERMISSION_ERROR = Status(DB_PERMISSION_ERROR, "Write permission needed!");
 }  // namespace
 
 #define CHECK_AVAILABLE        \
     if (!ServiceAvailable()) { \
         return SHUTDOWN_ERROR; \
+    }
+
+#define WRITE_PERMISSION_NEEDED_RETURN_STATUS                  \
+    if (options_.mode_ == DBOptions::MODE::CLUSTER_READONLY) { \
+        return PERMISSION_ERROR;                               \
+    }
+
+#define WRITE_PERMISSION_NEEDED_NO_RETURN                      \
+    if (options_.mode_ == DBOptions::MODE::CLUSTER_READONLY) { \
+        return;                                                \
     }
 
 DBImpl::DBImpl(const DBOptions& options)
@@ -97,13 +108,15 @@ DBImpl::Start() {
 
     // server may be closed unexpected, these un-merge files need to be merged when server restart
     // and soft-delete files need to be deleted when server restart
-    snapshot::IDS_TYPE collection_ids;
-    snapshot::Snapshots::GetInstance().GetCollectionIds(collection_ids);
-    std::set<int64_t> merge_ids;
-    for (auto id : collection_ids) {
-        merge_ids.insert(id);
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
+        snapshot::IDS_TYPE collection_ids;
+        snapshot::Snapshots::GetInstance().GetCollectionIds(collection_ids);
+        std::set<int64_t> merge_ids;
+        for (auto id : collection_ids) {
+            merge_ids.insert(id);
+        }
+        StartMergeTask(merge_ids, true);
     }
-    StartMergeTask(merge_ids, true);
 
     // for distribute version, some nodes are read only
     if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
@@ -158,6 +171,7 @@ DBImpl::Stop() {
 
 Status
 DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     auto ctx = context;
@@ -196,6 +210,7 @@ DBImpl::CreateCollection(const snapshot::CreateCollectionContext& context) {
 
 Status
 DBImpl::DropCollection(const std::string& collection_name) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Prepare to drop collection " << collection_name;
@@ -272,6 +287,7 @@ DBImpl::CountEntities(const std::string& collection_name, int64_t& row_count) {
 
 Status
 DBImpl::CreatePartition(const std::string& collection_name, const std::string& partition_name) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
@@ -291,6 +307,7 @@ DBImpl::CreatePartition(const std::string& collection_name, const std::string& p
 
 Status
 DBImpl::DropPartition(const std::string& collection_name, const std::string& partition_name) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
@@ -344,6 +361,7 @@ DBImpl::ListPartitions(const std::string& collection_name, std::vector<std::stri
 Status
 DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::string& collection_name,
                     const std::string& field_name, const CollectionIndex& index) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
     SetThreadName("create_index");
     LOG_ENGINE_DEBUG_ << "Create index for collection: " << collection_name << " field: " << field_name;
@@ -438,6 +456,7 @@ DBImpl::CreateIndex(const std::shared_ptr<server::Context>& context, const std::
 
 Status
 DBImpl::DropIndex(const std::string& collection_name, const std::string& field_name) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Drop index for collection: " << collection_name << " field: " << field_name;
@@ -469,6 +488,7 @@ DBImpl::DescribeIndex(const std::string& collection_name, const std::string& fie
 Status
 DBImpl::Insert(const std::string& collection_name, const std::string& partition_name, DataChunkPtr& data_chunk,
                idx_t op_id) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
     ScopedTimer scope_timer([data_chunk, this](double latency) {
         auto size = utils::GetSizeOfChunk(data_chunk);
@@ -615,6 +635,7 @@ DBImpl::GetEntityByID(const std::string& collection_name, const IDNumbers& id_ar
 
 Status
 DBImpl::DeleteEntityByID(const std::string& collection_name, const engine::IDNumbers& entity_ids, idx_t op_id) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     snapshot::ScopedSnapshotT ss;
@@ -747,6 +768,7 @@ DBImpl::LoadCollection(const server::ContextPtr& context, const std::string& col
 
 Status
 DBImpl::Flush(const std::string& collection_name) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     Status status;
@@ -769,6 +791,7 @@ DBImpl::Flush(const std::string& collection_name) {
 
 Status
 DBImpl::Flush() {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Begin flush all collections";
@@ -780,6 +803,7 @@ DBImpl::Flush() {
 
 Status
 DBImpl::Compact(const std::shared_ptr<server::Context>& context, const std::string& collection_name, double threshold) {
+    WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
 
     LOG_ENGINE_DEBUG_ << "Before compacting, wait for build index thread to finish...";

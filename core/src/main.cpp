@@ -127,6 +127,7 @@ main(int argc, char* argv[]) {
     signal(SIGINT, milvus::HandleSignal);
     signal(SIGUSR1, milvus::HandleSignal);
     signal(SIGSEGV, milvus::HandleSignal);
+    signal(SIGILL, milvus::HandleSignal);
     signal(SIGUSR2, milvus::HandleSignal);
     signal(SIGTERM, milvus::HandleSignal);
 
