@@ -167,16 +167,5 @@ IndexAnnoy::UpdateIndexSize() {
     index_size_ = index_->cal_size();
 }
 
-StatisticsPtr
-IndexAnnoy::GetStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexAnnoy has not implement interface GetStatistics yet";
-    return nullptr;
-}
-
-void
-IndexAnnoy::ClearStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexAnnoy has not implement interface ClearStatistics yet";
-}
-
 }  // namespace knowhere
 }  // namespace milvus

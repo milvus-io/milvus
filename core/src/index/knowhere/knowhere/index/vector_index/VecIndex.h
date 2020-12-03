@@ -69,10 +69,13 @@ class VecIndex : public Index {
     Count() = 0;
 
     virtual StatisticsPtr
-    GetStatistics() = 0;
+    GetStatistics() {
+        return stats;
+    }
 
     virtual void
-    ClearStatistics() = 0;
+    ClearStatistics() {
+    }
 
     virtual IndexType
     index_type() const {

@@ -391,22 +391,15 @@ IVF::SealImpl() {
 #endif
 }
 
-StatisticsPtr
-IVF::GetStatistics() {
-    if (!STATISTICS_LEVEL)
-        return nullptr;
-    return stats;
-}
-
 void
 IVF::ClearStatistics() {
-    if (!STATISTICS_LEVEL)
-        return;
-    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    ivf_stats->Clear();
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    ivf_index->clear_nprobe_statistics();
-    ivf_index->index_ivf_stats.reset();
+    if (stats != nullptr) {
+        auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+        ivf_stats->Clear();
+        auto ivf_index = dynamic_cast<faiss::IndexIVF *>(index_.get());
+        ivf_index->clear_nprobe_statistics();
+        ivf_index->index_ivf_stats.reset();
+    }
 }
 
 }  // namespace knowhere

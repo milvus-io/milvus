@@ -69,9 +69,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
     void
     UpdateIndexSize() override;
 
-    StatisticsPtr
-    GetStatistics() override;
-
     void
     ClearStatistics() override;
 

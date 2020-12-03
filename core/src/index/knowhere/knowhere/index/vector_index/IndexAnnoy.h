@@ -62,12 +62,6 @@ class IndexAnnoy : public VecIndex {
     int64_t
     Dim() override;
 
-    StatisticsPtr
-    GetStatistics() override;
-
-    void
-    ClearStatistics() override;
-
     void
     UpdateIndexSize() override;
 

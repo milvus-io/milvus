@@ -64,12 +64,6 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
         return Count() * Dim() * sizeof(FloatType);
     }
 
-    StatisticsPtr
-    GetStatistics() override;
-
-    void
-    ClearStatistics() override;
-
 #if 0
     DatasetPtr
     GetVectorById(const DatasetPtr& dataset, const Config& config) override;

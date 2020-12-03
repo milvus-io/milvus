@@ -222,17 +222,6 @@ CPUSPTAGRNG::UpdateIndexSize() {
     index_size_ = index_ptr_->GetIndexSize();
 }
 
-StatisticsPtr
-CPUSPTAGRNG::GetStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexSPTAG has not implement interface GetStatistics yet";
-    return nullptr;
-}
-
-void
-CPUSPTAGRNG::ClearStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexSPTAG has not implement interface ClearStatistics yet";
-}
-
 // void
 // CPUSPTAGRNG::Add(const DatasetPtr& origin, const Config& add_config) {
 //     SetParameters(add_config);

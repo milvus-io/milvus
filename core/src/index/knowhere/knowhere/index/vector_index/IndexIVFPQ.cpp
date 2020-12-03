@@ -105,16 +105,5 @@ IVFPQ::UpdateIndexSize() {
     index_size_ = capacity + centroid_table + precomputed_table;
 }
 
-StatisticsPtr
-IVFPQ::GetStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexIVFPQ has not implement interface GetStatistics yet";
-    return nullptr;
-}
-
-void
-IVFPQ::ClearStatistics() {
-    LOG_KNOWHERE_DEBUG_ << "IndexIVFPQ has not implement interface ClearStatistics yet";
-}
-
 }  // namespace knowhere
 }  // namespace milvus

@@ -69,9 +69,6 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     void
     UpdateIndexSize() override;
 
-    StatisticsPtr
-    GetStatistics() override;
-
     void
     ClearStatistics() override;
 

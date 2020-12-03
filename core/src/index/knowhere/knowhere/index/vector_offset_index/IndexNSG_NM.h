@@ -70,12 +70,6 @@ class NSG_NM : public VecIndex {
     void
     UpdateIndexSize() override;
 
-    StatisticsPtr
-    GetStatistics() override;
-
-    void
-    ClearStatistics() override;
-
  private:
     std::mutex mutex_;
     int64_t gpu_;
