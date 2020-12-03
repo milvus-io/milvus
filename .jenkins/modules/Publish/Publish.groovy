@@ -12,12 +12,15 @@ dir ('build/docker/deploy') {
 	try {
         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
             sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
+
             sh 'docker pull ${SOURCE_REPO}/master:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm master'
             sh 'docker-compose push master'
+
             sh 'docker pull ${SOURCE_REPO}/proxy:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm proxy'
             sh 'docker-compose push proxy'
+
             sh 'docker pull ${SOURCE_REPO}/querynode:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm querynode'
             sh 'docker-compose push querynode'

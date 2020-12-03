@@ -61,6 +61,9 @@ Search(CSegmentBase c_segment,
        int num_groups,
        CQueryResult* result);
 
+CStatus
+FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult result);
+
 //////////////////////////////////////////////////////////////////
 
 int

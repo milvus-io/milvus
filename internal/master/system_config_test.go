@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func Test_SysConfig(t *testing.T) {
 	require.Nil(t, err)
 
 	rootPath := "/test/root"
-	configKV := kv.NewEtcdKV(cli, rootPath)
+	configKV := etcdkv.NewEtcdKV(cli, rootPath)
 	defer configKV.Close()
 
 	sc := SysConfig{kv: configKV}

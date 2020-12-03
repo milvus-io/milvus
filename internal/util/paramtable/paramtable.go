@@ -20,7 +20,7 @@ import (
 
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
 )
 
 type Base interface {
@@ -33,12 +33,21 @@ type Base interface {
 }
 
 type BaseTable struct {
-	params *kv.MemoryKV
+	params *memkv.MemoryKV
 }
 
 func (gp *BaseTable) Init() {
-	gp.params = kv.NewMemoryKV()
+	gp.params = memkv.NewMemoryKV()
 	err := gp.LoadYaml("config.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	minioAddress := os.Getenv("MINIO_ADDRESS")
+	if minioAddress == "" {
+		minioAddress = "localhost:9000"
+	}
+	err = gp.Save("_MinioAddress", minioAddress)
 	if err != nil {
 		panic(err)
 	}

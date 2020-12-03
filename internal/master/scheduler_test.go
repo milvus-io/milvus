@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -31,7 +31,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
@@ -168,7 +168,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	meta, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)

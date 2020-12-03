@@ -271,7 +271,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 		return &servicepb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "WaitToFinish failed",
+				Reason:    err.Error(),
 			},
 			Value: t.(*hasPartitionTask).hasPartition,
 		}, nil

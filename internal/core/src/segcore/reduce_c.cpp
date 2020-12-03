@@ -50,97 +50,187 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits) {
 }
 
 struct SearchResultPair {
-    uint64_t id_;
     float distance_;
-    int64_t segment_id_;
+    SearchResult* search_result_;
+    int64_t offset_;
+    int64_t index_;
 
-    SearchResultPair(uint64_t id, float distance, int64_t segment_id)
-        : id_(id), distance_(distance), segment_id_(segment_id) {
+    SearchResultPair(float distance, SearchResult* search_result, int64_t offset, int64_t index)
+        : distance_(distance), search_result_(search_result), offset_(offset), index_(index) {
     }
 
     bool
     operator<(const SearchResultPair& pair) const {
         return (distance_ < pair.distance_);
     }
+
+    void
+    reset_distance() {
+        distance_ = search_result_->result_distances_[offset_];
+    }
 };
 
 void
-GetResultData(std::vector<SearchResult*>& search_results,
-              SearchResult& final_result,
+GetResultData(std::vector<std::vector<int64_t>>& search_records,
+              std::vector<SearchResult*>& search_results,
               int64_t query_offset,
+              bool* is_selected,
               int64_t topk) {
     auto num_segments = search_results.size();
-    std::map<int, int> iter_loc_peer_result;
+    AssertInfo(num_segments > 0, "num segment must greater than 0");
     std::vector<SearchResultPair> result_pairs;
     for (int j = 0; j < num_segments; ++j) {
-        auto id = search_results[j]->result_ids_[query_offset];
         auto distance = search_results[j]->result_distances_[query_offset];
-        result_pairs.push_back(SearchResultPair(id, distance, j));
-        iter_loc_peer_result[j] = query_offset;
+        auto search_result = search_results[j];
+        AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+        result_pairs.push_back(SearchResultPair(distance, search_result, query_offset, j));
     }
-    std::sort(result_pairs.begin(), result_pairs.end());
-    final_result.result_ids_.push_back(result_pairs[0].id_);
-    final_result.result_distances_.push_back(result_pairs[0].distance_);
-
-    for (int i = 1; i < topk; ++i) {
-        auto segment_id = result_pairs[0].segment_id_;
-        auto query_offset = ++(iter_loc_peer_result[segment_id]);
-        auto id = search_results[segment_id]->result_ids_[query_offset];
-        auto distance = search_results[segment_id]->result_distances_[query_offset];
-        result_pairs[0] = SearchResultPair(id, distance, segment_id);
+    int64_t loc_offset = query_offset;
+    AssertInfo(topk > 0, "topK must greater than 0");
+    for (int i = 0; i < topk; ++i) {
+        result_pairs[0].reset_distance();
         std::sort(result_pairs.begin(), result_pairs.end());
-        final_result.result_ids_.push_back(result_pairs[0].id_);
-        final_result.result_distances_.push_back(result_pairs[0].distance_);
+        auto& result_pair = result_pairs[0];
+        auto index = result_pair.index_;
+        is_selected[index] = true;
+        result_pair.search_result_->result_offsets_.push_back(loc_offset++);
+        search_records[index].push_back(result_pair.offset_++);
     }
 }
 
-CQueryResult
-ReduceQueryResults(CQueryResult* query_results, int64_t num_segments) {
+void
+ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
+                  std::vector<SearchResult*>& search_results,
+                  bool* is_selected) {
+    auto num_segments = search_results.size();
+    AssertInfo(num_segments > 0, "num segment must greater than 0");
+    for (int i = 0; i < num_segments; i++) {
+        if (is_selected[i] == false) {
+            continue;
+        }
+        auto search_result = search_results[i];
+        AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+
+        std::vector<float> result_distances;
+        std::vector<int64_t> internal_seg_offsets;
+        std::vector<int64_t> result_ids;
+
+        for (int j = 0; j < search_records[i].size(); j++) {
+            auto& offset = search_records[i][j];
+            auto distance = search_result->result_distances_[offset];
+            auto internal_seg_offset = search_result->internal_seg_offsets_[offset];
+            auto id = search_result->result_ids_[offset];
+            result_distances.push_back(distance);
+            internal_seg_offsets.push_back(internal_seg_offset);
+            result_ids.push_back(id);
+        }
+
+        search_result->result_distances_ = result_distances;
+        search_result->internal_seg_offsets_ = internal_seg_offsets;
+        search_result->result_ids_ = result_ids;
+    }
+}
+
+CStatus
+ReduceQueryResults(CQueryResult* c_search_results, int64_t num_segments, bool* is_selected) {
     std::vector<SearchResult*> search_results;
     for (int i = 0; i < num_segments; ++i) {
-        search_results.push_back((SearchResult*)query_results[i]);
+        search_results.push_back((SearchResult*)c_search_results[i]);
     }
-    auto topk = search_results[0]->topK_;
-    auto num_queries = search_results[0]->num_queries_;
-    auto final_result = std::make_unique<SearchResult>();
+    try {
+        auto topk = search_results[0]->topK_;
+        auto num_queries = search_results[0]->num_queries_;
+        std::vector<std::vector<int64_t>> search_records(num_segments);
 
-    int64_t query_offset = 0;
-    for (int j = 0; j < num_queries; ++j) {
-        GetResultData(search_results, *final_result, query_offset, topk);
-        query_offset += topk;
+        int64_t query_offset = 0;
+        for (int j = 0; j < num_queries; ++j) {
+            GetResultData(search_records, search_results, query_offset, is_selected, topk);
+            query_offset += topk;
+        }
+        ResetSearchResult(search_records, search_results, is_selected);
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        return status;
     }
-
-    return (CQueryResult)final_result.release();
 }
 
-CMarshaledHits
-ReorganizeQueryResults(CQueryResult c_query_result,
-                       CPlan c_plan,
+CStatus
+ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
                        CPlaceholderGroup* c_placeholder_groups,
-                       int64_t num_groups) {
-    auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
-    auto search_result = (milvus::engine::QueryResult*)c_query_result;
-    auto& result_ids = search_result->result_ids_;
-    auto& result_distances = search_result->result_distances_;
-    auto topk = GetTopK(c_plan);
-    int64_t queries_offset = 0;
-    for (int i = 0; i < num_groups; i++) {
-        auto num_queries = GetNumOfQueries(c_placeholder_groups[i]);
-        MarshaledHitsPeerGroup& hits_peer_group = (*marshaledHits).marshaled_hits_[i];
-        for (int j = 0; j < num_queries; j++) {
-            auto index = topk * queries_offset++;
-            milvus::proto::service::Hits hits;
-            for (int k = index; k < index + topk; k++) {
-                hits.add_ids(result_ids[k]);
-                hits.add_scores(result_distances[k]);
-            }
-            auto blob = hits.SerializeAsString();
-            hits_peer_group.hits_.push_back(blob);
-            hits_peer_group.blob_length_.push_back(blob.size());
+                       int64_t num_groups,
+                       CQueryResult* c_search_results,
+                       bool* is_selected,
+                       int64_t num_segments,
+                       CPlan c_plan) {
+    try {
+        auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
+        auto topk = GetTopK(c_plan);
+        std::vector<int64_t> num_queries_peer_group;
+        int64_t total_num_queries = 0;
+        for (int i = 0; i < num_groups; i++) {
+            auto num_queries = GetNumOfQueries(c_placeholder_groups[i]);
+            num_queries_peer_group.push_back(num_queries);
+            total_num_queries += num_queries;
         }
-    }
 
-    return (CMarshaledHits)marshaledHits.release();
+        std::vector<float> result_distances(total_num_queries * topk);
+        std::vector<int64_t> result_ids(total_num_queries * topk);
+        std::vector<std::vector<char>> row_datas(total_num_queries * topk);
+
+        int64_t count = 0;
+        for (int i = 0; i < num_segments; i++) {
+            if (is_selected[i] == false) {
+                continue;
+            }
+            auto search_result = (SearchResult*)c_search_results[i];
+            AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+            auto size = search_result->result_offsets_.size();
+            for (int j = 0; j < size; j++) {
+                auto loc = search_result->result_offsets_[j];
+                result_distances[loc] = search_result->result_distances_[j];
+                row_datas[loc] = search_result->row_data_[j];
+                result_ids[loc] = search_result->result_ids_[j];
+            }
+            count += size;
+        }
+        AssertInfo(count == total_num_queries * topk, "the reduces result's size less than total_num_queries*topk");
+
+        int64_t fill_hit_offset = 0;
+        for (int i = 0; i < num_groups; i++) {
+            MarshaledHitsPeerGroup& hits_peer_group = (*marshaledHits).marshaled_hits_[i];
+            for (int j = 0; j < num_queries_peer_group[i]; j++) {
+                milvus::proto::service::Hits hits;
+                for (int k = 0; k < topk; k++, fill_hit_offset++) {
+                    hits.add_ids(result_ids[fill_hit_offset]);
+                    hits.add_scores(result_distances[fill_hit_offset]);
+                    auto& row_data = row_datas[fill_hit_offset];
+                    hits.add_row_data(row_data.data(), row_data.size());
+                }
+                auto blob = hits.SerializeAsString();
+                hits_peer_group.hits_.push_back(blob);
+                hits_peer_group.blob_length_.push_back(blob.size());
+            }
+        }
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        auto marshled_res = (CMarshaledHits)marshaledHits.release();
+        *c_marshaled_hits = marshled_res;
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+        *c_marshaled_hits = nullptr;
+        return status;
+    }
 }
 
 int64_t

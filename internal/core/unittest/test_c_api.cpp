@@ -641,8 +641,14 @@ TEST(CApiTest, Reduce) {
     results.push_back(res1);
     results.push_back(res2);
 
-    auto reduced_search_result = ReduceQueryResults(results.data(), 2);
-    auto reorganize_search_result = ReorganizeQueryResults(reduced_search_result, plan, placeholderGroups.data(), 1);
+    bool is_selected[1] = {false};
+    status = ReduceQueryResults(results.data(), 1, is_selected);
+    assert(status.error_code == Success);
+    FillTargetEntry(segment, plan, res1);
+    void* reorganize_search_result = nullptr;
+    status = ReorganizeQueryResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(), is_selected,
+                                    1, plan);
+    assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
     std::vector<char> hits_blob;
@@ -660,7 +666,6 @@ TEST(CApiTest, Reduce) {
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(res1);
     DeleteQueryResult(res2);
-    DeleteQueryResult(reduced_search_result);
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);

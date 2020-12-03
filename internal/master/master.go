@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -42,7 +42,7 @@ type Master struct {
 	grpcServer *grpc.Server
 	grpcErr    chan error
 
-	kvBase               *kv.EtcdKV
+	kvBase               *etcdkv.EtcdKV
 	scheduler            *ddRequestScheduler
 	metaTable            *metaTable
 	timesSyncMsgProducer *timeSyncMsgProducer
@@ -63,12 +63,12 @@ type Master struct {
 	tsoAllocator *GlobalTSOAllocator
 }
 
-func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
+func newKVBase(kvRoot string, etcdAddr []string) *etcdkv.EtcdKV {
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   etcdAddr,
 		DialTimeout: 5 * time.Second,
 	})
-	kvBase := kv.NewEtcdKV(cli, kvRoot)
+	kvBase := etcdkv.NewEtcdKV(cli, kvRoot)
 	return kvBase
 }
 
@@ -89,8 +89,8 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	etcdkv := kv.NewEtcdKV(etcdClient, metaRootPath)
-	metakv, err := NewMetaTable(etcdkv)
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, metaRootPath)
+	metakv, err := NewMetaTable(etcdKV)
 	if err != nil {
 		return nil, err
 	}

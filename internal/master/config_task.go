@@ -4,13 +4,13 @@ import (
 	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type getSysConfigsTask struct {
 	baseTask
-	configkv *kv.EtcdKV
+	configkv *etcdkv.EtcdKV
 	req      *internalpb.SysConfigRequest
 	keys     []string
 	values   []string
