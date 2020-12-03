@@ -192,11 +192,13 @@ static const char* CONTROLLER_TEST_VALID_CONFIG_STR =
     "    - gpu0\n"
     "\n"
     "logs:\n"
-    "  level: debug\n"
     "  trace.enable: true\n"
     "  path: /tmp/milvus_web_controller_test/logs\n"
     "  max_log_file_size: 1024MB\n"
     "  log_rotate_num: 0\n"
+    "\n"
+    "log:\n"
+    "  min_messages: debug\n"
     "\n";
 
 }  // namespace
