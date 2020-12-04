@@ -9,6 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+
+#ifndef MILVUS_SDK_INCLUDE_BOLLEANQUERY_H_
+#define MILVUS_SDK_INCLUDE_BOLLEANQUERY_H_
+
+
 #pragma once
 
 #include <iostream>
@@ -66,3 +71,6 @@ class BooleanQuery {
 using BooleanQueryPtr = std::shared_ptr<BooleanQuery>;
 
 } // namespace milvus
+
+
+#endif
