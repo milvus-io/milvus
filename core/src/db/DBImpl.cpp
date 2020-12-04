@@ -157,10 +157,6 @@ DBImpl::Stop() {
         index_req_swn_.Notify();
         bg_index_thread_.join();
         LOG_ENGINE_DEBUG_ << "DBImpl::Stop bg_index_thread_.join()";
-    }
-
-    // wait metric thread exit
-    if (options_.metric_enable_) {
         swn_metric_.Notify();
         bg_metric_thread_.join();
     }
