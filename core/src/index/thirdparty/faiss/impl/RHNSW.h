@@ -372,40 +372,17 @@ struct RHNSWStatistics {
     int max_level;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
-    void CaculateStatistics(std::vector<double> &access_lorenz_curve, int64_t &access_total) {
-        std::vector<int64_t> cnts;
+    void GetStatistics(std::vector<size_t> &ret, size_t &access_total) {
         access_total = 0;
         for (auto &elem : access_cnt) {
-            cnts.push_back(elem.second);
+            ret.push_back(elem.second);
             access_total += elem.second;
         }
-        std::sort(cnts.begin(), cnts.end(), std::greater<int64_t>());
-        size_t len = cnts.size();
-        auto gini_len = 100;
-        std::vector<int> stat_len(gini_len, 0);
-        for (auto i = 0; i < gini_len; ++ i) {
-            stat_len[i] = (int)(((double)(i + 1) / 100.0) * len);
-        }
-        int64_t tmp_cnt = 0;
-        access_lorenz_curve.resize(gini_len);
-        access_lorenz_curve[gini_len] = 1.0;
-        int j = 0;
-        for (auto i = 1; i <= len && j < gini_len; ++ i) {
-            tmp_cnt += cnts[i];
-            if (i >= stat_len[j]) {
-                access_lorenz_curve[j] = (double)tmp_cnt / access_total + (j == 0 ? 0.0 : access_lorenz_curve[j - 1]);
-                tmp_cnt = 0;
-                j ++;
-            }
-            if (j >= gini_len)
-                break;
-        }
+        std::sort(ret.begin(), ret.end(), std::greater<int64_t>());
     }
 
     void
     Clear() {
-        max_level = 0;
-        distribution.clear();
         access_cnt.clear();
     }
 };

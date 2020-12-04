@@ -197,7 +197,7 @@ IndexRHNSW::GetStatistics() {
     if (!STATISTICS_LEVEL)
         return hnsw_stats;
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-    real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);
+    real_index->get_sorted_access_counts(hnsw_stats->access_cnt, hnsw_stats->access_total);
     return hnsw_stats;
 }
 

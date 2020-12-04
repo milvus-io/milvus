@@ -194,10 +194,10 @@ void IndexRHNSW::init_hnsw() {
 }
 
 void
-IndexRHNSW::calculate_stats(std::vector<double> &ret, int64_t &tot) {
+IndexRHNSW::get_sorted_access_counts(std::vector<size_t> &ret, size_t &tot) {
     if (STATISTICS_LEVEL != 3)
         return;
-    stats.CaculateStatistics(ret, tot);
+    stats.GetStatistics(ret, tot);
 }
 
 void

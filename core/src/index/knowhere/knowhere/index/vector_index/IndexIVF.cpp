@@ -38,9 +38,9 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #ifdef MILVUS_GPU_VERSION
-#include "knowhere/common/Statistics.h"
 #include "knowhere/index/vector_index/gpu/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#include "knowhere/index/vector_index/Statistics.h"
 #endif
 
 namespace milvus {
