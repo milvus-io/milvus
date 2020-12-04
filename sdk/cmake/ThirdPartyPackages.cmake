@@ -185,7 +185,7 @@ if (DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else ()
     set(GRPC_SOURCE_URL
-            "https://github.com/youny626/grpc-milvus/archive/master.zip")
+            "https://github.com/milvus-io/grpc-milvus/archive/master.zip")
 endif ()
 
 if (DEFINED ENV{MILVUS_ZLIB_URL})

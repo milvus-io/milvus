@@ -38,11 +38,12 @@ IVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    index_ = std::shared_ptr<faiss::Index>(new faiss::IndexIVFPQ(
-        coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m].get<int64_t>(),
-        config[IndexParams::nbits].get<int64_t>(), metric_type));
-
-    index_->train(rows, reinterpret_cast<const float*>(p_data));
+    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, config[IndexParams::nlist].get<int64_t>(),
+                                                     config[IndexParams::m].get<int64_t>(),
+                                                     config[IndexParams::nbits].get<int64_t>(), metric_type);
+    index->own_fields = true;
+    index->train(rows, reinterpret_cast<const float*>(p_data));
+    index_ = index;
 }
 
 VecIndexPtr

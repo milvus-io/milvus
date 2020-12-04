@@ -133,7 +133,6 @@ struct ServerConfig {
     } wal;
 
     struct Logs {
-        String level;
         struct Trace {
             Bool enable;
         } trace;
@@ -143,6 +142,10 @@ struct ServerConfig {
         Bool log_to_stdout;
         Bool log_to_file;
     } logs;
+
+    struct Log {
+        String min_messages;
+    } log;
 
     struct System {
         struct Lock {

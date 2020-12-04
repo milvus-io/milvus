@@ -199,7 +199,7 @@ class Operations : public std::enable_shared_from_this<Operations> {
     OperationContext context_;
     ScopedSnapshotT prev_ss_;
     StepsHolderT holders_;
-    size_t last_pos_;
+    size_t last_pos_ = 0;
     std::vector<ID_TYPE> ids_;
     bool done_ = false;
     Status status_;
