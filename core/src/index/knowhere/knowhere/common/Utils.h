@@ -20,7 +20,7 @@
 namespace milvus {
 namespace knowhere {
 
-extern const std::string INDEX_FILE_SLICE_SIZE_IN_MEGABYTE;
+extern const char* INDEX_FILE_SLICE_SIZE_IN_MEGABYTE;
 
 void
 Assemble(BinarySet& binarySet);

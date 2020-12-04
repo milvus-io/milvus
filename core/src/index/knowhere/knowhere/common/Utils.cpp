@@ -9,13 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "Utils.h"
+#include "knowhere/common/Utils.h"
 #include <iostream>
 
 namespace milvus {
 namespace knowhere {
 
-const std::string INDEX_FILE_SLICE_SIZE_IN_MEGABYTE("slice_size");
+const char* INDEX_FILE_SLICE_SIZE_IN_MEGABYTE = "slice_size";
 
 void
 Slice(const std::string& prefix, const BinaryPtr& data_src, const int64_t& slice_len, BinarySet& binarySet,
