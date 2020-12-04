@@ -89,7 +89,7 @@ InitConfig() {
          CreateIntegerConfig("general.stale_snapshots_count", 0, 100, &config.general.stale_snapshots_count.value, 0)},
         {"general.stale_snapshots_duration",
          CreateIntegerConfig("general.stale_snapshots_duration", 0, std::numeric_limits<int64_t>::max(),
-                 &config.general.stale_snapshots_duration.value, 10)},
+                             &config.general.stale_snapshots_duration.value, 10)},
 
         /* network */
         {"network.bind.address",

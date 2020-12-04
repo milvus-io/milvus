@@ -16,12 +16,12 @@
 #include <string>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/Store.h"
 #include "utils/Status.h"
-#include "config/ServerConfig.h"
 
 namespace milvus {
 namespace engine {

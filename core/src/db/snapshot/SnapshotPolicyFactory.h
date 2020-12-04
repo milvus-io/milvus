@@ -13,8 +13,8 @@
 
 #include <map>
 #include <memory>
-#include "db/snapshot/SnapshotPolicy.h"
 #include "config/ServerConfig.h"
+#include "db/snapshot/SnapshotPolicy.h"
 
 namespace milvus {
 namespace engine {
