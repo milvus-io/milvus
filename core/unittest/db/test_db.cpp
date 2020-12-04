@@ -31,6 +31,7 @@
 #include "db/utils.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "segment/Segment.h"
+#include "segment/SegmentReader.h"
 
 using SegmentVisitor = milvus::engine::SegmentVisitor;
 using InActiveResourcesGCEvent = milvus::engine::snapshot::InActiveResourcesGCEvent;
@@ -1354,6 +1355,57 @@ TEST_F(DBTest, FetchTest2) {
             ASSERT_EQ(segment_entity_ids.size(), batch_entity_ids.size());
         }
     }
+}
+
+TEST_F(DBTest, SegmentEntireRowCountTest) {
+    /*
+     * Test the function of 'GetEntireRowCount()'.
+     * The expected behavior is that before and after deleted, the return value
+     * of 'GetEntireRowCount()' should always be equal to SegmentRowCount and
+     * DeletedRowCount.
+     */
+    std::string collection_name = "test_collection_delete_";
+    CreateCollection2(db_, collection_name, false);
+    size_t count = 100;
+
+    milvus::engine::IDNumbers entity_ids;
+    milvus::engine::DataChunkPtr data_chunk;
+    BuildEntities(count, 0, data_chunk, true);
+    auto status = db_->Insert(collection_name, "", data_chunk);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::engine::utils::GetIDFromChunk(data_chunk, entity_ids);
+
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    milvus::json stats;
+    status = db_->GetCollectionStats(collection_name, stats);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    auto seg = stats["partitions"][0]["segments"][0];
+    std::string path = seg["files"][0]["path"];
+    int64_t segment_id = seg["id"];
+
+    ScopedSnapshotT ss;
+    status = Snapshots::GetInstance().GetSnapshot(ss, collection_name);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    auto visitor = SegmentVisitor::Build(ss, segment_id);
+    milvus::segment::SegmentReader segment_reader(path, visitor);
+    ASSERT_EQ(segment_reader.GetEntireRowCount(), count);
+
+    milvus::engine::IDNumbers delete_ids = {entity_ids[0], entity_ids[1]};
+    status = db_->DeleteEntityByID(collection_name, delete_ids);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    status = db_->Flush();
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    ScopedSnapshotT nss;
+    status = Snapshots::GetInstance().GetSnapshot(nss, collection_name);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    auto nvisitor = SegmentVisitor::Build(nss, segment_id);
+    milvus::segment::SegmentReader segment_nreader(path, nvisitor);
+    ASSERT_EQ(segment_nreader.GetEntireRowCount(), count);
 }
 
 TEST_F(DBTest, DeleteEntitiesTest) {

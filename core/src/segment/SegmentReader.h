@@ -104,6 +104,10 @@ class SegmentReader {
     int64_t
     GetRowCount();
 
+    // get the entire row count, which value is equal to count of uid.
+    int64_t
+    GetEntireRowCount() const;
+
     // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
     Status
     ClearCache();
