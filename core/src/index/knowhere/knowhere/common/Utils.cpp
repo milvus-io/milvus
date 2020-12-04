@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "knowhere/common/Utils.h"
+#include <algorithm>
 #include <iostream>
+#include <memory>
+#include <vector>
 
 namespace milvus {
 namespace knowhere {
