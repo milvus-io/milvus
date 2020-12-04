@@ -36,6 +36,7 @@ class AnnoyTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::IndexParams::n_trees, 4},
             {milvus::knowhere::IndexParams::search_k, 100},
             {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -196,6 +197,19 @@ TEST_P(AnnoyTest, annoy_serialize) {
         std::shared_ptr<uint8_t[]> dim_data(load_data3);
         binaryset.Append("annoy_dim", dim_data, bin_dim->size);
 
+        index_->Load(binaryset);
+        ASSERT_EQ(index_->Count(), nb);
+        ASSERT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
+TEST_P(AnnoyTest, annoy_slice) {
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);
         ASSERT_EQ(index_->Dim(), dim);

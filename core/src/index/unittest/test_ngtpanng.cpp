@@ -39,6 +39,7 @@ class NGTPANNGTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::IndexParams::max_search_edges, 50},
             {milvus::knowhere::IndexParams::forcedly_pruned_edge_size, 60},
             {milvus::knowhere::IndexParams::selectively_pruned_edge_size, 30},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -140,6 +141,21 @@ TEST_P(NGTPANNGTest, ngtpanng_serialize) {
 
         std::shared_ptr<uint8_t[]> tre_data(load_data4);
         binaryset.Append("ngt_tre_data", tre_data, bin_tre_data->size);
+
+        index_->Load(binaryset);
+        ASSERT_EQ(index_->Count(), nb);
+        ASSERT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
+TEST_P(NGTPANNGTest, ngtpanng_slice) {
+
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize(milvus::knowhere::Config());
 
         index_->Load(binaryset);
         ASSERT_EQ(index_->Count(), nb);

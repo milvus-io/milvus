@@ -177,6 +177,40 @@ TEST_P(IDMAPTest, idmap_serialize) {
     }
 }
 
+TEST_P(IDMAPTest, idmap_slice) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::meta::TOPK, k},
+                                  {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+
+    {
+        // serialize index
+        index_->Train(base_dataset, conf);
+        index_->Add(base_dataset, milvus::knowhere::Config());
+
+        if (index_mode_ == milvus::knowhere::IndexMode::MODE_GPU) {
+#ifdef MILVUS_GPU_VERSION
+            // cpu to gpu
+            index_ = std::dynamic_pointer_cast<milvus::knowhere::IDMAP>(index_->CopyCpuToGpu(DEVICEID, conf));
+#endif
+        }
+
+        auto re_result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(re_result, nq, k);
+        //        PrintResult(re_result, nq, k);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto binaryset = index_->Serialize(conf);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, k);
+        //        PrintResult(result, nq, k);
+    }
+}
+
 #ifdef MILVUS_GPU_VERSION
 TEST_P(IDMAPTest, idmap_copy) {
     ASSERT_TRUE(!xb.empty());

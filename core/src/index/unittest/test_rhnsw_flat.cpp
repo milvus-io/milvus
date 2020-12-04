@@ -33,6 +33,7 @@ class RHNSWFlatTest : public DataGen, public TestWithParam<std::string> {
             {milvus::knowhere::meta::DIM, 64},        {milvus::knowhere::meta::TOPK, 10},
             {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
             {milvus::knowhere::IndexParams::ef, 200}, {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
 
@@ -148,6 +149,21 @@ TEST_P(RHNSWFlatTest, HNSW_serialize) {
         binaryset.Append(new_idx->index_type() + "_Index", idx, bin_idx->size);
         binaryset.Append(new_idx->index_type() + "_Data", dat, bin_dat->size);
 
+        new_idx->Load(binaryset);
+        EXPECT_EQ(new_idx->Count(), nb);
+        EXPECT_EQ(new_idx->Dim(), dim);
+        auto result = new_idx->Query(query_dataset, conf, nullptr);
+//        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+    }
+}
+
+TEST_P(RHNSWFlatTest, HNSW_slice) {
+
+    {
+        index_->Train(base_dataset, conf);
+        index_->Add(base_dataset, conf);
+        auto binaryset = index_->Serialize(conf);
+        auto new_idx = std::make_shared<milvus::knowhere::IndexRHNSWFlat>();
         new_idx->Load(binaryset);
         EXPECT_EQ(new_idx->Count(), nb);
         EXPECT_EQ(new_idx->Dim(), dim);

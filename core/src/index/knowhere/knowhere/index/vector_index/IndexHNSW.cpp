@@ -51,6 +51,9 @@ IndexHNSW::Serialize(const Config& config) {
 
         BinarySet res_set;
         res_set.Append("HNSW", data, writer.rp);
+        if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+            Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
+        }
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -60,6 +63,7 @@ IndexHNSW::Serialize(const Config& config) {
 void
 IndexHNSW::Load(const BinarySet& index_binary) {
     try {
+        Assemble(const_cast<BinarySet&>(index_binary));
         auto binary = index_binary.GetByName("HNSW");
 
         MemoryIOReader reader;
