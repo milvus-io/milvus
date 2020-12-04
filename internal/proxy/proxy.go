@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -137,7 +138,7 @@ func (p *Proxy) AddCloseCallback(callbacks ...func()) {
 func (p *Proxy) grpcLoop() {
 	defer p.proxyLoopWg.Done()
 
-	lis, err := net.Listen("tcp", Params.NetworkAddress())
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.NetworkPort()))
 	if err != nil {
 		log.Fatalf("Proxy grpc server fatal error=%v", err)
 	}
