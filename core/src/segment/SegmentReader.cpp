@@ -668,12 +668,8 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
-            auto id = segment_visitor_->GetSegment()->GetID();
-            auto sc = segment_visitor_->GetSnapshot()->GetSegmentCommitBySegmentId(id);
-            // The black list size must be equal to total entity count containing deleted count
-            // and segment row count.
-            if (sc != nullptr && deleted_docs_ptr != nullptr) {
-                deleted_docs_ptr->GenBlacklist(sc->GetRowCount() + deleted_docs_ptr->GetCount());
+            if (deleted_docs_ptr != nullptr) {
+                deleted_docs_ptr->GenBlacklist(GetEntireRowCount());
             }
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
@@ -782,6 +778,30 @@ SegmentReader::GetRowCount() {
 
     int64_t count = raw->data_.size() / sizeof(engine::idx_t);
     return count;
+}
+
+int64_t
+SegmentReader::GetEntireRowCount() const {
+    if (segment_visitor_ == nullptr) {
+        return 0;
+    }
+
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
+    if (uid_field_visitor == nullptr) {
+        return 0;
+    }
+
+    auto uid_element_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+    if (uid_element_visitor == nullptr) {
+        return 0;
+    }
+
+    auto uid_file = uid_element_visitor->GetFile();
+    if (uid_file == nullptr) {
+        return 0;
+    }
+
+    return uid_file->GetRowCount();
 }
 
 Status
