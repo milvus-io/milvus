@@ -98,7 +98,49 @@ TEST(Expr, Range) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddField("age", DataType::INT32);
+    auto plan = CreatePlan(*schema, dsl_string);
+    ShowPlanNodeVisitor shower;
+    Assert(plan->tag2field_.at("$0") == "fakevec");
+    auto out = shower.call_child(*plan->plan_node_);
+    std::cout << out.dump(4);
+}
+
+TEST(Expr, RangeBinary) {
+    SUCCEED();
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::string dsl_string = R"(
+{
+    "bool": {
+        "must": [
+            {
+                "range": {
+                    "age": {
+                        "GT": 1,
+                        "LT": 100
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "Jaccard",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
     schema->AddField("age", DataType::INT32);
     auto plan = CreatePlan(*schema, dsl_string);
     ShowPlanNodeVisitor shower;
@@ -140,7 +182,7 @@ TEST(Expr, InvalidRange) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
     ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
 }
@@ -179,7 +221,7 @@ TEST(Expr, InvalidDSL) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
     ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
 }
@@ -189,7 +231,7 @@ TEST(Expr, ShowExecutor) {
     using namespace milvus::segcore;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
@@ -248,7 +290,7 @@ TEST(Expr, TestRange) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
 
     auto seg = CreateSegment(schema);

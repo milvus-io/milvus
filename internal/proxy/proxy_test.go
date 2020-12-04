@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -34,8 +35,26 @@ var masterServer *master.Master
 
 var testNum = 10
 
+func makeNewChannalNames(names []string, suffix string) []string {
+	var ret []string
+	for _, name := range names {
+		ret = append(ret, name+suffix)
+	}
+	return ret
+}
+
+func refreshChannelNames() {
+	suffix := "_test" + strconv.FormatInt(rand.Int63n(100), 10)
+	master.Params.DDChannelNames = makeNewChannalNames(master.Params.DDChannelNames, suffix)
+	master.Params.WriteNodeTimeTickChannelNames = makeNewChannalNames(master.Params.WriteNodeTimeTickChannelNames, suffix)
+	master.Params.InsertChannelNames = makeNewChannalNames(master.Params.InsertChannelNames, suffix)
+	master.Params.K2SChannelNames = makeNewChannalNames(master.Params.K2SChannelNames, suffix)
+	master.Params.ProxyTimeTickChannelNames = makeNewChannalNames(master.Params.ProxyTimeTickChannelNames, suffix)
+}
+
 func startMaster(ctx context.Context) {
 	master.Init()
+	refreshChannelNames()
 	etcdAddr := master.Params.EtcdAddress
 	metaRootPath := master.Params.MetaRootPath
 

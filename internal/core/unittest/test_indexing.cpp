@@ -235,14 +235,14 @@ TEST(Indexing, IVFFlatNM) {
     }
 }
 
-TEST(Indexing, DISABLED_BinaryBruteForce) {
+TEST(Indexing, BinaryBruteForce) {
     int64_t N = 100000;
     int64_t num_queries = 10;
     int64_t topk = 5;
-    int64_t dim = 64;
+    int64_t dim = 512;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("vecbin", DataType::VECTOR_BINARY, dim);
+    schema->AddField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
     schema->AddField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     vector<float> distances(result_count);
@@ -250,8 +250,16 @@ TEST(Indexing, DISABLED_BinaryBruteForce) {
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto line_sizeof = schema->operator[](0).get_sizeof();
     auto query_data = 1024 * line_sizeof + bin_vec.data();
-    query::BinarySearchBruteForce(faiss::MetricType::METRIC_Jaccard, line_sizeof, bin_vec.data(), N, topk, num_queries,
-                                  query_data, distances.data(), ids.data());
+    query::dataset::BinaryQueryDataset query_dataset{
+        faiss::MetricType::METRIC_Jaccard,  //
+        num_queries,                        //
+        topk,                               //
+        line_sizeof,                        //
+        query_data                          //
+    };
+
+    query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, distances.data(), ids.data());
+
     QueryResult qr;
     qr.num_queries_ = num_queries;
     qr.topK_ = topk;
@@ -264,76 +272,78 @@ TEST(Indexing, DISABLED_BinaryBruteForce) {
   [
     [
       "1024->0.000000",
-      "86966->0.395349",
-      "24843->0.404762",
-      "13806->0.416667",
-      "44313->0.421053"
+      "43190->0.578804",
+      "5255->0.586207",
+      "23247->0.586486",
+      "4936->0.588889"
     ],
     [
       "1025->0.000000",
-      "14226->0.348837",
-      "1488->0.365854",
-      "47337->0.377778",
-      "20913->0.377778"
+      "15147->0.562162",
+      "49910->0.564304",
+      "67435->0.567867",
+      "38292->0.569921"
     ],
     [
       "1026->0.000000",
-      "81882->0.386364",
-      "9215->0.409091",
-      "95024->0.409091",
-      "54987->0.414634"
+      "15332->0.569061",
+      "56391->0.572559",
+      "17187->0.572603",
+      "26988->0.573771"
     ],
     [
       "1027->0.000000",
-      "68981->0.394737",
-      "75528->0.404762",
-      "68794->0.405405",
-      "21975->0.425000"
+      "4502->0.559585",
+      "25879->0.566234",
+      "66937->0.566489",
+      "21228->0.566845"
     ],
     [
       "1028->0.000000",
-      "90290->0.375000",
-      "34309->0.394737",
-      "58559->0.400000",
-      "33865->0.400000"
+      "38490->0.578804",
+      "12946->0.581717",
+      "31677->0.582173",
+      "94474->0.583569"
     ],
     [
       "1029->0.000000",
-      "62722->0.388889",
-      "89070->0.394737",
-      "18528->0.414634",
-      "94971->0.421053"
+      "59011->0.551630",
+      "82575->0.555263",
+      "42914->0.561828",
+      "23705->0.564171"
     ],
     [
       "1030->0.000000",
-      "67402->0.333333",
-      "3988->0.347826",
-      "86376->0.354167",
-      "84381->0.361702"
+      "39782->0.579946",
+      "65553->0.589947",
+      "82154->0.590028",
+      "13374->0.590164"
     ],
     [
       "1031->0.000000",
-      "81569->0.325581",
-      "12715->0.347826",
-      "40332->0.363636",
-      "21037->0.372093"
+      "47826->0.582873",
+      "72669->0.587432",
+      "334->0.588076",
+      "80652->0.589333"
     ],
     [
       "1032->0.000000",
-      "60536->0.428571",
-      "93293->0.432432",
-      "70969->0.435897",
-      "64048->0.450000"
+      "31968->0.573034",
+      "63545->0.575758",
+      "76913->0.575916",
+      "6286->0.576000"
     ],
     [
       "1033->0.000000",
-      "99022->0.394737",
-      "11763->0.405405",
-      "50073->0.428571",
-      "97118->0.428571"
+      "95635->0.570248",
+      "93439->0.574866",
+      "6709->0.578534",
+      "6367->0.579634"
     ]
   ]
 ]
 )");
-    ASSERT_EQ(json, ref);
+    auto json_str = json.dump(2);
+    auto ref_str = ref.dump(2);
+    ASSERT_EQ(json_str, ref_str);
 }

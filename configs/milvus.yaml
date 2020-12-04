@@ -12,7 +12,7 @@
 
 nodeID: # will be deprecated after v0.2
   proxyIDList: [0]
-  queryNodeIDList: [1]
+  queryNodeIDList: [1, 2]
   writeNodeIDList: [3]
 
 etcd:
@@ -22,6 +22,13 @@ etcd:
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
   segThreshold: 10000
+
+minio:
+  address: localhost
+  port: 9000
+  accessKeyID: minioadmin
+  secretAccessKey: minioadmin
+  useSSL: false
 
 pulsar:
   address: localhost

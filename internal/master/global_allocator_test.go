@@ -1,7 +1,6 @@
 package master
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -11,16 +10,6 @@ import (
 
 var gTestTsoAllocator Allocator
 var gTestIDAllocator *GlobalIDAllocator
-
-func TestMain(m *testing.M) {
-	Params.Init()
-
-	etcdAddr := Params.EtcdAddress
-	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
-	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
-	exitCode := m.Run()
-	os.Exit(exitCode)
-}
 
 func TestGlobalTSOAllocator_Initialize(t *testing.T) {
 	err := gTestTsoAllocator.Initialize()

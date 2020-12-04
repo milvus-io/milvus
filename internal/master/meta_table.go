@@ -11,7 +11,7 @@ import (
 )
 
 type metaTable struct {
-	client        *kv.EtcdKV                     // client of a reliable kv service, i.e. etcd client
+	client        kv.TxnBase                     // client of a reliable kv service, i.e. etcd client
 	tenantID2Meta map[UniqueID]pb.TenantMeta     // tenant id to tenant meta
 	proxyID2Meta  map[UniqueID]pb.ProxyMeta      // proxy id to proxy meta
 	collID2Meta   map[UniqueID]pb.CollectionMeta // collection id to collection meta
@@ -23,7 +23,7 @@ type metaTable struct {
 	ddLock     sync.RWMutex
 }
 
-func NewMetaTable(kv *kv.EtcdKV) (*metaTable, error) {
+func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
 	mt := &metaTable{
 		client:     kv,
 		tenantLock: sync.RWMutex{},

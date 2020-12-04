@@ -86,23 +86,6 @@ func (pt *ParamTable) ProxyNum() int {
 	return len(ret)
 }
 
-func (pt *ParamTable) ProxyIDList() []UniqueID {
-	proxyIDStr, err := pt.Load("nodeID.proxyIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	proxyIDs := strings.Split(proxyIDStr, ",")
-	for _, i := range proxyIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
-}
-
 func (pt *ParamTable) queryNodeNum() int {
 	return len(pt.queryNodeIDList())
 }
@@ -237,8 +220,6 @@ func (pt *ParamTable) SearchChannelNames() []string {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 	return ret
-	//prefix += "-0"
-	//return []string{prefix}
 }
 
 func (pt *ParamTable) SearchResultChannelNames() []string {

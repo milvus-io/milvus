@@ -1,8 +1,9 @@
-set(COMMON_SRC 
-    Schema.cpp
-)
+set(COMMON_SRC
+        Schema.cpp
+        Types.cpp
+        )
 
-add_library(milvus_common 
-    ${COMMON_SRC}
-)
+add_library(milvus_common
+        ${COMMON_SRC}
+        )
 target_link_libraries(milvus_common milvus_proto)

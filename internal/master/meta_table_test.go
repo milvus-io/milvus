@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"go.etcd.io/etcd/clientv3"
@@ -19,7 +19,7 @@ func TestMetaTable_Collection(t *testing.T) {
 	etcdAddr := Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -157,7 +157,7 @@ func TestMetaTable_DeletePartition(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -252,7 +252,7 @@ func TestMetaTable_Segment(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -333,7 +333,7 @@ func TestMetaTable_UpdateSegment(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -379,7 +379,7 @@ func TestMetaTable_AddPartition_Limit(t *testing.T) {
 
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := kv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
 	assert.Nil(t, err)
