@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 
-	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -67,30 +66,7 @@ func (t *createPartitionTask) Execute() error {
 	if err != nil {
 		return err
 	}
-
-	ts, err := t.Ts()
-	if err != nil {
-		return err
-	}
-
-	err = t.mt.AddPartition(collectionMeta.ID, partitionName.Tag)
-	if err != nil {
-		return err
-	}
-
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
-	timeTickMsg := &ms.CreatePartitionMsg{
-		BaseMsg:                baseMsg,
-		CreatePartitionRequest: *t.req,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	return t.sch.ddMsgStream.Broadcast(&msgPack)
-
+	return t.mt.AddPartition(collectionMeta.ID, partitionName.Tag)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -122,29 +98,7 @@ func (t *dropPartitionTask) Execute() error {
 		return err
 	}
 
-	err = t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
-	if err != nil {
-		return err
-	}
-
-	ts, err := t.Ts()
-	if err != nil {
-		return err
-	}
-
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
-	timeTickMsg := &ms.DropPartitionMsg{
-		BaseMsg:              baseMsg,
-		DropPartitionRequest: *t.req,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-	return t.sch.ddMsgStream.Broadcast(&msgPack)
-
+	return t.mt.DeletePartition(collectionMeta.ID, partitionName.Tag)
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -178,7 +132,6 @@ func (t *hasPartitionTask) Execute() error {
 	t.hasPartition = t.mt.HasPartition(collectionMeta.ID, partitionName.Tag)
 
 	return nil
-
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -215,7 +168,6 @@ func (t *describePartitionTask) Execute() error {
 	t.description = &description
 
 	return nil
-
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -256,5 +208,4 @@ func (t *showPartitionTask) Execute() error {
 	t.stringListResponse = &stringListResponse
 
 	return nil
-
 }
