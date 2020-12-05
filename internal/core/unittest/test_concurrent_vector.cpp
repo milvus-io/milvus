@@ -52,7 +52,7 @@ TEST(ConcurrentVector, TestSingle) {
         c_vec.set_data(total_count, vec.data(), insert_size);
         total_count += insert_size;
     }
-    ASSERT_EQ(c_vec.chunk_size(), (total_count + 31) / 32);
+    ASSERT_EQ(c_vec.num_chunk(), (total_count + 31) / 32);
     for (int i = 0; i < total_count; ++i) {
         for (int d = 0; d < dim; ++d) {
             auto std_data = d + i * dim;
