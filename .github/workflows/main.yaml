@@ -51,7 +51,7 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd
+          docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
         env:
           CHECK_BUILDER: "1"

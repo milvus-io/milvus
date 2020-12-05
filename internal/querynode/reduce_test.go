@@ -9,19 +9,63 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 func TestReduce_AllFunc(t *testing.T) {
-	collectionName := "collection0"
-	collectionID := UniqueID(0)
-	segmentID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
+	fieldVec := schemapb.FieldSchema{
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name:   "collection0",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
 	assert.NotEqual(t, "", collectionMetaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
+	collection := newCollection(&collectionMeta, collectionMetaBlob)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+
+	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
+	assert.Equal(t, segmentID, segment.segmentID)
 
 	const DIM = 16
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
