@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -59,7 +60,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 
 	p.queryMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamSearchBufSize())
 	p.queryMsgStream.SetPulsarClient(pulsarAddress)
-	p.queryMsgStream.CreatePulsarProducers(Params.searchChannelNames())
+	p.queryMsgStream.CreatePulsarProducers(Params.SearchChannelNames())
 
 	masterAddr := Params.MasterAddress()
 	idAllocator, err := allocator.NewIDAllocator(p.proxyLoopCtx, masterAddr)
@@ -83,7 +84,7 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 
 	p.manipulationMsgStream = msgstream.NewPulsarMsgStream(p.proxyLoopCtx, Params.MsgStreamInsertBufSize())
 	p.manipulationMsgStream.SetPulsarClient(pulsarAddress)
-	p.manipulationMsgStream.CreatePulsarProducers(Params.insertChannelNames())
+	p.manipulationMsgStream.CreatePulsarProducers(Params.InsertChannelNames())
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, p.segAssigner, false)
 	}
@@ -137,7 +138,7 @@ func (p *Proxy) AddCloseCallback(callbacks ...func()) {
 func (p *Proxy) grpcLoop() {
 	defer p.proxyLoopWg.Done()
 
-	lis, err := net.Listen("tcp", Params.NetWorkAddress())
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.NetworkPort()))
 	if err != nil {
 		log.Fatalf("Proxy grpc server fatal error=%v", err)
 	}
