@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,7 +13,8 @@ import (
 
 func main() {
 	proxy.Init()
-	fmt.Println("ProxyID is", proxy.Params.ProxyID())
+
+	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := proxy.CreateProxy(ctx)
 	if err != nil {

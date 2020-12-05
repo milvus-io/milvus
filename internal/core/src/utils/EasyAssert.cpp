@@ -42,11 +42,8 @@ EasyAssertInfo(
 
 [[noreturn]] void
 ThrowWithTrace(const std::exception& exception) {
-    if (typeid(exception) == typeid(WrappedRuntimError)) {
-        throw exception;
-    }
     auto err_msg = exception.what() + std::string("\n") + EasyStackTrace();
-    throw WrappedRuntimError(err_msg);
+    throw std::runtime_error(err_msg);
 }
 
 }  // namespace milvus::impl

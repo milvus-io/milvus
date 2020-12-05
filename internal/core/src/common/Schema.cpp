@@ -11,50 +11,35 @@
 
 #include "common/Schema.h"
 #include <google/protobuf/text_format.h>
-#include <boost/lexical_cast.hpp>
 
 namespace milvus {
-
-using std::string;
-static std::map<string, string>
-RepeatedKeyValToMap(const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs) {
-    std::map<string, string> mapping;
-    for (auto& kv : kvs) {
-        AssertInfo(!mapping.count(kv.key()), "repeat key(" + kv.key() + ") in protobuf");
-        mapping.emplace(kv.key(), kv.value());
-    }
-    return mapping;
-}
-
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
     schema->set_auto_id(schema_proto.autoid());
     for (const milvus::proto::schema::FieldSchema& child : schema_proto.fields()) {
+        const auto& type_params = child.type_params();
+        int64_t dim = -1;
         auto data_type = DataType(child.data_type());
+        for (const auto& type_param : type_params) {
+            if (type_param.key() == "dim") {
+                dim = strtoll(type_param.value().c_str(), nullptr, 10);
+            }
+        }
+
+        if (field_is_vector(data_type)) {
+            AssertInfo(dim != -1, "dim not found");
+        } else {
+            AssertInfo(dim == 1 || dim == -1, "Invalid dim field. Should be 1 or not exists");
+            dim = 1;
+        }
 
         if (child.is_primary_key()) {
             AssertInfo(!schema->primary_key_offset_opt_.has_value(), "repetitive primary key");
             schema->primary_key_offset_opt_ = schema->size();
         }
 
-        if (field_is_vector(data_type)) {
-            auto type_map = RepeatedKeyValToMap(child.type_params());
-            auto index_map = RepeatedKeyValToMap(child.index_params());
-            if (!index_map.count("metric_type")) {
-                auto default_metric_type =
-                    data_type == DataType::VECTOR_FLOAT ? MetricType::METRIC_L2 : MetricType::METRIC_Jaccard;
-                index_map["metric_type"] = default_metric_type;
-            }
-
-            AssertInfo(type_map.count("dim"), "dim not found");
-            auto dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
-            AssertInfo(index_map.count("metric_type"), "index not found");
-            auto metric_type = GetMetricType(index_map.at("metric_type"));
-            schema->AddField(child.name(), data_type, dim, metric_type);
-        } else {
-            schema->AddField(child.name(), data_type);
-        }
+        schema->AddField(child.name(), data_type, dim);
     }
     return schema;
 }

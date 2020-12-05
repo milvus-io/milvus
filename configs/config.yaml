@@ -1,0 +1,118 @@
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
+
+master:
+  address: localhost
+  port: 53100
+  pulsarmoniterinterval: 1
+  pulsartopic: "monitor-topic"
+
+  proxyidlist: [1, 2]
+  proxyTimeSyncChannels: ["proxy1", "proxy2"]
+  proxyTimeSyncSubName: "proxy-topic"
+  softTimeTickBarrierInterval: 500
+
+  writeidlist: [3, 4]
+  writeTimeSyncChannels: ["write3", "write4"]
+  writeTimeSyncSubName: "write-topic"
+
+  dmTimeSyncChannels: ["dm5", "dm6"]
+  k2sTimeSyncChannels: ["k2s7", "k2s8"]
+
+  defaultSizePerRecord: 1024
+  minimumAssignSize: 1048576
+  segmentThreshold: 536870912
+  segmentExpireDuration: 2000
+  segmentThresholdFactor: 0.75
+  querynodenum: 1
+  writenodenum: 1
+  statsChannels: "statistic"
+
+etcd:
+  address: localhost
+  port: 2379
+  rootpath: by-dev
+  segthreshold: 10000
+
+minio:
+  address: localhost
+  port: 9000
+  accessKeyID: minioadmin
+  secretAccessKey: minioadmin
+  useSSL: false
+
+timesync:
+  interval: 400
+
+storage:
+  driver: TIKV
+  address: localhost
+  port: 2379
+  accesskey:
+  secretkey:
+
+pulsar:
+  authentication: false
+  user: user-default
+  token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJKb2UifQ.ipevRNuRP6HflG8cFKnmUPtypruRC4fb1DWtoLL62SY
+  address: localhost
+  port: 6650
+  topicnum: 128
+
+reader:
+  clientid: 0
+  stopflag: -1
+  readerqueuesize: 10000
+  searchchansize: 10000
+  key2segchansize: 10000
+  topicstart: 0
+  topicend: 128
+
+writer:
+  clientid: 0
+  stopflag: -2
+  readerqueuesize: 10000
+  searchbyidchansize: 10000
+  parallelism: 100
+  topicstart: 0
+  topicend: 128
+  bucket: "zilliz-hz"
+
+proxy:
+  timezone: UTC+8
+  proxy_id: 1
+  numReaderNodes: 2
+  tsoSaveInterval: 200
+  timeTickInterval: 200
+
+  pulsarTopics:
+    readerTopicPrefix: "milvusReader"
+    numReaderTopics: 2
+    deleteTopic: "milvusDeleter"
+    queryTopic: "milvusQuery"
+    resultTopic: "milvusResult"
+    resultGroup: "milvusResultGroup"
+    timeTickTopic: "milvusTimeTick"
+
+  network:
+    address: 0.0.0.0
+    port: 19530
+
+  logs:
+    level: debug
+    trace.enable: true
+    path: /tmp/logs
+    max_log_file_size: 1024MB
+    log_rotate_num: 0
+
+  storage:
+    path: /var/lib/milvus
+    auto_flush_interval: 1

@@ -19,7 +19,6 @@ import (
 
 func TestMaster_CollectionTask(t *testing.T) {
 	Init()
-	refreshMasterAddress()
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
@@ -65,10 +64,10 @@ func TestMaster_CollectionTask(t *testing.T) {
 
 	svr, err := CreateServer(ctx)
 	assert.Nil(t, err)
-	err = svr.Run(int64(Params.Port))
+	err = svr.Run(10002)
 	assert.Nil(t, err)
 
-	conn, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, "127.0.0.1:10002", grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer conn.Close()
 

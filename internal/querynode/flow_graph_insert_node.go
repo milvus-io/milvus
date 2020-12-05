@@ -10,7 +10,7 @@ import (
 
 type insertNode struct {
 	BaseNode
-	replica collectionReplica
+	replica *collectionReplica
 }
 
 type InsertData struct {
@@ -58,13 +58,13 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
 
 		// check if segment exists, if not, create this segment
-		if !iNode.replica.hasSegment(task.SegmentID) {
-			collection, err := iNode.replica.getCollectionByName(task.CollectionName)
+		if !(*iNode.replica).hasSegment(task.SegmentID) {
+			collection, err := (*iNode.replica).getCollectionByName(task.CollectionName)
 			if err != nil {
 				log.Println(err)
 				continue
 			}
-			err = iNode.replica.addSegment(task.SegmentID, task.PartitionTag, collection.ID())
+			err = (*iNode.replica).addSegment(task.SegmentID, task.PartitionTag, collection.ID())
 			if err != nil {
 				log.Println(err)
 				continue
@@ -74,7 +74,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 	// 2. do preInsert
 	for segmentID := range insertData.insertRecords {
-		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+		var targetSegment, err = (*iNode.replica).getSegmentByID(segmentID)
 		if err != nil {
 			log.Println("preInsert failed")
 			// TODO: add error handling
@@ -102,7 +102,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 }
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
-	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
+	var targetSegment, err = (*iNode.replica).getSegmentByID(segmentID)
 	if err != nil {
 		log.Println("cannot find segment:", segmentID)
 		// TODO: add error handling
@@ -127,7 +127,7 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 	wg.Done()
 }
 
-func newInsertNode(replica collectionReplica) *insertNode {
+func newInsertNode(replica *collectionReplica) *insertNode {
 	maxQueueLength := Params.flowGraphMaxQueueLength()
 	maxParallelism := Params.flowGraphMaxParallelism()
 

@@ -2,8 +2,8 @@ package querynode
 
 import (
 	"log"
-	"os"
 	"strconv"
+	"strings"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -21,16 +21,15 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
-	queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
-	if queryNodeIDStr == "" {
-		queryNodeIDList := p.QueryNodeIDList()
-		if len(queryNodeIDList) <= 0 {
-			queryNodeIDStr = "0"
-		} else {
-			queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
-		}
+	err = p.LoadYaml("milvus.yaml")
+	if err != nil {
+		panic(err)
 	}
-	p.Save("_queryNodeID", queryNodeIDStr)
+
+	err = p.LoadYaml("advanced/channel.yaml")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *ParamTable) pulsarAddress() (string, error) {
@@ -41,8 +40,8 @@ func (p *ParamTable) pulsarAddress() (string, error) {
 	return url, nil
 }
 
-func (p *ParamTable) QueryNodeID() UniqueID {
-	queryNodeID, err := p.Load("_queryNodeID")
+func (p *ParamTable) queryNodeID() int {
+	queryNodeID, err := p.Load("reader.clientid")
 	if err != nil {
 		panic(err)
 	}
@@ -50,7 +49,7 @@ func (p *ParamTable) QueryNodeID() UniqueID {
 	if err != nil {
 		panic(err)
 	}
-	return UniqueID(id)
+	return id
 }
 
 func (p *ParamTable) insertChannelRange() []int {
@@ -58,47 +57,138 @@ func (p *ParamTable) insertChannelRange() []int {
 	if err != nil {
 		panic(err)
 	}
-	return paramtable.ConvertRangeToIntRange(insertChannelRange, ",")
+
+	channelRange := strings.Split(insertChannelRange, ",")
+	if len(channelRange) != 2 {
+		panic("Illegal channel range num")
+	}
+	channelBegin, err := strconv.Atoi(channelRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(channelRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+	return []int{channelBegin, channelEnd}
 }
 
 // advanced params
 // stats
 func (p *ParamTable) statsPublishInterval() int {
-	return p.ParseInt("queryNode.stats.publishInterval")
+	timeInterval, err := p.Load("queryNode.stats.publishInterval")
+	if err != nil {
+		panic(err)
+	}
+	interval, err := strconv.Atoi(timeInterval)
+	if err != nil {
+		panic(err)
+	}
+	return interval
 }
 
 // dataSync:
 func (p *ParamTable) flowGraphMaxQueueLength() int32 {
-	return p.ParseInt32("queryNode.dataSync.flowGraph.maxQueueLength")
+	queueLength, err := p.Load("queryNode.dataSync.flowGraph.maxQueueLength")
+	if err != nil {
+		panic(err)
+	}
+	length, err := strconv.Atoi(queueLength)
+	if err != nil {
+		panic(err)
+	}
+	return int32(length)
 }
 
 func (p *ParamTable) flowGraphMaxParallelism() int32 {
-	return p.ParseInt32("queryNode.dataSync.flowGraph.maxParallelism")
+	maxParallelism, err := p.Load("queryNode.dataSync.flowGraph.maxParallelism")
+	if err != nil {
+		panic(err)
+	}
+	maxPara, err := strconv.Atoi(maxParallelism)
+	if err != nil {
+		panic(err)
+	}
+	return int32(maxPara)
 }
 
 // msgStream
 func (p *ParamTable) insertReceiveBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.insert.recvBufSize")
+	revBufSize, err := p.Load("queryNode.msgStream.insert.recvBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(revBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) insertPulsarBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.insert.pulsarBufSize")
+	pulsarBufSize, err := p.Load("queryNode.msgStream.insert.pulsarBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(pulsarBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) searchReceiveBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.search.recvBufSize")
+	revBufSize, err := p.Load("queryNode.msgStream.search.recvBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(revBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) searchPulsarBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.search.pulsarBufSize")
+	pulsarBufSize, err := p.Load("queryNode.msgStream.search.pulsarBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(pulsarBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) searchResultReceiveBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.searchResult.recvBufSize")
+	revBufSize, err := p.Load("queryNode.msgStream.searchResult.recvBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(revBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) statsReceiveBufSize() int64 {
-	return p.ParseInt64("queryNode.msgStream.stats.recvBufSize")
+	revBufSize, err := p.Load("queryNode.msgStream.stats.recvBufSize")
+	if err != nil {
+		panic(err)
+	}
+	bufSize, err := strconv.Atoi(revBufSize)
+	if err != nil {
+		panic(err)
+	}
+	return int64(bufSize)
 }
 
 func (p *ParamTable) etcdAddress() string {
@@ -122,73 +212,123 @@ func (p *ParamTable) metaRootPath() string {
 }
 
 func (p *ParamTable) gracefulTime() int64 {
-	return p.ParseInt64("queryNode.gracefulTime")
+	gracefulTime, err := p.Load("queryNode.gracefulTime")
+	if err != nil {
+		panic(err)
+	}
+	time, err := strconv.Atoi(gracefulTime)
+	if err != nil {
+		panic(err)
+	}
+	return int64(time)
 }
 
 func (p *ParamTable) insertChannelNames() []string {
-
-	prefix, err := p.Load("msgChannel.chanNamePrefix.insert")
+	ch, err := p.Load("msgChannel.chanNamePrefix.insert")
 	if err != nil {
 		log.Fatal(err)
 	}
-	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
 		panic(err)
 	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
 
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
 	}
-	sep := len(channelIDs) / p.queryNodeNum()
-	index := p.sliceIndex()
-	if index == -1 {
-		panic("queryNodeID not Match with Config")
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
 	}
-	start := index * sep
-	return ret[start : start+sep]
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
 }
 
 func (p *ParamTable) searchChannelNames() []string {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
+	ch, err := p.Load("msgChannel.chanNamePrefix.search")
 	if err != nil {
 		log.Fatal(err)
 	}
-	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.search")
 	if err != nil {
 		panic(err)
 	}
 
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
 	}
-	return ret
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
 }
 
 func (p *ParamTable) searchResultChannelNames() []string {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.searchResult")
+	ch, err := p.Load("msgChannel.chanNamePrefix.searchResult")
 	if err != nil {
 		log.Fatal(err)
 	}
-	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
 	if err != nil {
 		panic(err)
 	}
 
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
+	chanRange := strings.Split(channelRange, ",")
+	if len(chanRange) != 2 {
+		panic("Illegal channel range num")
 	}
-	return ret
+	channelBegin, err := strconv.Atoi(chanRange[0])
+	if err != nil {
+		panic(err)
+	}
+	channelEnd, err := strconv.Atoi(chanRange[1])
+	if err != nil {
+		panic(err)
+	}
+	if channelBegin < 0 || channelEnd < 0 {
+		panic("Illegal channel range value")
+	}
+	if channelBegin > channelEnd {
+		panic("Illegal channel range value")
+	}
+
+	channels := make([]string, channelEnd-channelBegin)
+	for i := 0; i < channelEnd-channelBegin; i++ {
+		channels[i] = ch + "-" + strconv.Itoa(channelBegin+i)
+	}
+	return channels
 }
 
 func (p *ParamTable) msgChannelSubName() string {
@@ -197,11 +337,7 @@ func (p *ParamTable) msgChannelSubName() string {
 	if err != nil {
 		log.Panic(err)
 	}
-	queryNodeIDStr, err := p.Load("_QueryNodeID")
-	if err != nil {
-		panic(err)
-	}
-	return name + "-" + queryNodeIDStr
+	return name
 }
 
 func (p *ParamTable) statsChannelName() string {
@@ -210,19 +346,4 @@ func (p *ParamTable) statsChannelName() string {
 		panic(err)
 	}
 	return channels
-}
-
-func (p *ParamTable) sliceIndex() int {
-	queryNodeID := p.QueryNodeID()
-	queryNodeIDList := p.QueryNodeIDList()
-	for i := 0; i < len(queryNodeIDList); i++ {
-		if queryNodeID == queryNodeIDList[i] {
-			return i
-		}
-	}
-	return -1
-}
-
-func (p *ParamTable) queryNodeNum() int {
-	return len(p.QueryNodeIDList())
 }

@@ -27,14 +27,5 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
                     int64_t num_queries,
                     Timestamp timestamp,
                     std::optional<const BitmapSimple*> bitmap_opt,
-                    QueryResult& results);
-
-Status
-BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
-                          const query::QueryInfo& info,
-                          const uint8_t* query_data,
-                          int64_t num_queries,
-                          Timestamp timestamp,
-                          std::optional<const BitmapSimple*> bitmaps_opt,
-                          QueryResult& results);
+                    segcore::QueryResult& results);
 }  // namespace milvus::query
