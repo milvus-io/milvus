@@ -19,7 +19,7 @@ typedef struct CStatus {
 } CStatus;
 
 CPayloadWriter NewPayloadWriter(int columnType);
-CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length);
+//CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length);
 CStatus AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t *values, int length);
 CStatus AddInt16ToPayload(CPayloadWriter payloadWriter, int16_t *values, int length);
 CStatus AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t *values, int length);
@@ -39,7 +39,7 @@ CStatus ReleasePayloadWriter(CPayloadWriter handler);
 
 typedef void *CPayloadReader;
 CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_size);
-CStatus GetBoolFromPayload(CPayloadReader payloadReader, bool **values, int *length);
+//CStatus GetBoolFromPayload(CPayloadReader payloadReader, bool **values, int *length);
 CStatus GetInt8FromPayload(CPayloadReader payloadReader, int8_t **values, int *length);
 CStatus GetInt16FromPayload(CPayloadReader payloadReader, int16_t **values, int *length);
 CStatus GetInt32FromPayload(CPayloadReader payloadReader, int32_t **values, int *length);
