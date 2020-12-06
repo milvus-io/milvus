@@ -18,42 +18,55 @@
 namespace milvus {
 namespace knowhere {
 
-const char* INDEX_FILE_SLICE_SIZE_IN_MEGABYTE = "slice_size";
+const char* INDEX_FILE_SLICE_SIZE_IN_MEGABYTE = "SLICE_SIZE";
+const char* INDEX_FILE_SLICE_META = "SLICE_META";
+
+static const char* META = "meta";
+static const char* NAME = "name";
+static const char* SLICE_NUM = "slice_num";
+static const char* TOTAL_LEN = "total_len";
 
 void
 Slice(const std::string& prefix, const BinaryPtr& data_src, const int64_t& slice_len, BinarySet& binarySet,
       milvus::json& ret) {
-    if (!data_src)
+    if (!data_src) {
         return;
+    }
+
     int slice_num = 0;
     for (int64_t i = 0; i < data_src->size; ++slice_num) {
         int64_t ri = std::min(i + slice_len, data_src->size);
-        uint8_t* slice_i = (uint8_t*)malloc((size_t)(ri - i));
-        memcpy(slice_i, data_src->data.get() + i, (size_t)(ri - i));
+        auto size = static_cast<size_t>(ri - i);
+        auto slice_i = reinterpret_cast<uint8_t*>(malloc(size));
+        memcpy(slice_i, data_src->data.get() + i, size);
         std::shared_ptr<uint8_t[]> slice_i_sp(slice_i, std::default_delete<uint8_t[]>());
         binarySet.Append(prefix + "_" + std::to_string(slice_num), slice_i_sp, ri - i);
         i = ri;
     }
-    ret["name"] = prefix;
-    ret["slice_num"] = slice_num;
-    ret["total_len"] = data_src->size;
+    ret[NAME] = prefix;
+    ret[SLICE_NUM] = slice_num;
+    ret[TOTAL_LEN] = data_src->size;
 }
 
 void
 Assemble(BinarySet& binarySet) {
-    if (!binarySet.Contains("meta"))
+    auto slice_meta = binarySet.Erase(INDEX_FILE_SLICE_META);
+    if (slice_meta == nullptr) {
         return;
-    milvus::json meta_data = milvus::json::parse(
-        std::string((char*)(binarySet.GetByName("meta")->data.get()), binarySet.GetByName("meta")->size));
-    for (auto& item : meta_data["meta"]) {
-        std::string prefix = item["name"];
-        int slice_num = item["slice_num"];
-        int64_t total_len = item["total_len"];
-        auto p_data = (uint8_t*)malloc(total_len);
+    }
+
+    milvus::json meta_data =
+        milvus::json::parse(std::string(reinterpret_cast<char*>(slice_meta->data.get()), slice_meta->size));
+
+    for (auto& item : meta_data[META]) {
+        std::string prefix = item[NAME];
+        int slice_num = item[SLICE_NUM];
+        auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
+        auto p_data = reinterpret_cast<uint8_t*>(malloc(total_len));
         int64_t pos = 0;
         for (auto i = 0; i < slice_num; ++i) {
             auto slice_i_sp = binarySet.Erase(prefix + "_" + std::to_string(i));
-            memcpy(p_data + pos, slice_i_sp->data.get(), (size_t)(slice_i_sp->size));
+            memcpy(p_data + pos, slice_i_sp->data.get(), static_cast<size_t>(slice_i_sp->size));
             pos += slice_i_sp->size;
         }
         std::shared_ptr<uint8_t[]> integral_data(p_data, std::default_delete<uint8_t[]>());
@@ -68,20 +81,19 @@ Disassemble(const int64_t& slice_size_in_byte, BinarySet& binarySet) {
     for (auto& kv : binarySet.binary_map_) {
         if (kv.second->size > slice_size_in_byte) {
             slice_key_list.push_back(kv.first);
-            //            Slice(kv.first, kv.second, binarySet);
         }
     }
     for (auto& key : slice_key_list) {
         milvus::json slice_i;
         Slice(key, binarySet.Erase(key), slice_size_in_byte, binarySet, slice_i);
-        meta_info["meta"].emplace_back(slice_i);
+        meta_info[META].emplace_back(slice_i);
     }
-    if (slice_key_list.size()) {
+    if (!slice_key_list.empty()) {
         auto meta_str = meta_info.dump();
         std::shared_ptr<uint8_t[]> meta_data(new uint8_t[meta_str.length() + 1], std::default_delete<uint8_t[]>());
         memcpy(meta_data.get(), meta_str.data(), meta_str.length());
         meta_data.get()[meta_str.length()] = 0;
-        binarySet.Append("meta", meta_data, meta_str.length() + 1);
+        binarySet.Append(INDEX_FILE_SLICE_META, meta_data, meta_str.length() + 1);
     }
 }
 
