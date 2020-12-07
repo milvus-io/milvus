@@ -129,6 +129,7 @@ DBImpl::Start() {
         // background build index thread
         bg_index_thread_ = std::thread(&DBImpl::TimingIndexThread, this);
     }
+    bg_metric_thread_ = std::thread(&DBImpl::BackgroundMetricThread, this);
 
     return Status::OK();
 }
@@ -156,10 +157,6 @@ DBImpl::Stop() {
         index_req_swn_.Notify();
         bg_index_thread_.join();
         LOG_ENGINE_DEBUG_ << "DBImpl::Stop bg_index_thread_.join()";
-    }
-
-    // wait metric thread exit
-    if (options_.metric_enable_) {
         swn_metric_.Notify();
         bg_metric_thread_.join();
     }
@@ -489,7 +486,10 @@ DBImpl::Insert(const std::string& collection_name, const std::string& partition_
                idx_t op_id) {
     WRITE_PERMISSION_NEEDED_RETURN_STATUS;
     CHECK_AVAILABLE
-
+    ScopedTimer scope_timer([data_chunk, this](double latency) {
+        auto size = utils::GetSizeOfChunk(data_chunk);
+        this->insert_entities_size_gauge_.Set(size / latency);
+    });
     if (data_chunk == nullptr) {
         return Status(DB_ERROR, "Null pointer");
     }
@@ -668,7 +668,13 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
     }
 
     auto vector_param = query_ptr->vectors.begin()->second;
-
+    auto nq = vector_param->nq;
+    ScopedTimer scoped_timer([nq, this](double latency) {
+        for (int64_t i = 0; i < nq; ++i) {
+            this->query_count_summary_.Observe(latency / nq);
+            this->query_response_summary_.Observe(latency);
+        }
+    });
     snapshot::ScopedSnapshotT ss;
     STATUS_CHECK(snapshot::Snapshots::GetInstance().GetSnapshot(ss, query_ptr->collection_id));
 
@@ -707,23 +713,6 @@ DBImpl::Query(const server::ContextPtr& context, const query::QueryPtr& query_pt
                                    result->data_chunk_));
         rc.RecordSection("get entities");
     }
-
-    // step 5: filter entities by field names
-    //    std::vector<engine::AttrsData> filter_attrs;
-    //    for (auto attr : result.attrs_) {
-    //        AttrsData attrs_data;
-    //        attrs_data.attr_type_ = attr.attr_type_;
-    //        attrs_data.attr_count_ = attr.attr_count_;
-    //        attrs_data.id_array_ = attr.id_array_;
-    //        for (auto& name : field_names) {
-    //            if (attr.attr_data_.find(name) != attr.attr_data_.end()) {
-    //                attrs_data.attr_data_.insert(std::make_pair(name, attr.attr_data_.at(name)));
-    //            }
-    //        }
-    //        filter_attrs.emplace_back(attrs_data);
-    //    }
-
-    // tracer.Context()->GetTraceContext()->GetSpan()->Finish();
 
     return Status::OK();
 }
@@ -1114,6 +1103,25 @@ DBImpl::BackgroundMerge(std::set<int64_t> collection_ids, bool force_merge_all) 
             LOG_ENGINE_DEBUG_ << "Server will shutdown, skip merge action for collection id: " << collection_id;
             break;
         }
+    }
+}
+
+void
+DBImpl::BackgroundMetricThread() {
+    SetThreadName("metric_thread");
+    while (true) {
+        if (!ServiceAvailable()) {
+            LOG_ENGINE_DEBUG_ << "DB background metric thread exit";
+            break;
+        }
+        size_t data_size = 0;
+        auto status = GetDataSize(data_size);
+        data_size_gauge_.Set(data_size);
+        if (!status.ok()) {
+            LOG_ENGINE_ERROR_ << "Server get data size failed";
+        }
+
+        swn_metric_.Wait_For(std::chrono::seconds(BACKGROUND_METRIC_INTERVAL));
     }
 }
 
