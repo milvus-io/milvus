@@ -261,48 +261,67 @@ class RHNSWStatistics : public HNSWStatistics {
     std::vector<size_t> access_cnt;
 };
 
-// todo
+/*
+ * class: IVFStatistics
+ * for index: IVF_FLAT, IVF_PQ, IVF_SQ8
+ */
 class IVFStatistics : public Statistics {
  public:
-    //    std::vector<double> cdf;
-    std::vector<std::pair<int64_t, int64_t>> nprobe_count;
-    size_t nprobe_access_count;
-    size_t nlist;
-
-    explicit IVFStatistics(std::string& idx_t) : Statistics(idx_t), nprobe_access_count(0), nlist(0) {
+    explicit IVFStatistics(std::string& idx_t)
+        : Statistics(idx_t), nprobe_count(), access_cnt(), nlist(0) {
     }
 
-    std::vector<std::pair<int64_t, int64_t>>
-    SearchNprobe() {
-        return nprobe_count;
-    }
+    ~IVFStatistics() override = default;
 
-    std::vector<double>
-    AccessCDF(const std::vector<size_t>& axis_x);
+    /*
+     * To string (may be for log output)
+     * @retval: string output
+     */
+    std::string
+    ToString() override;
 
-    void
-    UpdateStatistics(std::vector<int>& nprobe_statistics) {
-        nprobe_count.clear();
-        nprobe_access_count = 0;
-        for (int i = 0; i < nprobe_statistics.size(); i++) {
-            if (nprobe_statistics[i] > 0) {
-                nprobe_count.push_back(std::pair<int64_t, int64_t>(i, nprobe_statistics[i]));
-                nprobe_access_count += nprobe_statistics[i];
-            }
-        }
-        nlist = nprobe_statistics.size();
-    }
-
+    /*
+     * Clear all counts
+     * @retval: none
+     */
     void
     Clear() override {
         Statistics::Clear();
-        //        nprobe_count.assign(nprobe_count.size(), std::pair<int, int>(0, 0));
         nprobe_count.clear();
-        nprobe_access_count = 0;
     }
 
-    std::string
-    ToString() override;
+    /*
+     * Get the statistics of the search parameter nprboe (count of batches)  (Level 1)
+     * @retval: nprobe
+     */
+    int64_t
+    Nlist() {
+        return nlist;
+    }
+
+    /*
+     * Get the statistics of the search parameter nprboe (count of batches)  (Level 1)
+     * @retval: <nprobe, count>
+     */
+    std::map<int64_t, size_t>
+    SearchNprobe() {
+        auto rst = nprobe_count;
+        return rst;
+    }
+
+    /*
+     * Cumulative distribution function of bucket access (Level 3)
+     * @param: axis_x[in] specified by users and should be in ascending order
+     * @retval: Access CDF
+     */
+    std::vector<double>
+    AccessCDF(const std::vector<size_t>& axis_x);
+
+ public:
+    std::map<int64_t, size_t> nprobe_count;
+    std::vector<size_t> access_cnt;
+    size_t access_total;
+    int64_t nlist;
 };
 
 }  // namespace knowhere

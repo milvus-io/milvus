@@ -163,12 +163,9 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->total_query_time +=
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
-        if (STATISTICS_LEVEL >= 3) {
-            real_index->get_sorted_access_counts(hnsw_stats->access_cnt, hnsw_stats->access_total);
-        }
     }
-    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+//    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+//    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

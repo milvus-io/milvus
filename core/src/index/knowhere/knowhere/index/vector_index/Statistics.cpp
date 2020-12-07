@@ -86,21 +86,6 @@ HNSWStatistics::ToString() {
     return Statistics::ToString() + ret.str();
 }
 
-std::string
-IVFStatistics::ToString() {
-    std::ostringstream ret;
-
-    if (STATISTICS_LEVEL >= 3) {
-        ret << "Total queries: " << nq_cnt << std::endl;
-        std::vector<size_t> axis_x = {5, 10, 20, 40};
-        auto output = AccessCDF(axis_x);
-        for (int i = 0; i < output.size(); i++) {
-            ret << "Top " << axis_x[i] << "% access count " << output[i] << std::endl;
-        }
-    }
-    return Statistics::ToString() + ret.str();
-}
-
 std::vector<size_t>
 GenSplitIndex(size_t size, const std::vector<size_t>& axis_x) {
     // Gen split index
@@ -146,7 +131,6 @@ CaculateCDF(size_t access_total, const std::vector<size_t>& access_cnt, const st
 std::vector<double>
 LibHNSWStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
     // copy from std::map to std::vector
-    // todo: add lock
     std::vector<size_t> access_cnt;
     std::unique_lock<std::mutex> lock(hash_lock);
     access_cnt.reserve(access_cnt_map.size());
@@ -166,15 +150,34 @@ RHNSWStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
     return CaculateCDF(access_total, access_cnt, axis_x);
 }
 
+std::string
+IVFStatistics::ToString() {
+    std::ostringstream ret;
+
+    if (STATISTICS_LEVEL >= 1) {
+        ret << "nlist " << Nlist() << std::endl;
+        ret << "(nprobe, count): " << std::endl;
+        auto nprobe = SearchNprobe();
+        for (auto &it : nprobe){
+            ret << "(" << it.first << ", " << it.second << ") ";
+        }
+        ret << std::endl;
+    }
+    if (STATISTICS_LEVEL >= 3) {
+        std::vector<size_t> axis_x = {5, 10, 20, 40};
+        ret << "Bucket CDF " << std::endl;
+        auto output = AccessCDF(axis_x);
+        for (int i = 0; i < output.size(); i++) {
+            ret << "Top " << axis_x[i] << "% access count " << output[i] << std::endl;
+        }
+        ret << std::endl;
+    }
+    return Statistics::ToString() + ret.str();
+}
+
 std::vector<double>
 IVFStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
-    std::vector<size_t> nprobe_access_cnt(nlist, 0);
-    for (auto i = 0; i < nprobe_count.size(); ++i) {
-        nprobe_access_cnt[i] = nprobe_count[i].second;
-    }
-    std::sort(nprobe_access_cnt.begin(), nprobe_access_cnt.end(), std::greater<>());
-
-    return CaculateCDF(nprobe_access_count, nprobe_access_cnt, axis_x);
+    return CaculateCDF(access_total, access_cnt, axis_x);
 }
 
 }  // namespace knowhere

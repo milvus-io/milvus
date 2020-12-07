@@ -368,12 +368,9 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
                 ivf_stats->filter_stat[(int)(fps * 100) / 5] += 1;
             }
         }
-        if (STATISTICS_LEVEL >= 3) {
-            ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);
-        }
     }
-    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
+//    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
+//    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void

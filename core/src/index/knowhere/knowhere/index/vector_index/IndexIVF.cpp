@@ -349,7 +349,6 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
         if (STATISTICS_LEVEL >= 1) {
             ivf_stats->nq_cnt += n;
             ivf_stats->batch_cnt += 1;
-            ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
 
             if (n > 2048) {
                 ivf_stats->nq_stat[12]++;
@@ -374,12 +373,9 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
                 ivf_stats->filter_stat[static_cast<int>(fps * 100) / 5] += 1;
             }
         }
-        if (STATISTICS_LEVEL >= 3) {
-            ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);
-        }
     }
-    LOG_KNOWHERE_DEBUG_ << "IndexIVF::QueryImpl finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
+//    LOG_KNOWHERE_DEBUG_ << "IndexIVF::QueryImpl finished, show statistics:";
+//    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void

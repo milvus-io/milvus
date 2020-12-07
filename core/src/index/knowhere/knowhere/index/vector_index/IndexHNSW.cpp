@@ -273,8 +273,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             lock.unlock();
         }
     }
-    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+//    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+//    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
