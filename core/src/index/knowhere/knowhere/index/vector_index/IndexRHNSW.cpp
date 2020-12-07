@@ -131,8 +131,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
             if (rows > 2048) {
                 hnsw_stats->nq_stat[12]++;
-            }
-            else {
+            } else {
                 hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
             }
         }
@@ -141,8 +140,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexRHNSW::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
-            }
-            else {
+            } else {
                 hnsw_stats->filter_stat[(int)(fps * 100) / 5] += 1;
             }
         }

@@ -168,8 +168,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
 
             if (n > 2048) {
                 ivf_stats->nq_stat[12]++;
-            }
-            else {
+            } else {
                 ivf_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
             }
 
@@ -186,8 +185,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
-            }
-            else {
+            } else {
                 ivf_stats->filter_stat[(int)(fps * 100) / 5] += 1;
             }
         }
