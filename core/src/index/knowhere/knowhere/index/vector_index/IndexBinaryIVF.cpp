@@ -166,10 +166,12 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             ivf_stats->batch_cnt += 1;
             ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
 
-            if (n > 2048)
+            if (n > 2048) {
                 ivf_stats->nq_stat[12]++;
-            else
+            }
+            else {
                 ivf_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
+            }
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
                                 << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
@@ -181,11 +183,13 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            if (fps > 1.0 || fps < 0.0)
+            if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
-            else
+            }
+            else {
                 ivf_stats->filter_stat[(int)(fps * 100) / 5] += 1;
+            }
         }
         if (STATISTICS_LEVEL >= 3) {
             ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);

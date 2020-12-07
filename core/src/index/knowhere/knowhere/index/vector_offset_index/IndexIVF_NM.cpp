@@ -361,11 +361,13 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            if (fps > 1.0 || fps < 0.0)
+            if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
-            else
+            }
+            else {
                 ivf_stats->filter_stat[(int)(fps * 100) / 5] += 1;
+            }
         }
         if (STATISTICS_LEVEL >= 3) {
             ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);
@@ -417,8 +419,9 @@ IVF_NM::UpdateIndexSize() {
 
 void
 IVF_NM::ClearStatistics() {
-    if (!STATISTICS_LEVEL)
+    if (!STATISTICS_LEVEL) {
         return;
+    }
     if (stats != nullptr) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
         ivf_stats->Clear();

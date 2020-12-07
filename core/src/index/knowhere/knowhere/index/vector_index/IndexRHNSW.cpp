@@ -65,8 +65,9 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
                 hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
                 for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                     hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-                    if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                    if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000) {
                         hnsw_stats->target_level = i;
+                    }
                 }
                 real_idx->set_target_level(hnsw_stats->target_level);
             }
@@ -99,8 +100,9 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
             for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                 hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
+                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000) {
                     hnsw_stats->target_level = i;
+                }
             }
             real_idx->set_target_level(hnsw_stats->target_level);
         }
@@ -127,18 +129,22 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->nq_cnt += rows;
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
-            if (rows > 2048)
+            if (rows > 2048) {
                 hnsw_stats->nq_stat[12]++;
-            else
+            }
+            else {
                 hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
+            }
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            if (fps > 1.0 || fps < 0.0)
+            if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexRHNSW::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
-            else
+            }
+            else {
                 hnsw_stats->filter_stat[(int)(fps * 100) / 5] += 1;
+            }
         }
     }
     for (auto i = 0; i < k * rows; ++i) {
@@ -191,8 +197,9 @@ IndexRHNSW::Dim() {
 StatisticsPtr
 IndexRHNSW::GetStatistics() {
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
-    if (!STATISTICS_LEVEL)
+    if (!STATISTICS_LEVEL) {
         return hnsw_stats;
+    }
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
     real_index->get_sorted_access_counts(hnsw_stats->access_cnt, hnsw_stats->access_total);
     return hnsw_stats;
@@ -200,8 +207,9 @@ IndexRHNSW::GetStatistics() {
 
 void
 IndexRHNSW::ClearStatistics() {
-    if (!STATISTICS_LEVEL)
+    if (!STATISTICS_LEVEL) {
         return;
+    }
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
     hnsw_stats->Clear();

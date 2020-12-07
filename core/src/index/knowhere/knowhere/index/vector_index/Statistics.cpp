@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <stdio.h>
+#include <cstdio>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -156,7 +156,7 @@ LibHNSWStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
         access_total += elem.second;
     }
     lock.unlock();
-    std::sort(access_cnt.begin(), access_cnt.end(), std::greater<int64_t>());
+    std::sort(access_cnt.begin(), access_cnt.end(), std::greater<>());
 
     return CaculateCDF(access_total, access_cnt, axis_x);
 }
@@ -172,7 +172,7 @@ IVFStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
     for (auto i = 0; i < nprobe_count.size(); ++i) {
         nprobe_access_cnt[i] = nprobe_count[i].second;
     }
-    std::sort(nprobe_access_cnt.begin(), nprobe_access_cnt.end(), std::greater<int64_t>());
+    std::sort(nprobe_access_cnt.begin(), nprobe_access_cnt.end(), std::greater<>());
 
     return CaculateCDF(nprobe_access_count, nprobe_access_cnt, axis_x);
 }
