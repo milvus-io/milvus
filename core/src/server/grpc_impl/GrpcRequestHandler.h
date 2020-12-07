@@ -21,7 +21,6 @@
 #include <unordered_map>
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "grpc/gen-status/status.pb.h"
 #include "metrics/Prometheus.h"
 #include "opentracing/tracer.h"
 #include "server/context/Context.h"
@@ -39,24 +38,17 @@ namespace grpc {
     }
 
 #define SET_TRACING_TAG(STATUS, SERVER_CONTEXT)                                                                  \
-    if ((STATUS).code() != ::milvus::grpc::ErrorCode::SUCCESS) {                                                 \
+    if (!(STATUS).ok()) {                                                                                        \
         GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error", true);                       \
         GetContext((SERVER_CONTEXT))->GetTraceContext()->GetSpan()->SetTag("error_message", (STATUS).message()); \
     }
 
-#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT)                      \
-    do {                                                                    \
-        if ((STATUS).ok()) {                                                \
-            (RESPONSE)->set_error_code(::milvus::grpc::ErrorCode::SUCCESS); \
-        } else {                                                            \
-            (RESPONSE)->set_error_code(ErrorMap((STATUS).code()));          \
-        }                                                                   \
-        (RESPONSE)->set_reason((STATUS).message());                         \
-        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);                            \
+#define SET_RESPONSE(RESPONSE, STATUS, SERVER_CONTEXT) \
+    do {                                               \
+        (RESPONSE)->set_error_code((STATUS).code());   \
+        (RESPONSE)->set_reason((STATUS).message());    \
+        SET_TRACING_TAG(STATUS, SERVER_CONTEXT);       \
     } while (false);
-
-::milvus::grpc::ErrorCode
-ErrorMap(ErrorCode code);
 
 extern const char* EXTRA_PARAM_KEY;
 

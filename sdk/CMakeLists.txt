@@ -71,8 +71,6 @@ aux_source_directory(grpc grpc_client_files)
 set(grpc_service_files
         grpc-gen/gen-milvus/milvus.grpc.pb.cc
         grpc-gen/gen-milvus/milvus.pb.cc
-        grpc-gen/gen-status/status.grpc.pb.cc
-        grpc-gen/gen-status/status.pb.cc
         )
 
 set(grpc_lib

@@ -13,8 +13,6 @@
 
 set( GRPC_SERVICE_FILES ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
                         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
-                        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
                         )
 
 set( SERVER_INIT_FILES  ${MILVUS_ENGINE_SRC}/server/init/CpuChecker.cpp

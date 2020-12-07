@@ -11,9 +11,8 @@
 
 #pragma once
 
-#include "include/MilvusApi.h"
 #include "grpc-gen/gen-milvus/milvus.grpc.pb.h"
-//#include "grpc/gen-status/status.grpc.pb.h"
+#include "include/MilvusApi.h"
 
 #include <chrono>
 #include <iostream>
@@ -29,6 +28,19 @@
 #include <grpcpp/security/credentials.h>
 
 namespace milvus {
+
+#define CHECK_GRPC_STATUS(GRPC_STATUS, METHOD, STATUS_CODE)      \
+    if (!(GRPC_STATUS).ok()) {                                   \
+        std::cerr << METHOD " rpc failed!" << std::endl;         \
+        return Status(STATUS_CODE, GRPC_STATUS.error_message()); \
+    }
+
+#define CHECK_ERROR_CODE(STATUS, STATUS_CODE)          \
+    if ((STATUS).error_code() != 0) {                  \
+        std::cerr << (STATUS).reason() << std::endl;   \
+        return Status(STATUS_CODE, (STATUS).reason()); \
+    }
+
 class GrpcClient {
  public:
     explicit GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
@@ -62,8 +74,8 @@ class GrpcClient {
     Status
     GetCollectionInfo(const std::string& collection_name, grpc::Mapping& grpc_schema);
 
-    int64_t
-    CountEntities(grpc::CollectionName& collection_name, Status& status);
+    Status
+    CountEntities(grpc::CollectionName& collection_name, ::milvus::grpc::CollectionRowCount& count);
 
     Status
     ListCollections(milvus::grpc::CollectionNameList& collection_name_list);

@@ -13,8 +13,6 @@
 
 #include "db/Types.h"
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
-#include "grpc/gen-status/status.grpc.pb.h"
-#include "grpc/gen-status/status.pb.h"
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
 #include "utils/Status.h"

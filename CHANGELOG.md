@@ -11,6 +11,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3132 Add new indexes: RHNSW_PQ RHNSW_SQ
 -   \#3920 Allow an optional parameter `nbits` when creating IVF_PQ index
 -   \#4363 Put starting process of prometheus and grafana into docker-compose
+-   \#4398 Change status proto to remove enum ErrorCode and replace it as int type & Remove ErrorMap in Server
 
 ## Improvement
 
