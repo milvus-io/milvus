@@ -241,7 +241,7 @@ class TestInsertBase:
         }
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
-        entities = gen_entities_by_fields(fields["fields"], nb, dim)
+        entities = gen_entities_by_fields(fields["fields"], nb, default_dim)
         res_ids = connect.bulk_insert(collection_name, entities, ids)
         assert res_ids == ids
         connect.flush([collection_name])
