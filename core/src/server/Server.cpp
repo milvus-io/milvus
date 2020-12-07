@@ -164,6 +164,10 @@ Server::Start() {
                                      config.logs.max_log_file_size(), config.logs.log_rotate_num(),
                                      config.logs.log_to_stdout(), config.logs.log_to_file()));
 
+        auto count = 100;
+        while (--count)
+            MLOG(DEBUG, server, 0) << "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
         auto wal_path = config.wal.enable() ? config.wal.path() : "";
         STATUS_CHECK(Directory::Initialize(config.storage.path(), wal_path, config.logs.path()));
 
