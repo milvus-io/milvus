@@ -21,9 +21,11 @@
 #include "utils/CommonUtil.h"
 #include "utils/TimerContext.h"
 
+#include <utility>
+
 namespace milvus::engine::snapshot {
 
-static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 500 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 60 * 1000;
 static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
@@ -185,7 +187,7 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
     emsg << "\"" << name << "\""
          << " not found";
-    LOG_ENGINE_DEBUG_ << emsg.str();
+    LOG_SERVER_DEBUG_ << emsg.str();
     return Status(SS_NOT_FOUND_ERROR, "Collection " + name + " not found.");
 }
 
@@ -236,36 +238,53 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
+        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
         // TODO: Should be monitored
         return;
     }
     auto ids = op->GetIDs();
     ScopedSnapshotT ss;
     std::set<ID_TYPE> alive_cids;
+    std::set<ID_TYPE> this_invalid_cids;
+    bool diff_found = false;
     for (auto& [cid, ccid] : ids) {
-        /* std::cout << "cid: " << cid << " ccid: " << ccid << std::endl; */
-        auto status = LoadSnapshot(store_, ss, cid, ccid);
-        if (!status.ok()) {
-            LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
+        status = LoadSnapshot(store_, ss, cid, ccid);
+        if (status.code() == SS_NOT_ACTIVE_ERROR) {
+            auto found_it = invalid_ssid_.find(ccid);
+            this_invalid_cids.insert(ccid);
+            if (found_it == invalid_ssid_.end()) {
+                LOG_SERVER_ERROR_ << status.ToString();
+                diff_found = true;
+            }
+            continue;
+        } else if (!status.ok()) {
+            continue;
         }
         if (ss && ss->GetCollection()->IsActive()) {
             alive_cids.insert(cid);
         }
-        /* std::cout << ss->ToString() << std::endl; */
     }
+
+    if (diff_found) {
+        LOG_SERVER_ERROR_ << "Total " << this_invalid_cids.size() << " invalid SS found!";
+    }
+
+    if (invalid_ssid_.size() != 0 && (this_invalid_cids.size() == 0)) {
+        LOG_SERVER_ERROR_ << "All invalid SS Cleared!";
+        // TODO: Should be monitored
+    }
+
+    invalid_ssid_ = std::move(this_invalid_cids);
     auto op2 = std::make_shared<GetCollectionIDsOperation>();
     status = (*op2)(store_);
     if (!status.ok()) {
-        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer failed: " << status.message();
+        LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetCollectionIDsOperation failed: " << status.message();
         // TODO: Should be monitored
         return;
     }
     auto aids = op2->GetIDs();
 
     std::set<ID_TYPE> diff;
-    /* std::set_difference(alive_cids_.begin(), alive_cids_.end(), alive_cids.begin(), alive_cids.end(), */
-    /*         std::inserter(diff, diff.begin())); */
     std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
                         std::inserter(diff, diff.begin()));
     for (auto& cid : diff) {

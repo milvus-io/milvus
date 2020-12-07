@@ -103,6 +103,7 @@ class Snapshots {
     std::map<std::string, ID_TYPE> name_id_map_;
     mutable std::shared_timed_mutex inactive_mtx_;
     std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
+    std::set<ID_TYPE> invalid_ssid_;
     StorePtr store_;
 };
 
