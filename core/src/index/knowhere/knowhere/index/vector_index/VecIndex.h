@@ -19,6 +19,7 @@
 #include "knowhere/common/Dataset.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Typedef.h"
+#include "knowhere/common/Utils.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"

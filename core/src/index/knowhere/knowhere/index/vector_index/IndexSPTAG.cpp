@@ -83,11 +83,15 @@ CPUSPTAGRNG::Serialize(const Config& config) {
     binary_set.Append("config", x_cfg, length);
     binary_set.Append("graph", graph, index_blobs[2].Length());
 
+    if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, binary_set);
+    }
     return binary_set;
 }
 
 void
 CPUSPTAGRNG::Load(const BinarySet& binary_set) {
+    Assemble(const_cast<BinarySet&>(binary_set));
     std::string index_config;
     std::vector<SPTAG::ByteArray> index_blobs;
 

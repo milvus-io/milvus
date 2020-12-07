@@ -143,7 +143,7 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# level                | Log level in Milvus. Must be one of debug, info, warning,  | String     | debug           |
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
 #                      | error, fatal                                               |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
@@ -161,11 +161,13 @@ gpu:
 # log_to_file          | Whether logging to log files.                              | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
-  level: debug
   trace.enable: true
   path: @MILVUS_DB_PATH@/logs
   max_log_file_size: 1024MB
   log_rotate_num: 0
   log_to_stdout: false
   log_to_file: true
+
+log:
+  min_messages: warning 
 

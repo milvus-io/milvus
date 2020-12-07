@@ -78,6 +78,12 @@ class SystemInfoCollector {
     using Family = prometheus::Family<T>;
     using Gauge = prometheus::Gauge;
 
+    prometheus::Family<prometheus::Counter>& keeping_alive_ = prometheus::BuildCounter()
+                                                                  .Name("milvus_uptime")
+                                                                  .Help("total seconds of the serve alive")
+                                                                  .Register(prometheus.registry());
+    prometheus::Counter& keeping_alive_counter_ = keeping_alive_.Add({});
+
     /* cpu_utilization_ratio */
     Family<Gauge>& cpu_utilization_ratio_family_ = prometheus::BuildGauge()
                                                        .Name("milvus_cpu_utilization_ratio")
@@ -85,11 +91,11 @@ class SystemInfoCollector {
                                                        .Register(prometheus.registry());
     Gauge& cpu_utilization_ratio_ = cpu_utilization_ratio_family_.Add({});
 
-    Family<Gauge>& cpu_tempearature_family_ = prometheus::BuildGauge()
-                                                  .Name("milvus_cpu_temperature_celsius")
-                                                  .Help("cpu_temperature")
-                                                  .Register(prometheus.registry());
-    Gauge& cpu_temperature_ = cpu_tempearature_family_.Add({});
+    Family<Gauge>& cpu_temperature_family_ = prometheus::BuildGauge()
+                                                 .Name("milvus_cpu_temperature_celsius")
+                                                 .Help("cpu_temperature")
+                                                 .Register(prometheus.registry());
+    Gauge& cpu_temperature_ = cpu_temperature_family_.Add({});
 
     Family<Gauge>& mem_usage_family_ =
         prometheus::BuildGauge().Name("milvus_mem_usage").Help("mem_usage").Register(prometheus.registry());

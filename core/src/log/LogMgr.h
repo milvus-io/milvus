@@ -56,9 +56,18 @@ class LogMgr {
     static std::unordered_map<std::string, bool>
     parse_level(const std::string& level);
 
+    /**
+     *
+     * @brief Configures log path for corresponding level
+     */
     static void
-    set_level(el::Configurations& default_conf, el::Level level, bool enable, const std::string& log_path,
-              bool log_to_file);
+    set_file(el::Configurations& default_conf, el::Level level, const std::string& log_path, bool log_to_file);
+
+    /**
+     * @brief Configures if output corresponding level log
+     */
+    static void
+    enable(el::Configurations& default_conf, el::Level level, bool enable);
 
  private:
     el::Configurations el_config_;

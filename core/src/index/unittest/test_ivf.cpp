@@ -213,6 +213,22 @@ TEST_P(IVFTest, ivf_serialize) {
     }
 }
 
+TEST_P(IVFTest, ivf_slice) {
+    fiu_init(0);
+    {
+        // serialize index
+        index_->Train(base_dataset, conf_);
+        index_->Add(base_dataset, conf_);
+        auto binaryset = index_->Serialize(conf_);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf_, nullptr);
+        AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
+    }
+}
+
 // TODO(linxj): deprecated
 #ifdef MILVUS_GPU_VERSION
 TEST_P(IVFTest, clone_test) {

@@ -54,11 +54,16 @@ IVF::Serialize(const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    return SerializeImpl(index_type_);
+    auto ret = SerializeImpl(index_type_);
+    if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
+    }
+    return ret;
 }
 
 void
 IVF::Load(const BinarySet& binary_set) {
+    Assemble(const_cast<BinarySet&>(binary_set));
     std::lock_guard<std::mutex> lk(mutex_);
     index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     //    stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);

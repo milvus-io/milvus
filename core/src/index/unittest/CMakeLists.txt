@@ -37,6 +37,7 @@ set(util_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/IndexType.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Utils.cpp
         ${INDEX_SOURCE_DIR}/unittest/utils.cpp
         )
 

@@ -45,6 +45,8 @@ SystemInfoCollector::collector_function() {
     SystemInfo::CpuUtilizationRatio(base_cpu_, base_sys_cpu_, base_user_cpu_);
     while (running_) {
         /* collect metrics */
+        keeping_alive_counter_.Increment(1);
+
         // cpu_utilization_ratio range: 0~25600%
         cpu_utilization_ratio_.Set(cpu_utilization_ratio());
 

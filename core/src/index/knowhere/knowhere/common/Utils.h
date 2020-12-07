@@ -9,21 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include "./TimeRecorder.h"
+#pragma once
 
-#include <iostream>
+#include <string>
+#include "BinarySet.h"
+#include "Config.h"
+#include "Exception.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace milvus_sdk {
+namespace milvus {
+namespace knowhere {
 
-TimeRecorder::TimeRecorder(const std::string& title) : title_(title) {
-    start_ = std::chrono::system_clock::now();
-    std::cout << title_ << " begin..." << std::endl;
-}
+extern const char* INDEX_FILE_SLICE_SIZE_IN_MEGABYTE;
+extern const char* INDEX_FILE_SLICE_META;
 
-TimeRecorder::~TimeRecorder() {
-    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-    int64_t span = (std::chrono::duration_cast<std::chrono::milliseconds>(end - start_)).count();
-    std::cout << title_ << " totally cost: " << span << " ms" << std::endl;
-}
+void
+Assemble(BinarySet& binarySet);
 
-}  // namespace milvus_sdk
+void
+Disassemble(const int64_t& slice_size_in_byte, BinarySet& binarySet);
+
+}  // namespace knowhere
+}  // namespace milvus

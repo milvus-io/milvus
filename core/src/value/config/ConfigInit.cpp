@@ -142,13 +142,14 @@ InitConfig() {
         String(gpu.build_index_devices, "gpu0"),
 
         /* log */
-        String(logs.level, "debug"),
         Bool(logs.trace.enable, true),
         String(logs.path, "/var/lib/milvus/logs"),
         Size(logs.max_log_file_size, 512 * MB, 4096 * MB, 1024 * MB),
         Integer(logs.log_rotate_num, 0, 1024, 0),
         Bool(logs.log_to_stdout, false),
         Bool(logs.log_to_file, true),
+
+        String(log.min_messages, "warning"),
 
         /* tracing */
         String(tracing.json_config_path, ""),
@@ -326,7 +327,7 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# level                | Log level in Milvus. Must be one of debug, info, warning,  | String     | debug           |
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
 #                      | error, fatal                                               |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
@@ -344,13 +345,15 @@ gpu:
 # log_to_file          | Whether logging to log files.                              | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
-  level: @logs.level@
   trace.enable: @logs.trace.enable@
   path: @logs.path@
   max_log_file_size: @logs.max_log_file_size@
   log_rotate_num: @logs.log_rotate_num@
   log_to_stdout: @logs.log_to_stdout@
   log_to_file: @logs.log_to_file@
+
+log:
+  min_messages: @logs.min_messages@
 
 )";
 
