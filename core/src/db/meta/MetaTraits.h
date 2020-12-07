@@ -36,4 +36,11 @@ struct remove_cr {
 template<typename T>
 using remove_cr_t = typename remove_cr<T>::type;
 
+template <typename Base, typename Derived>
+struct is_decay_base_of : std::is_base_of<remove_cr_t<Base>, remove_cr_t<Derived>>
+{};
+
+template <typename Base, typename Derived>
+constexpr bool is_decay_base_of_v = is_decay_base_of<Base,Derived>::value;
+
 }  // namespace milvus::engine::meta

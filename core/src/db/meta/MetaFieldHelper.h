@@ -26,6 +26,9 @@ class MetaFieldHelper {
     using type = remove_cr_t<F>;
     using value_type = typename F::ValueType;
     static const constexpr char * name = F::Name;
+
+ public:
+    ~MetaFieldHelper() = default;
 };
 
 using MetaFieldHelperTuple =
@@ -60,5 +63,8 @@ GetResFieldNames(typename R::Ptr res) {
     std::apply([&res, &helpers, &names](auto&... fh){((extract_field_name(*res.get(), fh, names)), ...);}, helpers);
     return names;
 }
+
+//////////////////////////////////////////////////////
+
 
 }  // namespace milvus::engine::meta
