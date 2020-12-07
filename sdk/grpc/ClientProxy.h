@@ -21,16 +21,16 @@
 
 namespace milvus {
 
- class ClientProxy : public Connection , public GrpcInterceptorHookHandler {
+class ClientProxy : public Connection, public GrpcInterceptorHookHandler {
  public:
     // Implementations of the Connection interface
     void
     OnPostRecvInitialMetaData(::grpc::experimental::ClientRpcInfo* client_rpc_info,
                               ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
 
-     void
-     OnPreSendMessage(::grpc::experimental::ClientRpcInfo* client_rpc_info,
-                      ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+    void
+    OnPreSendMessage(::grpc::experimental::ClientRpcInfo* client_rpc_info,
+                     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
 
     Status
     Connect(const ConnectParam& connect_param) override;
