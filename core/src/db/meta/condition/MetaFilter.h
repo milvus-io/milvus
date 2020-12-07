@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "db/meta/MetaFieldHelper.h"
+#include "db/meta/MetaFieldValueHelper.h"
 #include "db/meta/condition/MetaBaseFilter.h"
 #include "db/meta/condition/MetaDeterminer.h"
 #include "db/meta/condition/MetaFinder.h"

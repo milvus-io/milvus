@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "db/meta/MetaFieldHelper.h"
+#include "db/meta/MetaFieldValueHelper.h"
 #include "db/meta/MetaResourceAttrs.h"
 #include "db/meta/backend/MetaEngine.h"
 #include "db/meta/condition/MetaRelation.h"

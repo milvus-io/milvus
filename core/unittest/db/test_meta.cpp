@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include "db/meta/MetaFieldHelper.h"
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaContext.h"
 #include "db/meta/condition/MetaFilter.h"
@@ -342,4 +343,13 @@ TEST_F(MetaTest, FilterTest) {
     ASSERT_TRUE(status.ok()) << status.ToString();
     ASSERT_EQ(collections.size(), 1);
     ASSERT_EQ(collections[0]->GetID(), result_id);
+}
+
+TEST_F(MetaTest, HelperTest) {
+    auto collection = std::make_shared<Collection>("helper_test");
+    auto names = milvus::engine::meta::GetResFieldNames<Collection>(collection);
+    ASSERT_GT(names.size(), 0);
+    for (auto& name: names) {
+        std::cout << "name: " << name << std::endl;
+    }
 }

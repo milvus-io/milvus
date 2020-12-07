@@ -35,6 +35,8 @@ static const json JEmpty = {};
 
 class MappingsField {
  public:
+//    using Type = MappingsField;
+    using ValueType = MappingT;
     static constexpr const char* Name = "mappings";
 
     explicit MappingsField(MappingT mappings = {}) : mappings_(std::move(mappings)) {
@@ -88,6 +90,8 @@ class FlushableMappingsField : public MappingsField {
 
 class StateField {
  public:
+//    using Type = StateField;
+    using ValueType = State;
     static constexpr const char* Name = "state";
 
     explicit StateField(State state = PENDING) : state_(state) {
@@ -132,6 +136,7 @@ class StateField {
 
 class LsnField {
  public:
+    using ValueType = LSN_TYPE;
     static constexpr const char* Name = "lsn";
 
     explicit LsnField(LSN_TYPE lsn = 0) : lsn_(lsn) {
@@ -153,6 +158,7 @@ class LsnField {
 
 class CreatedOnField {
  public:
+    using ValueType = TS_TYPE;
     static constexpr const char* Name = "created_on";
 
     explicit CreatedOnField(TS_TYPE created_on = GetMicroSecTimeStamp()) : created_on_(created_on) {
@@ -174,6 +180,7 @@ class CreatedOnField {
 
 class UpdatedOnField {
  public:
+    using ValueType = TS_TYPE;
     static constexpr const char* Name = "updated_on";
 
     explicit UpdatedOnField(TS_TYPE updated_on = GetMicroSecTimeStamp()) : updated_on_(updated_on) {
@@ -195,6 +202,7 @@ class UpdatedOnField {
 
 class IdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "id";
 
     explicit IdField(ID_TYPE id) : id_(id) {
@@ -219,6 +227,7 @@ class IdField {
 
 class CollectionIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "collection_id";
 
     explicit CollectionIdField(ID_TYPE id) : collection_id_(id) {
@@ -240,6 +249,7 @@ class CollectionIdField {
 
 class SchemaIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "schema_id";
 
     explicit SchemaIdField(ID_TYPE id) : schema_id_(id) {
@@ -260,6 +270,7 @@ class SchemaIdField {
 
 class NumField {
  public:
+    using ValueType = NUM_TYPE;
     static constexpr const char* Name = "num";
 
     explicit NumField(NUM_TYPE num) : num_(num) {
@@ -280,6 +291,7 @@ class NumField {
 
 class FtypeField {
  public:
+    using ValueType = FTYPE_TYPE;
     static constexpr const char* Name = "ftype";
 
     explicit FtypeField(FTYPE_TYPE ftype) : ftype_(ftype) {
@@ -301,6 +313,7 @@ class FtypeField {
 
 class FEtypeField {
  public:
+    using ValueType = FETYPE_TYPE;
     static constexpr const char* Name = "fetype";
 
     explicit FEtypeField(FETYPE_TYPE fetype) : fetype_(fetype) {
@@ -322,6 +335,7 @@ class FEtypeField {
 
 class FieldIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "field_id";
 
     explicit FieldIdField(ID_TYPE id) : field_id_(id) {
@@ -343,6 +357,7 @@ class FieldIdField {
 
 class FieldElementIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "field_element_id";
 
     explicit FieldElementIdField(ID_TYPE id) : field_element_id_(id) {
@@ -364,6 +379,7 @@ class FieldElementIdField {
 
 class PartitionIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "partition_id";
 
     explicit PartitionIdField(ID_TYPE id) : partition_id_(id) {
@@ -385,6 +401,7 @@ class PartitionIdField {
 
 class SegmentIdField {
  public:
+    using ValueType = ID_TYPE;
     static constexpr const char* Name = "segment_id";
 
     explicit SegmentIdField(ID_TYPE id) : segment_id_(id) {
@@ -406,6 +423,7 @@ class SegmentIdField {
 
 class TypeNameField {
  public:
+    using ValueType = std::string;
     static constexpr const char* Name = "TypeName";
 
     explicit TypeNameField(std::string val) : type_name_(std::move(val)) {
@@ -427,6 +445,7 @@ class TypeNameField {
 
 class NameField {
  public:
+    using ValueType = std::string;
     static constexpr const char* Name = "name";
 
     explicit NameField(std::string name) : name_(std::move(name)) {
@@ -448,6 +467,7 @@ class NameField {
 
 class ParamsField {
  public:
+    using ValueType = json;
     static constexpr const char* Name = "params";
 
     explicit ParamsField(const json& params) : params_(params) {
@@ -469,6 +489,7 @@ class ParamsField {
 
 class SizeField {
  public:
+    using ValueType = SIZE_TYPE;
     static constexpr const char* Name = "size";
 
     explicit SizeField(SIZE_TYPE size) : size_(size) {
@@ -490,6 +511,7 @@ class SizeField {
 
 class RowCountField {
  public:
+    using ValueType = SIZE_TYPE;
     static constexpr const char* Name = "row_count";
 
     explicit RowCountField(SIZE_TYPE size) : size_(size) {

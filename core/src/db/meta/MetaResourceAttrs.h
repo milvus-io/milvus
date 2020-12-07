@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "db/meta/MetaFieldHelper.h"
+#include "db/meta/MetaFieldValueHelper.h"
 #include "db/meta/MetaNames.h"
 #include "db/meta/Utils.h"
 #include "db/snapshot/ResourceContext.h"
