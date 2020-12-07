@@ -132,16 +132,16 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             if (rows > 2048) {
                 hnsw_stats->nq_stat[12]++;
             } else {
-                hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
+                hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2(static_cast<uint64_t>(rows)))]++;
             }
         }
         if (STATISTICS_LEVEL >= 2) {
-            double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
+            double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
             if (fps > 1.0 || fps < 0.0) {
                 LOG_KNOWHERE_ERROR_ << "in IndexRHNSW::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
             } else {
-                hnsw_stats->filter_stat[(int)(fps * 100) / 5] += 1;
+                hnsw_stats->filter_stat[static_cast<int>(fps * 100) / 5] += 1;
             }
         }
     }
