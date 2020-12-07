@@ -24,6 +24,27 @@
 #include <prometheus/registry.h>
 #include <prometheus/text_serializer.h>
 
+using Quantiles = std::vector<prometheus::detail::CKMSQuantiles::Quantile>;
+
+#define PROMETHEUS_GAUGE(name_family, name_gauge, name, description)                           \
+    prometheus::Family<prometheus::Gauge>& name_family =                                       \
+        prometheus::BuildGauge().Name(name).Help(description).Register(prometheus.registry()); \
+    prometheus::Gauge& name_gauge = name_family.Add({});
+
+#define PROMETHEUS_COUNT(name_family, name_count, name, description)                             \
+    prometheus::Family<prometheus::Counter>& name_family =                                       \
+        prometheus::BuildCounter().Name(name).Help(description).Register(prometheus.registry()); \
+    prometheus::Counter& rpc_requests_total_counter_ = rpc_requests_total_.Add({});
+
+#define PROMETHEUS_SUMMARY(name_family, name_summary, name, description)                         \
+    prometheus::Family<prometheus::Summary>& name_family =                                       \
+        prometheus::BuildSummary().Name(name).Help(description).Register(prometheus.registry()); \
+    prometheus::Summary& name_summary = name_family.Add({}, Quantiles{{0.95, 0.00}, {0.9, 0.05}, {0.8, 0.1}});
+
+#define PROMETHEUS_HISTOGRAM(name_family, name, description) \
+    prometheus::Family<prometheus::Histogram>& name_family = \
+        prometheus::BuildHistogram().Name(name).Help(description).Register(prometheus.registry());
+
 namespace milvus {
 
 class ScopedTimer {
@@ -34,7 +55,7 @@ class ScopedTimer {
 
     ~ScopedTimer() {
         auto end = std::chrono::system_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start_).count();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start_).count();
         callback_(duration);
     }
 

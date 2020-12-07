@@ -36,12 +36,14 @@ class SPTAGTest : public DataGen, public TestWithParam<std::string> {
                 {milvus::knowhere::meta::DIM, dim},
                 {milvus::knowhere::meta::TOPK, 10},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
             };
         } else {
             conf = milvus::knowhere::Config{
                 {milvus::knowhere::meta::DIM, dim},
                 {milvus::knowhere::meta::TOPK, 10},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
             };
         }
 
@@ -107,6 +109,54 @@ TEST_P(SPTAGTest, sptag_serialize) {
     ASSERT_EQ(new_index->Dim(), dim);
     //        ASSERT_THROW({ new_index->Clone(); }, milvus::knowhere::KnowhereException);
     //        ASSERT_NO_THROW({ new_index->Seal(); });
+
+    {
+        int fileno = 0;
+        const std::string& base_name = "/tmp/sptag_serialize_test_bin_";
+        std::vector<std::string> filename_list;
+        std::vector<std::pair<std::string, size_t>> meta_list;
+        for (auto& iter : binaryset.binary_map_) {
+            const std::string& filename = base_name + std::to_string(fileno);
+            FileIOWriter writer(filename);
+            writer(iter.second->data.get(), iter.second->size);
+
+            meta_list.emplace_back(std::make_pair(iter.first, iter.second->size));
+            filename_list.push_back(filename);
+            ++fileno;
+        }
+
+        milvus::knowhere::BinarySet load_data_list;
+        for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
+            auto bin_size = meta_list[i].second;
+            FileIOReader reader(filename_list[i]);
+
+            auto load_data = new uint8_t[bin_size];
+            reader(load_data, bin_size);
+            std::shared_ptr<uint8_t[]> data(load_data);
+            load_data_list.Append(meta_list[i].first, data, bin_size);
+        }
+
+        auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
+        new_index->Load(load_data_list);
+        auto result = new_index->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, k);
+        PrintResult(result, nq, k);
+    }
+}
+
+TEST_P(SPTAGTest, sptag_slice) {
+    assert(!xb.empty());
+
+    index_->Train(base_dataset, conf);
+    // index_->Add(base_dataset, conf);
+    auto binaryset = index_->Serialize();
+    auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
+    new_index->Load(binaryset);
+    auto result = new_index->Query(query_dataset, conf, nullptr);
+    AssertAnns(result, nq, k);
+    PrintResult(result, nq, k);
+    ASSERT_EQ(new_index->Count(), nb);
+    ASSERT_EQ(new_index->Dim(), dim);
 
     {
         int fileno = 0;

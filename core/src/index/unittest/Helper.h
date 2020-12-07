@@ -97,6 +97,7 @@ class ParamGenerator {
                 {milvus::knowhere::IndexParams::nlist, 100},
                 {milvus::knowhere::IndexParams::nprobe, 4},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
                 {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
@@ -108,6 +109,7 @@ class ParamGenerator {
                 {milvus::knowhere::IndexParams::m, 4},
                 {milvus::knowhere::IndexParams::nbits, 8},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
                 {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else if (type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
@@ -119,6 +121,7 @@ class ParamGenerator {
                 {milvus::knowhere::IndexParams::nprobe, 4},
                 {milvus::knowhere::IndexParams::nbits, 8},
                 {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
                 {milvus::knowhere::meta::DEVICEID, DEVICEID},
             };
         } else {
