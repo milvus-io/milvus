@@ -73,10 +73,9 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         if (STATISTICS_LEVEL >= 3)
             index_->stats_enable = true;
         index_->loadIndex(reader);
-        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+        auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
         if (STATISTICS_LEVEL) {
             if (STATISTICS_LEVEL >= 3) {
-                hnsw_stats->max_level = index_->maxlevel_;
                 hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
                 for (auto i = 0; i <= index_->maxlevel_; ++i) {
                     hnsw_stats->distribution[i] = index_->level_stats_[i];
@@ -86,7 +85,7 @@ IndexHNSW::Load(const BinarySet& index_binary) {
             }
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -154,9 +153,8 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
     if (STATISTICS_LEVEL) {
-        auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+        auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
         if (STATISTICS_LEVEL >= 3) {
-            hnsw_stats->max_level = index_->maxlevel_;
             hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
             for (auto i = 0; i <= index_->maxlevel_; ++i) {
                 hnsw_stats->distribution[i] = index_->level_stats_[i];
@@ -165,7 +163,7 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
             }
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
     }
 }
 
@@ -182,25 +180,25 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
     std::vector<hnswlib::StatisticsInfo> query_stats;
-    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
     if (STATISTICS_LEVEL) {
         if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->nq_cnt += rows;
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
             if (rows > 2048)
-                hnsw_stats->nq_fd[12]++;
+                hnsw_stats->nq_stat[12]++;
             else
-                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
+                hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            hnsw_stats->filter_percentage_sum += fps;
+            //            hnsw_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
                 LOG_KNOWHERE_ERROR_ << "in IndexHNSW::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
             else
-                hnsw_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
+                hnsw_stats->filter_stat[(int)(fps * 100) / 5] += 1;
         }
         if (STATISTICS_LEVEL >= 3) {
             query_stats.resize(rows);
@@ -262,19 +260,21 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
         if (STATISTICS_LEVEL >= 3) {
+            std::unique_lock<std::mutex> lock(hnsw_stats->hash_lock);
             for (auto i = 0; i < rows; ++i) {
                 for (auto j = 0; j < query_stats[i].accessed_points.size(); ++j) {
-                    auto tgt = hnsw_stats->access_cnt.find(query_stats[i].accessed_points[j]);
-                    if (tgt == hnsw_stats->access_cnt.end())
-                        hnsw_stats->access_cnt[query_stats[i].accessed_points[j]] = 1;
+                    auto tgt = hnsw_stats->access_cnt_map.find(query_stats[i].accessed_points[j]);
+                    if (tgt == hnsw_stats->access_cnt_map.end())
+                        hnsw_stats->access_cnt_map[query_stats[i].accessed_points[j]] = 1;
                     else
                         tgt->second += 1;
                 }
             }
+            lock.unlock();
         }
     }
     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
@@ -307,7 +307,7 @@ IndexHNSW::UpdateIndexSize() {
 
 StatisticsPtr
 IndexHNSW::GetStatistics() {
-    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
     return hnsw_stats;
 }
 
@@ -315,7 +315,7 @@ void
 IndexHNSW::ClearStatistics() {
     if (!STATISTICS_LEVEL)
         return;
-    auto hnsw_stats = std::dynamic_pointer_cast<HNSWStatistics>(stats);
+    auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
     hnsw_stats->Clear();
 }
 

@@ -73,9 +73,6 @@ IVF_NM::Load(const BinarySet& binary_set) {
     if (STATISTICS_LEVEL) {
         ivf_index->nprobe_statistics.resize(invlists->nlist);
         ivf_index->nprobe_statistics.assign(invlists->nlist, 0);
-        index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
-        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
-        stats->Clear();
     }
     // statistics logging :
 
@@ -111,6 +108,9 @@ IVF_NM::Load(const BinarySet& binary_set) {
     ro_codes = rol->pin_readonly_codes;
     data_ = nullptr;
 #endif
+    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::Load finished, show statistics:";
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
 }
 
 void
@@ -346,16 +346,14 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
             ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
 
             if (n > 2048) {
-                ivf_stats->nq_fd[12]++;
+                ivf_stats->nq_stat[12]++;
             } else {
-                ivf_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
+                ivf_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)n))]++;
             }
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
                                 << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
                                 << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
-            ivf_stats->total_quantizer_search_time += ivf_index->index_ivf_stats.quantization_time;
-            ivf_stats->total_data_search_time += ivf_index->index_ivf_stats.search_time;
             ivf_stats->total_query_time +=
                 ivf_index->index_ivf_stats.quantization_time + ivf_index->index_ivf_stats.search_time;
             ivf_index->index_ivf_stats.quantization_time = 0;
@@ -363,17 +361,18 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            ivf_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
                 LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
             else
-                ivf_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
+                ivf_stats->filter_stat[(int)(fps * 100) / 5] += 1;
         }
         if (STATISTICS_LEVEL >= 3) {
-            ivf_stats->CaculateStatistics(ivf_index->nprobe_statistics);
+            ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);
         }
     }
+    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
+    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
 }
 
 void
@@ -423,7 +422,7 @@ IVF_NM::ClearStatistics() {
     if (stats != nullptr) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
         ivf_stats->Clear();
-        auto ivf_index = dynamic_cast<faiss::IndexIVF *>(index_.get());
+        auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
         ivf_index->clear_nprobe_statistics();
         ivf_index->index_ivf_stats.reset();
     }

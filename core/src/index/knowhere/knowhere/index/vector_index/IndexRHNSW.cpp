@@ -62,7 +62,6 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         if (STATISTICS_LEVEL) {
             auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
             if (STATISTICS_LEVEL >= 3) {
-                hnsw_stats->max_level = real_idx->hnsw.max_level;
                 hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
                 for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                     hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
@@ -73,7 +72,7 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
             }
         }
         LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
         index_.reset(idx);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -97,7 +96,6 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (STATISTICS_LEVEL) {
         auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
         if (STATISTICS_LEVEL >= 3) {
-            hnsw_stats->max_level = real_idx->hnsw.max_level;
             hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
             for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
                 hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
@@ -108,7 +106,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         }
     }
     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Build finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 }
 
 DatasetPtr
@@ -130,18 +128,17 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->batch_cnt += 1;
             hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
             if (rows > 2048)
-                hnsw_stats->nq_fd[12]++;
+                hnsw_stats->nq_stat[12]++;
             else
-                hnsw_stats->nq_fd[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
+                hnsw_stats->nq_stat[len_of_pow2(upper_bound_of_pow2((uint64_t)rows))]++;
         }
         if (STATISTICS_LEVEL >= 2) {
             double fps = bitset ? (double)bitset->count_1() / bitset->count() : 0.0;
-            hnsw_stats->filter_percentage_sum += fps;
             if (fps > 1.0 || fps < 0.0)
                 LOG_KNOWHERE_ERROR_ << "in IndexRHNSW::Query, the percentage of 1 in bitset is " << fps
                                     << ", which is exceed 100% or negative!";
             else
-                hnsw_stats->filter_cdf[(int)(fps * 100) / 5] += 1;
+                hnsw_stats->filter_stat[(int)(fps * 100) / 5] += 1;
         }
     }
     for (auto i = 0; i < k * rows; ++i) {
@@ -163,11 +160,11 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
         }
         if (STATISTICS_LEVEL >= 3) {
-            real_index->calculate_stats(hnsw_stats->access_lorenz_curve, hnsw_stats->access_total);
+            real_index->get_sorted_access_counts(hnsw_stats->access_cnt, hnsw_stats->access_total);
         }
     }
     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString(index_type_);
+    LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

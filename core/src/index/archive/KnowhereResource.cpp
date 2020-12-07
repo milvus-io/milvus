@@ -128,8 +128,10 @@ KnowhereResource::Initialize() {
     // NGT_LOG_DEBUG_ = &knowhere::log_debug_;
 
     auto stat_level = config.engine.statistics_level();
+    stat_level = 3;
     milvus::knowhere::STATISTICS_LEVEL = stat_level;
     faiss::STATISTICS_LEVEL = stat_level;
+    std::cout << "STATISTICS_LEVEL = " << milvus::knowhere::STATISTICS_LEVEL << std::endl;
 
     return Status::OK();
 }

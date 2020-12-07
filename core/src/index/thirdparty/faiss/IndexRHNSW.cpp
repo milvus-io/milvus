@@ -304,6 +304,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
     }
 //    update_stats(n, query_stats);
     if (STATISTICS_LEVEL == 3) {
+        std::unique_lock<std::mutex> lock(stats.hash_lock);
         for (auto i = 0; i < n; ++ i) {
             for (auto j = 0; j < query_stats[i].access_points.size(); ++ j) {
                 auto tgt = stats.access_cnt.find(query_stats[i].access_points[j]);
@@ -313,6 +314,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
                     tgt->second += 1;
             }
         }
+        lock.unlock();
     }
 
     rhnsw_stats.nreorder += nreorder;

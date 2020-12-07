@@ -370,14 +370,19 @@ struct RHNSWStats {
 struct RHNSWStatistics {
     RHNSWStatistics():max_level(0) {}
     int max_level;
+    std::mutex hash_lock;
     std::vector<int> distribution;
     std::unordered_map<unsigned int, uint64_t> access_cnt;
     void GetStatistics(std::vector<size_t> &ret, size_t &access_total) {
         access_total = 0;
+        std::unique_lock<std::mutex> lock(hash_lock);
+        ret.clear();
+        ret.reserve(access_cnt.size());
         for (auto &elem : access_cnt) {
             ret.push_back(elem.second);
             access_total += elem.second;
         }
+        lock.unlock();
         std::sort(ret.begin(), ret.end(), std::greater<int64_t>());
     }
 
