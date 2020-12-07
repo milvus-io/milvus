@@ -4,8 +4,11 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -39,6 +42,23 @@ func makeMasterAddress(port int64) string {
 	return masterAddr
 }
 
+func makeNewChannalNames(names []string, suffix string) []string {
+	var ret []string
+	for _, name := range names {
+		ret = append(ret, name+suffix)
+	}
+	return ret
+}
+
+func refreshChannelNames() {
+	suffix := "_test" + strconv.FormatInt(rand.Int63n(100), 10)
+	Params.DDChannelNames = makeNewChannalNames(Params.DDChannelNames, suffix)
+	Params.WriteNodeTimeTickChannelNames = makeNewChannalNames(Params.WriteNodeTimeTickChannelNames, suffix)
+	Params.InsertChannelNames = makeNewChannalNames(Params.InsertChannelNames, suffix)
+	Params.K2SChannelNames = makeNewChannalNames(Params.K2SChannelNames, suffix)
+	Params.ProxyTimeTickChannelNames = makeNewChannalNames(Params.ProxyTimeTickChannelNames, suffix)
+}
+
 func receiveTimeTickMsg(stream *ms.MsgStream) bool {
 	for {
 		result := (*stream).Consume()
@@ -54,6 +74,17 @@ func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
 		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(internalPb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
 	}
 	return &msgPack
+}
+
+func TestMain(m *testing.M) {
+	Init()
+	refreshMasterAddress()
+	refreshChannelNames()
+	etcdAddr := Params.EtcdAddress
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
+	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
+	exitCode := m.Run()
+	os.Exit(exitCode)
 }
 
 func TestMaster(t *testing.T) {
