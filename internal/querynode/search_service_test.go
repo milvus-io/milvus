@@ -13,15 +13,80 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
 func TestSearch_Search(t *testing.T) {
-	node := NewQueryNode(context.Background(), 0)
-	initTestMeta(t, node, "collection0", 0, 0)
+	Params.Init()
+	ctx, cancel := context.WithCancel(context.Background())
 
+	// init query node
 	pulsarURL, _ := Params.pulsarAddress()
+	node := NewQueryNode(ctx, 0)
+
+	// init meta
+	collectionName := "collection0"
+	fieldVec := schemapb.FieldSchema{
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
+	assert.NoError(t, err)
+
+	collection, err := (*node.replica).getCollectionByName(collectionName)
+	assert.NoError(t, err)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+
+	err = (*node.replica).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
+	assert.NoError(t, err)
+
+	segmentID := UniqueID(0)
+	err = (*node.replica).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
+	assert.NoError(t, err)
 
 	// test data generate
 	const msgLength = 10
@@ -93,14 +158,14 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
 
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.searchService = newSearchService(node.ctx, node.replica)
 	go node.searchService.start()
 
 	// start insert
@@ -170,7 +235,7 @@ func TestSearch_Search(t *testing.T) {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	// pulsar produce
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertProducerChannels)
 	insertStream.Start()
@@ -180,19 +245,83 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
 	go node.dataSyncService.start()
 
 	time.Sleep(1 * time.Second)
 
+	cancel()
 	node.Close()
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
-	node := NewQueryNode(context.Background(), 0)
-	initTestMeta(t, node, "collection0", 0, 0)
+	Params.Init()
+	ctx, cancel := context.WithCancel(context.Background())
 
+	// init query node
 	pulsarURL, _ := Params.pulsarAddress()
+	node := NewQueryNode(ctx, 0)
+
+	// init meta
+	collectionName := "collection0"
+	fieldVec := schemapb.FieldSchema{
+		Name:         "vec",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VECTOR_FLOAT,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "16",
+			},
+		},
+	}
+
+	fieldInt := schemapb.FieldSchema{
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            UniqueID(0),
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	collectionMetaBlob := proto.MarshalTextString(&collectionMeta)
+	assert.NotEqual(t, "", collectionMetaBlob)
+
+	var err = (*node.replica).addCollection(&collectionMeta, collectionMetaBlob)
+	assert.NoError(t, err)
+
+	collection, err := (*node.replica).getCollectionByName(collectionName)
+	assert.NoError(t, err)
+	assert.Equal(t, collection.meta.Schema.Name, "collection0")
+	assert.Equal(t, collection.meta.ID, UniqueID(0))
+	assert.Equal(t, (*node.replica).getCollectionNum(), 1)
+
+	err = (*node.replica).addPartition(collection.ID(), collectionMeta.PartitionTags[0])
+	assert.NoError(t, err)
+
+	segmentID := UniqueID(0)
+	err = (*node.replica).addSegment(segmentID, collectionMeta.PartitionTags[0], UniqueID(0))
+	assert.NoError(t, err)
 
 	// test data generate
 	const msgLength = 1024
@@ -264,14 +393,14 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
 
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.searchService = newSearchService(node.ctx, node.replica)
 	go node.searchService.start()
 
 	// start insert
@@ -345,7 +474,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	// pulsar produce
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertProducerChannels)
 	insertStream.Start()
@@ -355,10 +484,11 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
 	go node.dataSyncService.start()
 
 	time.Sleep(1 * time.Second)
 
+	cancel()
 	node.Close()
 }
