@@ -10,7 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -42,7 +43,7 @@ type Master struct {
 	grpcServer *grpc.Server
 	grpcErr    chan error
 
-	kvBase               *etcdkv.EtcdKV
+	kvBase               *kv.EtcdKV
 	scheduler            *ddRequestScheduler
 	metaTable            *metaTable
 	timesSyncMsgProducer *timeSyncMsgProducer
@@ -63,12 +64,12 @@ type Master struct {
 	tsoAllocator *GlobalTSOAllocator
 }
 
-func newKVBase(kvRoot string, etcdAddr []string) *etcdkv.EtcdKV {
+func newKVBase(kvRoot string, etcdAddr []string) *kv.EtcdKV {
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   etcdAddr,
 		DialTimeout: 5 * time.Second,
 	})
-	kvBase := etcdkv.NewEtcdKV(cli, kvRoot)
+	kvBase := kv.NewEtcdKV(cli, kvRoot)
 	return kvBase
 }
 
@@ -89,8 +90,8 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, metaRootPath)
-	metakv, err := NewMetaTable(etcdKV)
+	etcdkv := kv.NewEtcdKV(etcdClient, metaRootPath)
+	metakv, err := NewMetaTable(etcdkv)
 	if err != nil {
 		return nil, err
 	}
@@ -121,11 +122,6 @@ func CreateServer(ctx context.Context) (*Master, error) {
 		return nil, err
 	}
 	tsMsgProducer.SetWriteNodeTtBarrier(writeTimeTickBarrier)
-
-	pulsarDDStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
-	pulsarDDStream.SetPulsarClient(pulsarAddr)
-	pulsarDDStream.CreatePulsarProducers(Params.DDChannelNames)
-	tsMsgProducer.SetDDSyncStream(pulsarDDStream)
 
 	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDMStream.SetPulsarClient(pulsarAddr)
@@ -165,10 +161,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 		return nil, err
 	}
 
-	m.scheduler = NewDDRequestScheduler(ctx)
-	m.scheduler.SetDDMsgStream(pulsarDDStream)
-	m.scheduler.SetIDAllocator(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
-
+	m.scheduler = NewDDRequestScheduler(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
 	m.segmentMgr = NewSegmentManager(metakv,
 		func() (UniqueID, error) { return m.idAllocator.AllocOne() },
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
@@ -256,16 +249,14 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	}
 
 	s.serverLoopWg.Add(1)
-	if err := s.scheduler.Start(); err != nil {
-		return err
-	}
-
-	s.serverLoopWg.Add(1)
 	go s.grpcLoop(grpcPort)
 
 	if err := <-s.grpcErr; err != nil {
 		return err
 	}
+
+	s.serverLoopWg.Add(1)
+	go s.tasksExecutionLoop()
 
 	s.serverLoopWg.Add(1)
 	go s.segmentStatisticsLoop()
@@ -278,8 +269,6 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 
 func (s *Master) stopServerLoop() {
 	s.timesSyncMsgProducer.Close()
-	s.serverLoopWg.Done()
-	s.scheduler.Close()
 	s.serverLoopWg.Done()
 
 	if s.grpcServer != nil {
@@ -343,6 +332,33 @@ func (s *Master) tsLoop() {
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Println("tsLoop is closed")
+			return
+		}
+	}
+}
+
+func (s *Master) tasksExecutionLoop() {
+	defer s.serverLoopWg.Done()
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	for {
+		select {
+		case task := <-s.scheduler.reqQueue:
+			timeStamp, err := (task).Ts()
+			if err != nil {
+				log.Println(err)
+			} else {
+				if timeStamp < s.scheduler.scheduleTimeStamp {
+					task.Notify(errors.Errorf("input timestamp = %d, schduler timestamp = %d", timeStamp, s.scheduler.scheduleTimeStamp))
+				} else {
+					s.scheduler.scheduleTimeStamp = timeStamp
+					err = task.Execute()
+					task.Notify(err)
+				}
+			}
+		case <-ctx.Done():
+			log.Print("server is closed, exit task execution loop")
 			return
 		}
 	}
