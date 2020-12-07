@@ -16,6 +16,7 @@
 #include <memory>
 #include <vector>
 #include "db/snapshot/Snapshot.h"
+#include "db/snapshot/SnapshotPolicy.h"
 
 namespace milvus {
 namespace engine {
@@ -25,7 +26,7 @@ class SnapshotHolder {
  public:
     using ScopedPtr = std::shared_ptr<ScopedSnapshotT>;
 
-    explicit SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler = nullptr, size_t num_versions = 1);
+    explicit SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, GCHandler gc_handler = nullptr);
 
     ID_TYPE
     GetID() const {
@@ -44,14 +45,19 @@ class SnapshotHolder {
         return Status::OK();
     }
 
+    // Return how many snapshots in active
+    int
+    NumOfSnapshot() const;
+
     bool
     IsActive(Snapshot::Ptr& ss);
+
+    Status
+    ApplyEject();
 
     ~SnapshotHolder();
 
  private:
-    /* Status */
-    /* LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc); */
     Status
     LoadNoLock(ID_TYPE collection_commit_id, CollectionCommitPtr& cc, StorePtr store);
 
@@ -67,8 +73,7 @@ class SnapshotHolder {
     ID_TYPE min_id_ = std::numeric_limits<ID_TYPE>::max();
     ID_TYPE max_id_ = std::numeric_limits<ID_TYPE>::min();
     std::map<ID_TYPE, Snapshot::Ptr> active_;
-    std::vector<Snapshot::Ptr> to_release_;
-    size_t num_versions_ = 1;
+    SnapshotPolicyPtr policy_;
     GCHandler gc_handler_;
 };
 
