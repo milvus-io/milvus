@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace milvus {
@@ -62,8 +63,11 @@ int64_t
 get_system_boottime() {
     FILE* uptime = fopen("/proc/uptime", "r");
     float since_sys_boot, _;
-    fscanf(uptime, "%f %f", &since_sys_boot, &_);
+    auto ret = fscanf(uptime, "%f %f", &since_sys_boot, &_);
     fclose(uptime);
+    if (ret != 2) {
+        throw std::runtime_error("read /proc/uptime failed.");
+    }
     return static_cast<int64_t>(since_sys_boot);
 }
 
@@ -85,6 +89,9 @@ get_thread_starttime() {
         }
     }
     fclose(thread_stat);
+    if (ret != 1) {
+        throw std::runtime_error("read " + std::string(filename) + " failed.");
+    }
     return val / sysconf(_SC_CLK_TCK);
 }
 
