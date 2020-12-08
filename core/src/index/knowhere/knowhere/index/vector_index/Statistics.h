@@ -11,10 +11,8 @@
 
 #pragma once
 
-#include <stdio.h>
 #include <algorithm>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,7 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "faiss/IndexIVF.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 
@@ -48,31 +45,6 @@ len_of_pow2(uint64_t x) {
     return __builtin_popcountl(x - 1);
 }
 
-inline void
-update_batch_count(size_t& batch_cnt) {
-    batch_cnt++;
-}
-
-inline void
-update_nq_count(size_t& nq_cnt, const int64_t& nq) {
-    nq_cnt += static_cast<size_t>(nq);
-}
-
-inline void
-update_nq_stats(std::vector<size_t>& nq_stats, const int64_t& nq) {
-    if (nq > 2048) {
-        nq_stats[12]++;
-    } else {
-        nq_stats[len_of_pow2(upper_bound_of_pow2(static_cast<size_t>(nq)))]++;
-    }
-}
-
-inline void
-update_filter_percentage(std::vector<size_t>& container, const faiss::ConcurrentBitsetPtr& bitset) {
-    double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
-    container[static_cast<int>(fps * 100) / 5] += 1;
-}
-
 /*
  * class: Statistics
  */
@@ -87,7 +59,8 @@ class Statistics {
           batch_cnt(0),
           total_query_time(0.0),
           nq_stat(NQ_Histogram_Slices, 0),
-          filter_stat(Filter_Histogram_Slices, 0) {
+          filter_stat(Filter_Histogram_Slices, 0),
+          update_lock() {
     }
 
     /*
@@ -107,19 +80,6 @@ class Statistics {
     ToString();
 
     virtual ~Statistics() = default;
-
-    /*
-     * Clear all counts
-     * @retval: none
-     */
-    virtual void
-    Clear() {
-        total_query_time = 0.0;
-        nq_cnt = 0;
-        batch_cnt = 0;
-        nq_stat.resize(NQ_Histogram_Slices, 0);
-        filter_stat.resize(Filter_Histogram_Slices, 0);
-    }
 
     /*
      * Get batch count of the queries (Level 1)
@@ -159,17 +119,52 @@ class Statistics {
     }
 
     std::unique_lock<std::mutex>
-    lock() {
+    Lock() {
         return std::unique_lock<std::mutex>(update_lock);
     }
 
  public:
+    void
+    update_batch_count() {
+        batch_cnt++;
+    }
+
+    void
+    update_nq_count(const int64_t nq) {
+        nq_cnt += static_cast<size_t>(nq);
+    }
+
+    void
+    update_nq_stats(const int64_t nq) {
+        if (nq > 2048) {
+            nq_stat[12]++;
+        } else {
+            nq_stat[len_of_pow2(upper_bound_of_pow2(static_cast<size_t>(nq)))]++;
+        }
+    }
+
+    void
+    update_filter_percentage(const faiss::ConcurrentBitsetPtr& bitset) {
+        double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
+        filter_stat[static_cast<int>(fps * 100) / 5] += 1;
+    }
+
+    virtual void
+    clear() {
+        total_query_time = 0.0;
+        nq_cnt = 0;
+        batch_cnt = 0;
+        nq_stat.resize(NQ_Histogram_Slices, 0);
+        filter_stat.resize(Filter_Histogram_Slices, 0);
+    }
+
+ public:
     std::string& index_type;
-    size_t batch_cnt;
-    size_t nq_cnt;
-    double total_query_time;  // unit: ms
-    std::vector<size_t> nq_stat;
-    std::vector<size_t> filter_stat;
+    size_t batch_cnt;                    // updated in query
+    size_t nq_cnt;                       // updated in query
+    double total_query_time;             // updated in query (unit: ms)
+    std::vector<size_t> nq_stat;         // updated in query
+    std::vector<size_t> filter_stat;     // updated in query
     std::mutex update_lock;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
@@ -191,17 +186,6 @@ class HNSWStatistics : public Statistics {
      */
     std::string
     ToString() override;
-
-    /*
-     * Clear all counts
-     * @retval: none
-     */
-    void
-    Clear() override {
-        Statistics::Clear();
-        access_total = 0;
-        ef_sum = 0;
-    }
 
     /*
      * Get nodes count in each level
@@ -245,10 +229,18 @@ class HNSWStatistics : public Statistics {
     AccessCDF(const std::vector<size_t>& axis_x) = 0;
 
  public:
+    void
+    clear() override {
+        Statistics::clear();
+        access_total = 0;
+        ef_sum = 0;
+    }
+
+ public:
     std::vector<size_t> distribution;
     size_t target_level;
-    size_t access_total;
-    size_t ef_sum;
+    size_t access_total;            // depend on subclass type
+    size_t ef_sum;                  // updated in query
 };
 
 /*
@@ -262,18 +254,18 @@ class LibHNSWStatistics : public HNSWStatistics {
 
     ~LibHNSWStatistics() override = default;
 
-    void
-    Clear() override {
-        HNSWStatistics::Clear();
-        access_cnt_map.clear();
-    }
-
     std::vector<double>
     AccessCDF(const std::vector<size_t>& axis_x) override;
 
  public:
-    std::unordered_map<int64_t, size_t> access_cnt_map;
-    std::mutex hash_lock;
+    void
+    clear() override {
+        HNSWStatistics::clear();
+        access_cnt_map.clear();
+    }
+
+ public:
+    std::unordered_map<int64_t, size_t> access_cnt_map; // updated in query
 };
 
 /*
@@ -291,7 +283,7 @@ class RHNSWStatistics : public HNSWStatistics {
     AccessCDF(const std::vector<size_t>& axis_x) override;
 
  public:
-    std::vector<size_t> access_cnt;
+    std::vector<size_t> access_cnt; // prepared in GetStatistics
 };
 
 /*
@@ -313,16 +305,6 @@ class IVFStatistics : public Statistics {
     ToString() override;
 
     /*
-     * Clear all counts
-     * @retval: none
-     */
-    void
-    Clear() override {
-        Statistics::Clear();
-        nprobe_count.clear();
-    }
-
-    /*
      * Get the statistics of the search parameter nprboe (count of batches)  (Level 1)
      * @retval: nprobe
      */
@@ -335,9 +317,11 @@ class IVFStatistics : public Statistics {
      * Get the statistics of the search parameter nprboe (count of batches)  (Level 1)
      * @retval: <nprobe, count>
      */
-    std::map<int64_t, size_t>
+    std::unordered_map<int64_t, size_t>
     SearchNprobe() {
+        auto lock = Lock();
         auto rst = nprobe_count;
+        lock.unlock();
         return rst;
     }
 
@@ -350,25 +334,25 @@ class IVFStatistics : public Statistics {
     AccessCDF(const std::vector<size_t>& axis_x);
 
  public:
-    std::map<int64_t, size_t> nprobe_count;
-    std::vector<size_t> access_cnt;
-    size_t access_total;
+    void
+    count_nprobe(const int64_t nq, const int64_t nprobe);
+
+    void
+    update_ivf_access_stats(const std::vector<size_t> &nprobe_statistics);
+
+    void
+    clear() override {
+        Statistics::clear();
+        nprobe_count.clear();
+        access_total = 0;
+    }
+
+ public:
+    std::unordered_map<int64_t, size_t> nprobe_count; // updated in query
+    std::vector<size_t> access_cnt; // prepared in GetStatistics
+    size_t access_total; // updated in query
     size_t nlist;
 };
-
-inline void
-update_ivf_nprobe_stats(const faiss::IndexIVF* idx, IVFStatistics* ivf_stats) {
-    ivf_stats->nprobe_count.clear();
-    ivf_stats->access_total = 0;
-    auto nprobe_statistics = idx->nprobe_statistics;
-    ivf_stats->nlist = nprobe_statistics.size();
-    for (auto i = 0; i < nprobe_statistics.size(); ++i) {
-        if (nprobe_statistics[i] > 0) {
-            ivf_stats->nprobe_count[i] = static_cast<size_t>(nprobe_statistics[i]);
-            ivf_stats->access_total += nprobe_statistics[i];
-        }
-    }
-}
 
 }  // namespace knowhere
 }  // namespace milvus

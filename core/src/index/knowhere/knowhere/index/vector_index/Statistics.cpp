@@ -134,14 +134,12 @@ std::vector<double>
 LibHNSWStatistics::AccessCDF(const std::vector<size_t>& axis_x) {
     // copy from std::map to std::vector
     std::vector<size_t> access_cnt;
-    std::unique_lock<std::mutex> lock(hash_lock);
     access_cnt.reserve(access_cnt_map.size());
     access_total = 0;
     for (auto& elem : access_cnt_map) {
         access_cnt.push_back(elem.second);
         access_total += elem.second;
     }
-    lock.unlock();
     std::sort(access_cnt.begin(), access_cnt.end(), std::greater<>());
 
     return CaculateCDF(access_total, access_cnt, axis_x);
@@ -175,6 +173,29 @@ IVFStatistics::ToString() {
         ret << std::endl;
     }
     return Statistics::ToString() + ret.str();
+}
+
+void
+IVFStatistics::count_nprobe(const int64_t nq, const int64_t nprobe){
+    // nprobe count
+    auto it = nprobe_count.find(nprobe);
+    if (it == nprobe_count.end()) {
+        nprobe_count[nprobe] = 1;
+    } else {
+        it->second++;
+    }
+
+    // access total
+    access_total += nq * nprobe;
+}
+
+void
+IVFStatistics::update_ivf_access_stats(const std::vector<size_t> &nprobe_statistics) {
+    nlist = nprobe_statistics.size();
+    access_total = 0;
+    access_cnt = nprobe_statistics;
+
+    std::sort(access_cnt.begin(), access_cnt.end(), std::greater<>());
 }
 
 std::vector<double>

@@ -136,7 +136,7 @@ struct IndexIVF: Index, Level1Quantizer {
     /** optional map that maps back ids to invlist entries. This
      *  enables reconstruct() */
     DirectMap direct_map;
-    mutable std::vector<int> nprobe_statistics;
+    mutable std::vector<size_t> nprobe_statistics;
     mutable IndexIVFStats index_ivf_stats;
 
 
