@@ -46,11 +46,9 @@ BinaryIVF::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 
-    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     if (STATISTICS_LEVEL) {
-        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
+        auto ivf_index = static_cast<faiss::IndexBinaryIVF*>(index_.get());
         ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
-        stats->clear();
     }
 }
 
@@ -153,6 +151,11 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index->train(rows, static_cast<const uint8_t*>(p_data));
     index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;
+
+    if (STATISTICS_LEVEL) {
+        auto ivf_index = static_cast<faiss::IndexBinaryIVF*>(index_.get());
+        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
+    }
 }
 
 std::shared_ptr<faiss::IVFSearchParameters>
@@ -181,9 +184,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
         auto lock = ivf_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            ivf_stats->update_nq_count(n);
-            ivf_stats->update_batch_count();
-            ivf_stats->update_nq_stats(n);
+            ivf_stats->update_nq(n);
             ivf_stats->count_nprobe(ivf_index->nprobe);
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost

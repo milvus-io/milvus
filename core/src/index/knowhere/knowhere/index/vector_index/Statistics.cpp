@@ -194,8 +194,8 @@ IVFStatistics::update_ivf_access_stats(const std::vector<size_t>& nprobe_statist
 
     std::sort(access_cnt.begin(), access_cnt.end(), std::greater<>());
     // access total
-    for (auto i = 0; i < access_cnt.size(); ++i) {
-        access_total += access_cnt[i];
+    for (auto& cnt : access_cnt) {
+        access_total += cnt;
     }
 }
 

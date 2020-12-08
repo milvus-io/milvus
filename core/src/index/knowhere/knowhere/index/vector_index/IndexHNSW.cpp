@@ -74,18 +74,15 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-        if (STATISTICS_LEVEL >= 3)
-            index_->stats_enable = true;
         index_->loadIndex(reader);
-        auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
-        if (STATISTICS_LEVEL) {
-            if (STATISTICS_LEVEL >= 3) {
-                auto lock = hnsw_stats->Lock();
-                hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
-            }
+        index_->stats_enable = (STATISTICS_LEVEL >= 3);
+        auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
+        if (STATISTICS_LEVEL >= 3) {
+            auto lock = hnsw_stats->Lock();
+            hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
         }
-        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+        // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        // LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -111,8 +108,7 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
-        if (STATISTICS_LEVEL >= 3)
-            index_->stats_enable = true;
+        index_->stats_enable = (STATISTICS_LEVEL >= 3);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
@@ -152,15 +148,13 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         faiss::BuilderSuspend::check_wait();
         index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
     }
-    if (STATISTICS_LEVEL) {
-        auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
-        if (STATISTICS_LEVEL >= 3) {
-            auto lock = hnsw_stats->Lock();
-            hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
-        }
-        LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
-        LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+    if (STATISTICS_LEVEL >= 3) {
+        auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
+        auto lock = hnsw_stats->Lock();
+        hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
     }
+    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 DatasetPtr
@@ -235,10 +229,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     if (STATISTICS_LEVEL) {
         auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            hnsw_stats->update_nq_count(rows);
-            hnsw_stats->update_batch_count();
-            hnsw_stats->update_nq_stats(rows);
-            hnsw_stats->update_ef_sum(config[IndexParams::ef].get<int64_t>());
+            hnsw_stats->update_nq(rows);
+            hnsw_stats->update_ef_sum(index_->ef_);
             hnsw_stats->update_total_query_time(
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
         }
@@ -257,8 +249,9 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             }
         }
     }
-    //    LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    //    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
@@ -293,7 +286,7 @@ void
 IndexHNSW::ClearStatistics() {
     if (!STATISTICS_LEVEL)
         return;
-    auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
+    auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
     auto lock = hnsw_stats->Lock();
     hnsw_stats->clear();
 }

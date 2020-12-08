@@ -126,17 +126,14 @@ class Statistics {
 
  public:
     void
-    update_batch_count() {
+    update_nq(const int64_t nq) {
+        // batch
         batch_cnt++;
-    }
 
-    void
-    update_nq_count(const int64_t nq) {
+        // nq_cnt
         nq_cnt += static_cast<size_t>(nq);
-    }
 
-    void
-    update_nq_stats(const int64_t nq) {
+        // nq_stat
         if (nq > 2048) {
             nq_stat[12]++;
         } else {

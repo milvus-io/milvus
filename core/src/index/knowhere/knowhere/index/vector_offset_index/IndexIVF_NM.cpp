@@ -69,7 +69,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
     // Construct arranged data from original data
     auto binary = binary_set.GetByName(RAW_DATA);
     auto original_data = reinterpret_cast<const float*>(binary->data.get());
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
     auto invlists = ivf_index->invlists;
     auto d = ivf_index->d;
     prefix_sum.resize(invlists->nlist);
@@ -138,6 +138,11 @@ IVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids_without_codes(rows, reinterpret_cast<const float*>(p_data), p_ids);
+
+    if (STATISTICS_LEVEL) {
+        auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
+        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
+    }
 }
 
 void
@@ -345,9 +350,7 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
     if (STATISTICS_LEVEL) {
         auto lock = ivf_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            ivf_stats->update_nq_count(n);
-            ivf_stats->update_batch_count();
-            ivf_stats->update_nq_stats(n);
+            ivf_stats->update_nq(n);
             ivf_stats->count_nprobe(ivf_index->nprobe);
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
@@ -362,8 +365,8 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
             ivf_stats->update_filter_percentage(bitset);
         }
     }
-    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
-    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    // LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
+    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void
@@ -414,7 +417,6 @@ IVF_NM::GetStatistics() {
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto lock = ivf_stats->Lock();
-    //    auto ivf_lock = ivf_index->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
 }
 
