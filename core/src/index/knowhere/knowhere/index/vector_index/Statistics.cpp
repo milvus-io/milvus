@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <src/index/thirdparty/faiss/utils/ConcurrentBitset.h>
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -18,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "IndexIVF.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"
@@ -158,7 +160,7 @@ IVFStatistics::ToString() {
         ret << "nlist " << Nlist() << std::endl;
         ret << "(nprobe, count): " << std::endl;
         auto nprobe = SearchNprobe();
-        for (auto &it : nprobe){
+        for (auto& it : nprobe) {
             ret << "(" << it.first << ", " << it.second << ") ";
         }
         ret << std::endl;

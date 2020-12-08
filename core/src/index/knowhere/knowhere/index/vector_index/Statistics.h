@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "faiss/IndexIVF.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 
@@ -44,6 +46,31 @@ upper_bound_of_pow2(uint64_t x) {
 inline int
 len_of_pow2(uint64_t x) {
     return __builtin_popcountl(x - 1);
+}
+
+inline void
+update_batch_count(size_t& batch_cnt) {
+    batch_cnt++;
+}
+
+inline void
+update_nq_count(size_t& nq_cnt, const int64_t& nq) {
+    nq_cnt += static_cast<size_t>(nq);
+}
+
+inline void
+update_nq_stats(std::vector<size_t>& nq_stats, const int64_t& nq) {
+    if (nq > 2048) {
+        nq_stats[12]++;
+    } else {
+        nq_stats[len_of_pow2(upper_bound_of_pow2(static_cast<size_t>(nq)))]++;
+    }
+}
+
+inline void
+update_filter_percentage(std::vector<size_t>& container, const faiss::ConcurrentBitsetPtr& bitset) {
+    double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
+    container[static_cast<int>(fps * 100) / 5] += 1;
 }
 
 /*
@@ -131,6 +158,11 @@ class Statistics {
         return filter_stat;
     }
 
+    std::unique_lock<std::mutex>
+    lock() {
+        return std::unique_lock<std::mutex>(update_lock);
+    }
+
  public:
     std::string& index_type;
     size_t batch_cnt;
@@ -138,6 +170,7 @@ class Statistics {
     double total_query_time;  // unit: ms
     std::vector<size_t> nq_stat;
     std::vector<size_t> filter_stat;
+    std::mutex update_lock;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
 
@@ -267,8 +300,7 @@ class RHNSWStatistics : public HNSWStatistics {
  */
 class IVFStatistics : public Statistics {
  public:
-    explicit IVFStatistics(std::string& idx_t)
-        : Statistics(idx_t), nprobe_count(), access_cnt(), nlist(0) {
+    explicit IVFStatistics(std::string& idx_t) : Statistics(idx_t), nprobe_count(), access_cnt(), nlist(0) {
     }
 
     ~IVFStatistics() override = default;
@@ -321,8 +353,22 @@ class IVFStatistics : public Statistics {
     std::map<int64_t, size_t> nprobe_count;
     std::vector<size_t> access_cnt;
     size_t access_total;
-    int64_t nlist;
+    size_t nlist;
 };
+
+inline void
+update_ivf_nprobe_stats(const faiss::IndexIVF* idx, IVFStatistics* ivf_stats) {
+    ivf_stats->nprobe_count.clear();
+    ivf_stats->access_total = 0;
+    auto nprobe_statistics = idx->nprobe_statistics;
+    ivf_stats->nlist = nprobe_statistics.size();
+    for (auto i = 0; i < nprobe_statistics.size(); ++i) {
+        if (nprobe_statistics[i] > 0) {
+            ivf_stats->nprobe_count[i] = static_cast<size_t>(nprobe_statistics[i]);
+            ivf_stats->access_total += nprobe_statistics[i];
+        }
+    }
+}
 
 }  // namespace knowhere
 }  // namespace milvus

@@ -58,9 +58,6 @@ class IndexHNSW : public VecIndex {
     void
     UpdateIndexSize() override;
 
-    StatisticsPtr
-    GetStatistics() override;
-
     void
     ClearStatistics() override;
 

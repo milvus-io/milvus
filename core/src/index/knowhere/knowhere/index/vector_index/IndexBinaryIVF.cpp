@@ -117,15 +117,28 @@ BinaryIVF::UpdateIndexSize() {
     index_size_ = nb * code_size + nb * sizeof(int64_t) + nlist * code_size;
 }
 
+StatisticsPtr
+BinaryIVF::GetStatistics() {
+    if (!STATISTICS_LEVEL) {
+        return stats;
+    }
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_stats->lock();
+    update_ivf_nprobe_stats(ivf_index, ivf_stats.get());
+}
+
 void
 BinaryIVF::ClearStatistics() {
-    if (stats != nullptr) {
-        auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-        ivf_stats->Clear();
-        auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
-        ivf_index->clear_nprobe_statistics();
-        ivf_index->index_ivf_stats.reset();
+    if (!STATISTICS_LEVEL) {
+        return;
     }
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
+    ivf_index->clear_nprobe_statistics();
+    ivf_index->index_ivf_stats.reset();
+    ivf_stats->lock();
+    ivf_stats->Clear();
 }
 
 void
@@ -166,16 +179,11 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     if (STATISTICS_LEVEL) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+        ivf_stats->lock();
         if (STATISTICS_LEVEL >= 1) {
-            ivf_stats->nq_cnt += n;
-            ivf_stats->batch_cnt += 1;
-            ivf_stats->nprobe_access_count = ivf_index->index_ivf_stats.nlist;
-
-            if (n > 2048) {
-                ivf_stats->nq_stat[12]++;
-            } else {
-                ivf_stats->nq_stat[len_of_pow2(upper_bound_of_pow2(static_cast<uint64_t>(n)))]++;
-            }
+            update_nq_count(ivf_stats->nq_cnt, n);
+            update_batch_count(ivf_stats->batch_cnt);
+            update_nq_stats(ivf_stats->nq_stat, n);
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
                                 << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
@@ -186,16 +194,7 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             ivf_index->index_ivf_stats.search_time = 0;
         }
         if (STATISTICS_LEVEL >= 2) {
-            double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
-            if (fps > 1.0 || fps < 0.0) {
-                LOG_KNOWHERE_ERROR_ << "in IndexIVF::Query, the percentage of 1 in bitset is " << fps
-                                    << ", which is exceed 100% or negative!";
-            } else {
-                ivf_stats->filter_stat[static_cast<int>(fps * 100) / 5] += 1;
-            }
-        }
-        if (STATISTICS_LEVEL >= 3) {
-            ivf_stats->UpdateStatistics(ivf_index->nprobe_statistics);
+            update_filter_percentage(ivf_stats->filter_stat, bitset);
         }
     }
 
