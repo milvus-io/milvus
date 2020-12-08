@@ -38,7 +38,7 @@ static auto map = [] {
 MetricType
 GetMetricType(const std::string& type_name) {
     auto real_name = to_lower_copy(type_name);
-    AssertInfo(map.left.count(real_name), "metric type not found: " + type_name);
+    AssertInfo(map.left.count(real_name), "metric type not found: (" + type_name + ")");
     return map.left.at(real_name);
 }
 

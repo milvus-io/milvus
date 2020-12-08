@@ -321,7 +321,88 @@ TEST(Expr, TestRange) {
             auto ans = final[vec_id][offset];
 
             auto val = age_col[i];
-            auto ref = !ref_func(val);
+            auto ref = ref_func(val);
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+        }
+    }
+}
+
+TEST(Expr, TestTerm) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto vec_2k_3k = [] {
+        std::string buf = "[";
+        for (int i = 2000; i < 3000 - 1; ++i) {
+            buf += std::to_string(i) + ", ";
+        }
+        buf += std::to_string(2999) + "]";
+        return buf;
+    }();
+
+    std::vector<std::tuple<std::string, std::function<bool(int)>>> testcases = {
+        {R"([2000, 3000])", [](int v) { return v == 2000 || v == 3000; }},
+        {R"([2000])", [](int v) { return v == 2000; }},
+        {R"([3000])", [](int v) { return v == 3000; }},
+        {vec_2k_3k, [](int v) { return 2000 <= v && v < 3000; }},
+    };
+
+    std::string dsl_string_tmp = R"(
+{
+    "bool": {
+        "must": [
+            {
+                "term": {
+                    "age": @@@@
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+    auto schema = std::make_shared<Schema>();
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddField("age", DataType::INT32);
+
+    auto seg = CreateSegment(schema);
+    int N = 10000;
+    std::vector<int> age_col;
+    int num_iters = 100;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_age_col = raw_data.get_col<int>(1);
+        age_col.insert(age_col.end(), new_age_col.begin(), new_age_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentSmallIndex*>(seg.get());
+    ExecExprVisitor visitor(*seg_promote);
+    for (auto [clause, ref_func] : testcases) {
+        auto loc = dsl_string_tmp.find("@@@@");
+        auto dsl_string = dsl_string_tmp;
+        dsl_string.replace(loc, 4, clause);
+        auto plan = CreatePlan(*schema, dsl_string);
+        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        EXPECT_EQ(final.size(), upper_div(N * num_iters, DefaultElementPerChunk));
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto vec_id = i / DefaultElementPerChunk;
+            auto offset = i % DefaultElementPerChunk;
+            auto ans = final[vec_id][offset];
+
+            auto val = age_col[i];
+            auto ref = ref_func(val);
             ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
         }
     }

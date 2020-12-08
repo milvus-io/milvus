@@ -467,16 +467,16 @@ SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
     auto dim = field.get_dim();
 
     auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(entry.type, entry.mode);
-    auto chunk_size = record_.uids_.chunk_size();
+    auto chunk_size = record_.uids_.num_chunk();
 
     auto& uids = record_.uids_;
     auto entities = record_.get_entity<FloatVector>(offset);
 
     std::vector<knowhere::DatasetPtr> datasets;
-    for (int chunk_id = 0; chunk_id < uids.chunk_size(); ++chunk_id) {
+    for (int chunk_id = 0; chunk_id < uids.num_chunk(); ++chunk_id) {
         auto entities_chunk = entities->get_chunk(chunk_id).data();
-        int64_t count = chunk_id == uids.chunk_size() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
-                                                          : DefaultElementPerChunk;
+        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
+                                                         : DefaultElementPerChunk;
         datasets.push_back(knowhere::GenDataset(count, dim, entities_chunk));
     }
     for (auto& ds : datasets) {
