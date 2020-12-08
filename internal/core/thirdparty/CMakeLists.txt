@@ -26,6 +26,12 @@ include( FetchContent )
 set( FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download )
 set( FETCHCONTENT_QUIET     OFF )
 
+if( CUSTOM_THIRDPARTY_DOWNLOAD_PATH )
+    set( THIRDPARTY_DOWNLOAD_PATH ${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} )
+else()
+    set( THIRDPARTY_DOWNLOAD_PATH ${CMAKE_BINARY_DIR}/3rdparty_download/download )
+endif()
+message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 # ----------------------------------------------------------------------
 # Find pthreads
 

@@ -24,19 +24,15 @@ namespace milvus {
 class Schema {
  public:
     void
-    AddField(std::string_view field_name, DataType data_type, int dim = 1) {
-        auto field_meta = FieldMeta(field_name, data_type, dim);
+    AddField(std::string_view field_name, DataType data_type) {
+        auto field_meta = FieldMeta(field_name, data_type);
         this->AddField(std::move(field_meta));
     }
 
     void
-    AddField(FieldMeta field_meta) {
-        auto offset = fields_.size();
-        fields_.emplace_back(field_meta);
-        offsets_.emplace(field_meta.get_name(), offset);
-        auto field_sizeof = field_meta.get_sizeof();
-        sizeof_infos_.push_back(field_sizeof);
-        total_sizeof_ += field_sizeof;
+    AddField(std::string_view field_name, DataType data_type, int64_t dim, MetricType metric_type) {
+        auto field_meta = FieldMeta(field_name, data_type, dim, metric_type);
+        this->AddField(std::move(field_meta));
     }
 
     void
@@ -44,17 +40,6 @@ class Schema {
         is_auto_id_ = is_auto_id;
     }
 
-    auto
-    begin() {
-        return fields_.begin();
-    }
-
-    auto
-    end() {
-        return fields_.end();
-    }
-
- public:
     bool
     get_is_auto_id() const {
         return is_auto_id_;
@@ -123,11 +108,20 @@ class Schema {
     static std::shared_ptr<Schema>
     ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto);
 
+    void
+    AddField(FieldMeta&& field_meta) {
+        auto offset = fields_.size();
+        fields_.emplace_back(field_meta);
+        offsets_.emplace(field_meta.get_name(), offset);
+        auto field_sizeof = field_meta.get_sizeof();
+        sizeof_infos_.push_back(std::move(field_sizeof));
+        total_sizeof_ += field_sizeof;
+    }
+
  private:
     // this is where data holds
     std::vector<FieldMeta> fields_;
 
- private:
     // a mapping for random access
     std::unordered_map<std::string, int> offsets_;
     std::vector<int> sizeof_infos_;

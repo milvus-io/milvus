@@ -63,7 +63,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
     int N = 1000 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -76,7 +76,7 @@ TEST(SegmentCoreTest, MockTest) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
     std::vector<char> raw_data;
     std::vector<Timestamp> timestamps;
@@ -116,7 +116,7 @@ TEST(SegmentCoreTest, SmallIndex) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddField("age", DataType::INT32);
     int N = 1024 * 1024;
     auto data = DataGen(schema, N);

@@ -23,7 +23,7 @@ FetchContent_Declare(
     yaml-cpp
     URL         ${YAMLCPP_SOURCE_URL}
     URL_MD5     "b45bf1089a382e81f6b661062c10d0c2"
-    DOWNLOAD_DIR    ${MILVUS_BINARY_DIR}/3rdparty_download/download
+    DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
     SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/yaml-src
     BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/yaml-build
     )

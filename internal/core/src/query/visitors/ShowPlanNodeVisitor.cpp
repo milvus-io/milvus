@@ -73,7 +73,24 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
 void
 ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    // TODO
+    assert(!ret_);
+    auto& info = node.query_info_;
+    Json json_body{
+        {"node_type", "BinaryVectorANNS"},           //
+        {"metric_type", info.metric_type_},          //
+        {"field_id_", info.field_id_},               //
+        {"topK", info.topK_},                        //
+        {"search_params", info.search_params_},      //
+        {"placeholder_tag", node.placeholder_tag_},  //
+    };
+    if (node.predicate_.has_value()) {
+        ShowExprVisitor expr_show;
+        Assert(node.predicate_.value());
+        json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
+    } else {
+        json_body["predicate"] = "None";
+    }
+    ret_ = json_body;
 }
 
 }  // namespace milvus::query

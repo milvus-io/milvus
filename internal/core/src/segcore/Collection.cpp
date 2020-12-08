@@ -123,9 +123,10 @@ Collection::CreateIndex(std::string& index_config) {
 void
 Collection::parse() {
     if (collection_proto_.empty()) {
+        // TODO: remove hard code use unittests are ready
         std::cout << "WARN: Use default schema" << std::endl;
         auto schema = std::make_shared<Schema>();
-        schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16);
+        schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
         schema->AddField("age", DataType::INT32);
         schema_ = schema;
         return;

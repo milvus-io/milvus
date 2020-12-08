@@ -226,8 +226,14 @@ class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
     using ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl;
 };
 
-class FloatVector {};
-class BinaryVector {};
+class VectorTrait {};
+
+class FloatVector : public VectorTrait {
+    using embedded_type = float;
+};
+class BinaryVector : public VectorTrait {
+    using embedded_type = uint8_t;
+};
 
 template <>
 class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> {

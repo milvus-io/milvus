@@ -85,8 +85,6 @@ IndexingRecord::UpdateResourceAck(int64_t chunk_ack, const InsertRecord& record)
 template <typename T>
 void
 ScalarIndexingEntry<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-    auto dim = field_meta_.get_dim();
-
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
     Assert(source);
     auto chunk_size = source->chunk_size();
