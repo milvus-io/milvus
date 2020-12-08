@@ -20,6 +20,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <boost/align/aligned_allocator.hpp>
 
 namespace milvus::query {
 using Json = nlohmann::json;
@@ -37,6 +38,9 @@ struct Plan {
     std::vector<std::string> target_entries_;
     // TODO: add move extra info
 };
+
+template <typename T>
+using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 512>>;
 
 struct Placeholder {
     // milvus::proto::service::PlaceholderGroup group_;

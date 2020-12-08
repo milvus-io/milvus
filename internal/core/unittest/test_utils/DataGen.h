@@ -31,14 +31,6 @@ struct GeneratedData {
         memcpy(ret.data(), target.data(), target.size());
         return ret;
     }
-    template <typename T>
-    auto
-    get_mutable_col(int index) {
-        auto& target = cols_.at(index);
-        assert(target.size() == row_ids_.size() * sizeof(T));
-        auto ptr = reinterpret_cast<T*>(target.data());
-        return ptr;
-    }
 
  private:
     GeneratedData() = default;
@@ -66,9 +58,6 @@ GeneratedData::generate_rows(int N, SchemaPtr schema) {
         }
     }
     rows_ = std::move(result);
-    raw_.raw_data = rows_.data();
-    raw_.sizeof_per_row = schema->get_total_sizeof();
-    raw_.count = N;
 }
 
 inline GeneratedData
@@ -140,12 +129,14 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     }
     GeneratedData res;
     res.cols_ = std::move(cols);
+    res.generate_rows(N, schema);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
         res.timestamps_.push_back(i);
     }
-
-    res.generate_rows(N, schema);
+    res.raw_.raw_data = res.rows_.data();
+    res.raw_.sizeof_per_row = schema->get_total_sizeof();
+    res.raw_.count = N;
     return std::move(res);
 }
 

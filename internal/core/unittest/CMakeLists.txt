@@ -26,5 +26,4 @@ target_link_libraries(all_tests
         pthread
         milvus_utils
         )
-
 install (TARGETS all_tests DESTINATION unittest)
