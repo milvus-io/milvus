@@ -34,10 +34,13 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
     if (request->GetRequestType() != BaseRequest::kSearch) {
         std::string msg = "search strategy can only handle search request";
         LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+
+        // directly put request to queue if the request is not a search request
+        queue.push(request);
+        return Status::OK();
     }
 
-    // if config set to 0, neve combine
+    // if config set to 0, never combine, directly put request to queue
     if (search_combine_nq_ <= 0) {
         queue.push(request);
         return Status::OK();
@@ -50,30 +53,31 @@ SearchReqStrategy::ReScheduleQueue(const BaseRequestPtr& request, std::queue<Bas
     if (last_req->GetRequestType() == BaseRequest::kSearch) {
         SearchRequestPtr last_search_req = std::static_pointer_cast<SearchRequest>(last_req);
         if (SearchCombineRequest::CanCombine(last_search_req, new_search_req, search_combine_nq_)) {
-            // combine request
+            // combine requests, create a SearchCombineRequest to hold them
             SearchCombineRequestPtr combine_request = std::make_shared<SearchCombineRequest>(search_combine_nq_);
             combine_request->Combine(last_search_req);
             combine_request->Combine(new_search_req);
             queue.back() = combine_request;  // replace the last request to combine request
             LOG_SERVER_DEBUG_ << "Combine 2 search request";
         } else {
-            // directly put to queue
+            // directly put request to queue since the two search requests have different parameters
             queue.push(request);
         }
     } else if (last_req->GetRequestType() == BaseRequest::kSearchCombine) {
         SearchCombineRequestPtr combine_req = std::static_pointer_cast<SearchCombineRequest>(last_req);
         if (combine_req->CanCombine(new_search_req)) {
-            // combine request
+            // combine requests, the last request is a SearchCombineRequest
             combine_req->Combine(new_search_req);
             LOG_SERVER_DEBUG_ << "Combine more search request";
         } else {
-            // directly put to queue
+            // directly put request to queue since the two search requests have different parameters
             queue.push(request);
         }
     } else {
-        std::string msg = "unsupported request type for search strategy";
-        LOG_SERVER_ERROR_ << msg;
-        return Status(SERVER_UNSUPPORTED_ERROR, msg);
+        // the search queue could contains PreloadRequest/GetEntityByID/ReloadSegment request
+        // if the last request is not SearchRequest/SearchCombineRequest, we can't do combination
+        // directly put request to queue
+        queue.push(request);
     }
 
     return Status::OK();
