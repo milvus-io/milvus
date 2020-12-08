@@ -206,7 +206,7 @@ extern "C" CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_
     st.error_msg = ErrorMsg("payload has finished");
     return st;
   }
-  auto ast = builder->AppendValues(values, (dimension / 8) * length);
+  auto ast = builder->AppendValues(values, length);
   if (!ast.ok()) {
     st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
     st.error_msg = ErrorMsg(ast.message());
@@ -249,7 +249,7 @@ extern "C" CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *
     st.error_msg = ErrorMsg("payload has finished");
     return st;
   }
-  auto ast = builder->AppendValues(reinterpret_cast<const uint8_t *>(values), dimension * length * sizeof(float));
+  auto ast = builder->AppendValues(reinterpret_cast<const uint8_t *>(values), length);
   if (!ast.ok()) {
     st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
     st.error_msg = ErrorMsg(ast.message());
@@ -451,7 +451,7 @@ extern "C" CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader,
     return st;
   }
   *dimension = array->byte_width() * 8;
-  *length = array->length() / array->byte_width();
+  *length = array->length();
   *values = (uint8_t *) array->raw_values();
   return st;
 }
@@ -470,7 +470,7 @@ extern "C" CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader,
     return st;
   }
   *dimension = array->byte_width() / sizeof(float);
-  *length = array->length() / array->byte_width();
+  *length = array->length();
   *values = (float *) array->raw_values();
   return st;
 }
@@ -478,12 +478,7 @@ extern "C" CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader,
 extern "C" int GetPayloadLengthFromReader(CPayloadReader payloadReader) {
   auto p = reinterpret_cast<wrapper::PayloadReader *>(payloadReader);
   if (p->array == nullptr) return 0;
-  auto ba = std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(p->array);
-  if (ba == nullptr) {
-    return p->array->length();
-  } else {
-    return ba->length() / ba->byte_width();
-  }
+  return p->array->length();
 }
 
 extern "C" CStatus ReleasePayloadReader(CPayloadReader payloadReader) {

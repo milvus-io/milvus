@@ -16,12 +16,16 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
+
+type UniqueID = typeutil.UniqueID
 
 type Base interface {
 	Load(key string) (string, error)
@@ -38,7 +42,18 @@ type BaseTable struct {
 
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
-	err := gp.LoadYaml("config.yaml")
+
+	err := gp.LoadYaml("milvus.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	err = gp.LoadYaml("advanced/common.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	err = gp.LoadYaml("advanced/channel.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -145,4 +160,141 @@ func (gp *BaseTable) Remove(key string) error {
 
 func (gp *BaseTable) Save(key, value string) error {
 	return gp.params.Save(strings.ToLower(key), value)
+}
+
+func (gp *BaseTable) ParseFloat(key string) float64 {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func (gp *BaseTable) ParseInt64(key string) int64 {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return int64(value)
+}
+
+func (gp *BaseTable) ParseInt32(key string) int32 {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return int32(value)
+}
+
+func (gp *BaseTable) ParseInt(key string) int {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func (gp *BaseTable) WriteNodeIDList() []UniqueID {
+	proxyIDStr, err := gp.Load("nodeID.writeNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load write node id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (gp *BaseTable) ProxyIDList() []UniqueID {
+	proxyIDStr, err := gp.Load("nodeID.proxyIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (gp *BaseTable) QueryNodeIDList() []UniqueID {
+	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
+	for _, i := range queryNodeIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load proxy id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+// package methods
+
+func ConvertRangeToIntRange(rangeStr, sep string) []int {
+	items := strings.Split(rangeStr, sep)
+	if len(items) != 2 {
+		panic("Illegal range ")
+	}
+
+	startStr := items[0]
+	endStr := items[1]
+	start, err := strconv.Atoi(startStr)
+	if err != nil {
+		panic(err)
+	}
+	end, err := strconv.Atoi(endStr)
+	if err != nil {
+		panic(err)
+	}
+
+	if start < 0 || end < 0 {
+		panic("Illegal range value")
+	}
+	if start > end {
+		panic("Illegal range value, start > end")
+	}
+	return []int{start, end}
+}
+
+func ConvertRangeToIntSlice(rangeStr, sep string) []int {
+	rangeSlice := ConvertRangeToIntRange(rangeStr, sep)
+	start, end := rangeSlice[0], rangeSlice[1]
+	var ret []int
+	for i := start; i < end; i++ {
+		ret = append(ret, i)
+	}
+	return ret
 }

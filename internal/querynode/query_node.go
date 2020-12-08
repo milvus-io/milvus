@@ -17,11 +17,12 @@ import (
 )
 
 type QueryNode struct {
-	ctx context.Context
+	queryNodeLoopCtx    context.Context
+	queryNodeLoopCancel func()
 
 	QueryNodeID uint64
 
-	replica *collectionReplica
+	replica collectionReplica
 
 	dataSyncService *dataSyncService
 	metaService     *metaService
@@ -29,7 +30,14 @@ type QueryNode struct {
 	statsService    *statsService
 }
 
+func Init() {
+	Params.Init()
+}
+
 func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
+
+	ctx1, cancel := context.WithCancel(ctx)
+
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
@@ -43,11 +51,11 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	}
 
 	return &QueryNode{
-		ctx: ctx,
+		queryNodeLoopCtx:    ctx1,
+		queryNodeLoopCancel: cancel,
+		QueryNodeID:         queryNodeID,
 
-		QueryNodeID: queryNodeID,
-
-		replica: &replica,
+		replica: replica,
 
 		dataSyncService: nil,
 		metaService:     nil,
@@ -56,31 +64,34 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	}
 }
 
-func (node *QueryNode) Start() {
-	node.dataSyncService = newDataSyncService(node.ctx, node.replica)
-	node.searchService = newSearchService(node.ctx, node.replica)
-	node.metaService = newMetaService(node.ctx, node.replica)
-	node.statsService = newStatsService(node.ctx, node.replica)
+func (node *QueryNode) Start() error {
+	// todo add connectMaster logic
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica)
 
 	go node.dataSyncService.start()
 	go node.searchService.start()
 	go node.metaService.start()
-	node.statsService.start()
+	go node.statsService.start()
+	return nil
 }
 
 func (node *QueryNode) Close() {
-	<-node.ctx.Done()
+	node.queryNodeLoopCancel()
+
 	// free collectionReplica
-	(*node.replica).freeAll()
+	node.replica.freeAll()
 
 	// close services
 	if node.dataSyncService != nil {
-		(*node.dataSyncService).close()
+		node.dataSyncService.close()
 	}
 	if node.searchService != nil {
-		(*node.searchService).close()
+		node.searchService.close()
 	}
 	if node.statsService != nil {
-		(*node.statsService).close()
+		node.statsService.close()
 	}
 }
