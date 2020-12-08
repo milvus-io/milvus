@@ -13,6 +13,8 @@
 
 #include <string>
 
+#include <sys/types.h>
+#include <unistd.h>
 #include "easyloggingpp/easylogging++.h"
 
 #include "log/DeprecatedLog.h"
@@ -26,23 +28,34 @@ namespace milvus {
 #define VAR_COLLECTION_NAME (context->collection_name())
 #define VAR_CLIENT_ID ("")
 #define VAR_CLIENT_TAG (context->client_tag())
-#define VAR_CLIENT_IPPORT (context->ipport())
-#define VAR_THREAD_ID (thread_id)
-#define VAR_THREAD_START_TIMESTAMP (thread_start_timestamp)
+#define VAR_CLIENT_IPPORT (context->client_ipport())
+#define VAR_THREAD_ID (gettid())
+#define VAR_THREAD_START_TIMESTAMP (get_thread_start_timestamp())
 #define VAR_COMMAND_TAG (context->command_tag())
 
-#define MLOG(level, module, error_code) LOG << " | "\
-    << VAR_REQUEST_ID << " | "\
-    << #level << " | "\
-    << VAR_COLLECTION_NAME << " | "\
-    << VAR_CLIENT_ID << " | "\
-    << VAR_CLIENT_TAG << " | "\
-    << VAR_CLIENT_IPPORT << " | "\
-    << VAR_THREAD_ID << " | "\
-    << VAR_THREAD_START_TIMESTAMP << " | "\
-    << VAR_COMMAND_TAG << " | "\
-    << #module << " | "\
-    << error_code << " | "
+// Use this macro whenever possible
+// Depends variables: context Context
+#define MLOG(level, module, error_code)                                                                                \
+    LOG(level) << " | " << VAR_REQUEST_ID << " | " << #level << " | " << VAR_COLLECTION_NAME << " | " << VAR_CLIENT_ID \
+               << " | " << VAR_CLIENT_TAG << " | " << VAR_CLIENT_IPPORT << " | " << VAR_THREAD_ID << " | "             \
+               << VAR_THREAD_START_TIMESTAMP << " | " << VAR_COMMAND_TAG << " | " << #module << " | " << error_code    \
+               << " | "
+
+// Use in some background process only
+#define MLOG_(level, module, error_code)                                                 \
+    LOG(level) << " | "                                                                  \
+               << ""                                                                     \
+               << " | " << #level << " | "                                               \
+               << ""                                                                     \
+               << " | "                                                                  \
+               << ""                                                                     \
+               << " | "                                                                  \
+               << ""                                                                     \
+               << " | "                                                                  \
+               << ""                                                                     \
+               << " | " << VAR_THREAD_ID << " | " << VAR_THREAD_START_TIMESTAMP << " | " \
+               << ""                                                                     \
+               << " | " << #module << " | " << error_code << " | "
 
 std::string
 LogOut(const char* pattern, ...);
@@ -52,5 +65,8 @@ SetThreadName(const std::string& name);
 
 std::string
 GetThreadName();
+
+int64_t
+get_thread_start_timestamp();
 
 }  // namespace milvus
