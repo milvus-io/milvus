@@ -59,12 +59,12 @@ class TestDropCollection:
         collection_names = []
 
         def create():
-            collection_name = gen_unique_str(collection_id)
+            collection_name = gen_unique_str(uniq_id)
             collection_names.append(collection_name)
             connect.create_collection(collection_name, default_fields)
             connect.drop_collection(collection_name)
         for i in range(threads_num):
-            t = threading.Thread(target=create, args=())
+            t = TestThread(target=create, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)

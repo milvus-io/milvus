@@ -1,14 +1,10 @@
-import pdb
 import pytest
-import logging
-import itertools
-import threading
-from time import sleep
-from multiprocessing import Process
+import time
 from utils import *
 from constants import *
 
 uid = "list_collections"
+
 
 class TestListCollections:
     """
@@ -16,6 +12,7 @@ class TestListCollections:
       The following cases are used to test `list_collections` function
     ******************************************************************
     """
+
     def test_list_collections(self, connect, collection):
         '''
         target: test list collections
@@ -67,27 +64,20 @@ class TestListCollections:
         result = connect.list_collections()
         if result:
             for collection_name in result:
-                connect.drop_collection(collection_name)
-        time.sleep(default_drop_interval)
-        result = connect.list_collections()
-        assert len(result) == 0
+                assert connect.has_collection(collection_name)
 
     @pytest.mark.level(2)
     def test_list_collections_multithread(self, connect):
-        '''
-        target: test create collection with multithread
-        method: create collection using multithread, 
-        expected: collections are created
-        '''
-        threads_num = 4 
+        threads_num = 10
         threads = []
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
 
-        def _list():
+        def list():
             assert collection_name in connect.list_collections()
+
         for i in range(threads_num):
-            t = threading.Thread(target=_list, args=())
+            t = TestThread(target=list)
             threads.append(t)
             t.start()
             time.sleep(0.2)

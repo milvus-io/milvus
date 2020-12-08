@@ -15,7 +15,7 @@ def get_segment_id(connect, collection, nb=1, vec_type='float', index_params=Non
         vectors, entities = gen_binary_entities(nb)
     else:
         entities = gen_entities(nb)
-    ids = connect.insert(collection, entities)
+    ids = connect.bulk_insert(collection, entities)
     connect.flush([collection])
     if index_params:
         if vec_type == 'float':
@@ -120,7 +120,7 @@ class TestListIdInSegmentBase:
         nb = 10
         entities = gen_entities(nb)
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection, entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["partitions"][1]["tag"] == default_tag
@@ -162,7 +162,7 @@ class TestListIdInSegmentBase:
         expected: status ok
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
         assert stats["partitions"][1]["tag"] == default_tag
@@ -236,7 +236,7 @@ class TestListIdInSegmentBinary:
         '''
         nb = 10
         vectors, entities = gen_binary_entities(nb)
-        ids = connect.insert(binary_collection, entities)
+        ids = connect.bulk_insert(binary_collection, entities)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][0]["segments"][0]["id"])
@@ -255,7 +255,7 @@ class TestListIdInSegmentBinary:
         connect.create_partition(binary_collection, default_tag)
         nb = 10
         vectors, entities = gen_binary_entities(nb)
-        ids = connect.insert(binary_collection, entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(binary_collection, entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
@@ -293,7 +293,7 @@ class TestListIdInSegmentBinary:
         expected: status ok
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities, partition_tag=default_tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         assert stats["partitions"][1]["tag"] == default_tag

@@ -106,7 +106,7 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids)
+        insert_ids = connect.bulk_insert(id_collection, default_entities, ids)
         assert len(insert_ids) == len(ids)
  
     def test_create_partition_insert_with_tag(self, connect, id_collection):
@@ -117,7 +117,7 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        insert_ids = connect.bulk_insert(id_collection, default_entities, ids, partition_tag=default_tag)
         assert len(insert_ids) == len(ids)
 
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
@@ -130,7 +130,7 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         ids = [i for i in range(default_nb)]
         with pytest.raises(Exception) as e:
-            insert_ids = connect.insert(collection, default_entities, ids, partition_tag=tag_new)
+            insert_ids = connect.bulk_insert(collection, default_entities, ids, partition_tag=tag_new)
 
     def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
@@ -140,9 +140,9 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        insert_ids = connect.bulk_insert(id_collection, default_entities, ids, partition_tag=default_tag)
         ids = [(i+default_nb) for i in range(default_nb)]
-        new_insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        new_insert_ids = connect.bulk_insert(id_collection, default_entities, ids, partition_tag=default_tag)
         connect.flush([id_collection])
         res = connect.count_entities(id_collection)
         assert res == default_nb * 2
@@ -158,8 +158,8 @@ class TestCreateBase:
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(collection_new, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        ids = connect.insert(collection_new, default_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection_new, default_entities, partition_tag=default_tag)
         connect.flush([collection, collection_new])
         res = connect.count_entities(collection)
         assert res == default_nb
