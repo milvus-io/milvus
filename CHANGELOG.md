@@ -1,8 +1,17 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
+# Milvus 0.10.5 (TBD)
+## Bug
+-   \#4378 Multi-threads to call load_collection() and search() cause Milvus hang
 
-# Milvus 0.10.4 (TBD)
+## Feature
+
+## Improvement
+
+## Task
+
+# Milvus 0.10.4 (2020-12-02)
 ## Bug
 -   \#3626 Fix server crash when searching with IVF_PQ on GPU
 -   \#3903 The performance of IVF_SQ8H in 0.10.3 is degraded
