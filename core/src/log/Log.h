@@ -21,6 +21,11 @@
 
 namespace milvus {
 
+#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
+#include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
+#endif
+
 // Log message format: %timestamp | %request_id | %level | %collection_name | %client_id | %client_tag | %client_ipport
 // | %thread_id | %thread_start_timestamp | %command_tag | %module | %error_code | %message
 

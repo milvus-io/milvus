@@ -69,10 +69,10 @@ get_system_boottime() {
 
 int64_t
 get_thread_starttime() {
-    auto tid = gettid();
-    auto pid = getpid();
+    int64_t tid = gettid();
+    int64_t pid = getpid();
     char filename[256];
-    snprintf(filename, sizeof(filename), "/proc/%d/task/%d/stat", pid, tid);
+    snprintf(filename, sizeof(filename), "/proc/%ld/task/%ld/stat", pid, tid);
 
     int64_t val = 0;
     char comm[16], state;
