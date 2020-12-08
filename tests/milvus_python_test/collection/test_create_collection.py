@@ -2,7 +2,7 @@ import pdb
 import copy
 import logging
 import itertools
-from time import sleep
+import time
 import threading
 from multiprocessing import Process
 import sklearn.preprocessing
@@ -108,7 +108,7 @@ class TestCreateCollection:
         expected: error raised
         '''
         # pdb.set_trace()
-        connect.insert(collection, default_entity)
+        connect.bulk_insert(collection, default_entity)
 
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)
@@ -119,7 +119,7 @@ class TestCreateCollection:
         method: insert vector and create collection
         expected: error raised
         '''
-        connect.insert(collection, default_entity)
+        connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         with pytest.raises(Exception) as e:
             connect.create_collection(collection, default_fields)
@@ -172,7 +172,7 @@ class TestCreateCollection:
             collection_names.append(collection_name)
             connect.create_collection(collection_name, default_fields)
         for i in range(threads_num):
-            t = threading.Thread(target=create, args=())
+            t = TestThread(target=create, args=())
             threads.append(t)
             t.start()
             time.sleep(0.2)

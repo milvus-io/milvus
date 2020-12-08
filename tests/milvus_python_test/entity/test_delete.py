@@ -18,12 +18,14 @@ default_single_query = {
     }
 }
 
+
 class TestDeleteBase:
     """
     ******************************************************************
       The following cases are used to test `delete_entity_by_id` function
     ******************************************************************
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_simple_index()
@@ -53,7 +55,7 @@ class TestDeleteBase:
         method: add entity and delete
         expected: status DELETED
         '''
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         status = connect.delete_entity_by_id(collection, [0])
         assert status
@@ -83,7 +85,7 @@ class TestDeleteBase:
         method: add entity and delete
         expected: error raised
         '''
-        ids = connect.insert(collection, default_entity)
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         collection_new = gen_unique_str()
         with pytest.raises(Exception) as e:
@@ -96,7 +98,7 @@ class TestDeleteBase:
         expected: no error raised
         '''
         entities = gen_entities(insert_count)
-        ids = connect.insert(collection, entities)
+        ids = connect.bulk_insert(collection, entities)
         connect.flush([collection])
         delete_ids = [ids[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -111,7 +113,7 @@ class TestDeleteBase:
         method: add entities and delete one in collection, and one not in collection
         expected: no error raised
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], 1]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -127,7 +129,7 @@ class TestDeleteBase:
         expected: no error raised, all entities deleted
         '''
         ids = [1 for i in range(default_nb)]
-        res_ids = connect.insert(id_collection, default_entities, ids)
+        res_ids = connect.bulk_insert(id_collection, default_entities, ids)
         connect.flush([id_collection])
         delete_ids = [1]
         status = connect.delete_entity_by_id(id_collection, delete_ids)
@@ -141,8 +143,8 @@ class TestDeleteBase:
         target: test delete entity
         method: add one entity and delete two ids
         expected: error raised
-        '''        
-        ids = connect.insert(collection, default_entity)
+        '''
+        ids = connect.bulk_insert(collection, default_entity)
         connect.flush([collection])
         delete_ids = [ids[0], 1]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -156,7 +158,7 @@ class TestDeleteBase:
         method: add entities and delete, then flush
         expected: entity deleted and no error raised
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -171,7 +173,7 @@ class TestDeleteBase:
         method: add entities and delete, then flush
         expected: entity deleted and no error raised
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(binary_collection, delete_ids)
@@ -185,7 +187,7 @@ class TestDeleteBase:
         method: add entities and delete
         expected: status DELETED
         '''
-        ids = connect.insert(binary_collection, default_binary_entities)
+        ids = connect.bulk_insert(binary_collection, default_binary_entities)
         connect.flush([binary_collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(binary_collection, delete_ids)
@@ -197,12 +199,12 @@ class TestDeleteBase:
         note: Not flush after delete
         '''
         insert_ids = [i for i in range(default_nb)]
-        ids = connect.insert(id_collection, default_entities, insert_ids)
+        ids = connect.bulk_insert(id_collection, default_entities, insert_ids)
         connect.flush([id_collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(id_collection, delete_ids)
         assert status
-        new_ids = connect.insert(id_collection, default_entity, [ids[0]])
+        new_ids = connect.bulk_insert(id_collection, default_entity, [ids[0]])
         assert new_ids == [ids[0]]
         connect.flush([id_collection])
         res_count = connect.count_entities(id_collection)
@@ -214,12 +216,12 @@ class TestDeleteBase:
         expected: status DELETED, all id deleted
         '''
         insert_ids = [i for i in range(default_nb)]
-        ids = connect.insert(binary_id_collection, default_binary_entities, insert_ids)
+        ids = connect.bulk_insert(binary_id_collection, default_binary_entities, insert_ids)
         connect.flush([binary_id_collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(binary_id_collection, delete_ids)
         assert status
-        new_ids = connect.insert(binary_id_collection, default_binary_entity, [ids[0]])
+        new_ids = connect.bulk_insert(binary_id_collection, default_binary_entity, [ids[0]])
         assert new_ids == [ids[0]]
         connect.flush([binary_id_collection])
         res_count = connect.count_entities(binary_id_collection)
@@ -231,7 +233,7 @@ class TestDeleteBase:
         method: add entities and delete, then search
         expected: entity deleted and no error raised
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -251,7 +253,7 @@ class TestDeleteBase:
         method: add entitys and delete, then create index
         expected: vectors deleted, index created
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -263,7 +265,7 @@ class TestDeleteBase:
         method: add entities and delete id serveral times
         expected: entities deleted
         '''
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -279,7 +281,7 @@ class TestDeleteBase:
         expected: entities deleted
         '''
         connect.create_index(collection, field_name, get_simple_index)
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -299,7 +301,7 @@ class TestDeleteBase:
         ids = [i for i in range(default_nb)]
         connect.create_index(id_collection, field_name, get_simple_index)
         for i in range(default_nb):
-            connect.insert(id_collection, default_entity, [ids[i]])
+            connect.bulk_insert(id_collection, default_entity, [ids[i]])
         connect.flush([id_collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(id_collection, delete_ids)
@@ -313,13 +315,14 @@ class TestDeleteBase:
       The following cases are used to test `delete_entity_by_id` function, with tags
     ******************************************************************
     """
+
     def test_insert_tag_delete(self, connect, collection):
         '''
         method: add entitys with given tag, delete entities with the return ids
         expected: entities deleted
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -334,7 +337,7 @@ class TestDeleteBase:
         expected: entities deleted
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities)
+        ids = connect.bulk_insert(collection, default_entities)
         connect.flush([collection])
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -351,8 +354,8 @@ class TestDeleteBase:
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        ids_new = connect.insert(collection, default_entities, partition_tag=tag_new)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+        ids_new = connect.bulk_insert(collection, default_entities, partition_tag=tag_new)
         connect.flush([collection])
         delete_ids = [ids[0], ids_new[0]]
         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -362,15 +365,15 @@ class TestDeleteBase:
         assert res_count == 2 * (default_nb - 1)
 
     def test_insert_tags_index_delete(self, connect, collection, get_simple_index):
-        '''
+        """
         method: add entitys with given tag, create index, delete entities with the return ids
         expected: entities deleted
-        '''
+        """
         tag_new = "tag_new"
         connect.create_partition(collection, default_tag)
         connect.create_partition(collection, tag_new)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        ids_new = connect.insert(collection, default_entities, partition_tag=tag_new)
+        ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+        ids_new = connect.bulk_insert(collection, default_entities, partition_tag=tag_new)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         delete_ids = [ids[0], ids_new[0]]
@@ -380,12 +383,63 @@ class TestDeleteBase:
         res_count = connect.count_entities(collection)
         assert res_count == 2 * (default_nb - 1)
 
+    def test_insert_delete_loop(self, connect, collection):
+        """
+        target: test loop insert and delete entities
+        method: loop insert entities into two segments, and delete entities cross segments.
+        expected: count is correct
+        """
+        loop = 2
+        for i in range(loop):
+            ids = connect.bulk_insert(collection, default_entities)
+            connect.flush([collection])
+            status = connect.delete_entity_by_id(collection, ids[100:default_nb - 100])
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == loop * 200
+
+    def test_search_delete_loop(self, connect, collection):
+        """
+        target: test loop search and delete entities
+        method: loop search and delete cross segments
+        expected: ok
+        """
+        loop = 2
+        ids = connect.bulk_insert(collection, default_entities)
+        connect.flush([collection])
+        ni = default_nb // loop
+        for i in range(loop):
+            res = connect.search(collection, default_single_query)
+            status = connect.delete_entity_by_id(collection, ids[i * ni:(i + 1) * ni])
+            assert status
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
+    def test_count_delete_loop(self, connect, collection):
+        """
+        target: test loop search and delete entities
+        method: loop search and delete cross segments
+        expected: ok
+        """
+        loop = 2
+        ids = connect.bulk_insert(collection, default_entities)
+        connect.flush([collection])
+        ni = default_nb // loop
+        for i in range(loop):
+            connect.count_entities(collection)
+            status = connect.delete_entity_by_id(collection, ids[i * ni:(i + 1) * ni])
+            assert status
+            connect.flush([collection])
+        res_count = connect.count_entities(collection)
+        assert res_count == 0
+
 
 class TestDeleteInvalid(object):
-
     """
     Test adding vectors with invalid vectors
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_ints()
@@ -416,4 +470,3 @@ class TestDeleteInvalid(object):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             status = connect.delete_entity_by_id(collection_name, [1])
-
