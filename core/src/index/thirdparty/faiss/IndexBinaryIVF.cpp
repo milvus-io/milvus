@@ -45,10 +45,8 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist)
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_LEVEL)
-  {
-      nprobe_statistics.resize(nlist);
-      nprobe_statistics.assign(nprobe_statistics.size(),0);
+  if(STATISTICS_LEVEL) {
+      nprobe_statistics.resize(nlist, 0);
   }
 }
 
@@ -67,10 +65,8 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, M
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_LEVEL)
-  {
-      nprobe_statistics.resize(nlist);
-      nprobe_statistics.assign(nprobe_statistics.size(),0);
+  if(STATISTICS_LEVEL) {
+      nprobe_statistics.resize(nlist, 0);
   }
 
 }
@@ -159,9 +155,17 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 
   double t0 = getmillisecs();
   quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-  if(STATISTICS_LEVEL)
-  {
+  if(STATISTICS_LEVEL) {
       index_ivf_stats.quantization_time += getmillisecs() - t0;
+      if (STATISTICS_LEVEL >= 3) {
+//          auto lock = Lock();
+//          std::unique_lock<std::mutex> lock(nprobe_stat_lock);
+          for (auto i = 0; i < n; ++ i) {
+              for (auto j = 0; j < nprobe; ++ j) {
+                  nprobe_statistics[idx.get()[i * nprobe + j]] ++;
+              }
+          }
+      }
   }
 
 
@@ -170,8 +174,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 
   search_preassigned(n, x, k, idx.get(), coarse_dis.get(),
                      distances, labels, false, nullptr, bitset);
-  if(STATISTICS_LEVEL)
-  {
+  if(STATISTICS_LEVEL) {
       index_ivf_stats.search_time += getmillisecs() - t0;
   }
 
@@ -532,7 +535,6 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
                              int32_t *distances, idx_t *labels,
                              bool store_pairs,
                              const IVFSearchParameters *params,
-                             std::vector<int> &nprobe_statistics,
                              IndexIVFStats &index_ivf_stats,
                              ConcurrentBitsetPtr bitset = nullptr)
 {
@@ -574,13 +576,6 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
                     // not enough centroids for multiprobe
                     continue;
                 }
-#pragma omp critical
-                {
-                    if(STATISTICS_LEVEL>=3)
-                    {
-                        nprobe_statistics[key]++;
-                    }
-                }
                 FAISS_THROW_IF_NOT_FMT
                     (key < (idx_t) ivf.nlist,
                      "Invalid key=%ld  at ik=%ld nlist=%ld\n",
@@ -618,8 +613,7 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
         } // parallel for
     } // parallel
 
-    if(STATISTICS_LEVEL>=1)
-    {
+    if(STATISTICS_LEVEL >= 1) {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
         index_ivf_stats.ndis += ndis;
@@ -639,7 +633,6 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
                                 idx_t *labels,
                                 bool store_pairs,
                                 const IVFSearchParameters *params,
-                                std::vector<int> &nprobe_statistics,
                                 IndexIVFStats &index_ivf_stats,
                                 ConcurrentBitsetPtr bitset = nullptr)
 {
@@ -676,13 +669,6 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
                     // not enough centroids for multiprobe
                     continue;
                 }
-#pragma omp critical
-                {
-                    if(STATISTICS_LEVEL>=3)
-                    {
-                        nprobe_statistics[key]++;
-                    }
-                }
                 FAISS_THROW_IF_NOT_FMT
                 (key < (idx_t) ivf.nlist,
                  "Invalid key=%ld  at ik=%ld nlist=%ld\n",
@@ -716,8 +702,7 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
         } // parallel for
     } // parallel
 
-    if(STATISTICS_LEVEL>=1)
-    {
+    if(STATISTICS_LEVEL >= 1) {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
         index_ivf_stats.ndis += ndis;
@@ -735,7 +720,6 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
                               int32_t *distances,
                               idx_t *labels,
                               const IVFSearchParameters *params,
-                              std::vector<int> &nprobe_statistics,
                               IndexIVFStats &index_ivf_stats,
                               ConcurrentBitsetPtr bitset = nullptr) {
   const int nBuckets = ivf.d + 1;
@@ -771,14 +755,6 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
         // not enough centroids for multiprobe
         continue;
       }
-#pragma omp critical
-        {
-          if(STATISTICS_LEVEL>=3)
-          {
-              nprobe_statistics[key]++;
-          }
-
-        }
       FAISS_THROW_IF_NOT_FMT (
         key < (idx_t) ivf.nlist,
         "Invalid key=%ld  at ik=%ld nlist=%ld\n",
@@ -823,8 +799,7 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
     }
   }
 
-  if(STATISTICS_LEVEL>=1)
-  {
+  if(STATISTICS_LEVEL >= 1) {
       index_ivf_stats.nq += nx;
       index_ivf_stats.nlist += nlistv;
       index_ivf_stats.ndis += ndis;
@@ -843,14 +818,13 @@ void search_knn_hamming_count_1 (
                         int32_t *distances,
                         idx_t *labels,
                         const IVFSearchParameters *params,
-                        std::vector<int> &nprobe_statistics,
                         IndexIVFStats &index_ivf_stats,
                         ConcurrentBitsetPtr bitset = nullptr) {
     switch (ivf.code_size) {
 #define HANDLE_CS(cs)                                                                  \
     case cs:                                                                           \
        search_knn_hamming_count<HammingComputer ## cs, store_pairs>(                   \
-           ivf, nx, x, keys, k, distances, labels, params, nprobe_statistics, index_ivf_stats, bitset); \
+           ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset); \
       break;
       HANDLE_CS(4);
       HANDLE_CS(8);
@@ -862,13 +836,13 @@ void search_knn_hamming_count_1 (
     default:
         if (ivf.code_size % 8 == 0) {
             search_knn_hamming_count<HammingComputerM8, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, nprobe_statistics, index_ivf_stats, bitset);
+                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
         } else if (ivf.code_size % 4 == 0) {
             search_knn_hamming_count<HammingComputerM4, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, nprobe_statistics, index_ivf_stats, bitset);
+                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
         } else {
             search_knn_hamming_count<HammingComputerDefault, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, nprobe_statistics, index_ivf_stats, bitset);
+                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
         }
         break;
     }
@@ -915,7 +889,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
             memcpy(c_dis, coarse_dis, sizeof(float) * n * nprobe);
             search_knn_binary_dis_heap(*this, n, x, k, idx, c_dis ,
                                        D, labels, store_pairs,
-                                       params, nprobe_statistics, index_ivf_stats, bitset);
+                                       params, index_ivf_stats, bitset);
             if (metric_type == METRIC_Tanimoto) {
                 for (int i = 0; i < k * n; i++) {
                     D[i] = -log2(1-D[i]);
@@ -933,14 +907,14 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
         if (use_heap) {
             search_knn_hamming_heap (*this, n, x, k, idx, coarse_dis,
                                      distances, labels, store_pairs,
-                                     params, nprobe_statistics, index_ivf_stats, bitset);
+                                     params, index_ivf_stats, bitset);
         } else {
             if (store_pairs) {
                 search_knn_hamming_count_1<true>
-                        (*this, n, x, idx, k, distances, labels, params, this->nprobe_statistics, index_ivf_stats, bitset);
+                        (*this, n, x, idx, k, distances, labels, params, index_ivf_stats, bitset);
             } else {
                 search_knn_hamming_count_1<false>
-                        (*this, n, x, idx, k, distances, labels, params, this->nprobe_statistics, index_ivf_stats, bitset);
+                        (*this, n, x, idx, k, distances, labels, params, index_ivf_stats, bitset);
             }
         }
     }
@@ -954,12 +928,10 @@ void IndexBinaryIVF::range_search(
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
-
     double t0 = getmillisecs();
 
     quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-    if (STATISTICS_LEVEL>=1)
-    {
+    if (STATISTICS_LEVEL >= 1) {
         index_ivf_stats.quantization_time += getmillisecs() - t0;
     }
 
@@ -1019,8 +991,7 @@ void IndexBinaryIVF::range_search(
 
     }
 
-    if(STATISTICS_LEVEL>=1)
-    {
+    if(STATISTICS_LEVEL >= 1) {
         index_ivf_stats.nq += n;
         index_ivf_stats.nlist += nlistv;
         index_ivf_stats.ndis += ndis;

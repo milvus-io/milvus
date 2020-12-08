@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <algorithm>
 #include <numeric>
+#include <mutex>
 
 #include <faiss/Index.h>
 #include <faiss/InvertedLists.h>
@@ -138,7 +139,7 @@ struct IndexIVF: Index, Level1Quantizer {
     DirectMap direct_map;
     mutable std::vector<size_t> nprobe_statistics;
     mutable IndexIVFStats index_ivf_stats;
-
+//    mutable std::mutex nprobe_stat_lock;
 
     /** The Inverted file takes a quantizer (an Index) on input,
      * which implements the function mapping a vector to a list
@@ -357,12 +358,16 @@ struct IndexIVF: Index, Level1Quantizer {
 
 
     /// clear nprobe statistics
-    void clear_nprobe_statistics()
-    {
+    void clear_nprobe_statistics() {
         if(!STATISTICS_LEVEL)
             return ;
         nprobe_statistics.clear();
     }
+
+//    virtual std::unique_lock<std::mutex>
+//    Lock() const {
+//        return std::unique_lock<std::mutex>(nprobe_stat_lock);
+//    }
 
     /* The standalone codec interface (except sa_decode that is specific) */
     size_t sa_code_size () const override;

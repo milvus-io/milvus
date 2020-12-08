@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 
@@ -144,6 +145,11 @@ class Statistics {
     }
 
     void
+    update_total_query_time(const double query_time) {
+        total_query_time += query_time;
+    }
+
+    void
     update_filter_percentage(const faiss::ConcurrentBitsetPtr& bitset) {
         double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
         filter_stat[static_cast<int>(fps * 100) / 5] += 1;
@@ -160,11 +166,11 @@ class Statistics {
 
  public:
     std::string& index_type;
-    size_t batch_cnt;                    // updated in query
-    size_t nq_cnt;                       // updated in query
-    double total_query_time;             // updated in query (unit: ms)
-    std::vector<size_t> nq_stat;         // updated in query
-    std::vector<size_t> filter_stat;     // updated in query
+    size_t batch_cnt;                 // updated in query
+    size_t nq_cnt;                    // updated in query
+    double total_query_time;          // updated in query (unit: ms)
+    std::vector<size_t> nq_stat;      // updated in query
+    std::vector<size_t> filter_stat;  // updated in query
     std::mutex update_lock;
 };
 using StatisticsPtr = std::shared_ptr<Statistics>;
@@ -230,6 +236,22 @@ class HNSWStatistics : public Statistics {
 
  public:
     void
+    update_ef_sum(const int64_t ef) {
+        ef_sum += ef;
+    }
+
+    void
+    update_level_distribution(const int max_level, const std::vector<int>& levels) {
+        distribution.resize(max_level + 1);
+        for (auto i = 0; i <= max_level; ++i) {
+            distribution[i] = levels[i];
+            if (distribution[i] >= 1000 && distribution[i] < 10000) {
+                target_level = i;
+            }
+        }
+    }
+
+    void
     clear() override {
         Statistics::clear();
         access_total = 0;
@@ -239,8 +261,8 @@ class HNSWStatistics : public Statistics {
  public:
     std::vector<size_t> distribution;
     size_t target_level;
-    size_t access_total;            // depend on subclass type
-    size_t ef_sum;                  // updated in query
+    size_t access_total;  // depend on subclass type
+    size_t ef_sum;        // updated in query
 };
 
 /*
@@ -265,7 +287,7 @@ class LibHNSWStatistics : public HNSWStatistics {
     }
 
  public:
-    std::unordered_map<int64_t, size_t> access_cnt_map; // updated in query
+    std::unordered_map<int64_t, size_t> access_cnt_map;  // updated in query
 };
 
 /*
@@ -283,7 +305,7 @@ class RHNSWStatistics : public HNSWStatistics {
     AccessCDF(const std::vector<size_t>& axis_x) override;
 
  public:
-    std::vector<size_t> access_cnt; // prepared in GetStatistics
+    std::vector<size_t> access_cnt;  // prepared in GetStatistics
 };
 
 /*
@@ -335,10 +357,10 @@ class IVFStatistics : public Statistics {
 
  public:
     void
-    count_nprobe(const int64_t nq, const int64_t nprobe);
+    count_nprobe(const int64_t nprobe);
 
     void
-    update_ivf_access_stats(const std::vector<size_t> &nprobe_statistics);
+    update_ivf_access_stats(const std::vector<size_t>& nprobe_statistics);
 
     void
     clear() override {
@@ -348,9 +370,9 @@ class IVFStatistics : public Statistics {
     }
 
  public:
-    std::unordered_map<int64_t, size_t> nprobe_count; // updated in query
-    std::vector<size_t> access_cnt; // prepared in GetStatistics
-    size_t access_total; // updated in query
+    std::unordered_map<int64_t, size_t> nprobe_count;  // updated in query
+    std::vector<size_t> access_cnt;                    // prepared in GetStatistics
+    size_t access_total;                               // updated in query
     size_t nlist;
 };
 

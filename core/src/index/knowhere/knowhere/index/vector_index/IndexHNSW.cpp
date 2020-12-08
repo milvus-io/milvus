@@ -80,13 +80,8 @@ IndexHNSW::Load(const BinarySet& index_binary) {
         auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
         if (STATISTICS_LEVEL) {
             if (STATISTICS_LEVEL >= 3) {
-                hnsw_stats->lock();
-                hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-                for (auto i = 0; i <= index_->maxlevel_; ++i) {
-                    hnsw_stats->distribution[i] = index_->level_stats_[i];
-                    if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
-                        hnsw_stats->target_level = i;
-                }
+                auto lock = hnsw_stats->Lock();
+                hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
             }
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
@@ -160,13 +155,8 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (STATISTICS_LEVEL) {
         auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
         if (STATISTICS_LEVEL >= 3) {
-            hnsw_stats->lock();
-            hnsw_stats->distribution.resize(index_->maxlevel_ + 1);
-            for (auto i = 0; i <= index_->maxlevel_; ++i) {
-                hnsw_stats->distribution[i] = index_->level_stats_[i];
-                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000)
-                    hnsw_stats->target_level = i;
-            }
+            auto lock = hnsw_stats->Lock();
+            hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
         }
         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
         LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
@@ -243,17 +233,17 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     query_end = std::chrono::high_resolution_clock::now();
 
     if (STATISTICS_LEVEL) {
-        hnsw_stats->lock();
+        auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            update_nq_count(hnsw_stats->nq_cnt, rows);
-            update_batch_count(hnsw_stats->batch_cnt);
-            update_nq_stats(hnsw_stats->nq_stat, rows);
-            hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
-            hnsw_stats->total_query_time +=
-                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
+            hnsw_stats->update_nq_count(rows);
+            hnsw_stats->update_batch_count();
+            hnsw_stats->update_nq_stats(rows);
+            hnsw_stats->update_ef_sum(config[IndexParams::ef].get<int64_t>());
+            hnsw_stats->update_total_query_time(
+                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
         }
         if (STATISTICS_LEVEL >= 2) {
-            update_filter_percentage(hnsw_stats->filter_stat, bitset);
+            hnsw_stats->update_filter_percentage(bitset);
         }
         if (STATISTICS_LEVEL >= 3) {
             for (auto i = 0; i < rows; ++i) {
@@ -304,8 +294,8 @@ IndexHNSW::ClearStatistics() {
     if (!STATISTICS_LEVEL)
         return;
     auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
-    hnsw_stats->lock();
-    hnsw_stats->Clear();
+    auto lock = hnsw_stats->Lock();
+    hnsw_stats->clear();
 }
 
 }  // namespace knowhere

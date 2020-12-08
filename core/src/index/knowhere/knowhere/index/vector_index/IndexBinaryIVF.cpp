@@ -49,9 +49,8 @@ BinaryIVF::Load(const BinarySet& index_binary) {
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     if (STATISTICS_LEVEL) {
         stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
-        ivf_index->nprobe_statistics.resize(ivf_index->nlist);
-        ivf_index->nprobe_statistics.assign(ivf_index->nlist, 0);
-        stats->Clear();
+        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
+        stats->clear();
     }
 }
 
@@ -124,8 +123,9 @@ BinaryIVF::GetStatistics() {
     }
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
-    ivf_stats->lock();
-    update_ivf_nprobe_stats(ivf_index, ivf_stats.get());
+    auto lock = ivf_stats->Lock();
+    //    auto ivf_lock = ivf_index->Lock();
+    ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
 }
 
 void
@@ -137,8 +137,8 @@ BinaryIVF::ClearStatistics() {
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->clear_nprobe_statistics();
     ivf_index->index_ivf_stats.reset();
-    ivf_stats->lock();
-    ivf_stats->Clear();
+    auto lock = ivf_stats->Lock();
+    ivf_stats->clear();
 }
 
 void
@@ -179,22 +179,23 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     if (STATISTICS_LEVEL) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-        ivf_stats->lock();
+        auto lock = ivf_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            update_nq_count(ivf_stats->nq_cnt, n);
-            update_batch_count(ivf_stats->batch_cnt);
-            update_nq_stats(ivf_stats->nq_stat, n);
+            ivf_stats->update_nq_count(n);
+            ivf_stats->update_batch_count();
+            ivf_stats->update_nq_stats(n);
+            ivf_stats->count_nprobe(ivf_index->nprobe);
 
             LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
                                 << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
                                 << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
-            ivf_stats->total_query_time +=
-                ivf_index->index_ivf_stats.quantization_time + ivf_index->index_ivf_stats.search_time;
+            ivf_stats->update_total_query_time(ivf_index->index_ivf_stats.quantization_time +
+                                               ivf_index->index_ivf_stats.search_time);
             ivf_index->index_ivf_stats.quantization_time = 0;
             ivf_index->index_ivf_stats.search_time = 0;
         }
         if (STATISTICS_LEVEL >= 2) {
-            update_filter_percentage(ivf_stats->filter_stat, bitset);
+            ivf_stats->update_filter_percentage(bitset);
         }
     }
 

@@ -176,7 +176,7 @@ IVFStatistics::ToString() {
 }
 
 void
-IVFStatistics::count_nprobe(const int64_t nq, const int64_t nprobe){
+IVFStatistics::count_nprobe(const int64_t nprobe) {
     // nprobe count
     auto it = nprobe_count.find(nprobe);
     if (it == nprobe_count.end()) {
@@ -184,18 +184,19 @@ IVFStatistics::count_nprobe(const int64_t nq, const int64_t nprobe){
     } else {
         it->second++;
     }
-
-    // access total
-    access_total += nq * nprobe;
 }
 
 void
-IVFStatistics::update_ivf_access_stats(const std::vector<size_t> &nprobe_statistics) {
+IVFStatistics::update_ivf_access_stats(const std::vector<size_t>& nprobe_statistics) {
     nlist = nprobe_statistics.size();
     access_total = 0;
     access_cnt = nprobe_statistics;
 
     std::sort(access_cnt.begin(), access_cnt.end(), std::greater<>());
+    // access total
+    for (auto i = 0; i < access_cnt.size(); ++i) {
+        access_total += access_cnt[i];
+    }
 }
 
 std::vector<double>

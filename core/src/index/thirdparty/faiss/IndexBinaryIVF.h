@@ -58,6 +58,7 @@ struct IndexBinaryIVF : IndexBinary {
     Index *clustering_index; ///< to override index used during clustering
     mutable std::vector<int> nprobe_statistics;
     mutable IndexIVFStats index_ivf_stats;
+//    mutable std::mutex nprobe_stat_lock;
 
     /** The Inverted file takes a quantizer (an IndexBinary) on input,
      * which implements the function mapping a vector to a list
@@ -180,11 +181,14 @@ struct IndexBinaryIVF : IndexBinary {
     { return invlists->list_size(list_no); }
 
     /// clear nprobe statistics:
-    void clear_nprobe_statistics()
-    {
+    void clear_nprobe_statistics() {
         nprobe_statistics.clear();
     }
 
+//    virtual std::unique_lock<std::mutex>
+//    Lock() const {
+//        return std::unique_lock<std::mutex>(nprobe_stat_lock);
+//    }
 
     /** intialize a direct map
      *

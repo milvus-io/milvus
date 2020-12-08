@@ -63,14 +63,8 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
         if (STATISTICS_LEVEL) {
             auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(idx);
             if (STATISTICS_LEVEL >= 3) {
-                hnsw_stats->lock();
-                hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-                for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
-                    hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-                    if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000) {
-                        hnsw_stats->target_level = i;
-                    }
-                }
+                auto lock = hnsw_stats->Lock();
+                hnsw_stats->update_level_distribution(real_idx->hnsw.max_level, real_idx->hnsw.level_stats);
                 real_idx->set_target_level(hnsw_stats->target_level);
             }
         }
@@ -99,14 +93,8 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     if (STATISTICS_LEVEL) {
         auto real_idx = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
         if (STATISTICS_LEVEL >= 3) {
-            hnsw_stats->lock();
-            hnsw_stats->distribution.resize(real_idx->hnsw.max_level + 1);
-            for (auto i = 0; i <= real_idx->hnsw.max_level; ++i) {
-                hnsw_stats->distribution[i] = real_idx->hnsw.level_stats[i];
-                if (hnsw_stats->distribution[i] >= 1000 && hnsw_stats->distribution[i] < 10000) {
-                    hnsw_stats->target_level = i;
-                }
-            }
+            auto lock = hnsw_stats->Lock();
+            hnsw_stats->update_level_distribution(real_idx->hnsw.max_level, real_idx->hnsw.level_stats);
             real_idx->set_target_level(hnsw_stats->target_level);
         }
     }
@@ -141,21 +129,21 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset);
     query_end = std::chrono::high_resolution_clock::now();
     if (STATISTICS_LEVEL) {
-        hnsw_stats->lock();
+        auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
-            update_nq_count(hnsw_stats->nq_cnt, rows);
-            update_batch_count(hnsw_stats->batch_cnt);
-            update_nq_stats(hnsw_stats->nq_stat, rows);
-            hnsw_stats->ef_sum += config[IndexParams::ef].get<int64_t>();
-            hnsw_stats->total_query_time +=
-                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count();
+            hnsw_stats->update_nq_count(rows);
+            hnsw_stats->update_batch_count();
+            hnsw_stats->update_nq_stats(rows);
+            hnsw_stats->update_ef_sum(config[IndexParams::ef].get<int64_t>());
+            hnsw_stats->update_total_query_time(
+                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
         }
         if (STATISTICS_LEVEL >= 2) {
-            update_filter_percentage(hnsw_stats->filter_stat, bitset);
+            hnsw_stats->update_filter_percentage(bitset);
         }
     }
-    //    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    //    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+    LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -186,7 +174,7 @@ IndexRHNSW::GetStatistics() {
     }
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
-    hnsw_stats->lock();
+    auto lock = hnsw_stats->Lock();
     real_index->get_sorted_access_counts(hnsw_stats->access_cnt, hnsw_stats->access_total);
     return hnsw_stats;
 }
@@ -199,8 +187,8 @@ IndexRHNSW::ClearStatistics() {
     auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
     auto real_index = dynamic_cast<faiss::IndexRHNSW*>(index_.get());
     real_index->clear_stats();
-    hnsw_stats->lock();
-    hnsw_stats->Clear();
+    auto lock = hnsw_stats->Lock();
+    hnsw_stats->clear();
 }
 
 void
