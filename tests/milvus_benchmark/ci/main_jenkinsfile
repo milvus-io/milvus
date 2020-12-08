@@ -6,7 +6,7 @@ pipeline {
     }
 
     parameters{
-        string defaultValue: '0.10.4', description: 'server image version', name: 'IMAGE_VERSION', trim: true
+        string defaultValue: '0.10.5', description: 'server image version', name: 'IMAGE_VERSION', trim: true
         choice choices: ['single', 'shards'], description: 'server deploy mode', name: 'DEPLOY_MODE'
         string defaultValue: '010_data.json', description: 'test suite config yaml', name: 'CONFIG_FILE', trim: true
         string defaultValue: 'shards.json', description: 'shards test suite config yaml', name: 'SHARDS_CONFIG_FILE', trim: true
@@ -15,9 +15,9 @@ pipeline {
 
     environment {
         HELM_URL = "https://github.com/milvus-io/milvus-helm.git"
-        HELM_BRANCH = "0.10.3"
+        HELM_BRANCH = "0.10.4"
         TEST_URL = "git@192.168.1.105:Test/milvus_benchmark.git"
-        TEST_BRANCH = "0.10.4"
+        TEST_BRANCH = "0.10.5"
         TEST_LIB_URL = "http://192.168.1.105:6060/Test/milvus_metrics.git"
         HELM_RELEASE_NAME = "milvus-benchmark-test-${env.BUILD_NUMBER}"
         HELM_SHARDS_RELEASE_NAME = "milvus-shards-benchmark-test-${env.BUILD_NUMBER}"
