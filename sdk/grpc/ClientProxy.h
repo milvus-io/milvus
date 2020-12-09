@@ -13,6 +13,7 @@
 
 #include "GrpcClient.h"
 #include "MilvusApi.h"
+#include "interceptor/GrpcInterceptorHookHandler.h"
 
 #include <memory>
 #include <string>
@@ -20,9 +21,17 @@
 
 namespace milvus {
 
-class ClientProxy : public Connection {
+class ClientProxy : public Connection, public GrpcInterceptorHookHandler {
  public:
     // Implementations of the Connection interface
+    void
+    OnPostRecvInitialMetaData(::grpc::experimental::ClientRpcInfo* client_rpc_info,
+                              ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
+    void
+    OnPreSendMessage(::grpc::experimental::ClientRpcInfo* client_rpc_info,
+                     ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) override;
+
     Status
     Connect(const ConnectParam& connect_param) override;
 
@@ -107,6 +116,7 @@ class ClientProxy : public Connection {
     std::shared_ptr<::grpc::Channel> channel_;
     std::shared_ptr<GrpcClient> client_ptr_;
     bool connected_ = false;
+    std::string client_tag_ = "";
 };
 
 }  // namespace milvus

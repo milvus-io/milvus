@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include "grpc/ClientProxy.h"
+#include "interceptor/GrpcClientInterceptor.h"
 #include "thirdparty/nlohmann/json.hpp"
 
 #include <memory>
@@ -388,6 +389,17 @@ CopyEntityToJson(::milvus::grpc::Entities& grpc_entities, JSON& json_entity) {
     }
 }
 
+void
+ClientProxy::OnPreSendMessage(::grpc::experimental::ClientRpcInfo* client_rpc_info,
+                              ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+    client_rpc_info->client_context()->AddMetadata("client_tag", client_tag_);
+}
+
+void
+ClientProxy::OnPostRecvInitialMetaData(::grpc::experimental::ClientRpcInfo* client_rpc_info,
+                                       ::grpc::experimental::InterceptorBatchMethods* interceptor_batch_methods) {
+}
+
 Status
 ClientProxy::Connect(const ConnectParam& param) {
     std::string uri = param.ip_address + ":" + param.port;
@@ -395,7 +407,14 @@ ClientProxy::Connect(const ConnectParam& param) {
     ::grpc::ChannelArguments args;
     args.SetMaxSendMessageSize(-1);
     args.SetMaxReceiveMessageSize(-1);
-    channel_ = ::grpc::CreateCustomChannel(uri, ::grpc::InsecureChannelCredentials(), args);
+    client_tag_ = param.client_tag_;
+
+    std::vector<std::unique_ptr<::grpc::experimental::ClientInterceptorFactoryInterface>> interceptor_creators;
+    interceptor_creators.emplace_back(std::unique_ptr<::grpc::experimental::ClientInterceptorFactoryInterface>(
+        new GrpcClientInterceptorFactory(this)));
+    channel_ = ::grpc::experimental::CreateCustomChannelWithInterceptors(uri, ::grpc::InsecureChannelCredentials(),
+                                                                         args, std::move(interceptor_creators));
+    //    channel_ = ::grpc::CreateCustomChannel(uri, ::grpc::InsecureChannelCredentials(), args);
     if (channel_ != nullptr) {
         connected_ = true;
         client_ptr_ = std::make_shared<GrpcClient>(channel_);
