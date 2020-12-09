@@ -62,8 +62,9 @@ enum class MetricType {
  * @brief Connect API parameter
  */
 struct ConnectParam {
-    std::string ip_address;  ///< Server IP address
-    std::string port;        ///< Server PORT
+    std::string ip_address;          ///< Server IP address
+    std::string port;                ///< Server PORT
+    std::string client_tag_ = "";    ///< Client Tag
 };
 
 /**

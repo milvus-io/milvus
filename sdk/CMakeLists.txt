@@ -24,6 +24,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(include)
 include_directories(grpc-gen/gen-milvus)
 include_directories(grpc-gen/gen-status)
+include_directories(grpc/interceptor)
 
 # set build type
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -73,6 +74,10 @@ set(grpc_service_files
         grpc-gen/gen-milvus/milvus.pb.cc
         )
 
+set(grpc_interceptor_files
+        grpc/interceptor/GrpcClientInterceptor.cpp
+        grpc/interceptor/GrpcInterceptorHookHandler.cpp)
+
 set(grpc_lib
         grpcpp_channelz
         grpc++
@@ -85,6 +90,7 @@ add_library(milvus_sdk SHARED
         ${interface_files}
         ${grpc_client_files}
         ${grpc_service_files}
+        ${grpc_interceptor_files}
         )
 
 target_link_libraries(milvus_sdk
