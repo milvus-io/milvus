@@ -11,6 +11,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3132 Add new indexes: RHNSW_PQ RHNSW_SQ
 -   \#3920 Allow an optional parameter `nbits` when creating IVF_PQ index
 -   \#4363 Put starting process of prometheus and grafana into docker-compose
+-   \#4376 Add an optional parameter naming `client_tag` on client constructor in c++ sdk
 
 ## Improvement
 

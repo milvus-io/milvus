@@ -24,7 +24,42 @@
 namespace milvus {
 namespace server {
 
-class Context {
+class RequestContext {
+ public:
+    std::string&
+    request_id() {
+        return request_id_;
+    }
+
+    std::string&
+    collection_name() {
+        return collection_name_;
+    }
+
+    std::string&
+    client_tag() {
+        return client_tag_;
+    }
+
+    std::string&
+    client_ipport() {
+        return client_ipport_;
+    }
+
+    std::string&
+    command_tag() {
+        return command_tag_;
+    }
+
+ private:
+    std::string request_id_;
+    std::string collection_name_;
+    std::string client_tag_;
+    std::string client_ipport_;
+    std::string command_tag_;
+};
+
+class Context : public RequestContext {
  public:
     explicit Context(std::string request_id);
 

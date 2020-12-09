@@ -5,7 +5,8 @@ import pdb
 import string
 import struct
 import logging
-import time, datetime
+import threading
+import time
 import copy
 import numpy as np
 from sklearn import preprocessing
@@ -245,7 +246,7 @@ def gen_default_fields(auto_id=True):
             {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
         ],
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
@@ -258,7 +259,7 @@ def gen_binary_default_fields(auto_id=True):
             {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
         ],
         "segment_row_limit": default_segment_row_limit,
-        "auto_id" : auto_id 
+        "auto_id": auto_id
     }
     return default_fields
 
@@ -273,6 +274,39 @@ def gen_entities(nb, is_normal=False):
     return entities
 
 
+def gen_entities_new(nb, is_normal=False):
+    vectors = gen_vectors(nb, default_dim, is_normal)
+    entities = [
+        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "float", "values": [float(i) for i in range(nb)]},
+        {"name": default_float_vec_field_name, "values": vectors}
+    ]
+    return entities
+
+
+def gen_entities_rows(nb, is_normal=False, _id=True):
+    vectors = gen_vectors(nb, default_dim, is_normal)
+    entities = []
+    if not _id:
+        for i in range(nb):
+            entity = {
+                "_id": i,
+                "int64": i,
+                "float": float(i),
+                default_float_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    else:
+        for i in range(nb):
+            entity = {
+                "int64": i,
+                "float": float(i),
+                default_float_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    return entities
+
+
 def gen_binary_entities(nb):
     raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
     entities = [
@@ -280,6 +314,39 @@ def gen_binary_entities(nb):
         {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
         {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "values": vectors}
     ]
+    return raw_vectors, entities
+
+
+def gen_binary_entities_new(nb):
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
+    entities = [
+        {"name": "int64", "values": [i for i in range(nb)]},
+        {"name": "float", "values": [float(i) for i in range(nb)]},
+        {"name": default_binary_vec_field_name, "values": vectors}
+    ]
+    return raw_vectors, entities
+
+
+def gen_binary_entities_rows(nb, _id=True):
+    raw_vectors, vectors = gen_binary_vectors(nb, default_dim)
+    entities = []
+    if not _id:
+        for i in range(nb):
+            entity = {
+                "_id": i,
+                "int64": i,
+                "float": float(i),
+                default_binary_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
+    else:
+        for i in range(nb):
+            entity = {
+                "int64": i,
+                "float": float(i),
+                default_binary_vec_field_name: vectors[i]
+            }
+            entities.append(entity)
     return raw_vectors, entities
 
 
@@ -375,7 +442,7 @@ def gen_invalid_range():
 
 def gen_valid_ranges():
     ranges = [
-        {"GT": 0, "LT": default_nb//2},
+        {"GT": 0, "LT": default_nb // 2},
         {"GT": default_nb // 2, "LT": default_nb * 2},
         {"GT": 0},
         {"LT": default_nb},
@@ -474,6 +541,25 @@ def update_field_value(entities, old_type, new_value):
         if item["type"] == old_type:
             for index, value in enumerate(item["values"]):
                 item["values"][index] = new_value
+    return tmp_entities
+
+
+def update_field_name_row(entities, old_name, new_name):
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
+        if old_name in item:
+            item[new_name] = item[old_name]
+            item.pop(old_name)
+        else:
+            raise Exception("Field %s not in field" % old_name)
+    return tmp_entities
+
+
+def update_field_type_row(entities, old_name, new_name):
+    tmp_entities = copy.deepcopy(entities)
+    for item in tmp_entities:
+        if old_name in item:
+            item["type"] = new_name
     return tmp_entities
 
 
@@ -675,9 +761,6 @@ def gen_invalid_index():
     for nlist in gen_invalid_params():
         index_param = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}}
         index_params.append(index_param)
-    for nbits in gen_invalid_params() + [0, 17]:
-        index_param = {"index_type": "IVF_PQ", "params": {"nlist": 1024, "m": 16, "nbits": nbits}}
-        index_params.append(index_param)
     for M in gen_invalid_params():
         index_param = {"index_type": "HNSW", "params": {"M": M, "efConstruction": 100}}
         index_param = {"index_type": "RHNSW_PQ", "params": {"M": M, "efConstruction": 100}}
@@ -719,7 +802,6 @@ def gen_invalid_index():
 def gen_index():
     nlists = [1, 1024, 16384]
     pq_ms = [128, 64, 32, 16, 8, 4]
-    pq_nbits = [1, 2, 4, 8, 9]
     Ms = [5, 24, 48]
     efConstructions = [100, 300, 500]
     search_lengths = [10, 100, 300]
@@ -736,10 +818,9 @@ def gen_index():
                           for nlist in nlists]
             index_params.extend(ivf_params)
         elif index_type == "IVF_PQ":
-            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m, "nbits": nbits}} \
+            IVFPQ_params = [{"index_type": index_type, "index_param": {"nlist": nlist, "m": m}} \
                             for nlist in nlists \
-                            for m in pq_ms \
-                            for nbits in pq_nbits]
+                            for m in pq_ms]
             index_params.extend(IVFPQ_params)
         elif index_type in ["HNSW", "RHNSW_SQ", "RHNSW_PQ"]:
             hnsw_params = [{"index_type": index_type, "index_param": {"M": M, "efConstruction": efConstruction}} \
@@ -889,3 +970,20 @@ def restart_server(helm_release_name):
     #     logging.error("Restart pod: %s timeout" % pod_name_tmp)
     #     res = False
     return res
+
+
+class TestThread(threading.Thread):
+    def __init__(self, target, args=()):
+        threading.Thread.__init__(self, target=target, args=args)
+
+    def run(self):
+        self.exc = None
+        try:
+            super(TestThread, self).run()
+        except BaseException as e:
+            self.exc = e
+
+    def join(self):
+        super(TestThread, self).join()
+        if self.exc:
+            raise self.exc
