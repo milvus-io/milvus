@@ -90,7 +90,7 @@ class MetaRangeFilter : public ComparableFilter<T> {
         throw std::runtime_error("Unknown range type");
     }
 
-    std::string
+    [[nodiscard]] std::string
     Dump() const override {
         switch (range_) {
             case LT: {
@@ -143,7 +143,7 @@ class MetaBetweenFilter : public ComparableFilter<T> {
                ((FieldCompare(v, rvalue_) == -1) || (FieldCompare(lvalue_, v) == 0));
     }
 
-    std::string
+    [[nodiscard]] std::string
     Dump() const override {
         std::string r = in_ ? " BETWEEN " : " NOT BETWEEN ";
         return this->Field() + r + FieldValue2Str(lvalue_) + " AND " + FieldValue2Str(rvalue_);
@@ -176,7 +176,7 @@ class MetaInFilter : public ComparableFilter<T> {
         return false;
     }
 
-    std::string
+    [[nodiscard]] std::string
     Dump() const override {
         std::vector<std::string> svalues(values_.size());
         for (size_t i = 0; i < values_.size(); i++) {

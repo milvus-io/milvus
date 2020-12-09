@@ -14,7 +14,7 @@
 #include <memory>
 #include <type_traits>
 
-namespace milvus::engine::meta {
+namespace milvus::engine::metax {
 
 template <typename T, typename U>
 struct decay_equal :
@@ -30,8 +30,7 @@ constexpr bool decay_equal_v = decay_equal<T, U>::value;
  */
 template<typename T>
 struct remove_cr {
-    typedef typename
-    std::remove_const<std::remove_reference_t<T>>::type     type;
+    using type = typename std::remove_const<std::remove_reference_t<T> >::type;
 };
 
 template<typename T>
@@ -87,4 +86,14 @@ struct remove_unique_ptr<std::unique_ptr<T>>
 template <typename T>
 using remove_unique_ptr_t = typename remove_unique_ptr<T>::type;
 
-}  // namespace milvus::engine::meta
+//////// is decay base and equal
+//template <typename Base, typename Equal, typename Derived>
+//struct is_decay_base_of_and_equal_of : std::false_type {};
+
+template <typename Base, typename Equal, typename Derived>
+struct is_decay_base_of_and_equal_of
+    : std::integral_constant<bool, is_decay_base_of_v<Base, Derived> && decay_equal_v<Base, Equal>> {};
+
+template <typename Base, typename Equal, typename Derived>
+constexpr bool is_decay_base_of_and_equal_of_v = is_decay_base_of_and_equal_of<Base, Equal, Derived>::value;
+}  // namespace milvus::engine::metax

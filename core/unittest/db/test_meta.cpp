@@ -11,12 +11,15 @@
 
 #include "db/meta/MetaFieldHelper.h"
 #include "db/meta/MetaNames.h"
+#include "db/meta/MetaTraits.h"
 #include "db/meta/backend/MetaContext.h"
 #include "db/meta/condition/MetaFilter.h"
 #include "db/meta/condition/MetaRelation.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/utils.h"
 #include "utils/Json.h"
+
+#include "db/metax/MetaResField.h"
 
 template<typename T>
 using ResourceContext = milvus::engine::snapshot::ResourceContext<T>;
@@ -31,6 +34,10 @@ using State = milvus::engine::snapshot::State;
 template <typename R, typename F, typename T>
 using RangeFilter = milvus::engine::meta::MetaRangeFilter<R, F, T>;
 using Range = milvus::engine::meta::Range;
+
+//template <typename T>
+//using is_shared_ptr = milvus::engine::meta::is_shared_ptr<T>;
+
 using milvus::engine::meta::AND_;
 using milvus::engine::meta::OR_;
 using milvus::engine::meta::ONE_;
@@ -352,4 +359,11 @@ TEST_F(MetaTest, HelperTest) {
     for (auto& name: names) {
         std::cout << "name: " << name << std::endl;
     }
+}
+
+TEST_F(MetaTest, PointTest) {
+    auto collection = std::make_shared<Collection>("a");
+    std::string b = bool(milvus::engine::meta::is_shared_ptr<decltype(collection)>::value) ? "True" : "False";
+    std::cout << "std::make_shared<Collection>(\"a\") is shared_ptr: "
+              << b << std::endl;
 }

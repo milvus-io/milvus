@@ -28,6 +28,15 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     ${DB_META_CONDITION_FILES}
                     )
 
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax             DB_METAX_MAIN_FILES      )
+#aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend      DB_META_BACKEND_FILES   )
+#aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/condition    DB_META_CONDITION_FILES )
+set( DB_METAX_FILES
+        ${DB_METAX_MAIN_FILES}
+#        ${DB_META_BACKEND_FILES}
+#        ${DB_META_CONDITION_FILES}
+        )
+
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/context    SERVER_CONTEXT_FILES)
@@ -43,6 +52,7 @@ set( ENGINE_FILES   ${DB_MAIN_FILES}
                     ${DB_ENGINE_FILES}
                     ${DB_INSERT_FILES}
                     ${DB_META_FILES}
+                    ${DB_METAX_FILES}
                     ${DB_MERGE_FILES}
                     ${DB_WAL_FILES}
                     ${DB_SNAPSHOT_FILES}

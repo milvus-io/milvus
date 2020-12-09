@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -32,6 +33,7 @@ struct MetaQueryContext {
 };
 
 struct MetaFilterContext {
+//    std::set<std::string> tables_;
     std::string table_;
     MetaCombinationPtr combination_;
 };

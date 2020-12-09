@@ -391,6 +391,18 @@ class MetaTest : public BaseTest {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+class MetaxTest : public BaseTest {
+ protected:
+    MetaAdapterPtr meta_;
+
+ protected:
+    void
+    SetUp() override;
+    void
+    TearDown() override;
+};
+
+///////////////////////////////////////////////////////////////////////////////
 class SchedulerTest : public BaseTest {
  protected:
     std::shared_ptr<DB> db_;

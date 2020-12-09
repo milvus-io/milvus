@@ -15,13 +15,16 @@
 
 #include "db/meta/MetaFieldHelper.h"
 #include "db/meta/MetaFieldValueHelper.h"
+#include "utils/Status.h"
 
 namespace milvus::engine::meta {
 
 template <typename F>
-class MetaFieldGS : public MetaFieldHelper<F> {
+class MetaFieldGS {
  protected:
-    using v_type = typename MetaFieldHelper<F>::value_type;
+    using v_type = typename MetaFieldIntegralHelper<F>::value_type;
+    using f_type = remove_cr_t<F>;
+    static const constexpr char* name = F::Name;
 
  public:
     MetaFieldGS() = default;
@@ -29,10 +32,25 @@ class MetaFieldGS : public MetaFieldHelper<F> {
     explicit MetaFieldGS(const std::string& table) : table_(table) {
     }
 
-    ~MetaFieldGS() override = default;
+    ~MetaFieldGS() = default;
+
+    Status
+    SetTable(const std::string& table) {
+        if (table_.empty()) {
+            table_ = table;
+            return Status::OK();
+        }
+        return Status(DB_ERROR, "Table has been set in Meta Field");
+    }
+
+    [[nodiscard]] std::string
+    Table() const {
+        return table_;
+    }
 
     v_type
     Get() const {
+
         return value_;
     }
 
@@ -228,4 +246,3 @@ class MetaFieldGS : public MetaFieldHelper<F> {
 };
 
 }  // namespace milvus::engine::meta
-
