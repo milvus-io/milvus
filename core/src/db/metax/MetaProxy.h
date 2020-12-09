@@ -15,10 +15,40 @@
 #include <string>
 
 #include "db/Types.h"
+#include "db/metax/MetaDef.h"
+#include "db/metax/MetaResField.h"
+#include "db/metax/backend/MetaMysqlWare.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "utils/Status.h"
 
 namespace milvus::engine::metax {
 
 class MetaProxy {
+ public:
+    explicit MetaProxy(EngineType type) : type_(type) {
+        switch (type) {
+            case EngineType::mysql: {
+                ware_ = std::make_shared<MetaMysqlWare>();
+                break;
+            }
+            case EngineType::sqlite: {
+                break;
+            }
+            case EngineType::mock: {
+                break;
+            }
+            default: { break; }
+        }
+    }
+
+    Status
+    Insert(const MetaResFieldTuple& fields, snapshot::ID_TYPE& result_id) {
+        return ware_->Insert(fields, result_id);
+    }
+
+ private:
+    EngineType type_;
+    MetaEngineWarePtr ware_;
 };
 
 using MetaProxyPtr = std::shared_ptr<MetaProxy>;

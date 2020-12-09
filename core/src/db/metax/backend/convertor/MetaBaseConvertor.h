@@ -11,39 +11,45 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <type_traits>
-#include <vector>
 
-#include "db/metax/MetaProxy.h"
-#include "db/metax/MetaResField.h"
-#include "db/metax/MetaResFieldHelper.h"
-#include "db/metax/MetaTraits.h"
-#include "db/snapshot/Resources.h"
-
-#include "utils/Exception.h"
-#include "utils/Status.h"
+#include "db/snapshot/ResourceTypes.h"
+#include "utils/Json.h"
 
 namespace milvus::engine::metax {
 
-class MetaAdapter {
+class MetaBaseConvertor {
  public:
-    explicit MetaAdapter(MetaProxyPtr proxy) : proxy_(proxy) {
-    }
+    virtual ~MetaBaseConvertor() = default;
 
-    template <typename R, typename std::enable_if<is_decay_base_of_v<snapshot::BaseResource<R>, R>>::type* = nullptr>
-    Status
-    Insert(std::shared_ptr<R> res) {
-        auto fields = GenFieldTupleFromRes<R>(res);
+ public:
+    virtual std::string
+    int2str(const int64_t&) = 0;
 
-        return Status::OK();
-    }
+    virtual std::string
+    uint2str(const uint64_t&) = 0;
 
- private:
-    MetaProxyPtr proxy_;
+    virtual std::string
+    str2str(const std::string&) = 0;
+
+    virtual std::string
+    json2str(const json&) = 0;
+
+    virtual int64_t
+    intfstr(const std::string&) = 0;
+
+    virtual uint64_t
+    uintfstr(const std::string&) = 0;
+
+    virtual std::string
+    strfstr(const std::string&) = 0;
+
+    virtual json
+    jsonfstr(const std::string&) = 0;
 };
 
-using MetaAdapterPtr = std::shared_ptr<MetaAdapter>;
+using MetaConvertorPtr = std::shared_ptr<MetaBaseConvertor>;
 
 }  // namespace milvus::engine::metax

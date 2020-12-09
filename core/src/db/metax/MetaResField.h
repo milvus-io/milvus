@@ -12,10 +12,10 @@
 #pragma once
 
 #include <string>
+#include <tuple>
+#include <utility>
 
 #include "db/metax/MetaTraits.h"
-//#include "db/meta/MetaFieldHelper.h"
-//#include "db/meta/MetaFieldValueHelper.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
 
@@ -27,9 +27,11 @@ class MetaResField {
     using Type = MetaResField<F>;
     using FType = remove_cr_t<F>;
     using VType = typename F::ValueType;
+    static constexpr const char* Name = F::Name;
 
  public:
-    MetaResField() = default;
+    MetaResField() : table_(""), value_(VType{}), filled_(false) {
+    }
 
     explicit MetaResField(std::string table) : table_(std::move(table)) {
     }
@@ -66,17 +68,13 @@ class MetaResField {
     bool filled_ = false;
 };
 
-using MetaResFieldTuple =
-std::tuple<MetaResField<snapshot::MappingsField>,        MetaResField<snapshot::StateField>,
-           MetaResField<snapshot::LsnField>,             MetaResField<snapshot::CreatedOnField>,
-           MetaResField<snapshot::UpdatedOnField>,       MetaResField<snapshot::IdField>,
-           MetaResField<snapshot::CollectionIdField>,    MetaResField<snapshot::SchemaIdField>,
-           MetaResField<snapshot::NumField>,             MetaResField<snapshot::FtypeField>,
-           MetaResField<snapshot::FEtypeField>,          MetaResField<snapshot::FieldIdField>,
-           MetaResField<snapshot::FieldElementIdField>,  MetaResField<snapshot::PartitionIdField>,
-           MetaResField<snapshot::SegmentIdField>,       MetaResField<snapshot::TypeNameField>,
-           MetaResField<snapshot::NameField>,            MetaResField<snapshot::ParamsField>,
-           MetaResField<snapshot::SizeField>,            MetaResField<snapshot::RowCountField>
->;
+using MetaResFieldTuple = std::tuple<
+    MetaResField<snapshot::MappingsField>, MetaResField<snapshot::StateField>, MetaResField<snapshot::LsnField>,
+    MetaResField<snapshot::CreatedOnField>, MetaResField<snapshot::UpdatedOnField>, MetaResField<snapshot::IdField>,
+    MetaResField<snapshot::CollectionIdField>, MetaResField<snapshot::SchemaIdField>, MetaResField<snapshot::NumField>,
+    MetaResField<snapshot::FtypeField>, MetaResField<snapshot::FEtypeField>, MetaResField<snapshot::FieldIdField>,
+    MetaResField<snapshot::FieldElementIdField>, MetaResField<snapshot::PartitionIdField>,
+    MetaResField<snapshot::SegmentIdField>, MetaResField<snapshot::TypeNameField>, MetaResField<snapshot::NameField>,
+    MetaResField<snapshot::ParamsField>, MetaResField<snapshot::SizeField>, MetaResField<snapshot::RowCountField> >;
 
 }  // namespace milvus::engine::metax

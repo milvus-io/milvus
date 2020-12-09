@@ -50,7 +50,6 @@ class MetaFieldGS {
 
     v_type
     Get() const {
-
         return value_;
     }
 
@@ -63,18 +62,16 @@ class MetaFieldGS {
     void
     Get2Res(typename R::Ptr res) {
         static_assert(is_decay_base_of_v<F, R>, "Template class F is not base of R");
-//        if constexpr(!) {
-//             TODO(yhz): may tell invoker there is some incorrect
-//            return;
-        if constexpr(decay_equal_v<F, snapshot::MappingsField>) {
-            if constexpr(decay_equal_v<F, snapshot::FlushableMappingsField>) {
+        // TODO(yhz): may tell invoker there is some incorrect
+        if constexpr (decay_equal_v<F, snapshot::MappingsField>) {
+            if constexpr (decay_equal_v<F, snapshot::FlushableMappingsField>) {
                 res->GetFlushIds() = value_;
                 return;
             } else {
                 res->GetMappings() = value_;
                 return;
             }
-        } else if constexpr(decay_equal_v<F, snapshot::StateField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::StateField>) {
             res->ResetStatus();
             switch (value_) {
                 case snapshot::PENDING: {
@@ -88,62 +85,60 @@ class MetaFieldGS {
                     res->Deactivate();
                     return;
                 }
-                default: {
-                    return;
-                }
+                default: { return; }
             }
-        } else if constexpr(decay_equal_v<F, snapshot::LsnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::LsnField>) {
             res->SetLsn(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::CreatedOnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::CreatedOnField>) {
             res->SetCreatedTime(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::UpdatedOnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::UpdatedOnField>) {
             res->SetUpdatedTime(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::IdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::IdField>) {
             res->SetID(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::CollectionIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::CollectionIdField>) {
             res->SetCollectionId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SchemaIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SchemaIdField>) {
             res->SetSchemaId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::NumField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::NumField>) {
             res->SetNum(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FtypeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FtypeField>) {
             res->SetFtype(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FEtypeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FEtypeField>) {
             res->SetFEtype(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FieldIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FieldIdField>) {
             res->SetFieldId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FieldElementIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FieldElementIdField>) {
             res->SetFieldElementId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::PartitionIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::PartitionIdField>) {
             res->SetPartitionId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SegmentIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SegmentIdField>) {
             res->SetSegmentId(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::TypeNameField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::TypeNameField>) {
             res->SetTypeName(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::NameField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::NameField>) {
             res->SetName(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::ParamsField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::ParamsField>) {
             res->SetParams(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SizeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SizeField>) {
             res->SetSize(value_);
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::RowCountField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::RowCountField>) {
             res->SetRowCount(value_);
             return;
         } else {
@@ -166,72 +161,70 @@ class MetaFieldGS {
     void
     SetFromRes(typename R::Ptr res) {
         static_assert(is_decay_base_of_v<F, R>, "Template class F is not base of R");
-//        if constexpr(!) {
-//             TODO(yhz): may tell invoker there is some incorrect
-//            return;
-        if constexpr(decay_equal_v<F, snapshot::MappingsField>) {
-            if constexpr(decay_equal_v<F, snapshot::FlushableMappingsField>) {
+        // TODO(yhz): may tell invoker there is some incorrect
+        if constexpr (decay_equal_v<F, snapshot::MappingsField>) {
+            if constexpr (decay_equal_v<F, snapshot::FlushableMappingsField>) {
                 value_ = res->GetFlushIds();
                 return;
             } else {
                 value_ = res->GetMappings();
                 return;
             }
-        } else if constexpr(decay_equal_v<F, snapshot::StateField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::StateField>) {
             value_ = res->GetState();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::LsnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::LsnField>) {
             value_ = res->GetLsn();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::CreatedOnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::CreatedOnField>) {
             value_ = res->GetCreatedTime();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::UpdatedOnField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::UpdatedOnField>) {
             value_ = res->GetUpdatedTime();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::IdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::IdField>) {
             value_ = res->GetID();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::CollectionIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::CollectionIdField>) {
             value_ = res->GetCollectionId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SchemaIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SchemaIdField>) {
             value_ = res->GetSchemaId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::NumField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::NumField>) {
             value_ = res->GetNum();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FtypeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FtypeField>) {
             value_ = res->GetFtype();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FEtypeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FEtypeField>) {
             value_ = res->GetFEtype();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FieldIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FieldIdField>) {
             value_ = res->GetFieldId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::FieldElementIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::FieldElementIdField>) {
             value_ = res->GetFieldElementId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::PartitionIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::PartitionIdField>) {
             value_ = res->GetPartitionId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SegmentIdField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SegmentIdField>) {
             value_ = res->GetSegmentId();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::TypeNameField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::TypeNameField>) {
             value_ = res->GetTypeName();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::NameField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::NameField>) {
             value_ = res->GetName();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::ParamsField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::ParamsField>) {
             value_ = res->GetParams();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::SizeField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::SizeField>) {
             value_ = res->GetSize();
             return;
-        } else if constexpr(decay_equal_v<F, snapshot::RowCountField>) {
+        } else if constexpr (decay_equal_v<F, snapshot::RowCountField>) {
             value_ = res->GetRowCount();
             return;
         } else {

@@ -12,38 +12,20 @@
 #pragma once
 
 #include <memory>
-#include <string>
-#include <type_traits>
-#include <vector>
 
-#include "db/metax/MetaProxy.h"
-#include "db/metax/MetaResField.h"
-#include "db/metax/MetaResFieldHelper.h"
-#include "db/metax/MetaTraits.h"
-#include "db/snapshot/Resources.h"
-
-#include "utils/Exception.h"
+#include "db/metax/backend/MetaSqlContext.h"
 #include "utils/Status.h"
 
 namespace milvus::engine::metax {
 
-class MetaAdapter {
+class SqlBaseEngine {
  public:
-    explicit MetaAdapter(MetaProxyPtr proxy) : proxy_(proxy) {
-    }
+    virtual ~SqlBaseEngine() = default;
 
-    template <typename R, typename std::enable_if<is_decay_base_of_v<snapshot::BaseResource<R>, R>>::type* = nullptr>
-    Status
-    Insert(std::shared_ptr<R> res) {
-        auto fields = GenFieldTupleFromRes<R>(res);
-
-        return Status::OK();
-    }
-
- private:
-    MetaProxyPtr proxy_;
+    virtual Status
+    Insert(const MetaSqlCUDContext& context, int64_t& result_id) = 0;
 };
 
-using MetaAdapterPtr = std::shared_ptr<MetaAdapter>;
+using SqlEnginePtr = std::shared_ptr<SqlBaseEngine>;
 
 }  // namespace milvus::engine::metax

@@ -12,10 +12,11 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <string>
 
-#include "db/metax/MetaTraits.h"
 #include "db/metax/MetaResField.h"
+#include "db/metax/MetaTraits.h"
 #include "db/snapshot/Resources.h"
 #include "utils/Status.h"
 
@@ -24,87 +25,87 @@ namespace milvus::engine::metax {
 template <typename R, typename F>
 void
 extract_field_value(std::shared_ptr<R> res, F& field) {
-//    if constexpr(!is_decay_base_of_v<typename F::FType, R>) {
-//        return;
-//    } else
-    if constexpr(is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::MappingsField, R> &&
-                 is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FlushableMappingsField, R>) {
+    //    if constexpr(!is_decay_base_of_v<typename F::FType, R>) {
+    //        return;
+    //    } else
+    if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::MappingsField, R> &&
+                  is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FlushableMappingsField, R>) {
         field.Set(res->GetFlushIds());
         return;
-    } else if (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::MappingsField, R>) {
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::MappingsField, R>) {
         field.Set(res->GetMappings());
         return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::StateField, R>) {
+        field.Set(res->GetState());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::LsnField, R>) {
+        field.Set(res->GetLsn());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::CreatedOnField, R>) {
+        field.Set(res->GetCreatedTime());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::UpdatedOnField, R>) {
+        field.Set(res->GetUpdatedTime());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::IdField, R>) {
+        field.Set(res->GetID());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::CollectionIdField, R>) {
+        field.Set(res->GetCollectionId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::SchemaIdField, R>) {
+        field.Set(res->GetSchemaId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::NumField, R>) {
+        field.Set(res->GetNum());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FtypeField, R>) {
+        field.Set(res->GetFtype());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FEtypeField, R>) {
+        field.Set(res->GetFEtype());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FieldIdField, R>) {
+        field.Set(res->GetFieldId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::FieldElementIdField, R>) {
+        field.Set(res->GetFieldElementId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::PartitionIdField, R>) {
+        field.Set(res->GetPartitionId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::SegmentIdField, R>) {
+        field.Set(res->GetSegmentId());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::TypeNameField, R>) {
+        field.Set(res->GetTypeName());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::NameField, R>) {
+        field.Set(res->GetName());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::ParamsField, R>) {
+        field.Set(res->GetParams());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::SizeField, R>) {
+        field.Set(res->GetSize());
+        return;
+    } else if constexpr (is_decay_base_of_and_equal_of_v<typename F::FType, snapshot::RowCountField, R>) {
+        field.Set(res->GetRowCount());
+        return;
     } else {
+        static_assert(!is_decay_base_of_v<typename F::FType, R>, "Unknown Template class F::FType");
         return;
     }
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::StateField>) {
-//        field.Set(res->GetState());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::LsnField>) {
-//        field.Set(res->GetLsn());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::CreatedOnField>) {
-//        field.Set(res->GetCreatedTime());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::UpdatedOnField>) {
-//        field.Set(res->GetUpdatedTime());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::IdField>) {
-//        field.Set(res->GetID());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::CollectionIdField>) {
-//        field.Set(res->GetCollectionId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::SchemaIdField>) {
-//        field.Set(res->GetSchemaId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::NumField>) {
-//        field.Set(res->GetNum());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::FtypeField>) {
-//        field.Set(res->GetFtype());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::FEtypeField>) {
-//        field.Set(res->GetFEtype());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::FieldIdField>) {
-//        field.Set(res->GetFieldId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::FieldElementIdField>) {
-//        field.Set(res->GetFieldElementId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::PartitionIdField>) {
-//        field.Set(res->GetPartitionId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::SegmentIdField>) {
-//        field.Set(res->GetSegmentId());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::TypeNameField>) {
-//        field.Set(res->GetTypeName());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::NameField>) {
-//        field.Set(res->GetName());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::ParamsField>) {
-//        field.Set(res->GetParams());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::SizeField>) {
-//        field.Set(res->GetSize());
-//        return;
-//    } else if constexpr(decay_equal_v<typename F::FType, snapshot::RowCountField>) {
-//        field.Set(res->GetRowCount());
-//        return;
-//    } else {
-//        static_assert(!is_decay_base_of_v<typename F::FType, R>, "Unknown Template class F::FType");
-//        return;
-//    }
 }
 
 template <typename R>
 MetaResFieldTuple
 GenFieldTupleFromRes(typename R::Ptr res) {
     MetaResFieldTuple fields;
-    std::apply([&res, &fields](auto&... field){((extract_field_value(res, field)), ...);}, fields);
+    std::apply([&res, &fields](auto&... field) { ((extract_field_value(res, field)), ...); }, fields);
+    std::apply([&res, &fields](auto&... field) { ((field.SetTable(R::Name)), ...); }, fields);
+
+    return fields;
 }
 
 }  // namespace milvus::engine::metax

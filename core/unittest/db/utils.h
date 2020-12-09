@@ -22,6 +22,7 @@
 #include "db/DB.h"
 #include "db/DBFactory.h"
 #include "db/meta/MetaAdapter.h"
+#include "db/metax/MetaAdapter.h"
 #include "db/snapshot/CompoundOperations.h"
 #include "db/snapshot/Context.h"
 #include "db/snapshot/EventExecutor.h"
@@ -81,6 +82,7 @@ using TQueue = milvus::BlockingQueue<std::tuple<ID_TYPE, ID_TYPE>>;
 using SoftDeleteCollectionOperation = milvus::engine::snapshot::SoftDeleteOperation<Collection>;
 using ParamsField = milvus::engine::snapshot::ParamsField;
 using IdField = milvus::engine::snapshot::IdField;
+using MappingsField = milvus::engine::snapshot::MappingsField;
 using IteratePartitionHandler = milvus::engine::snapshot::IterateHandler<Partition>;
 using IterateSegmentFileHandler = milvus::engine::snapshot::IterateHandler<SegmentFile>;
 using PartitionIterator = milvus::engine::snapshot::PartitionIterator;
@@ -393,7 +395,7 @@ class MetaTest : public BaseTest {
 ///////////////////////////////////////////////////////////////////////////////
 class MetaxTest : public BaseTest {
  protected:
-    MetaAdapterPtr meta_;
+    milvus::engine::metax::MetaAdapterPtr meta_;
 
  protected:
     void

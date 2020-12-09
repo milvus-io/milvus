@@ -35,8 +35,6 @@ namespace milvus::engine::snapshot {
 
 static const json JEmpty = {};
 
-
-
 ///////////////////////////////////////////////////////////////////////////////
 
 class Collection : public BaseResource<Collection>,

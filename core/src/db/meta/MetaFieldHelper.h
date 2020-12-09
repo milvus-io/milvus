@@ -25,29 +25,29 @@ class MetaFieldIntegralHelper {
  public:
     using type = remove_cr_t<F>;
     using value_type = typename F::ValueType;
-    static const constexpr char * name = F::Name;
+    static const constexpr char* name = F::Name;
 
  public:
     ~MetaFieldIntegralHelper() = default;
 };
 
 using MetaFieldIntegralHelperTuple =
-    std::tuple<MetaFieldIntegralHelper<snapshot::MappingsField>,        MetaFieldIntegralHelper<snapshot::StateField>,
-               MetaFieldIntegralHelper<snapshot::LsnField>,             MetaFieldIntegralHelper<snapshot::CreatedOnField>,
-               MetaFieldIntegralHelper<snapshot::UpdatedOnField>,       MetaFieldIntegralHelper<snapshot::IdField>,
-               MetaFieldIntegralHelper<snapshot::CollectionIdField>,    MetaFieldIntegralHelper<snapshot::SchemaIdField>,
-               MetaFieldIntegralHelper<snapshot::NumField>,             MetaFieldIntegralHelper<snapshot::FtypeField>,
-               MetaFieldIntegralHelper<snapshot::FEtypeField>,          MetaFieldIntegralHelper<snapshot::FieldIdField>,
-               MetaFieldIntegralHelper<snapshot::FieldElementIdField>,  MetaFieldIntegralHelper<snapshot::PartitionIdField>,
-               MetaFieldIntegralHelper<snapshot::SegmentIdField>,       MetaFieldIntegralHelper<snapshot::TypeNameField>,
-               MetaFieldIntegralHelper<snapshot::NameField>,            MetaFieldIntegralHelper<snapshot::ParamsField>,
-               MetaFieldIntegralHelper<snapshot::SizeField>,            MetaFieldIntegralHelper<snapshot::RowCountField>
-               >;
+    std::tuple<MetaFieldIntegralHelper<snapshot::MappingsField>, MetaFieldIntegralHelper<snapshot::StateField>,
+               MetaFieldIntegralHelper<snapshot::LsnField>, MetaFieldIntegralHelper<snapshot::CreatedOnField>,
+               MetaFieldIntegralHelper<snapshot::UpdatedOnField>, MetaFieldIntegralHelper<snapshot::IdField>,
+               MetaFieldIntegralHelper<snapshot::CollectionIdField>, MetaFieldIntegralHelper<snapshot::SchemaIdField>,
+               MetaFieldIntegralHelper<snapshot::NumField>, MetaFieldIntegralHelper<snapshot::FtypeField>,
+               MetaFieldIntegralHelper<snapshot::FEtypeField>, MetaFieldIntegralHelper<snapshot::FieldIdField>,
+               MetaFieldIntegralHelper<snapshot::FieldElementIdField>,
+               MetaFieldIntegralHelper<snapshot::PartitionIdField>, MetaFieldIntegralHelper<snapshot::SegmentIdField>,
+               MetaFieldIntegralHelper<snapshot::TypeNameField>, MetaFieldIntegralHelper<snapshot::NameField>,
+               MetaFieldIntegralHelper<snapshot::ParamsField>, MetaFieldIntegralHelper<snapshot::SizeField>,
+               MetaFieldIntegralHelper<snapshot::RowCountField> >;
 
 template <typename R, typename H>
 inline void
 extract_field_name(R& res, H& helper, std::unordered_set<std::string>& names) {
-    if constexpr(std::is_base_of_v<typename H::type, R>) {
+    if constexpr (std::is_base_of_v<typename H::type, R>) {
         names.insert(std::string(H::name));
         return;
     } else {
@@ -60,7 +60,7 @@ inline std::unordered_set<std::string>
 GetResFieldNames(typename R::Ptr res) {
     MetaFieldIntegralHelperTuple helpers;
     std::unordered_set<std::string> names;
-    std::apply([&res, &helpers, &names](auto&... fh){((extract_field_name(*res.get(), fh, names)), ...);}, helpers);
+    std::apply([&res, &helpers, &names](auto&... fh) { ((extract_field_name(*res.get(), fh, names)), ...); }, helpers);
     return names;
 }
 
@@ -70,7 +70,7 @@ class MetaFieldSelectHelper {
  public:
     using type = remove_cr_t<F>;
     using value_type = typename F::ValueType;
-    static const constexpr char * name = F::Name;
+    static const constexpr char* name = F::Name;
 
  public:
     explicit MetaFieldSelectHelper(const std::string& table) : table_(table) {

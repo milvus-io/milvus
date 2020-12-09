@@ -35,6 +35,8 @@
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #endif
+#include "db/metax/MetaFactory.h"
+#include "db/metax/MetaProxy.h"
 #include "db/meta/backend/MockEngine.h"
 #include "db/meta/backend/MySqlEngine.h"
 #include "db/meta/backend/SqliteEngine.h"
@@ -263,7 +265,8 @@ MetaTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaxTest::SetUp() {
-
+    auto proxy = std::make_shared<milvus::engine::metax::MetaProxy>(milvus::engine::metax::EngineType::mock);
+    meta_ = std::make_shared<milvus::engine::metax::MetaAdapter>(proxy);
 }
 
 void

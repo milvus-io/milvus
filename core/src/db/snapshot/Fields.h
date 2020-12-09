@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <string>
+#include <utility>
+
 #include "db/snapshot/ResourceTypes.h"
 
 using milvus::engine::utils::GetMicroSecTimeStamp;
@@ -19,7 +22,7 @@ namespace milvus::engine::snapshot {
 
 class MappingsField {
  public:
-//    using Type = MappingsField;
+    //    using Type = MappingsField;
     using ValueType = MappingT;
     static constexpr const char* Name = "mappings";
 
@@ -74,7 +77,7 @@ class FlushableMappingsField : public MappingsField {
 
 class StateField {
  public:
-//    using Type = StateField;
+    //    using Type = StateField;
     using ValueType = State;
     static constexpr const char* Name = "state";
 
@@ -516,4 +519,3 @@ class RowCountField {
 };
 
 }  // namespace milvus::engine::snapshot
-

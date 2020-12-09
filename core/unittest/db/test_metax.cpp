@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
+#include <iostream>
 #include <memory>
 
 #include "db/metax/MetaAdapter.h"
@@ -21,6 +22,12 @@
 // unittest folder
 #include "db/utils.h"
 
+template <typename F>
+using MetaResField = milvus::engine::metax::MetaResField<F>;
+
+template <typename Base, typename Equal, typename Derived>
+using is_decay_base_of_and_equal_of = milvus::engine::metax::is_decay_base_of_and_equal_of<Base, Equal, Derived>;
+
 TEST_F(MetaxTest, HelperTest) {
     auto proxy = std::make_shared<milvus::engine::metax::MetaProxy>();
 
@@ -31,7 +38,11 @@ TEST_F(MetaxTest, HelperTest) {
     ASSERT_TRUE(status.ok()) << status.ToString();
 }
 
-TEST_F(MetaxTest, PointTest) {
+TEST_F(MetaxTest, TraitsTest) {
+    auto ff = MetaResField<IdField>();
+
+    std::cout << is_decay_base_of_and_equal_of<MetaResField<IdField>::FType, IdField, Collection>::value << std::endl;
+    std::cout << is_decay_base_of_and_equal_of<MetaResField<MappingsField>::FType, MappingsField, Collection>::value << std::endl;
 //    auto collection = std::make_shared<Collection>("a");
 //    std::string b = bool(milvus::engine::meta::is_shared_ptr<decltype(collection)>::value) ? "True" : "False";
 //    std::cout << "std::make_shared<Collection>(\"a\") is shared_ptr: "

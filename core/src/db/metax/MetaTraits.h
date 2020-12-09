@@ -17,9 +17,7 @@
 namespace milvus::engine::metax {
 
 template <typename T, typename U>
-struct decay_equal :
-    std::is_same<typename std::decay<T>::type, U>::type
-{};
+struct decay_equal : std::is_same<typename std::decay<T>::type, U>::type {};
 
 template <typename T, typename U>
 constexpr bool decay_equal_v = decay_equal<T, U>::value;
@@ -28,20 +26,19 @@ constexpr bool decay_equal_v = decay_equal<T, U>::value;
  * Reomve const and reference property
  * @tparam T
  */
-template<typename T>
+template <typename T>
 struct remove_cr {
-    using type = typename std::remove_const<std::remove_reference_t<T> >::type;
+    using type = typename std::remove_const<std::remove_reference_t<T>>::type;
 };
 
-template<typename T>
+template <typename T>
 using remove_cr_t = typename remove_cr<T>::type;
 
 template <typename Base, typename Derived>
-struct is_decay_base_of : std::is_base_of<remove_cr_t<Base>, remove_cr_t<Derived>>
-{};
+struct is_decay_base_of : std::is_base_of<remove_cr_t<Base>, remove_cr_t<Derived>> {};
 
 template <typename Base, typename Derived>
-constexpr bool is_decay_base_of_v = is_decay_base_of<Base,Derived>::value;
+constexpr bool is_decay_base_of_v = is_decay_base_of<Base, Derived>::value;
 
 template <typename T>
 struct is_shared_ptr : std::false_type {};
@@ -63,32 +60,36 @@ template <typename T>
 constexpr bool is_unique_ptr_v = is_unique_ptr<T>::value;
 
 //////// remove shared_ptr
-template<typename T>
-struct remove_shared_ptr
-{ using type = T; };
+template <typename T>
+struct remove_shared_ptr {
+    using type = T;
+};
 
-template<typename T>
-struct remove_shared_ptr<std::shared_ptr<T>>
-{ using type = T; };
+template <typename T>
+struct remove_shared_ptr<std::shared_ptr<T>> {
+    using type = T;
+};
 
 template <typename T>
 using remove_shared_ptr_t = typename remove_shared_ptr<T>::type;
 
 //////// remove unique_ptr
-template<typename T>
-struct remove_unique_ptr
-{ using type = T; };
+template <typename T>
+struct remove_unique_ptr {
+    using type = T;
+};
 
-template<typename T>
-struct remove_unique_ptr<std::unique_ptr<T>>
-{ using type = T; };
+template <typename T>
+struct remove_unique_ptr<std::unique_ptr<T>> {
+    using type = T;
+};
 
 template <typename T>
 using remove_unique_ptr_t = typename remove_unique_ptr<T>::type;
 
 //////// is decay base and equal
-//template <typename Base, typename Equal, typename Derived>
-//struct is_decay_base_of_and_equal_of : std::false_type {};
+// template <typename Base, typename Equal, typename Derived>
+// struct is_decay_base_of_and_equal_of : std::false_type {};
 
 template <typename Base, typename Equal, typename Derived>
 struct is_decay_base_of_and_equal_of

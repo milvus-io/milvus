@@ -33,7 +33,7 @@ struct MetaQueryContext {
 };
 
 struct MetaFilterContext {
-//    std::set<std::string> tables_;
+    //    std::set<std::string> tables_;
     std::string table_;
     MetaCombinationPtr combination_;
 };

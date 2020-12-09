@@ -28,11 +28,15 @@ set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     ${DB_META_CONDITION_FILES}
                     )
 
-aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax             DB_METAX_MAIN_FILES      )
-#aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend      DB_META_BACKEND_FILES   )
-#aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/condition    DB_META_CONDITION_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax                         DB_METAX_MAIN_FILES                 )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax/backend                 DB_METAX_BACKEND_FILES              )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax/backend/convertor       DB_METAX_BACKEND_CONVERTOR_FILES    )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/metax/backend/engine          DB_METAX_BACKEND_ENGINE_FILES       )
 set( DB_METAX_FILES
         ${DB_METAX_MAIN_FILES}
+        ${DB_METAX_BACKEND_FILES}
+        ${DB_METAX_BACKEND_CONVERTOR_FILES}
+        ${DB_METAX_BACKEND_ENGINE_FILES}
 #        ${DB_META_BACKEND_FILES}
 #        ${DB_META_CONDITION_FILES}
         )
