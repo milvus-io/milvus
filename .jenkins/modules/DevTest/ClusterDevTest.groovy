@@ -15,7 +15,9 @@ timeout(time: 150, unit: 'MINUTES') {
                    --namespace milvus"
 
     def helmStatusCMD = "helm get manifest --namespace milvus ${env.CLUSTER_HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
-                         kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME}\" -c milvus && \
+                         kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=writable\" -c milvus && \
+                         kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=readonly\" -c milvus && \
+                         kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=nginx\" && \
                          helm status -n milvus ${env.CLUSTER_HELM_RELEASE_NAME}"
 
     def isTimeTriggeredBuild = currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0
