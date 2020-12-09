@@ -78,7 +78,7 @@ NSG_NM::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }

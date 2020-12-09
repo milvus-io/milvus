@@ -273,7 +273,7 @@ void hammings_knn_hc (
         size_t n2,
         bool order = true,
         bool init_heap = true,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     size_t k = ha->k;
 
@@ -296,7 +296,7 @@ void hammings_knn_hc (
 
 #pragma omp parallel for
         for (size_t j = 0; j < n2; j++) {
-            if(!bitset || !bitset->test(j)) {
+            if(!bitset || !bitset.test(j)) {
                 int thread_no = omp_get_thread_num();
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
@@ -350,7 +350,7 @@ void hammings_knn_hc (
                 int64_t * __restrict bh_ids_ = ha->ids + i * k;
                 size_t j;
                 for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         dis = hc.hamming (bs2_);
                         if (dis < bh_val_[0]) {
                             faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
@@ -375,7 +375,7 @@ void hammings_knn_mc (
         size_t k,
         int32_t *distances,
         int64_t *labels,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
   const int nBuckets = bytes_per_code * 8 + 1;
   std::vector<int> all_counters(na * nBuckets, 0);
@@ -398,7 +398,7 @@ void hammings_knn_mc (
 #pragma omp parallel for
     for (size_t i = 0; i < na; ++i) {
       for (size_t j = j0; j < j1; ++j) {
-        if (!bitset || !bitset->test(j)) {
+        if (!bitset || !bitset.test(j)) {
           cs[i].update_counter(b + j * bytes_per_code, j);
         }
       }
@@ -435,7 +435,7 @@ void hammings_knn_hc_1 (
         size_t n2,
         bool order = true,
         bool init_heap = true,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     const size_t nwords = 1;
     size_t k = ha->k;
@@ -458,7 +458,7 @@ void hammings_knn_hc_1 (
         const uint64_t bs1_ = bs1[0];
 #pragma omp parallel for
         for (size_t j = 0; j < n2; j++) {
-            if(!bitset || !bitset->test(j)) {
+            if(!bitset || !bitset.test(j)) {
                 hamdis_t dis = popcount64 (bs1_ ^ bs2[j]);
 
                 int thread_no = omp_get_thread_num();
@@ -492,7 +492,7 @@ void hammings_knn_hc_1 (
             int64_t * bh_ids_ = ha->ids + i * k;
             size_t j;
             for (j = 0; j < n2; j++, bs2_+= nwords) {
-                if(!bitset || !bitset->test(j)){
+                if(!bitset || !bitset.test(j)){
                     dis = popcount64 (bs1_ ^ *bs2_);
                     if (dis < bh_val_0) {
                         faiss::maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, dis, j);
@@ -666,7 +666,7 @@ void hammings_knn_hc (
         size_t nb,
         size_t ncodes,
         int order,
-        ConcurrentBitsetPtr bitset)
+        const BitsetView& bitset)
 {
     switch (ncodes) {
     case 4:
@@ -707,7 +707,7 @@ void hammings_knn_mc(
     size_t ncodes,
     int32_t *distances,
     int64_t *labels,
-    ConcurrentBitsetPtr bitset)
+    const BitsetView& bitset)
 {
     switch (ncodes) {
     case 4:

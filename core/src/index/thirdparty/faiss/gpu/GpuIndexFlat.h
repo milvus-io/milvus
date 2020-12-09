@@ -122,7 +122,7 @@ class GpuIndexFlat : public GpuIndex {
                    int k,
                    float* distances,
                    faiss::Index::idx_t* labels,
-                   ConcurrentBitsetPtr bitset = nullptr) const override;
+                   const BitsetView& bitset = nullptr) const override;
 
  protected:
   /// Our config object

@@ -52,7 +52,7 @@ class GPUIVF_NM : public IVF, public GPUIndex {
 
     void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&,
-              const faiss::ConcurrentBitsetPtr& bitset) override;
+              const faiss::BitsetView& bitset) override;
 
  protected:
     uint8_t* arranged_data;

@@ -81,7 +81,7 @@ IndexReplicasTemplate<IndexT>::search(idx_t n,
                                       idx_t k,
                                       distance_t* distances,
                                       idx_t* labels,
-                                      ConcurrentBitsetPtr bitset) const {
+                                      const BitsetView& bitset) const {
   FAISS_THROW_IF_NOT_MSG(this->count() > 0, "no replicas in index");
 
   if (n == 0) {

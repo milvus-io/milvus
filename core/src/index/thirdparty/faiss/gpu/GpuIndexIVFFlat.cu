@@ -300,7 +300,7 @@
                               int k,
                               float* distances,
                               Index::idx_t* labels,
-                              ConcurrentBitsetPtr bitset) const {
+                              const BitsetView& bitset) const {
    // Device is already set in GpuIndex::search
    FAISS_ASSERT(index_);
    FAISS_ASSERT(n > 0);

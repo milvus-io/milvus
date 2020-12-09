@@ -270,7 +270,7 @@ namespace hnswlib_nm {
 
         template <bool has_deletions>
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-        searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset, void *pdata) const {
+        searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView& bitset, void *pdata) const {
             VisitedList *vl = visited_list_pool_->getFreeVisitedList();
             vl_type *visited_array = vl->mass;
             vl_type visited_array_tag = vl->curV;
@@ -294,7 +294,7 @@ namespace hnswlib_nm {
 
             dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
-            if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
+            if (!has_deletions || !bitset.test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
                 dist_t dist;
                 if (is_sq8_) {
                     dist = (*sqdc)(ep_id);
@@ -361,7 +361,7 @@ namespace hnswlib_nm {
 #endif
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
-                            if (!has_deletions || (!bitset->test((faiss::ConcurrentBitset::id_type_t)(candidate_id))))
+                            if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)(candidate_id))))
                                 top_candidates.emplace(dist, candidate_id);
 
                             if (top_candidates.size() > ef)
@@ -1114,7 +1114,7 @@ namespace hnswlib_nm {
         };
 
         std::priority_queue<std::pair<dist_t, labeltype >>
-        searchKnn_NM(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset, dist_t *pdata) const {
+        searchKnn_NM(const void *query_data, size_t k, const faiss::BitsetView& bitset, dist_t *pdata) const {
             std::priority_queue<std::pair<dist_t, labeltype >> result;
             if (cur_element_count == 0) return result;
 
@@ -1167,7 +1167,7 @@ namespace hnswlib_nm {
             }
 
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
-            if (bitset != nullptr) {
+            if (!bitset.empty()) {
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
                         top_candidates1 = searchBaseLayerST<true>(currObj, query_data, std::max(ef_, k), bitset, pdata);
                 top_candidates.swap(top_candidates1);
@@ -1192,7 +1192,7 @@ namespace hnswlib_nm {
 
         template <typename Comp>
         std::vector<std::pair<dist_t, labeltype>>
-        searchKnn_NM(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset, dist_t *pdata) {
+        searchKnn_NM(const void* query_data, size_t k, Comp comp, const faiss::BitsetView& bitset, dist_t *pdata) {
             std::vector<std::pair<dist_t, labeltype>> result;
             if (cur_element_count == 0) return result;
 

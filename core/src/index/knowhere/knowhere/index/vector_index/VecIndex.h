@@ -12,6 +12,7 @@
 #pragma once
 
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/utils/BitsetView.h>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -47,7 +48,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) = 0;
+    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset) = 0;
 
 #if 0
     virtual DatasetPtr

@@ -54,7 +54,7 @@ struct IndexPQ: Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
     void reset() override;
 
@@ -159,7 +159,7 @@ struct MultiIndexQuantizer: Index  {
     void search(
         idx_t n, const float* x, idx_t k,
         float* distances, idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
     /// add and reset will crash at runtime
     void add(idx_t n, const float* x) override;
@@ -193,7 +193,7 @@ struct MultiIndexQuantizer2: MultiIndexQuantizer {
     void search(
         idx_t n, const float* x, idx_t k,
         float* distances, idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
 };
 

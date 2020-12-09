@@ -196,7 +196,7 @@ GpuIndexFlat::searchImpl_(int n,
                           int k,
                           float* distances,
                           Index::idx_t* labels,
-                          ConcurrentBitsetPtr bitset) const {
+                          const BitsetView& bitset) const {
   auto stream = resources_->getDefaultStream(device_);
 
   // Input and output data are already resident on the GPU

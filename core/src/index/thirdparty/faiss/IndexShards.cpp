@@ -265,7 +265,7 @@ IndexShardsTemplate<IndexT>::search(idx_t n,
                                     idx_t k,
                                     distance_t *distances,
                                     idx_t *labels,
-                                    ConcurrentBitsetPtr bitset) const {
+                                    const BitsetView& bitset) const {
   long nshard = this->count();
 
   std::vector<distance_t> all_distances(nshard * k * n);

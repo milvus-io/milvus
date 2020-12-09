@@ -143,7 +143,7 @@ static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
                         float_minheap_array_t * res,
-                        ConcurrentBitsetPtr bitset = nullptr)
+                        const BitsetView& bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -173,7 +173,7 @@ static void knn_inner_product_sse (const float * x,
 
 #pragma omp parallel for schedule(static)
             for (size_t j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)) {
+                if(!bitset || !bitset.test(j)) {
                     size_t thread_no = omp_get_thread_num();
                     const float *y_j = y + j * d;
                     const float *x_i = x + x_from * d;
@@ -236,7 +236,7 @@ static void knn_inner_product_sse (const float * x,
             }
 
             for (size_t j = 0; j < ny; j++) {
-                if (!bitset || !bitset->test(j)) {
+                if (!bitset || !bitset.test(j)) {
                     float disij = fvec_inner_product (x_i, y_j, d);
                     if (disij > val_[0]) {
                         minheap_swap_top (k, val_, ids_, disij, j);
@@ -255,7 +255,7 @@ static void knn_L2sqr_sse (
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                ConcurrentBitsetPtr bitset = nullptr)
+                const BitsetView& bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -285,7 +285,7 @@ static void knn_L2sqr_sse (
 
 #pragma omp parallel for schedule(static)
             for (size_t j = 0; j < ny; j++) {
-                if(!bitset || !bitset->test(j)) {
+                if(!bitset || !bitset.test(j)) {
                     size_t thread_no = omp_get_thread_num();
                     const float *y_j = y + j * d;
                     const float *x_i = x + x_from * d;
@@ -349,7 +349,7 @@ static void knn_L2sqr_sse (
             }
 
             for (size_t j = 0; j < ny; j++) {
-                if (!bitset || !bitset->test(j)) {
+                if (!bitset || !bitset.test(j)) {
                     float disij = fvec_L2sqr (x_i, y_j, d);
                     if (disij < val_[0]) {
                         maxheap_swap_top (k, val_, ids_, disij, j);
@@ -369,7 +369,7 @@ static void knn_inner_product_blas (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     res->heapify ();
 
@@ -409,7 +409,7 @@ static void knn_inner_product_blas (
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for(size_t j = j0; j < j1; j++){
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         float dis = *ip_line;
 
                         if(dis > simi[0]){
@@ -433,7 +433,7 @@ static void knn_L2sqr_blas (const float * x,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
         const DistanceCorrection &corr,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     res->heapify ();
 
@@ -479,7 +479,7 @@ static void knn_L2sqr_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         float ip = *ip_line;
                         float dis = x_norms[i] + y_norms[j] - 2 * ip;
 
@@ -509,7 +509,7 @@ static void knn_jaccard_blas (const float * x,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
                               const DistanceCorrection &corr,
-                              ConcurrentBitsetPtr bitset = nullptr)
+                              const BitsetView& bitset = nullptr)
 {
     res->heapify ();
 
@@ -555,7 +555,7 @@ static void knn_jaccard_blas (const float * x,
                 const float *ip_line = ip_block + (i - i0) * (j1 - j0);
 
                 for (size_t j = j0; j < j1; j++) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         float ip = *ip_line;
                         float dis = 1.0 - ip / (x_norms[i] + y_norms[j] - ip);
 
@@ -594,7 +594,7 @@ void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        ConcurrentBitsetPtr bitset)
+        const BitsetView& bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
@@ -615,7 +615,7 @@ void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                ConcurrentBitsetPtr bitset)
+                const BitsetView& bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
@@ -629,7 +629,7 @@ void knn_jaccard (const float * x,
                   const float * y,
                   size_t d, size_t nx, size_t ny,
                   float_maxheap_array_t * res,
-                  ConcurrentBitsetPtr bitset)
+                  const BitsetView& bitset)
 {
     if (d % 4 != 0) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);

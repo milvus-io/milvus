@@ -101,7 +101,7 @@ void IndexIVFPQR::search_preassigned (idx_t n, const float *x, idx_t k,
                                       float *distances, idx_t *labels,
                                       bool store_pairs,
                                       const IVFSearchParameters *params,
-                                      ConcurrentBitsetPtr bitset
+                                      const BitsetView& bitset
                                       ) const
 {
     uint64_t t0;

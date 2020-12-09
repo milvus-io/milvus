@@ -54,7 +54,7 @@ class IndexNGT : public VecIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
 
     int64_t
     Count() override;

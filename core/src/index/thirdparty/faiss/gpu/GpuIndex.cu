@@ -199,7 +199,7 @@ GpuIndex::search(Index::idx_t n,
                  Index::idx_t k,
                  float* distances,
                  Index::idx_t* labels,
-                 ConcurrentBitsetPtr bitset) const {
+                 const BitsetView& bitset) const {
   FAISS_THROW_IF_NOT_MSG(this->is_trained, "Index not trained");
 
   // For now, only support <= max int results
@@ -276,7 +276,7 @@ GpuIndex::searchNonPaged_(int n,
                           int k,
                           float* outDistancesData,
                           Index::idx_t* outIndicesData,
-                          ConcurrentBitsetPtr bitset) const {
+                          const BitsetView& bitset) const {
   auto stream = resources_->getDefaultStream(device_);
 
   // Make sure arguments are on the device we desire; use temporary
@@ -296,7 +296,7 @@ GpuIndex::searchFromCpuPaged_(int n,
                               int k,
                               float* outDistancesData,
                               Index::idx_t* outIndicesData,
-                              ConcurrentBitsetPtr bitset) const {
+                              const BitsetView& bitset) const {
   Tensor<float, 2, true> outDistances(outDistancesData, {n, k});
   Tensor<Index::idx_t, 2, true> outIndices(outIndicesData, {n, k});
 

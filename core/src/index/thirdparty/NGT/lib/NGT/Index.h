@@ -655,7 +655,7 @@ public:
     virtual void linearSearch(NGT::SearchContainer & sc) { getIndex().linearSearch(sc); }
     virtual void linearSearch(NGT::SearchQuery & sc) { getIndex().linearSearch(sc); }
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset) { getIndex().search(sc, bitset); }
+    virtual void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset) { getIndex().search(sc, bitset); }
     virtual void search(NGT::SearchContainer & sc) { getIndex().search(sc); }
     virtual void search(NGT::SearchQuery & sc) { getIndex().search(sc); }
     virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds) { getIndex().search(sc, seeds); }
@@ -1058,7 +1058,7 @@ public:
     }
 
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset)
+    virtual void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset)
     {
         sc.distanceComputationCount = 0;
         sc.visitCount = 0;
@@ -1586,7 +1586,7 @@ protected:
     }
 
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::ConcurrentBitsetPtr & bitset)
+    virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::BitsetView&bitset)
     {
         if (sc.size == 0)
         {
@@ -2147,7 +2147,7 @@ public:
 
     // for milvus
     void
-    getSeedsFromTree(NGT::SearchContainer& sc, ObjectDistances& seeds, const faiss::ConcurrentBitsetPtr& bitset) {
+    getSeedsFromTree(NGT::SearchContainer& sc, ObjectDistances& seeds, const faiss::BitsetView& bitset) {
         DVPTree::SearchContainer tso(sc.object);
         tso.mode = DVPTree::SearchContainer::SearchLeaf;
         tso.radius = 0.0;
@@ -2204,7 +2204,7 @@ public:
     }
 
     // for milvus
-    void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset)
+    void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset)
     {
         sc.distanceComputationCount = 0;
         sc.visitCount = 0;
