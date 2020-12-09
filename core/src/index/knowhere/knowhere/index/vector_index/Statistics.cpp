@@ -66,12 +66,6 @@ HNSWStatistics::ToString() {
     std::ostringstream ret;
 
     if (STATISTICS_LEVEL >= 1) {
-        ret << "Level distribution: " << std::endl;
-        size_t point_cnt = 0;
-        for (int i = distribution.size() - 1; i >= 0; i--) {
-            point_cnt += distribution[i];
-            ret << "Level " << i << " has " << point_cnt << " points" << std::endl;
-        }
         ret << "Avg Ef: " << AvgSearchEf() << std::endl;
     }
     if (STATISTICS_LEVEL >= 3) {
@@ -83,6 +77,12 @@ HNSWStatistics::ToString() {
             ret << "(" << axis_x[i] << "," << access_cdf[i] << ") ";
         }
         ret << std::endl;
+        ret << "Level distribution: " << std::endl;
+        size_t point_cnt = 0;
+        for (int i = distribution.size() - 1; i >= 0; i--) {
+            point_cnt += distribution[i];
+            ret << "Level " << i << " has " << point_cnt << " points" << std::endl;
+        }
     }
 
     return Statistics::ToString() + ret.str();

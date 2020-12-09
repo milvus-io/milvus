@@ -124,6 +124,7 @@ BinaryIVF::GetStatistics() {
     auto lock = ivf_stats->Lock();
     //    auto ivf_lock = ivf_index->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
+    return ivf_stats;
 }
 
 void

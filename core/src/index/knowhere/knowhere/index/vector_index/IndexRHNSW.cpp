@@ -65,8 +65,8 @@ IndexRHNSW::Load(const BinarySet& index_binary) {
             auto lock = hnsw_stats->Lock();
             hnsw_stats->update_level_distribution(real_idx->hnsw.max_level, real_idx->hnsw.level_stats);
             real_idx->set_target_level(hnsw_stats->target_level);
-            // LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-            // LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+            //             LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+            //             LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
         }
         index_.reset(idx);
     } catch (std::exception& e) {
@@ -94,8 +94,8 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         hnsw_stats->update_level_distribution(real_idx->hnsw.max_level, real_idx->hnsw.level_stats);
         real_idx->set_target_level(hnsw_stats->target_level);
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 DatasetPtr
@@ -128,7 +128,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->update_nq(rows);
-            hnsw_stats->update_ef_sum(real_index->hnsw.efSearch);
+            hnsw_stats->update_ef_sum(real_index->hnsw.efSearch * rows);
             hnsw_stats->update_total_query_time(
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
         }
@@ -136,8 +136,8 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
             hnsw_stats->update_filter_percentage(bitset);
         }
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

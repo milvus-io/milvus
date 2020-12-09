@@ -111,9 +111,9 @@ IVF_NM::Load(const BinarySet& binary_set) {
     ro_codes = rol->pin_readonly_codes;
     data_ = nullptr;
 #endif
-    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::Load finished, show statistics:";
-    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
+    //    LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::Load finished, show statistics:";
+    //    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
+    //    LOG_KNOWHERE_DEBUG_ << ivf_stats->ToString();
 }
 
 void
@@ -365,8 +365,8 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
             ivf_stats->update_filter_percentage(bitset);
         }
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexIVF_FLAT::QueryImpl finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void
@@ -418,6 +418,7 @@ IVF_NM::GetStatistics() {
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto lock = ivf_stats->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
+    return ivf_stats;
 }
 
 void

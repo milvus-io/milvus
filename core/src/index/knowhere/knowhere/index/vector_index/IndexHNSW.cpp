@@ -74,15 +74,15 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
-        index_->loadIndex(reader);
         index_->stats_enable = (STATISTICS_LEVEL >= 3);
+        index_->loadIndex(reader);
         auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
         if (STATISTICS_LEVEL >= 3) {
             auto lock = hnsw_stats->Lock();
             hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
         }
-        // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
-        // LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
+        //         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        //         LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -153,8 +153,8 @@ IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
         auto lock = hnsw_stats->Lock();
         hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 DatasetPtr
@@ -230,7 +230,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->update_nq(rows);
-            hnsw_stats->update_ef_sum(index_->ef_);
+            hnsw_stats->update_ef_sum(index_->ef_ * rows);
             hnsw_stats->update_total_query_time(
                 std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
         }
@@ -249,8 +249,8 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
             }
         }
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);

@@ -368,8 +368,8 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
             ivf_stats->update_filter_percentage(bitset);
         }
     }
-    // LOG_KNOWHERE_DEBUG_ << "IndexIVF::QueryImpl finished, show statistics:";
-    // LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+    //     LOG_KNOWHERE_DEBUG_ << "IndexIVF::QueryImpl finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void
@@ -392,6 +392,7 @@ IVF::GetStatistics() {
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     auto lock = ivf_stats->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
+    return ivf_stats;
 }
 
 void
