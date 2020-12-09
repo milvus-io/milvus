@@ -90,7 +90,8 @@ func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventRea
 		return nil, err
 	}
 
-	payloadReader, err := NewPayloadReader(datatype, buffer.Bytes())
+	payloadBuffer := buffer.Next(int(reader.EventLength - reader.eventHeader.GetMemoryUsageInBytes() - reader.GetEventDataFixPartSize()))
+	payloadReader, err := NewPayloadReader(datatype, payloadBuffer)
 	if err != nil {
 		return nil, err
 	}

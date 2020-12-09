@@ -42,12 +42,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Cache Docker Volumes
+      - name: Cache CCache Volumes
         uses: actions/cache@v1
         with:
-          path: .docker
-          key: ubuntu${{ matrix.ubuntu }}-${{ hashFiles('internal/core/**') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
+          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+      - name: Cache Go Mod Volumes
+        uses: actions/cache@v1
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
+          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
       - name: Dockerfile Lint
         uses: reviewdog/action-hadolint@v1
         with:
@@ -55,5 +61,7 @@ jobs:
           reporter: github-pr-check # Default is github-pr-check
           hadolint_ignore: DL3008
       - name: Code Check
+        env:
+          CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"

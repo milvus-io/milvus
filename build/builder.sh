@@ -14,7 +14,6 @@ if [ "${1-}" = "pull" ]; then
 fi
 
 if [ "${1-}" = "gdbserver" ]; then
-    mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-cache"
     mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-gdbserver-home"
     chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
@@ -45,7 +44,8 @@ gid=$(id -g)
 [ "$uid" -lt 500 ] && uid=501
 [ "$gid" -lt 500 ] && gid=$uid
 
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-cache"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-ccache"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures ubuntu

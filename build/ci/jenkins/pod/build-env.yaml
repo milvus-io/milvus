@@ -11,12 +11,12 @@ spec:
     runAsGroup: 2000
   containers:
   - name: build-env
-    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201124-101232
+    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201209-104246
     env:
     - name: OS_NAME
       value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
-      value: "f0f52760fde8758793f5a68c39ba20298c812e754de337ba4cc7fd8edf4ae7a9"
+      value: "ae09110abf11fc58e2bcd2393c4cd071f0c5cfe2b65ab1a75f9510f3b32921bc"
     command:
     - cat
     tty: true

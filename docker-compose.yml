@@ -24,7 +24,8 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     volumes: &ubuntu-volumes
       - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-cache:/ccache:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-ccache:/ccache:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-go-mod:/go/pkg/mod:delegated
     working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
     command: &ubuntu-command >
       /bin/bash -c "

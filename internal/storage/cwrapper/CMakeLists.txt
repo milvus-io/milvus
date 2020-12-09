@@ -37,6 +37,8 @@ macro( build_arrow )
         "-DARROW_BUILD_UTILITIES=OFF"
         "-DARROW_PARQUET=ON"
         "-DPARQUET_BUILD_SHARED=OFF"
+        "-DThrift_SOURCE=BUNDLED"
+        "-Dutf8proc_SOURCE=BUNDLED"
         "-DARROW_S3=OFF"
         "-DCMAKE_VERBOSE_MAKEFILE=ON"
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
