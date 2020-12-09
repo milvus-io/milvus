@@ -24,8 +24,8 @@ namespace milvus {
 class LogMgr {
  public:
     static Status
-    InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
-            int64_t delete_exceeds, bool log_to_stdout, bool log_to_file);
+    InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, const std::string& filename,
+            int64_t max_log_file_size, int64_t delete_exceeds, bool log_to_stdout, bool log_to_file);
 
     static void
     RolloutHandler(const char* filename, std::size_t size, el::Level level);
@@ -36,9 +36,12 @@ class LogMgr {
     LogMgr&
     Default();
 
+    LogMgr&
+    Filename(const std::string& filename);
+
     /* Non-const for fiu to injecting error */
     LogMgr&
-    Level(std::unordered_map<std::string, bool>& enables, bool log_to_file);
+    Level(std::unordered_map<std::string, bool>& enables);
 
     LogMgr&
     To(bool log_to_stdout, bool log_to_file);
@@ -55,13 +58,6 @@ class LogMgr {
 
     static std::unordered_map<std::string, bool>
     parse_level(const std::string& level);
-
-    /**
-     *
-     * @brief Configures log path for corresponding level
-     */
-    static void
-    set_file(el::Configurations& default_conf, el::Level level, const std::string& log_path, bool log_to_file);
 
     /**
      * @brief Configures if output corresponding level log

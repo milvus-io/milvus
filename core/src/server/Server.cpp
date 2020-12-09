@@ -159,9 +159,13 @@ Server::Start() {
 
         STATUS_CHECK(Timezone::SetTimezone(config.general.timezone()));
 
+        /* milvus-<node_id>-%datetime{%y-%M-%d-%H:%m}-<pid>.csv */
+        auto log_filename =
+            "milvus-" + config.cluster.node_id() + "-%datetime{%y-%M-%d-%H:%m}-" + std::to_string(getpid()) + ".csv";
+
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         STATUS_CHECK(LogMgr::InitLog(config.logs.trace.enable(), config.log.min_messages(), config.logs.path(),
-                                     config.logs.max_log_file_size(), config.logs.log_rotate_num(),
+                                     log_filename, config.logs.max_log_file_size(), config.logs.log_rotate_num(),
                                      config.logs.log_to_stdout(), config.logs.log_to_file()));
 
         auto wal_path = config.wal.enable() ? config.wal.path() : "";
