@@ -11,9 +11,11 @@
 
 #include "log/Log.h"
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace milvus {
@@ -49,6 +51,57 @@ GetThreadName() {
     }
 
     return thread_name;
+}
+
+int64_t
+get_now_timestamp() {
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::seconds>(now).count();
+}
+
+int64_t
+get_system_boottime() {
+    FILE* uptime = fopen("/proc/uptime", "r");
+    float since_sys_boot, _;
+    auto ret = fscanf(uptime, "%f %f", &since_sys_boot, &_);
+    fclose(uptime);
+    if (ret != 2) {
+        throw std::runtime_error("read /proc/uptime failed.");
+    }
+    return static_cast<int64_t>(since_sys_boot);
+}
+
+int64_t
+get_thread_starttime() {
+    int64_t tid = gettid();
+    int64_t pid = getpid();
+    char filename[256];
+    snprintf(filename, sizeof(filename), "/proc/%ld/task/%ld/stat", pid, tid);
+
+    int64_t val = 0;
+    char comm[16], state;
+    FILE* thread_stat = fopen(filename, "r");
+    auto ret = fscanf(thread_stat, "%ld %s %s ", &val, comm, &state);
+    for (auto i = 4; i < 23; i++) {
+        ret = fscanf(thread_stat, "%ld ", &val);
+        if (i == 22) {
+            break;
+        }
+    }
+    fclose(thread_stat);
+    if (ret != 1) {
+        throw std::runtime_error("read " + std::string(filename) + " failed.");
+    }
+    return val / sysconf(_SC_CLK_TCK);
+}
+
+int64_t
+get_thread_start_timestamp() {
+    try {
+        return get_now_timestamp() - get_system_boottime() + get_thread_starttime();
+    } catch (...) {
+        return 0;
+    }
 }
 
 }  // namespace milvus
