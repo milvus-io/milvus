@@ -36,14 +36,15 @@ int64_t LogMgr::logs_delete_exceeds = 1;
 bool LogMgr::enable_log_delete = false;
 
 Status
-LogMgr::InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, int64_t max_log_file_size,
-                int64_t log_rotate_num, bool log_to_stdout, bool log_to_file) {
+LogMgr::InitLog(bool trace_enable, const std::string& level, const std::string& logs_path, const std::string& filename,
+                int64_t max_log_file_size, int64_t log_rotate_num, bool log_to_stdout, bool log_to_file) {
     try {
         auto enables = parse_level(level);
         enables["trace"] = trace_enable;
         LogMgr log_mgr(logs_path);
         log_mgr.Default()
-            .Level(enables, log_to_file)
+            .Filename(filename)
+            .Level(enables)
             .To(log_to_stdout, log_to_file)
             .Rotate(max_log_file_size, log_rotate_num)
             .Setup();
@@ -125,16 +126,19 @@ LogMgr::Default() {
 }
 
 LogMgr&
-LogMgr::Level(std::unordered_map<std::string, bool>& enables, bool log_to_file) {
+LogMgr::Filename(const std::string& filename) {
     std::string logs_reg_path = logs_path_.rfind('/') == logs_path_.length() - 1 ? logs_path_ : logs_path_ + "/";
 
-    /* TODO(yhz): Change log file format here */
-    std::string log_file = logs_reg_path + "milvus-nodeid-%datetime{%y-%M-%d-%H:%m}-PID.csv";
+    std::string log_file = logs_reg_path + filename;
 
-    /* If want to output all logs to one file, uncomment this line below and comment other set_level lines */
     /* Set set log file at Global level to make all level log output to the same log file*/
-    set_file(el_config_, el::Level::Global, log_file, log_to_file);
+    el_config_.set(el::Level::Global, el::ConfigurationType::Filename, log_file.c_str());
 
+    return *this;
+}
+
+LogMgr&
+LogMgr::Level(std::unordered_map<std::string, bool>& enables) {
     fiu_do_on("LogMgr.Level.trace_enable_to_false", enables["trace"] = false);
     enable(el_config_, el::Level::Trace, enables["trace"]);
 
@@ -239,13 +243,6 @@ LogMgr::parse_level(const std::string& level) {
         }
     }
     return enables;
-}
-
-void
-LogMgr::set_file(el::Configurations& default_conf, el::Level level, const std::string& log_path, bool log_to_file) {
-    if (log_to_file) {
-        default_conf.set(level, el::ConfigurationType::Filename, log_path.c_str());
-    }
 }
 
 void
