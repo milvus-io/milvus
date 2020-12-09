@@ -66,6 +66,7 @@ struct ServerConfig {
     struct Cluster {
         Bool enable;
         Integer role;
+        String node_id;
     } cluster;
 
     struct General {
