@@ -243,12 +243,15 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
-func NewInsertBinlogWriter(dataType schemapb.DataType) *InsertBinlogWriter {
-	descriptorEvent := newDescriptorEvent()
+func NewInsertBinlogWriter(dataType schemapb.DataType) (*InsertBinlogWriter, error) {
+	descriptorEvent, err := newDescriptorEvent()
+	if err != nil {
+		return nil, err
+	}
 	descriptorEvent.PayloadDataType = dataType
 	return &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent:    descriptorEvent,
+			descriptorEvent:    *descriptorEvent,
 			magicNumber:        MagicNumber,
 			binlogType:         InsertBinlog,
 			eventWriters:       make([]EventWriter, 0),
@@ -259,14 +262,17 @@ func NewInsertBinlogWriter(dataType schemapb.DataType) *InsertBinlogWriter {
 			isClose:            false,
 			offset:             4 + descriptorEvent.GetMemoryUsageInBytes(),
 		},
-	}
+	}, nil
 }
-func NewDeleteBinlogWriter(dataType schemapb.DataType) *DeleteBinlogWriter {
-	descriptorEvent := newDescriptorEvent()
+func NewDeleteBinlogWriter(dataType schemapb.DataType) (*DeleteBinlogWriter, error) {
+	descriptorEvent, err := newDescriptorEvent()
+	if err != nil {
+		return nil, err
+	}
 	descriptorEvent.PayloadDataType = dataType
 	return &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent:    descriptorEvent,
+			descriptorEvent:    *descriptorEvent,
 			magicNumber:        MagicNumber,
 			binlogType:         DeleteBinlog,
 			eventWriters:       make([]EventWriter, 0),
@@ -277,14 +283,17 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType) *DeleteBinlogWriter {
 			isClose:            false,
 			offset:             4 + descriptorEvent.GetMemoryUsageInBytes(),
 		},
-	}
+	}, nil
 }
-func NewDDLBinlogWriter(dataType schemapb.DataType) *DDLBinlogWriter {
-	descriptorEvent := newDescriptorEvent()
+func NewDDLBinlogWriter(dataType schemapb.DataType) (*DDLBinlogWriter, error) {
+	descriptorEvent, err := newDescriptorEvent()
+	if err != nil {
+		return nil, err
+	}
 	descriptorEvent.PayloadDataType = dataType
 	return &DDLBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent:    descriptorEvent,
+			descriptorEvent:    *descriptorEvent,
 			magicNumber:        MagicNumber,
 			binlogType:         DDLBinlog,
 			eventWriters:       make([]EventWriter, 0),
@@ -295,5 +304,5 @@ func NewDDLBinlogWriter(dataType schemapb.DataType) *DDLBinlogWriter {
 			isClose:            false,
 			offset:             4 + descriptorEvent.GetMemoryUsageInBytes(),
 		},
-	}
+	}, nil
 }

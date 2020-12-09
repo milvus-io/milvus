@@ -43,17 +43,17 @@ func (reader *EventReader) readData() (eventData, error) {
 	var err error
 	switch reader.TypeCode {
 	case InsertEventType:
-		data, err = readInsertEventData(reader.buffer)
+		data, err = readInsertEventDataFixPart(reader.buffer)
 	case DeleteEventType:
-		data, err = readDeleteEventData(reader.buffer)
+		data, err = readDeleteEventDataFixPart(reader.buffer)
 	case CreateCollectionEventType:
-		data, err = readCreateCollectionEventData(reader.buffer)
+		data, err = readCreateCollectionEventDataFixPart(reader.buffer)
 	case DropCollectionEventType:
-		data, err = readDropCollectionEventData(reader.buffer)
+		data, err = readDropCollectionEventDataFixPart(reader.buffer)
 	case CreatePartitionEventType:
-		data, err = readCreatePartitionEventData(reader.buffer)
+		data, err = readCreatePartitionEventDataFixPart(reader.buffer)
 	case DropPartitionEventType:
-		data, err = readDropPartitionEventData(reader.buffer)
+		data, err = readDropPartitionEventDataFixPart(reader.buffer)
 	default:
 		return nil, errors.New("unknown header type code: " + strconv.Itoa(int(reader.TypeCode)))
 	}

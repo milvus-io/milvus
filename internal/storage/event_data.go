@@ -1,12 +1,11 @@
 package storage
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -37,9 +36,7 @@ func (data *descriptorEventData) SetEndTimeStamp(ts typeutil.Timestamp) {
 }
 
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
-	buf := new(bytes.Buffer)
-	_ = data.Write(buf)
-	return int32(buf.Len())
+	return int32(binary.Size(data.DescriptorEventDataFixPart) + binary.Size(data.PostHeaderLengths))
 }
 
 func (data *descriptorEventData) Write(buffer io.Writer) error {
@@ -54,7 +51,10 @@ func (data *descriptorEventData) Write(buffer io.Writer) error {
 }
 
 func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
-	event := newDescriptorEventData()
+	event, err := newDescriptorEventData()
+	if err != nil {
+		return nil, err
+	}
 
 	if err := binary.Read(buffer, binary.LittleEndian, &event.DescriptorEventDataFixPart); err != nil {
 		return nil, err
@@ -64,11 +64,11 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 		return nil, err
 	}
 
-	return &event, nil
+	return event, nil
 }
 
 type eventData interface {
-	GetEventDataSize() int32
+	GetEventDataFixPartSize() int32
 	WriteEventData(buffer io.Writer) error
 }
 
@@ -87,10 +87,8 @@ func (data *insertEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
 	data.EndTimestamp = timestamp
 }
 
-func (data *insertEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *insertEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *insertEventData) WriteEventData(buffer io.Writer) error {
@@ -110,20 +108,12 @@ func (data *deleteEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
 	data.EndTimestamp = timestamp
 }
 
-func (data *deleteEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *deleteEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *deleteEventData) WriteEventData(buffer io.Writer) error {
-	if err := binary.Write(buffer, binary.LittleEndian, data.StartTimestamp); err != nil {
-		return err
-	}
-	if err := binary.Write(buffer, binary.LittleEndian, data.EndTimestamp); err != nil {
-		return err
-	}
-	return nil
+	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
 type createCollectionEventData struct {
@@ -139,20 +129,12 @@ func (data *createCollectionEventData) SetEndTimestamp(timestamp typeutil.Timest
 	data.EndTimestamp = timestamp
 }
 
-func (data *createCollectionEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *createCollectionEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *createCollectionEventData) WriteEventData(buffer io.Writer) error {
-	if err := binary.Write(buffer, binary.LittleEndian, data.StartTimestamp); err != nil {
-		return err
-	}
-	if err := binary.Write(buffer, binary.LittleEndian, data.EndTimestamp); err != nil {
-		return err
-	}
-	return nil
+	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
 type dropCollectionEventData struct {
@@ -168,20 +150,12 @@ func (data *dropCollectionEventData) SetEndTimestamp(timestamp typeutil.Timestam
 	data.EndTimestamp = timestamp
 }
 
-func (data *dropCollectionEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *dropCollectionEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *dropCollectionEventData) WriteEventData(buffer io.Writer) error {
-	if err := binary.Write(buffer, binary.LittleEndian, data.StartTimestamp); err != nil {
-		return err
-	}
-	if err := binary.Write(buffer, binary.LittleEndian, data.EndTimestamp); err != nil {
-		return err
-	}
-	return nil
+	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
 type createPartitionEventData struct {
@@ -197,20 +171,12 @@ func (data *createPartitionEventData) SetEndTimestamp(timestamp typeutil.Timesta
 	data.EndTimestamp = timestamp
 }
 
-func (data *createPartitionEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *createPartitionEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *createPartitionEventData) WriteEventData(buffer io.Writer) error {
-	if err := binary.Write(buffer, binary.LittleEndian, data.StartTimestamp); err != nil {
-		return err
-	}
-	if err := binary.Write(buffer, binary.LittleEndian, data.EndTimestamp); err != nil {
-		return err
-	}
-	return nil
+	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
 type dropPartitionEventData struct {
@@ -226,23 +192,36 @@ func (data *dropPartitionEventData) SetEndTimestamp(timestamp typeutil.Timestamp
 	data.EndTimestamp = timestamp
 }
 
-func (data *dropPartitionEventData) GetEventDataSize() int32 {
-	buf := new(bytes.Buffer)
-	_ = binary.Write(buf, binary.LittleEndian, data)
-	return int32(buf.Len())
+func (data *dropPartitionEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data))
 }
 
 func (data *dropPartitionEventData) WriteEventData(buffer io.Writer) error {
-	if err := binary.Write(buffer, binary.LittleEndian, data.StartTimestamp); err != nil {
-		return err
-	}
-	if err := binary.Write(buffer, binary.LittleEndian, data.EndTimestamp); err != nil {
-		return err
-	}
-	return nil
+	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
-func newDescriptorEventData() descriptorEventData {
+func getEventFixPartSize(code EventTypeCode) int32 {
+	switch code {
+	case DescriptorEventType:
+		return int32(binary.Size(descriptorEventData{}.DescriptorEventDataFixPart))
+	case InsertEventType:
+		return (&insertEventData{}).GetEventDataFixPartSize()
+	case DeleteEventType:
+		return (&deleteEventData{}).GetEventDataFixPartSize()
+	case CreateCollectionEventType:
+		return (&createCollectionEventData{}).GetEventDataFixPartSize()
+	case DropCollectionEventType:
+		return (&dropCollectionEventData{}).GetEventDataFixPartSize()
+	case CreatePartitionEventType:
+		return (&createCollectionEventData{}).GetEventDataFixPartSize()
+	case DropPartitionEventType:
+		return (&dropPartitionEventData{}).GetEventDataFixPartSize()
+	default:
+		return -1
+	}
+}
+
+func newDescriptorEventData() (*descriptorEventData, error) {
 	data := descriptorEventData{
 		DescriptorEventDataFixPart: DescriptorEventDataFixPart{
 			BinlogVersion:   BinlogVersion,
@@ -255,50 +234,57 @@ func newDescriptorEventData() descriptorEventData {
 			EndTimestamp:    0,
 			PayloadDataType: -1,
 		},
-		PostHeaderLengths: []uint8{16, 16, 16, 16, 16, 16},
+		PostHeaderLengths: []uint8{},
+	}
+	for i := DescriptorEventType; i < EventTypeEnd; i++ {
+		size := getEventFixPartSize(i)
+		if size == -1 {
+			return nil, errors.Errorf("undefined event type %d", i)
+		}
+		data.PostHeaderLengths = append(data.PostHeaderLengths, uint8(size))
 	}
 	data.HeaderLength = int8(data.GetMemoryUsageInBytes())
-	return data
+	return &data, nil
 }
 
-func newInsertEventData() insertEventData {
-	return insertEventData{
+func newInsertEventData() (*insertEventData, error) {
+	return &insertEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
-func newDeleteEventData() deleteEventData {
-	return deleteEventData{
+func newDeleteEventData() (*deleteEventData, error) {
+	return &deleteEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
-func newCreateCollectionEventData() createCollectionEventData {
-	return createCollectionEventData{
+func newCreateCollectionEventData() (*createCollectionEventData, error) {
+	return &createCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
-func newDropCollectionEventData() dropCollectionEventData {
-	return dropCollectionEventData{
+func newDropCollectionEventData() (*dropCollectionEventData, error) {
+	return &dropCollectionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
-func newCreatePartitionEventData() createPartitionEventData {
-	return createPartitionEventData{
+func newCreatePartitionEventData() (*createPartitionEventData, error) {
+	return &createPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
-func newDropPartitionEventData() dropPartitionEventData {
-	return dropPartitionEventData{
+func newDropPartitionEventData() (*dropPartitionEventData, error) {
+	return &dropPartitionEventData{
 		StartTimestamp: 0,
 		EndTimestamp:   0,
-	}
+	}, nil
 }
 
-func readInsertEventData(buffer io.Reader) (*insertEventData, error) {
+func readInsertEventDataFixPart(buffer io.Reader) (*insertEventData, error) {
 	data := &insertEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
@@ -306,7 +292,7 @@ func readInsertEventData(buffer io.Reader) (*insertEventData, error) {
 	return data, nil
 }
 
-func readDeleteEventData(buffer io.Reader) (*deleteEventData, error) {
+func readDeleteEventDataFixPart(buffer io.Reader) (*deleteEventData, error) {
 	data := &deleteEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
@@ -314,7 +300,7 @@ func readDeleteEventData(buffer io.Reader) (*deleteEventData, error) {
 	return data, nil
 }
 
-func readCreateCollectionEventData(buffer io.Reader) (*createCollectionEventData, error) {
+func readCreateCollectionEventDataFixPart(buffer io.Reader) (*createCollectionEventData, error) {
 	data := &createCollectionEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
@@ -322,7 +308,7 @@ func readCreateCollectionEventData(buffer io.Reader) (*createCollectionEventData
 	return data, nil
 }
 
-func readDropCollectionEventData(buffer io.Reader) (*dropCollectionEventData, error) {
+func readDropCollectionEventDataFixPart(buffer io.Reader) (*dropCollectionEventData, error) {
 	data := &dropCollectionEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
@@ -330,7 +316,7 @@ func readDropCollectionEventData(buffer io.Reader) (*dropCollectionEventData, er
 	return data, nil
 }
 
-func readCreatePartitionEventData(buffer io.Reader) (*createPartitionEventData, error) {
+func readCreatePartitionEventDataFixPart(buffer io.Reader) (*createPartitionEventData, error) {
 	data := &createPartitionEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
@@ -338,7 +324,7 @@ func readCreatePartitionEventData(buffer io.Reader) (*createPartitionEventData, 
 	return data, nil
 }
 
-func readDropPartitionEventData(buffer io.Reader) (*dropPartitionEventData, error) {
+func readDropPartitionEventDataFixPart(buffer io.Reader) (*dropPartitionEventData, error) {
 	data := &dropPartitionEventData{}
 	if err := binary.Read(buffer, binary.LittleEndian, data); err != nil {
 		return nil, err
