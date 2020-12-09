@@ -115,7 +115,6 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3631 Add build option `-rdynamic` in CMakeList.txt
 -   \#3882 Params in Restful-api is different from the params in other SDKs
 
-## Task
 
 # Milvus 0.10.2 (2020-08-15)
 
