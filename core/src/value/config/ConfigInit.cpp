@@ -101,6 +101,7 @@ InitConfig() {
         /* cluster */
         Bool(cluster.enable, false),
         Enum(cluster.role, &ClusterRoleMap, ClusterRole::RW),
+        String(cluster.node_id, "master"),
 
         /* general */
         String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid),
@@ -194,9 +195,12 @@ version: @version@
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # role                 | Milvus deployment role: rw / ro                            | Role       | rw              |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# node_id              | Node ID, used in log message only.                         | String     | master          |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 cluster:
   enable: @cluster.enable@
   role: @cluster.role@
+  node_id: @cluster.node_id@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # General Config       | Description                                                | Type       | Default         |
