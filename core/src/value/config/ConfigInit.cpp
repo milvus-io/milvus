@@ -23,6 +23,25 @@ const int64_t GB = (1024ll * 1024 * 1024);
 namespace milvus {
 
 bool
+is_nodeid_valid(const std::string& val, std::string& err) {
+    // lambda, check if it's [0-9a-zA-Z_-]
+    auto is_valid = [](char ch) {
+        if (isalnum(ch) || ch == '_' || ch == '-') {
+            return true;
+        }
+        return false;
+    };
+
+    for (auto& ch : val) {
+        if (not is_valid(ch)) {
+            err = "Invalid nodeid: " + val + ", supported char: [0-9a-zA-Z_-]";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
 is_timezone_valid(const std::string& val, std::string& err) {
     auto plus_count = std::count(val.begin(), val.end(), '+');
     auto sub_count = std::count(val.begin(), val.end(), '-');
@@ -101,7 +120,7 @@ InitConfig() {
         /* cluster */
         Bool(cluster.enable, false),
         Enum(cluster.role, &ClusterRoleMap, ClusterRole::RW),
-        String(cluster.node_id, "master"),
+        String_(cluster.node_id, _MODIFIABLE, "master", is_nodeid_valid),
 
         /* general */
         String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid),
