@@ -146,6 +146,7 @@ struct ServerConfig {
 
     struct Log {
         String min_messages;
+        // Integer rotation_age;
     } log;
 
     struct System {

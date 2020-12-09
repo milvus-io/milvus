@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <map>
+#include <regex>
 #include <sstream>
 #include <string>
 
@@ -24,6 +26,13 @@ std::unordered_map<std::string, int64_t> BYTE_UNITS = {
     {"k", 1024},
     {"m", 1024 * 1024},
     {"g", 1024 * 1024 * 1024},
+};
+
+std::map<std::string, int64_t> TIME_UNITS = {
+    //    {"seconds", 1ll},
+    //    {"minutes", 1ll * 60},
+    {"hours", 1ll * 60 * 60},
+    {"days", 1ll * 60 * 60 * 24},
 };
 
 bool
@@ -111,11 +120,36 @@ parse_bytes(const std::string& str, std::string& err) {
         } else {
             std::stringstream ss;
             ss << "The specified value for memory (" << str << ") should specify the units."
-               << "The postfix should be one of the `b` `k` `m` `g` characters";
+               << " The postfix should be one of the `b` `k` `m` `g` characters.";
             err = ss.str();
         }
     } catch (...) {
         err = "Unknown error happened on parse bytes.";
+    }
+    return 0;
+}
+
+int64_t
+parse_time(const std::string& str, std::string& err) {
+    try {
+        const std::regex regex(R"(\s*([0-9]+)\s*(seconds|minutes|hours|days)\s*)");
+        std::smatch base_match;
+        auto& units = TIME_UNITS;
+        if (std::regex_match(str, base_match, regex) && base_match.size() == 3 &&
+            units.find(base_match[2].str()) != units.end()) {
+            return stoll(base_match[1].str()) * units[base_match[2].str()];
+        } else {
+            std::stringstream ss;
+            ss << "The specified value for time (" << str << ") should specify the units."
+               << " The postfix should be one of the ";
+            for (auto& pair : units) {
+                ss << "`" << pair.first << "` ";
+            }
+            ss << "words.";
+            err = ss.str();
+        }
+    } catch (...) {
+        err = "Unknown error happened on parse time.";
     }
     return 0;
 }
@@ -484,6 +518,77 @@ SizeValue::Get() {
         return std::to_string(val / kb) + "KB";
     } else {
         return std::to_string(val);
+    }
+}
+
+TimeValue::TimeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
+                     Value<int64_t>& config, int64_t default_value,
+                     std::function<bool(int64_t val, std::string& err)> is_valid_fn)
+    : BaseValue(name, alias, modifiable),
+      config_(config),
+      lower_bound_(lower_bound),
+      upper_bound_(upper_bound),
+      default_value_(default_value),
+      is_valid_fn_(std::move(is_valid_fn)) {
+}
+
+void
+TimeValue::Init() {
+    BaseValue::Init();
+    config_ = default_value_;
+}
+
+void
+TimeValue::Set(const std::string& val, bool update) {
+    assertm(inited_, "uninitialized");
+    try {
+        /* Check modifiable */
+        if (update and not modifiable_) {
+            throw Immutable(name_, val);
+        }
+
+        /* Parse from string */
+        std::string err;
+        int64_t value = parse_time(val, err);
+        if (not err.empty()) {
+            throw Invalid(name_, val, err);
+        }
+
+        /* Boundary check */
+        if (not boundary_check<int64_t>(value, lower_bound_, upper_bound_)) {
+            throw OutOfRange<int64_t>(name_, val, lower_bound_, upper_bound_);
+        }
+
+        /* Validate */
+        if (is_valid_fn_ && not is_valid_fn_(value, err)) {
+            throw Invalid(name_, val, err);
+        }
+
+        /* Set value */
+        config_ = value;
+    } catch (ValueError& e) {
+        throw;
+    } catch (...) {
+        throw Unexpected(name_, val);
+    }
+}
+
+std::string
+TimeValue::Get() {
+    assertm(inited_, "uninitialized");
+    auto val = config_();
+    const int64_t second = 1ll;
+    const int64_t minute = second * 60;
+    const int64_t hour = minute * 60;
+    const int64_t day = hour * 24;
+    if (val % day == 0) {
+        return std::to_string(val / day) + "days";
+    } else if (val % hour == 0) {
+        return std::to_string(val / hour) + "hours";
+    } else if (val % minute == 0) {
+        return std::to_string(val / minute) + "minutes";
+    } else {
+        return std::to_string(val) + "seconds";
     }
 }
 

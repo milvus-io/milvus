@@ -19,6 +19,8 @@
 #define _IMMUTABLE (false)
 const int64_t MB = (1024ll * 1024);
 const int64_t GB = (1024ll * 1024 * 1024);
+const int64_t HOURS = (3600ll);
+const int64_t DAYS = (HOURS * 24);
 
 namespace milvus {
 
@@ -101,6 +103,8 @@ is_cachesize_valid(int64_t size, std::string& err) {
     { #name, CreateFloatingValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 #define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
     { #name, CreateSizeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
+#define Time_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateTimeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 
 #define Bool(name, default) Bool_(name, true, default, nullptr)
 #define String(name, default) String_(name, true, default, nullptr)
@@ -110,6 +114,7 @@ is_cachesize_valid(int64_t size, std::string& err) {
 #define Floating(name, lower_bound, upper_bound, default) \
     Floating_(name, true, lower_bound, upper_bound, default, nullptr)
 #define Size(name, lower_bound, upper_bound, default) Size_(name, true, lower_bound, upper_bound, default, nullptr)
+#define Time(name, lower_bound, upper_bound, default) Time_(name, true, lower_bound, upper_bound, default, nullptr)
 
 std::unordered_map<std::string, BaseValuePtr>
 InitConfig() {
@@ -170,6 +175,7 @@ InitConfig() {
         Bool(logs.log_to_file, true),
 
         String(log.min_messages, "warning"),
+        // Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
 
         /* tracing */
         String(tracing.json_config_path, ""),
