@@ -14,7 +14,6 @@ const (
 	BinlogVersion = 1
 	CommitID      = 1
 	ServerVersion = 1
-	HeaderLength  = 17
 )
 
 type BinlogType int32
@@ -25,7 +24,7 @@ const (
 	DDLBinlog
 )
 const (
-	MagicNumber = 0xfffabc
+	MagicNumber int32 = 0xfffabc
 )
 
 type baseBinlogWriter struct {

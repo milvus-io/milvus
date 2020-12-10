@@ -243,7 +243,6 @@ func newDescriptorEventData() (*descriptorEventData, error) {
 		}
 		data.PostHeaderLengths = append(data.PostHeaderLengths, uint8(size))
 	}
-	data.HeaderLength = int8(data.GetMemoryUsageInBytes())
 	return &data, nil
 }
 
