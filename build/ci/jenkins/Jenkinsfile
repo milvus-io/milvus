@@ -40,6 +40,7 @@ pipeline {
                 CCACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/ccache"
                 THIRDPARTY_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/thirdparty"
                 CUSTOM_THIRDPARTY_PATH = "${WORKSPACE}/3rdparty_download"
+                GO_CACHE_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/go-cache"
                 GO_MOD_ARTFACTORY_URL = "${JFROG_ARTFACTORY_URL}/milvus-distributed/go-mod"
             }
             steps {
