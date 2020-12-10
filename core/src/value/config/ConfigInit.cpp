@@ -176,6 +176,7 @@ InitConfig() {
 
         String(log.min_messages, "warning"),
         Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
+        Size(log.rotation_size, 128 * MB, 8192 * MB, 1024 * MB),
 
         /* tracing */
         String(tracing.json_config_path, ""),
@@ -386,9 +387,12 @@ logs:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # rotation_age         | When to generate new logfile.                              | Time       | 24 hours        |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_size        | When to generate new logfile.                              | Size       | 1GB             |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 log:
   min_messages: @log.min_messages@
   rotation_age: @log.rotation_age@
+  rotation_size: @log.rotation_size@
 
 )";
 
