@@ -34,6 +34,12 @@ class ClientTest {
     CreateCollection();
 
     void
+    CreateMultiVecCollection();
+
+    void
+    InsertMultiEntities();
+
+    void
     CreatePartition();
 
     void
