@@ -138,11 +138,6 @@ IVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids_without_codes(rows, reinterpret_cast<const float*>(p_data), p_ids);
-
-    if (STATISTICS_LEVEL) {
-        auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
-        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
-    }
 }
 
 void
