@@ -16,7 +16,6 @@ timeout(time: 150, unit: 'MINUTES') {
 
     def helmStatusCMD = "helm get manifest --namespace milvus ${env.CLUSTER_HELM_RELEASE_NAME} | kubectl describe -n milvus -f - && \
                          kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=writable\" -c milvus && \
-                         kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=readonly\" -c milvus && \
                          kubectl logs --namespace milvus -l \"app.kubernetes.io/name=milvus,app.kubernetes.io/instance=${env.CLUSTER_HELM_RELEASE_NAME},component=nginx\" && \
                          helm status -n milvus ${env.CLUSTER_HELM_RELEASE_NAME}"
 
@@ -59,7 +58,7 @@ timeout(time: 150, unit: 'MINUTES') {
                                --alluredir=\"test_out/dev/cluster/mysql\" \
                                --ip ${env.CLUSTER_HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                                --service ${env.CLUSTER_HELM_RELEASE_NAME} >> \
-                               ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
+                               ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_cluster_dev_test.log"
         sh "${pytestCMD_mysql}"
     }
 }
