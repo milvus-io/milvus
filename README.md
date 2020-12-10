@@ -19,7 +19,7 @@ The following is Milvus architecture:
 ![arch](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_arch.png)
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). See Milvus [release notes](https://www.milvus.io/docs/release_notes.md) to keep up-to-date with its releases and updates.
 
-Milvus is an [LF AI Foundation](https://lfai.foundation/) incubation project. 
+Milvus is an incubation-stage project at [LF AI & Data Foundation](https://lfaidata.foundation/).
 
 ## Get started
 
