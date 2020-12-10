@@ -18,13 +18,22 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+#define CHECK_NOT_NULL_AND_RETURN(target) \
+    if (not target) {                     \
+        return;                           \
+    }
+
 void
 Snapshot::RefAll() {
+    assert(invalid_ != true);
     std::apply([this](auto&... resource) { ((DoRef(resource)), ...); }, resources_);
 }
 
 void
 Snapshot::UnRefAll() {
+    if (invalid_) {
+        return;
+    }
     std::apply([this](auto&... resource) { ((DoUnRef(resource)), ...); }, resources_);
 }
 
@@ -42,14 +51,17 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto& segment_files_holder = SegmentFilesHolder::GetInstance();
 
     auto collection_commit = collection_commits_holder.GetResource(store, ss_id, false);
+    CHECK_NOT_NULL_AND_RETURN(collection_commit);
     AddResource<CollectionCommit>(collection_commit);
 
     max_lsn_ = collection_commit->GetLsn();
     auto schema_commit = schema_commits_holder.GetResource(store, collection_commit->GetSchemaId(), false);
+    CHECK_NOT_NULL_AND_RETURN(schema_commit);
     AddResource<SchemaCommit>(schema_commit);
 
     current_schema_id_ = schema_commit->GetID();
     auto collection = collections_holder.GetResource(store, collection_commit->GetCollectionId(), false);
+    CHECK_NOT_NULL_AND_RETURN(collection);
     AddResource<Collection>(collection);
 
     auto base_path = GetResPath<Collection>(store->GetRootPath(), std::make_shared<Collection>(*collection));
@@ -60,11 +72,13 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         auto partition_id = partition_commit->GetPartitionId();
         auto partition = partitions_holder.GetResource(store, partition_id, false);
         auto partition_name = partition->GetName();
+        CHECK_NOT_NULL_AND_RETURN(partition_commit);
         AddResource<PartitionCommit>(partition_commit);
         base_path = GetResPath<Partition>(store->GetRootPath(), std::make_shared<Partition>(*partition));
         partition_commit->LoadIds(base_path);
 
         p_pc_map_[partition_id] = partition_commit->GetID();
+        CHECK_NOT_NULL_AND_RETURN(partition);
         AddResource<Partition>(partition);
         partition_names_map_[partition_name] = partition_id;
         p_max_seg_num_[partition_id] = 0;
@@ -76,10 +90,13 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         auto& partition_commit_mappings = partition_commit->GetMappings();
         for (auto s_c_id : partition_commit_mappings) {
             auto segment_commit = segment_commits_holder.GetResource(store, s_c_id, false);
+            CHECK_NOT_NULL_AND_RETURN(segment_commit);
             auto segment_id = segment_commit->GetSegmentId();
             auto segment = segments_holder.GetResource(store, segment_id, false);
+            CHECK_NOT_NULL_AND_RETURN(segment);
             auto segment_schema_id = segment_commit->GetSchemaId();
             auto segment_schema = schema_commits_holder.GetResource(store, segment_schema_id, false);
+            CHECK_NOT_NULL_AND_RETURN(segment_schema);
             auto segment_partition_id = segment->GetPartitionId();
             AddResource<SchemaCommit>(segment_schema);
             AddResource<SegmentCommit>(segment_commit);
@@ -92,9 +109,11 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
             auto& segment_commit_mappings = segment_commit->GetMappings();
             for (auto s_f_id : segment_commit_mappings) {
                 auto segment_file = segment_files_holder.GetResource(store, s_f_id, false);
+                CHECK_NOT_NULL_AND_RETURN(segment_file);
                 auto segment_file_id = segment_file->GetID();
                 auto field_element_id = segment_file->GetFieldElementId();
                 auto field_element = field_elements_holder.GetResource(store, field_element_id, false);
+                CHECK_NOT_NULL_AND_RETURN(field_element);
                 AddResource<FieldElement>(field_element);
                 AddResource<SegmentFile>(segment_file);
                 element_segfiles_map_[field_element_id][segment_id] = segment_file_id;
@@ -112,10 +131,12 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         auto& schema_commit = kv.second;
         for (auto field_commit_id : schema_commit_mappings) {
             auto field_commit = field_commits_holder.GetResource(store, field_commit_id, false);
+            CHECK_NOT_NULL_AND_RETURN(field_commit);
             AddResource<FieldCommit>(field_commit);
 
             auto field_id = field_commit->GetFieldId();
             auto field = fields_holder.GetResource(store, field_id, false);
+            CHECK_NOT_NULL_AND_RETURN(field);
             auto field_name = field->GetName();
             AddResource<Field>(field);
 
@@ -123,6 +144,7 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
             auto& field_commit_mappings = field_commit->GetMappings();
             for (auto field_element_id : field_commit_mappings) {
                 auto field_element = field_elements_holder.GetResource(store, field_element_id, false);
+                CHECK_NOT_NULL_AND_RETURN(field_element);
                 AddResource<FieldElement>(field_element);
                 auto field_element_name = field_element->GetName();
                 field_element_names_map_[field_name][field_element_name] = field_element_id;
@@ -130,6 +152,7 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
         }
     }
 
+    invalid_ = false;
     RefAll();
 }
 
@@ -197,6 +220,9 @@ Snapshot::GetSegmentFile(ID_TYPE segment_id, ID_TYPE field_element_id) const {
 
 const std::string
 Snapshot::ToString() const {
+    if (invalid_) {
+        return "Invalid Snapshot";
+    }
     auto to_matrix_string = [](const MappingT& mappings, int line_length, size_t ident = 0) -> std::string {
         std::stringstream ss;
         std::string l1_spaces;

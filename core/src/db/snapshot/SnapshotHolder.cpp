@@ -13,6 +13,8 @@
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHolders.h"
 
+#include <string>
+
 namespace milvus {
 namespace engine {
 namespace snapshot {
@@ -166,6 +168,10 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
     Snapshot::Ptr oldest_ss;
     {
         auto ss = std::make_shared<Snapshot>(store, id);
+        if (!ss->IsValid()) {
+            std::string emsg = "SnapshotHolder::Add: Invalid SS " + std::to_string(id);
+            return Status(SS_NOT_ACTIVE_ERROR, emsg);
+        }
 
         std::unique_lock<std::mutex> lock(mutex_);
         if (!IsActive(ss)) {
