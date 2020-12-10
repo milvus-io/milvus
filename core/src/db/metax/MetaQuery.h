@@ -11,13 +11,30 @@
 
 #pragma once
 
-#include <string>
+#include <memory>
+#include <tuple>
+#include <type_traits>
 
-#include "db/Types.h"
-#include "db/metax/MetaAdapter.h"
+#include "db/metax/MetaTraits.h"
 
 namespace milvus::engine::metax {
 
-enum class EngineType { mock_, mysql_, sqlite_ };
+template <typename R, typename F>
+struct Column {
+    using RType = remove_cr_t<R>;
+    using FType = remove_cr_t<F>;
+    using VType = remove_cr_t<typename F::ValueType>;
+
+    VType value_;
+};
+
+template <typename ... Cols>
+struct Columns {
+    using type = std::tuple<Cols...>;
+    static constexpr size_t size = std::tuple_size<std::tuple<Cols...>>::value;
+};
+
+template<typename...Cols>
+constexpr size_t Columns<Cols...>::size;
 
 }  // namespace milvus::engine::metax

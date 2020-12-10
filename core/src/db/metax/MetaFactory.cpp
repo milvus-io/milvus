@@ -50,13 +50,13 @@ MetaFactory::Build(const DBMetaOptions& meta_options) {
 
     if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
         /* options.backend_uri_ = "mysql://root:12345678@127.0.0.1:3307/milvus"; */
-        auto proxy = std::make_shared<MetaProxy>(EngineType::mysql);
+        auto proxy = std::make_shared<MetaProxy>(EngineType::mysql_);
         return std::make_shared<metax::MetaAdapter>(proxy);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "mock") == 0) {
-        auto proxy = std::make_shared<MetaProxy>(EngineType::mock);
+        auto proxy = std::make_shared<MetaProxy>(EngineType::mock_);
         return std::make_shared<metax::MetaAdapter>(proxy);
     } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
-        auto proxy = std::make_shared<metax::MetaProxy>(EngineType::sqlite);
+        auto proxy = std::make_shared<metax::MetaProxy>(EngineType::sqlite_);
         return std::make_shared<metax::MetaAdapter>(proxy);
     } else {
         throw InvalidArgumentException("URI dialect is not mysql / sqlite / mock");

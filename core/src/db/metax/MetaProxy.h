@@ -16,6 +16,7 @@
 
 #include "db/Types.h"
 #include "db/metax/MetaDef.h"
+#include "db/metax/MetaQuery.h"
 #include "db/metax/MetaResField.h"
 #include "db/metax/backend/MetaMysqlWare.h"
 #include "db/snapshot/ResourceTypes.h"
@@ -27,14 +28,14 @@ class MetaProxy {
  public:
     explicit MetaProxy(EngineType type) : type_(type) {
         switch (type) {
-            case EngineType::mysql: {
+            case EngineType::mysql_: {
                 ware_ = std::make_shared<MetaMysqlWare>();
                 break;
             }
-            case EngineType::sqlite: {
+            case EngineType::sqlite_: {
                 break;
             }
-            case EngineType::mock: {
+            case EngineType::mock_: {
                 break;
             }
             default: { break; }
@@ -45,6 +46,8 @@ class MetaProxy {
     Insert(const MetaResFieldTuple& fields, snapshot::ID_TYPE& result_id) {
         return ware_->Insert(fields, result_id);
     }
+
+
 
  private:
     EngineType type_;

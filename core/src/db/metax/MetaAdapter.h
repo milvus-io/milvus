@@ -20,6 +20,7 @@
 #include "db/metax/MetaResField.h"
 #include "db/metax/MetaResFieldHelper.h"
 #include "db/metax/MetaTraits.h"
+#include "db/snapshot/ResourceTypes.h"
 #include "db/snapshot/Resources.h"
 
 #include "utils/Exception.h"
@@ -34,10 +35,9 @@ class MetaAdapter {
 
     template <typename R, typename std::enable_if<is_decay_base_of_v<snapshot::BaseResource<R>, R>>::type* = nullptr>
     Status
-    Insert(std::shared_ptr<R> res) {
+    Insert(std::shared_ptr<R> res, snapshot::ID_TYPE& result_id) {
         auto fields = GenFieldTupleFromRes<R>(res);
-
-        return Status::OK();
+        return proxy_->Insert(fields, result_id);
     }
 
  private:
