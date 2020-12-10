@@ -289,9 +289,13 @@ func TestMetaTable_Segment(t *testing.T) {
 	getSegMeta, err := meta.GetSegmentByID(segMeta.SegmentID)
 	assert.Nil(t, err)
 	assert.Equal(t, &segMeta, getSegMeta)
-	err = meta.CloseSegment(segMeta.SegmentID, Timestamp(11), 111, 100000)
+	segMeta.NumRows = 111
+	segMeta.MemSize = 100000
+	err = meta.UpdateSegment(&segMeta)
 	assert.Nil(t, err)
-	err = meta.CloseSegment(1000, Timestamp(11), 111, 100000)
+	err = meta.CloseSegment(segMeta.SegmentID, Timestamp(11))
+	assert.Nil(t, err)
+	err = meta.CloseSegment(1000, Timestamp(11))
 	assert.NotNil(t, err)
 	getSegMeta, err = meta.GetSegmentByID(segMeta.SegmentID)
 	assert.Nil(t, err)
