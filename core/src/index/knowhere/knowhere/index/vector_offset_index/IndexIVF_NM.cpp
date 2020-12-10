@@ -152,7 +152,7 @@ IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -320,7 +320,7 @@ IVF_NM::GenParams(const Config& config) {
 
 void
 IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, int64_t* labels, const Config& config,
-                  const faiss::ConcurrentBitsetPtr& bitset) {
+                  const faiss::BitsetView& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;

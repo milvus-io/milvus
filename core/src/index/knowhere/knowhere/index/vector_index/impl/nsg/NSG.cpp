@@ -851,7 +851,7 @@ NsgIndex::FindUnconnectedNode(float* data, boost::dynamic_bitset<>& has_linked, 
 
 void
 NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k,
-                 float* dist, int64_t* ids, SearchParams& params, faiss::ConcurrentBitsetPtr bitset) {
+                 float* dist, int64_t* ids, SearchParams& params, const faiss::BitsetView& bitset) {
     std::vector<std::vector<Neighbor>> resset(nq);
 
     TimeRecorder rc("NsgIndex::search", 1);
@@ -873,7 +873,7 @@ NsgIndex::Search(const float* query, float* data, const unsigned& nq, const unsi
             if (pos >= k) {
                 break;  // already top k
             }
-            if (!bitset || !bitset->test(node.id)) {
+            if (!bitset || !bitset.test(node.id)) {
                 ids[i * k + pos] = ids_[node.id];
                 dist[i * k + pos] = is_ip ? -node.distance : node.distance;
                 ++pos;

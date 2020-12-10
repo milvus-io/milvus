@@ -180,7 +180,7 @@ CPUSPTAGRNG::SetParameters(const Config& config) {
 }
 
 DatasetPtr
-CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     SetParameters(config);
 
     float* p_data = (float*)dataset_ptr->Get<const void*>(meta::TENSOR);

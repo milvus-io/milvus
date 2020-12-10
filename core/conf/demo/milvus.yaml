@@ -146,9 +146,6 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
-#                      | error, fatal                                               |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # path                 | Absolute path to the folder holding the log files.         | String     |                 |
@@ -171,5 +168,19 @@ logs:
   log_to_stdout: false
   log_to_file: true
 
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Log Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
+#                      | error, fatal                                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_age         | When to generate new logfile.                              | Time       | 24 hours        |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_size        | When to generate new logfile.                              | Size       | 1GB             |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+
 log:
-  min_messages: warning 
+  min_messages: warning
+  rotation_age: 24 hours
+  rotation_size: 1GB
+

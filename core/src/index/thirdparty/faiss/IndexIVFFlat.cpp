@@ -184,12 +184,12 @@ struct IVFFlatScanner: InvertedListScanner {
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
                        size_t k,
-                       ConcurrentBitsetPtr bitset) const override
+                       const BitsetView& bitset) const override
     {
         const float *list_vecs = (const float*)codes;
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            if (!bitset || !bitset->test(ids[j])) {
+            if (!bitset || !bitset.test(ids[j])) {
                 const float * yj = list_vecs + d * j;
                 float dis = metric == METRIC_INNER_PRODUCT ?
                             fvec_inner_product (xi, yj, d) : fvec_L2sqr (xi, yj, d);
@@ -208,7 +208,7 @@ struct IVFFlatScanner: InvertedListScanner {
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & res,
-                           ConcurrentBitsetPtr bitset = nullptr) const override
+                           const BitsetView& bitset = nullptr) const override
     {
         const float *list_vecs = (const float*)codes;
         for (size_t j = 0; j < list_size; j++) {
@@ -354,7 +354,7 @@ void IndexIVFFlatDedup::search_preassigned (
            float *distances, idx_t *labels,
            bool store_pairs,
            const IVFSearchParameters *params,
-           ConcurrentBitsetPtr bitset) const
+           const BitsetView& bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (
            !store_pairs, "store_pairs not supported in IVFDedup");
@@ -483,7 +483,7 @@ void IndexIVFFlatDedup::range_search(
         const float* ,
         float ,
         RangeSearchResult* ,
-        ConcurrentBitsetPtr) const
+        const BitsetView&) const
 {
     FAISS_THROW_MSG ("not implemented");
 }

@@ -231,7 +231,7 @@ struct RHNSW {
                      storage_idx_t nearest,
                      storage_idx_t ef,
                      float d_nearest,
-                     ConcurrentBitsetPtr bitset = nullptr) const;
+                     const BitsetView& bitset = nullptr) const;
 
   void make_connection(DistanceComputer& ptdis,
                        storage_idx_t pt_id,
@@ -245,7 +245,7 @@ struct RHNSW {
   /// search interface inspired by hnswlib
   void searchKnn(DistanceComputer& qdis, int k,
                  idx_t *I, float *D, RHNSWStatInfo &rsi,
-                 ConcurrentBitsetPtr bitset = nullptr) const;
+                 const BitsetView& bitset = nullptr) const;
 
   size_t cal_size();
 

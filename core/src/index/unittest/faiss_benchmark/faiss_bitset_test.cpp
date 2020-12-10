@@ -37,6 +37,7 @@
 #include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/utils/BitsetView.h>
 #include <faiss/utils/distances.h>
 
 /*****************************************************

@@ -257,7 +257,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) const {
+    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView& bitset, StatisticsInfo &stats) const {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -267,7 +267,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
-          if (!has_deletions || !bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
+          if (!has_deletions || !bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
@@ -324,7 +324,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #endif
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
-                        if (!has_deletions || (!bitset->test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
+                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
                             top_candidates.emplace(dist, candidate_id);
                         }
                         else {
@@ -1080,7 +1080,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     };
 
     std::priority_queue<std::pair<dist_t, labeltype >>
-    searchKnn(const void *query_data, size_t k, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) const {
+    searchKnn(const void *query_data, size_t k, const faiss::BitsetView& bitset, StatisticsInfo &stats) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
         if (cur_element_count == 0) return result;
 
@@ -1115,7 +1115,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
 
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
-        if (bitset != nullptr) {
+        if (!bitset.empty()) {
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
                 top_candidates1 = searchBaseLayerST<true>(currObj, query_data, std::max(ef_, k), bitset, stats);
             top_candidates.swap(top_candidates1);
@@ -1138,7 +1138,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <typename Comp>
     std::vector<std::pair<dist_t, labeltype>>
-    searchKnn(const void* query_data, size_t k, Comp comp, faiss::ConcurrentBitsetPtr bitset, StatisticsInfo &stats) {
+    searchKnn(const void* query_data, size_t k, Comp comp, const faiss::BitsetView& bitset, StatisticsInfo &stats) {
         std::vector<std::pair<dist_t, labeltype>> result;
         if (cur_element_count == 0) return result;
 

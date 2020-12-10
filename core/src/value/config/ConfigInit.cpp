@@ -19,6 +19,8 @@
 #define _IMMUTABLE (false)
 const int64_t MB = (1024ll * 1024);
 const int64_t GB = (1024ll * 1024 * 1024);
+const int64_t HOURS = (3600ll);
+const int64_t DAYS = (HOURS * 24);
 
 namespace milvus {
 
@@ -101,6 +103,8 @@ is_cachesize_valid(int64_t size, std::string& err) {
     { #name, CreateFloatingValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 #define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
     { #name, CreateSizeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
+#define Time_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateTimeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 
 #define Bool(name, default) Bool_(name, true, default, nullptr)
 #define String(name, default) String_(name, true, default, nullptr)
@@ -110,6 +114,7 @@ is_cachesize_valid(int64_t size, std::string& err) {
 #define Floating(name, lower_bound, upper_bound, default) \
     Floating_(name, true, lower_bound, upper_bound, default, nullptr)
 #define Size(name, lower_bound, upper_bound, default) Size_(name, true, lower_bound, upper_bound, default, nullptr)
+#define Time(name, lower_bound, upper_bound, default) Time_(name, true, lower_bound, upper_bound, default, nullptr)
 
 std::unordered_map<std::string, BaseValuePtr>
 InitConfig() {
@@ -170,6 +175,8 @@ InitConfig() {
         Bool(logs.log_to_file, true),
 
         String(log.min_messages, "warning"),
+        Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
+        Size(log.rotation_size, 128 * MB, 8192 * MB, 1024 * MB),
 
         /* tracing */
         String(tracing.json_config_path, ""),
@@ -350,9 +357,6 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
-#                      | error, fatal                                               |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # path                 | Absolute path to the folder holding the log files.         | String     |                 |
@@ -375,8 +379,20 @@ logs:
   log_to_stdout: @logs.log_to_stdout@
   log_to_file: @logs.log_to_file@
 
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Log Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
+#                      | error, fatal                                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_age         | When to generate new logfile.                              | Time       | 24 hours        |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_size        | When to generate new logfile.                              | Size       | 1GB             |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 log:
-  min_messages: @logs.min_messages@
+  min_messages: @log.min_messages@
+  rotation_age: @log.rotation_age@
+  rotation_size: @log.rotation_size@
 
 )";
 

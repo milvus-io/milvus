@@ -95,11 +95,6 @@ IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA_ID(dataset_ptr)
     index_->add_with_ids(rows, reinterpret_cast<const float*>(p_data), p_ids);
-
-    if (STATISTICS_LEVEL) {
-        auto ivf_index = static_cast<faiss::IndexIVFFlat*>(index_.get());
-        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
-    }
 }
 
 void
@@ -114,7 +109,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -336,7 +331,7 @@ IVF::GenParams(const Config& config) {
 
 void
 IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-               const faiss::ConcurrentBitsetPtr& bitset) {
+               const faiss::BitsetView& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);

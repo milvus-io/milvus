@@ -321,7 +321,7 @@ void IndexIVF::set_direct_map_type (DirectMap::Type type)
 
 void IndexIVF::search (idx_t n, const float *x, idx_t k,
                        float *distances, idx_t *labels,
-                       ConcurrentBitsetPtr bitset) const
+                       const BitsetView& bitset) const
 {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
@@ -353,7 +353,7 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
                                      const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
                                      bool is_sq8, idx_t k, float *distances, idx_t *labels,
-                                     ConcurrentBitsetPtr bitset)
+                                     const BitsetView& bitset)
 {
 
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
@@ -384,12 +384,12 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
 }
 
 #if 0
-void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset) {
+void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, const BitsetView& bitset) {
     make_direct_map(true);
 
     /* only get vector by 1 id */
     FAISS_ASSERT(n == 1);
-    if (!bitset || !bitset->test(xid[0])) {
+    if (!bitset || !bitset.test(xid[0])) {
         reconstruct(xid[0], x + 0 * d);
     } else {
         memset(x, UINT8_MAX, d * sizeof(float));
@@ -397,7 +397,7 @@ void IndexIVF::get_vector_by_id (idx_t n, const idx_t *xid, float *x, Concurrent
 }
 
 void IndexIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
-                             ConcurrentBitsetPtr bitset) {
+                             const BitsetView& bitset) {
     make_direct_map(true);
 
     auto x = new float[n * d];
@@ -416,7 +416,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
                                    float *distances, idx_t *labels,
                                    bool store_pairs,
                                    const IVFSearchParameters *params,
-                                   ConcurrentBitsetPtr bitset) const
+                                   const BitsetView& bitset) const
 {
     long nprobe = params ? params->nprobe : this->nprobe;
     long max_codes = params ? params->max_codes : this->max_codes;
@@ -472,7 +472,7 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         // set porperly) and storing results in simi and idxi
         auto scan_one_list = [&] (idx_t key, float coarse_dis_i,
                                   float *simi, idx_t *idxi,
-                                  ConcurrentBitsetPtr bitset) {
+                                  const BitsetView& bitset) {
 
             if (key < 0) {
                 // not enough centroids for multiprobe
@@ -622,7 +622,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
                                                  float *distances, idx_t *labels,
                                                  bool store_pairs,
                                                  const IVFSearchParameters *params,
-                                                 ConcurrentBitsetPtr bitset)
+                                                 const BitsetView& bitset)
 {
     long nprobe = params ? params->nprobe : this->nprobe;
     long max_codes = params ? params->max_codes : this->max_codes;
@@ -677,7 +677,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
         // single list scan using the current scanner (with query
         // set porperly) and storing results in simi and idxi
         auto scan_one_list = [&] (idx_t key, float coarse_dis_i, const uint8_t *arranged_codes,
-                                  float *simi, idx_t *idxi, ConcurrentBitsetPtr bitset) {
+                                  float *simi, idx_t *idxi, const BitsetView& bitset) {
 
             if (key < 0) {
                 // not enough centroids for multiprobe
@@ -822,7 +822,7 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
 
 void IndexIVF::range_search (idx_t nx, const float *x, float radius,
                              RangeSearchResult *result,
-                             ConcurrentBitsetPtr bitset) const
+                             const BitsetView& bitset) const
 {
     std::unique_ptr<idx_t[]> keys (new idx_t[nx * nprobe]);
     std::unique_ptr<float []> coarse_dis (new float[nx * nprobe]);
@@ -848,7 +848,7 @@ void IndexIVF::range_search_preassigned (
          idx_t nx, const float *x, float radius,
          const idx_t *keys, const float *coarse_dis,
          RangeSearchResult *result,
-         ConcurrentBitsetPtr bitset) const
+         const BitsetView& bitset) const
 {
 
     size_t nlistv = 0, ndis = 0;
@@ -1264,7 +1264,7 @@ void InvertedListScanner::scan_codes_range (size_t ,
                        const idx_t *,
                        float ,
                        RangeQueryResult &,
-                       ConcurrentBitsetPtr) const
+                       const BitsetView&) const
 {
     FAISS_THROW_MSG ("scan_codes_range not implemented");
 }

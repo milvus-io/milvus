@@ -122,7 +122,7 @@ IndexNGT::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 #endif
 
 DatasetPtr
-IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }

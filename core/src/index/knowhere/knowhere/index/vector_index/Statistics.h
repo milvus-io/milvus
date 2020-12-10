@@ -147,8 +147,8 @@ class Statistics {
     }
 
     void
-    update_filter_percentage(const faiss::ConcurrentBitsetPtr& bitset) {
-        double fps = bitset ? static_cast<double>(bitset->count_1()) / bitset->count() : 0.0;
+    update_filter_percentage(const faiss::BitsetView& bitset) {
+        double fps = !bitset.empty() ? static_cast<double>(bitset.count_1()) / bitset.size() : 0.0;
         filter_stat[static_cast<int>(fps * 100) / 5] += 1;
     }
 

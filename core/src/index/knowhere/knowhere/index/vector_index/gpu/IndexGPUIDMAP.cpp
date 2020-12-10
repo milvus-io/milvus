@@ -105,7 +105,7 @@ GPUIDMAP::GetRawIds() {
 
 void
 GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                    const faiss::ConcurrentBitsetPtr& bitset) {
+                    const faiss::BitsetView& bitset) {
     ResScope rs(res_, gpu_id_);
 
     // assign the metric type
