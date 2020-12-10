@@ -335,6 +335,11 @@ class Snapshot : public ReferenceProxy {
         resources[resource->GetID()] = resource;
     }
 
+    bool
+    IsValid() const {
+        return !invalid_;
+    }
+
     const std::string
     ToString() const;
 
@@ -357,6 +362,7 @@ class Snapshot : public ReferenceProxy {
     std::map<ID_TYPE, NUM_TYPE> p_max_seg_num_;
     LSN_TYPE max_lsn_;
     std::set<ID_TYPE> empty_set_;
+    bool invalid_ = true;
 };
 
 using GCHandler = std::function<void(Snapshot::Ptr)>;
