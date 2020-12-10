@@ -343,6 +343,7 @@ TEST(Expr, TestTerm) {
         {R"([2000, 3000])", [](int v) { return v == 2000 || v == 3000; }},
         {R"([2000])", [](int v) { return v == 2000; }},
         {R"([3000])", [](int v) { return v == 3000; }},
+        {R"([])", [](int v) { return false; }},
         {vec_2k_3k, [](int v) { return 2000 <= v && v < 3000; }},
     };
 
@@ -352,7 +353,9 @@ TEST(Expr, TestTerm) {
         "must": [
             {
                 "term": {
-                    "age": @@@@
+                    "age": {
+                        "values": @@@@
+                    }
                 }
             },
             {

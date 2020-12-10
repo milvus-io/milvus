@@ -105,10 +105,12 @@ std::unique_ptr<Expr>
 ParseTermNodeImpl(const Schema& schema, const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<TermExprImpl<T>>();
     auto data_type = schema[field_name].get_data_type();
-    Assert(body.is_array());
+    Assert(body.is_object());
+    auto values = body["values"];
+
     expr->field_id_ = field_name;
     expr->data_type_ = data_type;
-    for (auto& value : body) {
+    for (auto& value : values) {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value.is_boolean());
         } else if constexpr (std::is_integral_v<T>) {
