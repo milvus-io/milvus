@@ -496,6 +496,13 @@ Utils::PrintTopKQueryResult(milvus::TopKQueryResult& topk_query_result) {
                     }
                     std::cout << std::endl;
                 }
+                if (data.first == "vec") {
+                    std::cout << "- " << data.first << ": ";
+                    for (const auto& v : data.second.float_data) {
+                        std::cout << v << " ";
+                    }
+                    std::cout << std::endl;
+                }
             }
         }
 

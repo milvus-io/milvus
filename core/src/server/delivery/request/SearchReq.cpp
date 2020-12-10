@@ -73,18 +73,15 @@ SearchReq::OnExecute() {
 
         // step 4: Get field info
         std::unordered_map<std::string, engine::DataType> field_types;
+        auto vector_query = query_ptr_->vectors.begin()->second;
         for (auto& schema : fields_schema) {
             auto field = schema.first;
             field_types.insert(std::make_pair(field->GetName(), field->GetFtype()));
-            if (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
-                field->GetFtype() == engine::DataType::VECTOR_BINARY) {
+            if (vector_query->field_name == field->GetName() &&
+                (field->GetFtype() == engine::DataType::VECTOR_FLOAT ||
+                 field->GetFtype() == engine::DataType::VECTOR_BINARY)) {
                 // check dim
                 int64_t dimension = field->GetParams()[engine::PARAM_DIMENSION];
-                auto vector_query = query_ptr_->vectors.begin()->second;
-                if (vector_query->field_name != field->GetName()) {
-                    return Status(SERVER_INVALID_ARGUMENT,
-                                  "DSL vector query field name: " + vector_query->field_name + " is wrong");
-                }
 
                 if (!vector_query->query_vector.binary_data.empty()) {
                     if (vector_query->query_vector.binary_data.size() !=
