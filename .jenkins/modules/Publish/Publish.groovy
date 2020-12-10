@@ -12,6 +12,7 @@ dir ("docker/deploy") {
     def sourceImage = "${params.DOKCER_REGISTRY_URL}/${PROJECT_NAME}/engine:${SOURCE_TAG}"
 
     try {
+        sh(returnStatus: true, script: "docker pull ${params.DOKCER_REGISTRY_URL}/milvus/milvus-dev:amd64-${OS_NAME}")
         sh(returnStatus: true, script: "docker pull ${sourceImage}")
         sh "docker-compose build --force-rm ${BINARY_VERSION}_${OS_NAME}"
         try {
