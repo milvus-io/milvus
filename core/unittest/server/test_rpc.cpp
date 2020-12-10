@@ -748,19 +748,20 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     // Preload Collection
     {
         ::milvus::grpc::CollectionSchema collection_schema;
+        ::milvus::grpc::PreloadCollectionParam preload_param;
 
         grpc_collection_name.Clear();
-        auto status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        auto status = handler->PreloadCollection(&context, &preload_param, &response);
         grpc_collection_name.set_collection_name(COLLECTION_NAME);
-        status = handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        status = handler->PreloadCollection(&context, &preload_param, &response);
         ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
         fiu_enable("PreloadCollectionRequest.OnExecute.preload_collection_fail", 1, NULL, 0);
-        handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        handler->PreloadCollection(&context, &preload_param, &response);
         fiu_disable("PreloadCollectionRequest.OnExecute.preload_collection_fail");
 
         fiu_enable("PreloadCollectionRequest.OnExecute.throw_std_exception", 1, NULL, 0);
-        handler->PreloadCollection(&context, &grpc_collection_name, &response);
+        handler->PreloadCollection(&context, &preload_param, &response);
         fiu_disable("PreloadCollectionRequest.OnExecute.throw_std_exception");
 
         fiu_init(0);

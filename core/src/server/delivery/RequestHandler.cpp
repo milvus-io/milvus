@@ -188,8 +188,9 @@ RequestHandler::DeleteByID(const std::shared_ptr<Context>& context, const std::s
 }
 
 Status
-RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name) {
-    BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name);
+RequestHandler::PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                                  const std::vector<std::string>& partition_tags) {
+    BaseRequestPtr request_ptr = PreloadCollectionRequest::Create(context, collection_name, partition_tags);
     RequestScheduler::ExecRequest(request_ptr);
 
     return request_ptr->status();

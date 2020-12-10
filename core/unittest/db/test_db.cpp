@@ -434,19 +434,24 @@ TEST_F(DBTest, PRELOAD_TEST) {
     milvus::engine::meta::CollectionSchema collection_info = BuildCollectionSchema();
     auto stat = db_->CreateCollection(collection_info);
 
+    std::string partition_tag = "part_1";
+    stat = db_->CreatePartition(collection_info.collection_id_, "", partition_tag);
+
     milvus::engine::meta::CollectionSchema collection_info_get;
     collection_info_get.collection_id_ = COLLECTION_NAME;
     stat = db_->DescribeCollection(collection_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(collection_info_get.dimension_, COLLECTION_DIM);
 
+    // insert 5000 rows to partition, insert 20000 rows to collection
     int loop = 5;
     for (auto i = 0; i < loop; ++i) {
         uint64_t nb = VECTOR_COUNT;
         milvus::engine::VectorsData xb;
         BuildVectors(nb, i, xb);
 
-        db_->InsertVectors(COLLECTION_NAME, "", xb);
+        std::string tag = (i == 0) ? partition_tag : "";
+        db_->InsertVectors(COLLECTION_NAME, tag, xb);
         ASSERT_EQ(xb.id_array_.size(), nb);
     }
 
@@ -454,35 +459,56 @@ TEST_F(DBTest, PRELOAD_TEST) {
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IDMAP;
     db_->CreateIndex(dummy_context_, COLLECTION_NAME, index);  // wait until build index finish
 
+    // test load one partition data
     int64_t prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    std::vector<std::string> partition_tags = {partition_tag};
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_TRUE(stat.ok());
-    int64_t cur_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
-    ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
+    int64_t gap = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage() - prev_cache_usage;
+    int64_t data_size = VECTOR_COUNT*(COLLECTION_DIM*sizeof(float) + sizeof(int64_t));
+    ASSERT_EQ(gap, data_size);
+
+    // test load whole collection data
+    prev_cache_usage = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    partition_tags.clear();
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
+    ASSERT_TRUE(stat.ok());
+    gap = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage() - prev_cache_usage;
+    data_size = VECTOR_COUNT*(COLLECTION_DIM*sizeof(float) + sizeof(int64_t))*4;
+    ASSERT_EQ(gap, data_size);
+
+    milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
+    // test regular match patition tag
+    partition_tags = {"part_\\d{1}"};
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
+    ASSERT_TRUE(stat.ok());
+    gap = milvus::cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    data_size = VECTOR_COUNT*(COLLECTION_DIM*sizeof(float) + sizeof(int64_t));
+    ASSERT_EQ(gap, data_size);
 
     FIU_ENABLE_FIU("SqliteMetaImpl.FilesToSearch.throw_exception");
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_FALSE(stat.ok());
     fiu_disable("SqliteMetaImpl.FilesToSearch.throw_exception");
 
     // create a partition
     stat = db_->CreatePartition(COLLECTION_NAME, "part0", "0");
     ASSERT_TRUE(stat.ok());
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_TRUE(stat.ok());
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.null_engine");
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.null_engine");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.exceed_cache");
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.exceed_cache");
 
     FIU_ENABLE_FIU("DBImpl.PreloadCollection.engine_throw_exception");
-    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME);
+    stat = db_->PreloadCollection(dummy_context_, COLLECTION_NAME, partition_tags);
     ASSERT_FALSE(stat.ok());
     fiu_disable("DBImpl.PreloadCollection.engine_throw_exception");
 }
@@ -543,7 +569,8 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     stat = db_->GetVectorsByID(collection_info, id_array, vectors);
     ASSERT_FALSE(stat.ok());
 
-    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_);
+    std::vector<std::string> partition_tags;
+    stat = db_->PreloadCollection(dummy_context_, collection_info.collection_id_, partition_tags);
     ASSERT_FALSE(stat.ok());
 
     uint64_t row_count = 0;

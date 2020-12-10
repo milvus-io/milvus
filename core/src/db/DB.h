@@ -72,7 +72,7 @@ class DB {
 
     virtual Status
     PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                      bool force = false) = 0;
+                      const std::vector<std::string>& partition_tags, bool force = false) = 0;
 
     virtual Status
     ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::vector<int64_t>& segment_ids) = 0;

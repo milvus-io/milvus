@@ -429,51 +429,60 @@ DBImpl::GetCollectionInfo(const std::string& collection_id, std::string& collect
 
 Status
 DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
-                          bool force) {
+                          const std::vector<std::string>& partition_tags, bool force) {
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
 
     // step 1: get all collection files from parent collection
-    meta::FilesHolder files_holder;
-#if 0
-    auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-    if (!status.ok()) {
-        return status;
-    }
-
-    // step 2: get files from partition collections
-    std::vector<meta::CollectionSchema> partition_array;
-    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-    for (auto& schema : partition_array) {
-        status = meta_ptr_->FilesToSearch(schema.collection_id_, files_holder);
-    }
-#else
-    auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
-    if (!status.ok()) {
-        return status;
-    }
-
-    std::vector<meta::CollectionSchema> partition_array;
-    status = meta_ptr_->ShowPartitions(collection_id, partition_array);
-
+    Status status;
     std::set<std::string> partition_ids;
-    for (auto& schema : partition_array) {
-        partition_ids.insert(schema.collection_id_);
+    meta::FilesHolder files_holder;
+    if (partition_tags.empty()) {
+        // no partition tag specified, means load whole collection
+        // get files from root collection
+        auto status = meta_ptr_->FilesToSearch(collection_id, files_holder);
+        if (!status.ok()) {
+            return status;
+        }
+
+        // count all partitions
+        std::vector<meta::CollectionSchema> partition_array;
+        status = meta_ptr_->ShowPartitions(collection_id, partition_array);
+
+        for (auto& schema : partition_array) {
+            partition_ids.insert(schema.collection_id_);
+        }
+    } else {
+        // get specified partitions
+        std::set<std::string> partition_name_array;
+        status = GetPartitionsByTags(collection_id, partition_tags, partition_name_array);
+        if (!status.ok()) {
+            return status;  // didn't match any partition.
+        }
+
+        for (auto& partition_name : partition_name_array) {
+            partition_ids.insert(partition_name);
+        }
     }
 
+    // get files from partitions
     status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
     if (!status.ok()) {
         return status;
     }
-#endif
+
+    if (files_holder.HoldFiles().empty()) {
+        LOG_ENGINE_DEBUG_ << "Could not get any file to load";
+        return Status::OK();  // no files to search
+    }
 
     int64_t size = 0;
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t available_size = cache_total - cache_usage;
 
-    // step 3: load file one by one
+    // step 2: load file one by one
     milvus::engine::meta::SegmentsSchema& files_array = files_holder.HoldFiles();
     LOG_ENGINE_DEBUG_ << "Begin pre-load collection:" + collection_id + ", totally " << files_array.size()
                       << " files need to be pre-loaded";
