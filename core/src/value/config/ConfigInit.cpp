@@ -175,7 +175,7 @@ InitConfig() {
         Bool(logs.log_to_file, true),
 
         String(log.min_messages, "warning"),
-        // Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
+        Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
 
         /* tracing */
         String(tracing.json_config_path, ""),
@@ -356,9 +356,6 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
-#                      | error, fatal                                               |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # path                 | Absolute path to the folder holding the log files.         | String     |                 |
@@ -381,8 +378,17 @@ logs:
   log_to_stdout: @logs.log_to_stdout@
   log_to_file: @logs.log_to_file@
 
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Log Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
+#                      | error, fatal                                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_age         | When to generate new logfile.                              | Time       | 24 hours        |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 log:
-  min_messages: @logs.min_messages@
+  min_messages: @log.min_messages@
+  rotation_age: @log.rotation_age@
 
 )";
 
