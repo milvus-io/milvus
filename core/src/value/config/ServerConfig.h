@@ -66,6 +66,7 @@ struct ServerConfig {
     struct Cluster {
         Bool enable;
         Integer role;
+        String node_id;
     } cluster;
 
     struct General {
@@ -145,6 +146,7 @@ struct ServerConfig {
 
     struct Log {
         String min_messages;
+        Integer rotation_age;
     } log;
 
     struct System {

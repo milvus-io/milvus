@@ -19,8 +19,29 @@
 #define _IMMUTABLE (false)
 const int64_t MB = (1024ll * 1024);
 const int64_t GB = (1024ll * 1024 * 1024);
+const int64_t HOURS = (3600ll);
+const int64_t DAYS = (HOURS * 24);
 
 namespace milvus {
+
+bool
+is_nodeid_valid(const std::string& val, std::string& err) {
+    // lambda, check if it's [0-9a-zA-Z_-]
+    auto is_valid = [](char ch) {
+        if (isalnum(ch) || ch == '_' || ch == '-') {
+            return true;
+        }
+        return false;
+    };
+
+    for (auto& ch : val) {
+        if (not is_valid(ch)) {
+            err = "Invalid nodeid: " + val + ", supported char: [0-9a-zA-Z_-]";
+            return false;
+        }
+    }
+    return true;
+}
 
 bool
 is_timezone_valid(const std::string& val, std::string& err) {
@@ -82,6 +103,8 @@ is_cachesize_valid(int64_t size, std::string& err) {
     { #name, CreateFloatingValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 #define Size_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
     { #name, CreateSizeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
+#define Time_(name, modifiable, lower_bound, upper_bound, default, is_valid) \
+    { #name, CreateTimeValue(#name, modifiable, lower_bound, upper_bound, config.name, default, is_valid) }
 
 #define Bool(name, default) Bool_(name, true, default, nullptr)
 #define String(name, default) String_(name, true, default, nullptr)
@@ -91,6 +114,7 @@ is_cachesize_valid(int64_t size, std::string& err) {
 #define Floating(name, lower_bound, upper_bound, default) \
     Floating_(name, true, lower_bound, upper_bound, default, nullptr)
 #define Size(name, lower_bound, upper_bound, default) Size_(name, true, lower_bound, upper_bound, default, nullptr)
+#define Time(name, lower_bound, upper_bound, default) Time_(name, true, lower_bound, upper_bound, default, nullptr)
 
 std::unordered_map<std::string, BaseValuePtr>
 InitConfig() {
@@ -101,6 +125,7 @@ InitConfig() {
         /* cluster */
         Bool(cluster.enable, false),
         Enum(cluster.role, &ClusterRoleMap, ClusterRole::RW),
+        String_(cluster.node_id, _MODIFIABLE, "master", is_nodeid_valid),
 
         /* general */
         String_(general.timezone, _MODIFIABLE, "UTC+8", is_timezone_valid),
@@ -150,6 +175,7 @@ InitConfig() {
         Bool(logs.log_to_file, true),
 
         String(log.min_messages, "warning"),
+        Time(log.rotation_age, 0, 16384ll * HOURS, 24ll * HOURS),
 
         /* tracing */
         String(tracing.json_config_path, ""),
@@ -194,9 +220,12 @@ version: @version@
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # role                 | Milvus deployment role: rw / ro                            | Role       | rw              |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# node_id              | Node ID, used in log message only.                         | String     | master          |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 cluster:
   enable: @cluster.enable@
   role: @cluster.role@
+  node_id: @cluster.node_id@
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # General Config       | Description                                                | Type       | Default         |
@@ -327,9 +356,6 @@ gpu:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
-#                      | error, fatal                                               |            |                 |
-#----------------------+------------------------------------------------------------+------------+-----------------+
 # trace.enable         | Whether to enable trace level logging in Milvus.           | Boolean    | true            |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # path                 | Absolute path to the folder holding the log files.         | String     |                 |
@@ -352,8 +378,17 @@ logs:
   log_to_stdout: @logs.log_to_stdout@
   log_to_file: @logs.log_to_file@
 
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# Log Config           | Description                                                | Type       | Default         |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# min_messages         | Log level in Milvus. Must be one of debug, info, warning,  | String     | warning         |
+#                      | error, fatal                                               |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# rotation_age         | When to generate new logfile.                              | Time       | 24 hours        |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 log:
-  min_messages: @logs.min_messages@
+  min_messages: @log.min_messages@
+  rotation_age: @log.rotation_age@
 
 )";
 
