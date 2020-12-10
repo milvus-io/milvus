@@ -14,8 +14,8 @@ func (dNode *deleteNode) Operate(in []*Msg) []*Msg {
 }
 
 func newDeleteNode() *deleteNode {
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

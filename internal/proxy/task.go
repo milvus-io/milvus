@@ -429,8 +429,8 @@ func (qt *QueryTask) PostExecute() error {
 				}
 			}
 
-			rlen := len(filterSearchResult) // query node num
-			if rlen <= 0 {
+			availableQueryNodeNum := len(filterSearchResult)
+			if availableQueryNodeNum <= 0 {
 				qt.result = &servicepb.QueryResult{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -440,26 +440,48 @@ func (qt *QueryTask) PostExecute() error {
 				return errors.New(filterReason)
 			}
 
-			n := len(filterSearchResult[0].Hits) // n
-			if n <= 0 {
-				qt.result = &servicepb.QueryResult{}
-				return nil
-			}
-
-			hits := make([][]*servicepb.Hits, rlen)
-			for i, partialSearchResult := range filterSearchResult {
-				hits[i] = make([]*servicepb.Hits, n)
-				for j, bs := range partialSearchResult.Hits {
-					hits[i][j] = &servicepb.Hits{}
-					err := proto.Unmarshal(bs, hits[i][j])
+			hits := make([][]*servicepb.Hits, 0)
+			for _, partialSearchResult := range filterSearchResult {
+				if len(partialSearchResult.Hits) <= 0 {
+					filterReason += "nq is zero\n"
+					continue
+				}
+				partialHits := make([]*servicepb.Hits, 0)
+				for _, bs := range partialSearchResult.Hits {
+					partialHit := &servicepb.Hits{}
+					err := proto.Unmarshal(bs, partialHit)
 					if err != nil {
 						log.Println("unmarshal error")
 						return err
 					}
+					partialHits = append(partialHits, partialHit)
 				}
+				hits = append(hits, partialHits)
 			}
 
-			k := len(hits[0][0].IDs)
+			availableQueryNodeNum = len(hits)
+			if availableQueryNodeNum <= 0 {
+				qt.result = &servicepb.QueryResult{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_SUCCESS,
+						Reason:    filterReason,
+					},
+				}
+				return nil
+			}
+
+			nq := len(hits[0])
+			if nq <= 0 {
+				qt.result = &servicepb.QueryResult{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_SUCCESS,
+						Reason:    filterReason,
+					},
+				}
+				return nil
+			}
+
+			topk := len(hits[0][0].IDs)
 			qt.result = &servicepb.QueryResult{
 				Status: &commonpb.Status{
 					ErrorCode: 0,
@@ -467,15 +489,15 @@ func (qt *QueryTask) PostExecute() error {
 				Hits: make([][]byte, 0),
 			}
 
-			for i := 0; i < n; i++ { // n
-				locs := make([]int, rlen)
+			for i := 0; i < nq; i++ {
+				locs := make([]int, availableQueryNodeNum)
 				reducedHits := &servicepb.Hits{
 					IDs:     make([]int64, 0),
 					RowData: make([][]byte, 0),
 					Scores:  make([]float32, 0),
 				}
 
-				for j := 0; j < k; j++ { // k
+				for j := 0; j < topk; j++ {
 					choice, minDistance := 0, float32(math.MaxFloat32)
 					for q, loc := range locs { // query num, the number of ways to merge
 						distance := hits[q][i].Scores[loc]

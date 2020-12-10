@@ -37,23 +37,20 @@ type searchService struct {
 type ResultEntityIds []UniqueID
 
 func newSearchService(ctx context.Context, replica collectionReplica) *searchService {
-	receiveBufSize := Params.searchReceiveBufSize()
-	pulsarBufSize := Params.searchPulsarBufSize()
+	receiveBufSize := Params.SearchReceiveBufSize
+	pulsarBufSize := Params.SearchPulsarBufSize
 
-	msgStreamURL, err := Params.pulsarAddress()
-	if err != nil {
-		log.Fatal(err)
-	}
+	msgStreamURL := Params.PulsarAddress
 
-	consumeChannels := Params.searchChannelNames()
-	consumeSubName := Params.msgChannelSubName()
+	consumeChannels := Params.SearchChannelNames
+	consumeSubName := Params.MsgChannelSubName
 	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchStream.SetPulsarClient(msgStreamURL)
 	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 	var inputStream msgstream.MsgStream = searchStream
 
-	producerChannels := Params.searchResultChannelNames()
+	producerChannels := Params.SearchResultChannelNames
 	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchResultStream.SetPulsarClient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
@@ -74,7 +71,7 @@ func newSearchService(ctx context.Context, replica collectionReplica) *searchSer
 
 		searchMsgStream:       inputStream,
 		searchResultMsgStream: outputStream,
-		queryNodeID:           Params.QueryNodeID(),
+		queryNodeID:           Params.QueryNodeID,
 	}
 }
 

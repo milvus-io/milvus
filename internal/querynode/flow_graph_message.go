@@ -13,8 +13,10 @@ type key2SegMsg struct {
 	timeRange  TimeRange
 }
 
-type schemaUpdateMsg struct {
-	timeRange TimeRange
+type ddMsg struct {
+	collectionRecords map[string][]metaOperateRecord
+	partitionRecords  map[string][]metaOperateRecord
+	timeRange         TimeRange
 }
 
 type insertMsg struct {
@@ -56,11 +58,11 @@ func (ksMsg *key2SegMsg) DownStreamNodeIdx() int {
 	return 0
 }
 
-func (suMsg *schemaUpdateMsg) TimeTick() Timestamp {
+func (suMsg *ddMsg) TimeTick() Timestamp {
 	return suMsg.timeRange.timestampMax
 }
 
-func (suMsg *schemaUpdateMsg) DownStreamNodeIdx() int {
+func (suMsg *ddMsg) DownStreamNodeIdx() int {
 	return 0
 }
 

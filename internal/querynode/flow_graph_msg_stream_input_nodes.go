@@ -2,23 +2,19 @@ package querynode
 
 import (
 	"context"
-	"log"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
 func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
-	receiveBufSize := Params.insertReceiveBufSize()
-	pulsarBufSize := Params.insertPulsarBufSize()
+	receiveBufSize := Params.InsertReceiveBufSize
+	pulsarBufSize := Params.InsertPulsarBufSize
 
-	msgStreamURL, err := Params.pulsarAddress()
-	if err != nil {
-		log.Fatal(err)
-	}
+	msgStreamURL := Params.PulsarAddress
 
-	consumeChannels := Params.insertChannelNames()
-	consumeSubName := Params.msgChannelSubName()
+	consumeChannels := Params.InsertChannelNames
+	consumeSubName := Params.MsgChannelSubName
 
 	insertStream := msgstream.NewPulsarTtMsgStream(ctx, receiveBufSize)
 	insertStream.SetPulsarClient(msgStreamURL)
@@ -27,9 +23,32 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 
 	var stream msgstream.MsgStream = insertStream
 
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
+	return node
+}
+
+func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
+	receiveBufSize := Params.DDReceiveBufSize
+	pulsarBufSize := Params.DDPulsarBufSize
+
+	msgStreamURL := Params.PulsarAddress
+
+	consumeChannels := Params.DDChannelNames
+	consumeSubName := Params.MsgChannelSubName
+
+	ddStream := msgstream.NewPulsarTtMsgStream(ctx, receiveBufSize)
+	ddStream.SetPulsarClient(msgStreamURL)
+	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+
+	var stream msgstream.MsgStream = ddStream
+
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
+
+	node := flowgraph.NewInputNode(&stream, "ddInputNode", maxQueueLength, maxParallelism)
 	return node
 }

@@ -14,11 +14,8 @@ func TestPartition_Segments(t *testing.T) {
 
 	collection, err := node.replica.getCollectionByName(collectionName)
 	assert.NoError(t, err)
-	collectionMeta := collection.meta
 
 	partitions := collection.Partitions()
-	assert.Equal(t, len(collectionMeta.PartitionTags), len(*partitions))
-
 	targetPartition := (*partitions)[0]
 
 	const segmentNum = 3

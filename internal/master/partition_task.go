@@ -84,6 +84,8 @@ func (t *createPartitionTask) Execute() error {
 		EndTimestamp:   ts,
 		HashValues:     []uint32{0},
 	}
+
+	t.req.CollectionID = collectionMeta.ID
 	timeTickMsg := &ms.CreatePartitionMsg{
 		BaseMsg:                baseMsg,
 		CreatePartitionRequest: *t.req,
@@ -138,6 +140,8 @@ func (t *dropPartitionTask) Execute() error {
 		EndTimestamp:   ts,
 		HashValues:     []uint32{0},
 	}
+
+	t.req.CollectionID = collectionMeta.ID
 	timeTickMsg := &ms.DropPartitionMsg{
 		BaseMsg:              baseMsg,
 		DropPartitionRequest: *t.req,

@@ -39,8 +39,8 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 	targetCollection, err := node.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
-	assert.Equal(t, targetCollection.meta.Schema.Name, collectionName)
-	assert.Equal(t, targetCollection.meta.ID, collectionID)
+	assert.Equal(t, targetCollection.Name(), collectionName)
+	assert.Equal(t, targetCollection.ID(), collectionID)
 	node.Close()
 }
 
@@ -53,8 +53,8 @@ func TestCollectionReplica_getCollectionByName(t *testing.T) {
 	targetCollection, err := node.replica.getCollectionByName(collectionName)
 	assert.NoError(t, err)
 	assert.NotNil(t, targetCollection)
-	assert.Equal(t, targetCollection.meta.Schema.Name, collectionName)
-	assert.Equal(t, targetCollection.meta.ID, collectionID)
+	assert.Equal(t, targetCollection.Name(), collectionName)
+	assert.Equal(t, targetCollection.ID(), collectionID)
 
 	node.Close()
 }

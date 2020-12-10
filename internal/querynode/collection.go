@@ -11,37 +11,47 @@ package querynode
 
 */
 import "C"
-import (
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-)
+import "unsafe"
 
 type Collection struct {
 	collectionPtr C.CCollection
-	meta          *etcdpb.CollectionMeta
+	id            UniqueID
+	name          string
 	partitions    []*Partition
 }
 
 func (c *Collection) Name() string {
-	return (*c.meta).Schema.Name
+	return c.name
 }
 
 func (c *Collection) ID() UniqueID {
-	return (*c.meta).ID
+	return c.id
 }
 
 func (c *Collection) Partitions() *[]*Partition {
 	return &c.partitions
 }
 
-func newCollection(collMeta *etcdpb.CollectionMeta, collMetaBlob string) *Collection {
+func newCollection(collectionID UniqueID, schemaBlob string) *Collection {
 	/*
 		CCollection
-		newCollection(const char* schema_conf);
-	*/
-	cCollMetaBlob := C.CString(collMetaBlob)
-	collection := C.NewCollection(cCollMetaBlob)
+		NewCollection(const char* schema_proto_blob);
 
-	var newCollection = &Collection{collectionPtr: collection, meta: collMeta}
+		const char*
+		GetCollectionName(CCollection collection);
+	*/
+	cSchemaBlob := C.CString(schemaBlob)
+	collection := C.NewCollection(cSchemaBlob)
+
+	name := C.GetCollectionName(collection)
+	collectionName := C.GoString(name)
+	defer C.free(unsafe.Pointer(name))
+
+	var newCollection = &Collection{
+		collectionPtr: collection,
+		id:            collectionID,
+		name:          collectionName,
+	}
 
 	return newCollection
 }

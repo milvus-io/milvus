@@ -25,12 +25,12 @@ func TestCollection_newCollection(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
 
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 }
 
 func TestCollection_deleteCollection(t *testing.T) {
@@ -38,11 +38,11 @@ func TestCollection_deleteCollection(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
 
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 	deleteCollection(collection)
 }

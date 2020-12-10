@@ -34,8 +34,8 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 }
 
 func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

@@ -28,10 +28,13 @@ typedef struct CStatus {
 typedef void* CCollection;
 
 CCollection
-NewCollection(const char* collection_proto);
+NewCollection(const char* schema_proto_blob);
 
 void
 DeleteCollection(CCollection collection);
+
+const char*
+GetCollectionName(CCollection collection);
 
 #ifdef __cplusplus
 }

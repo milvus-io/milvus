@@ -19,7 +19,7 @@
 
 namespace milvus::segcore {
 
-Collection::Collection(const std::string& collection_proto) : collection_proto_(collection_proto) {
+Collection::Collection(const std::string& collection_proto) : schema_proto_(collection_proto) {
     parse();
     index_ = nullptr;
 }
@@ -122,25 +122,26 @@ Collection::CreateIndex(std::string& index_config) {
 
 void
 Collection::parse() {
-    if (collection_proto_.empty()) {
+    if (schema_proto_.empty()) {
         // TODO: remove hard code use unittests are ready
         std::cout << "WARN: Use default schema" << std::endl;
         auto schema = std::make_shared<Schema>();
         schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
         schema->AddField("age", DataType::INT32);
+        collection_name_ = "default-collection";
         schema_ = schema;
         return;
     }
 
-    milvus::proto::etcd::CollectionMeta collection_meta;
-    auto suc = google::protobuf::TextFormat::ParseFromString(collection_proto_, &collection_meta);
+    milvus::proto::schema::CollectionSchema collection_schema;
+    auto suc = google::protobuf::TextFormat::ParseFromString(schema_proto_, &collection_schema);
 
     if (!suc) {
         std::cerr << "unmarshal schema string failed" << std::endl;
     }
 
-    collection_name_ = collection_meta.schema().name();
-    schema_ = Schema::ParseFrom(collection_meta.schema());
+    collection_name_ = collection_schema.name();
+    schema_ = Schema::ParseFrom(collection_schema);
 }
 
 }  // namespace milvus::segcore

@@ -18,17 +18,16 @@ import (
 )
 
 func TestSearch_Search(t *testing.T) {
-	node := NewQueryNode(context.Background(), 0)
+	node := newQueryNode()
 	initTestMeta(t, node, "collection0", 0, 0)
 
-	pulsarURL, _ := Params.pulsarAddress()
+	pulsarURL := Params.PulsarAddress
 
 	// test data generate
 	const msgLength = 10
 	const receiveBufSize = 1024
 	const DIM = 16
-	insertProducerChannels := Params.insertChannelNames()
-	searchProducerChannels := Params.searchChannelNames()
+	searchProducerChannels := Params.SearchChannelNames
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
 	// start search service
@@ -170,13 +169,29 @@ func TestSearch_Search(t *testing.T) {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	// pulsar produce
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+
 	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(insertProducerChannels)
-	insertStream.Start()
-	err = insertStream.Produce(&msgPack)
+	insertStream.CreatePulsarProducers(insertChannels)
+
+	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
+
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
-	err = insertStream.Broadcast(&timeTickMsgPack)
+
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync
@@ -192,14 +207,13 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	node := NewQueryNode(context.Background(), 0)
 	initTestMeta(t, node, "collection0", 0, 0)
 
-	pulsarURL, _ := Params.pulsarAddress()
+	pulsarURL := Params.PulsarAddress
 
 	// test data generate
-	const msgLength = 1024
+	const msgLength = 10
 	const receiveBufSize = 1024
 	const DIM = 16
-	insertProducerChannels := Params.insertChannelNames()
-	searchProducerChannels := Params.searchChannelNames()
+	searchProducerChannels := Params.SearchChannelNames
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
 	// start search service
@@ -345,13 +359,29 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 	// pulsar produce
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
+
 	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(insertProducerChannels)
-	insertStream.Start()
-	err = insertStream.Produce(&msgPack)
+	insertStream.CreatePulsarProducers(insertChannels)
+
+	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
+
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
-	err = insertStream.Broadcast(&timeTickMsgPack)
+
+	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

@@ -225,14 +225,15 @@ class FieldSchema :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kTypeParamsFieldNumber = 5,
-    kIndexParamsFieldNumber = 6,
-    kNameFieldNumber = 1,
-    kDescriptionFieldNumber = 3,
-    kIsPrimaryKeyFieldNumber = 2,
-    kDataTypeFieldNumber = 4,
+    kTypeParamsFieldNumber = 6,
+    kIndexParamsFieldNumber = 7,
+    kNameFieldNumber = 2,
+    kDescriptionFieldNumber = 4,
+    kFieldIDFieldNumber = 1,
+    kIsPrimaryKeyFieldNumber = 3,
+    kDataTypeFieldNumber = 5,
   };
-  // repeated .milvus.proto.common.KeyValuePair type_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair type_params = 6;
   int type_params_size() const;
   void clear_type_params();
   ::milvus::proto::common::KeyValuePair* mutable_type_params(int index);
@@ -243,7 +244,7 @@ class FieldSchema :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
       type_params() const;
 
-  // repeated .milvus.proto.common.KeyValuePair index_params = 6;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 7;
   int index_params_size() const;
   void clear_index_params();
   ::milvus::proto::common::KeyValuePair* mutable_index_params(int index);
@@ -254,7 +255,7 @@ class FieldSchema :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
       index_params() const;
 
-  // string name = 1;
+  // string name = 2;
   void clear_name();
   const std::string& name() const;
   void set_name(const std::string& value);
@@ -265,7 +266,7 @@ class FieldSchema :
   std::string* release_name();
   void set_allocated_name(std::string* name);
 
-  // string description = 3;
+  // string description = 4;
   void clear_description();
   const std::string& description() const;
   void set_description(const std::string& value);
@@ -276,12 +277,17 @@ class FieldSchema :
   std::string* release_description();
   void set_allocated_description(std::string* description);
 
-  // bool is_primary_key = 2;
+  // int64 fieldID = 1;
+  void clear_fieldid();
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
+  void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // bool is_primary_key = 3;
   void clear_is_primary_key();
   bool is_primary_key() const;
   void set_is_primary_key(bool value);
 
-  // .milvus.proto.schema.DataType data_type = 4;
+  // .milvus.proto.schema.DataType data_type = 5;
   void clear_data_type();
   ::milvus::proto::schema::DataType data_type() const;
   void set_data_type(::milvus::proto::schema::DataType value);
@@ -295,6 +301,7 @@ class FieldSchema :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > index_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
+  ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   bool is_primary_key_;
   int data_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -481,7 +488,21 @@ class CollectionSchema :
 #endif  // __GNUC__
 // FieldSchema
 
-// string name = 1;
+// int64 fieldID = 1;
+inline void FieldSchema::clear_fieldid() {
+  fieldid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 FieldSchema::fieldid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.fieldID)
+  return fieldid_;
+}
+inline void FieldSchema::set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  fieldid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.fieldID)
+}
+
+// string name = 2;
 inline void FieldSchema::clear_name() {
   name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -532,7 +553,7 @@ inline void FieldSchema::set_allocated_name(std::string* name) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.name)
 }
 
-// bool is_primary_key = 2;
+// bool is_primary_key = 3;
 inline void FieldSchema::clear_is_primary_key() {
   is_primary_key_ = false;
 }
@@ -546,7 +567,7 @@ inline void FieldSchema::set_is_primary_key(bool value) {
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.is_primary_key)
 }
 
-// string description = 3;
+// string description = 4;
 inline void FieldSchema::clear_description() {
   description_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
@@ -597,7 +618,7 @@ inline void FieldSchema::set_allocated_description(std::string* description) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.FieldSchema.description)
 }
 
-// .milvus.proto.schema.DataType data_type = 4;
+// .milvus.proto.schema.DataType data_type = 5;
 inline void FieldSchema::clear_data_type() {
   data_type_ = 0;
 }
@@ -611,7 +632,7 @@ inline void FieldSchema::set_data_type(::milvus::proto::schema::DataType value) 
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.data_type)
 }
 
-// repeated .milvus.proto.common.KeyValuePair type_params = 5;
+// repeated .milvus.proto.common.KeyValuePair type_params = 6;
 inline int FieldSchema::type_params_size() const {
   return type_params_.size();
 }
@@ -638,7 +659,7 @@ FieldSchema::type_params() const {
   return type_params_;
 }
 
-// repeated .milvus.proto.common.KeyValuePair index_params = 6;
+// repeated .milvus.proto.common.KeyValuePair index_params = 7;
 inline int FieldSchema::index_params_size() const {
   return index_params_.size();
 }

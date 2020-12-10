@@ -78,12 +78,10 @@ func (t *createCollectionTask) Execute() error {
 	}
 
 	collection := etcdpb.CollectionMeta{
-		ID:         collectionID,
-		Schema:     &schema,
-		CreateTime: ts,
-		// TODO: initial segment?
-		SegmentIDs: make([]UniqueID, 0),
-		// TODO: initial partition?
+		ID:            collectionID,
+		Schema:        &schema,
+		CreateTime:    ts,
+		SegmentIDs:    make([]UniqueID, 0),
 		PartitionTags: make([]string, 0),
 	}
 	err = t.mt.AddCollection(&collection)
@@ -97,6 +95,8 @@ func (t *createCollectionTask) Execute() error {
 		EndTimestamp:   t.req.Timestamp,
 		HashValues:     []uint32{0},
 	}
+
+	t.req.CollectionID = collectionID
 	timeTickMsg := &ms.CreateCollectionMsg{
 		BaseMsg:                 baseMsg,
 		CreateCollectionRequest: *t.req,
@@ -150,6 +150,8 @@ func (t *dropCollectionTask) Execute() error {
 		EndTimestamp:   ts,
 		HashValues:     []uint32{0},
 	}
+
+	t.req.CollectionID = collectionID
 	timeTickMsg := &ms.DropCollectionMsg{
 		BaseMsg:               baseMsg,
 		DropCollectionRequest: *t.req,

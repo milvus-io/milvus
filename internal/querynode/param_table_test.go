@@ -9,101 +9,124 @@ import (
 )
 
 func TestParamTable_PulsarAddress(t *testing.T) {
-	address, err := Params.pulsarAddress()
-	assert.NoError(t, err)
+	address := Params.PulsarAddress
 	split := strings.Split(address, ":")
 	assert.Equal(t, "pulsar", split[0])
 	assert.Equal(t, "6650", split[len(split)-1])
 }
 
 func TestParamTable_QueryNodeID(t *testing.T) {
-	id := Params.QueryNodeID()
+	id := Params.QueryNodeID
 	assert.Contains(t, Params.QueryNodeIDList(), id)
 }
 
 func TestParamTable_insertChannelRange(t *testing.T) {
-	channelRange := Params.insertChannelRange()
+	channelRange := Params.InsertChannelRange
 	assert.Equal(t, 2, len(channelRange))
 }
 
 func TestParamTable_statsServiceTimeInterval(t *testing.T) {
-	interval := Params.statsPublishInterval()
+	interval := Params.StatsPublishInterval
 	assert.Equal(t, 1000, interval)
 }
 
 func TestParamTable_statsMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.statsReceiveBufSize()
+	bufSize := Params.StatsReceiveBufSize
 	assert.Equal(t, int64(64), bufSize)
 }
 
 func TestParamTable_insertMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.insertReceiveBufSize()
+	bufSize := Params.InsertReceiveBufSize
 	assert.Equal(t, int64(1024), bufSize)
 }
 
+func TestParamTable_ddMsgStreamReceiveBufSize(t *testing.T) {
+	bufSize := Params.DDReceiveBufSize
+	assert.Equal(t, bufSize, int64(64))
+}
+
 func TestParamTable_searchMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.searchReceiveBufSize()
+	bufSize := Params.SearchReceiveBufSize
 	assert.Equal(t, int64(512), bufSize)
 }
 
 func TestParamTable_searchResultMsgStreamReceiveBufSize(t *testing.T) {
-	bufSize := Params.searchResultReceiveBufSize()
+	bufSize := Params.SearchResultReceiveBufSize
 	assert.Equal(t, int64(64), bufSize)
 }
 
 func TestParamTable_searchPulsarBufSize(t *testing.T) {
-	bufSize := Params.searchPulsarBufSize()
+	bufSize := Params.SearchPulsarBufSize
 	assert.Equal(t, int64(512), bufSize)
 }
 
 func TestParamTable_insertPulsarBufSize(t *testing.T) {
-	bufSize := Params.insertPulsarBufSize()
+	bufSize := Params.InsertPulsarBufSize
 	assert.Equal(t, int64(1024), bufSize)
 }
 
+func TestParamTable_ddPulsarBufSize(t *testing.T) {
+	bufSize := Params.DDPulsarBufSize
+	assert.Equal(t, bufSize, int64(64))
+}
+
 func TestParamTable_flowGraphMaxQueueLength(t *testing.T) {
-	length := Params.flowGraphMaxQueueLength()
+	length := Params.FlowGraphMaxQueueLength
 	assert.Equal(t, int32(1024), length)
 }
 
 func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxParallelism := Params.FlowGraphMaxParallelism
 	assert.Equal(t, int32(1024), maxParallelism)
 }
 
 func TestParamTable_insertChannelNames(t *testing.T) {
-	names := Params.insertChannelNames()
-	channelRange := Params.insertChannelRange()
+	names := Params.InsertChannelNames
+	channelRange := Params.InsertChannelRange
 	num := channelRange[1] - channelRange[0]
-	num = num / Params.queryNodeNum()
+	num = num / Params.QueryNodeNum
 	assert.Equal(t, num, len(names))
-	start := num * Params.sliceIndex()
-	assert.Equal(t, fmt.Sprintf("insert-%d", channelRange[start]), names[0])
+	start := num * Params.SliceIndex
+	contains := strings.Contains(names[0], fmt.Sprintf("insert-%d", channelRange[start]))
+	assert.Equal(t, contains, true)
 }
 
 func TestParamTable_searchChannelNames(t *testing.T) {
-	names := Params.searchChannelNames()
+	names := Params.SearchChannelNames
 	assert.Equal(t, len(names), 1)
-	assert.Equal(t, "search-0", names[0])
+	contains := strings.Contains(names[0], "search-0")
+	assert.Equal(t, contains, true)
 }
 
 func TestParamTable_searchResultChannelNames(t *testing.T) {
-	names := Params.searchResultChannelNames()
+	names := Params.SearchResultChannelNames
 	assert.NotNil(t, names)
 }
 
 func TestParamTable_msgChannelSubName(t *testing.T) {
-	name := Params.msgChannelSubName()
-	expectName := fmt.Sprintf("queryNode-%d", Params.QueryNodeID())
+	name := Params.MsgChannelSubName
+	expectName := fmt.Sprintf("queryNode-%d", Params.QueryNodeID)
 	assert.Equal(t, expectName, name)
 }
 
 func TestParamTable_statsChannelName(t *testing.T) {
-	name := Params.statsChannelName()
-	assert.Equal(t, "query-node-stats", name)
+	name := Params.StatsChannelName
+	contains := strings.Contains(name, "query-node-stats")
+	assert.Equal(t, contains, true)
 }
 
 func TestParamTable_metaRootPath(t *testing.T) {
-	path := Params.metaRootPath()
+	path := Params.MetaRootPath
 	assert.Equal(t, "by-dev/meta", path)
+}
+
+func TestParamTable_ddChannelName(t *testing.T) {
+	names := Params.DDChannelNames
+	contains := strings.Contains(names[0], "data-definition-0")
+	assert.Equal(t, contains, true)
+}
+
+func TestParamTable_defaultPartitionTag(t *testing.T) {
+	tag := Params.DefaultPartitionTag
+	assert.Equal(t, tag, "_default")
 }

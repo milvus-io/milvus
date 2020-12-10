@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -28,15 +27,12 @@ func newStatsService(ctx context.Context, replica collectionReplica) *statsServi
 }
 
 func (sService *statsService) start() {
-	sleepTimeInterval := Params.statsPublishInterval()
-	receiveBufSize := Params.statsReceiveBufSize()
+	sleepTimeInterval := Params.StatsPublishInterval
+	receiveBufSize := Params.StatsReceiveBufSize
 
 	// start pulsar
-	msgStreamURL, err := Params.pulsarAddress()
-	if err != nil {
-		log.Fatal(err)
-	}
-	producerChannels := []string{Params.statsChannelName()}
+	msgStreamURL := Params.PulsarAddress
+	producerChannels := []string{Params.StatsChannelName}
 
 	statsStream := msgstream.NewPulsarMsgStream(sService.ctx, receiveBufSize)
 	statsStream.SetPulsarClient(msgStreamURL)

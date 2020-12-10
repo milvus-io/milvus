@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
+
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
 type Node interface {
@@ -33,7 +36,7 @@ type nodeCtx struct {
 
 func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 	if (*nodeCtx.node).IsInputNode() {
-		fmt.Println("start InputNode.inStream")
+		// fmt.Println("start InputNode.inStream")
 		inStream, ok := (*nodeCtx.node).(*InputNode)
 		if !ok {
 			log.Fatal("Invalid inputNode")
@@ -108,6 +111,20 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 			return
 		}
 		nodeCtx.inputMessages[i] = msg
+	}
+
+	// timeTick alignment check
+	if len(nodeCtx.inputMessages) > 1 {
+		time := (*nodeCtx.inputMessages[0]).TimeTick()
+		for i := 1; i < len(nodeCtx.inputMessages); i++ {
+			if time != (*nodeCtx.inputMessages[i]).TimeTick() {
+				err := errors.New("Fatal, misaligned time tick," +
+					"t1=" + strconv.FormatUint(time, 10) +
+					", t2=" + strconv.FormatUint((*nodeCtx.inputMessages[i]).TimeTick(), 10) +
+					", please restart pulsar")
+				panic(err)
+			}
+		}
 	}
 }
 

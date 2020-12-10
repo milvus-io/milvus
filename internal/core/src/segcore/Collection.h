@@ -44,7 +44,7 @@ class Collection {
  private:
     IndexMetaPtr index_;
     std::string collection_name_;
-    std::string collection_proto_;
+    std::string schema_proto_;
     SchemaPtr schema_;
 };
 

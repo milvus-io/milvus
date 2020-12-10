@@ -24,6 +24,10 @@ queryNode:
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
 
+    dataDefinition:
+      recvBufSize: 64 # msgPack chan buffer size
+      pulsarBufSize: 64 # pulsar chan buffer size
+
     delete:
       #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size

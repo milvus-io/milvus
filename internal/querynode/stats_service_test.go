@@ -16,15 +16,15 @@ func TestStatsService_start(t *testing.T) {
 }
 
 //NOTE: start pulsar before test
-func TestSegmentManagement_SegmentStatisticService(t *testing.T) {
+func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	node := newQueryNode()
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	const receiveBufSize = 1024
 	// start pulsar
-	producerChannels := []string{Params.statsChannelName()}
+	producerChannels := []string{Params.StatsChannelName}
 
-	pulsarURL, _ := Params.pulsarAddress()
+	pulsarURL := Params.PulsarAddress
 
 	statsStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	statsStream.SetPulsarClient(pulsarURL)

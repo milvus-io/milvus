@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 const (
@@ -30,8 +30,8 @@ type metaService struct {
 }
 
 func newMetaService(ctx context.Context, replica collectionReplica) *metaService {
-	ETCDAddr := Params.etcdAddress()
-	MetaRootPath := Params.metaRootPath()
+	ETCDAddr := Params.ETCDAddress
+	MetaRootPath := Params.MetaRootPath
 
 	cli, _ := clientv3.New(clientv3.Config{
 		Endpoints:   []string{ETCDAddr},
@@ -55,37 +55,24 @@ func (mService *metaService) start() {
 	if err != nil {
 		log.Fatal("metaService loadSegments failed")
 	}
-
-	metaChan := mService.kvBase.WatchWithPrefix("")
-	for {
-		select {
-		case <-mService.ctx.Done():
-			return
-		case resp := <-metaChan:
-			err := mService.processResp(resp)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-	}
 }
 
 func GetCollectionObjID(key string) string {
-	ETCDRootPath := Params.metaRootPath()
+	ETCDRootPath := Params.MetaRootPath
 
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func GetSegmentObjID(key string) string {
-	ETCDRootPath := Params.metaRootPath()
+	ETCDRootPath := Params.MetaRootPath
 
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	return strings.TrimPrefix(key, prefix)
 }
 
 func isCollectionObj(key string) bool {
-	ETCDRootPath := Params.metaRootPath()
+	ETCDRootPath := Params.MetaRootPath
 
 	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
@@ -95,7 +82,7 @@ func isCollectionObj(key string) bool {
 }
 
 func isSegmentObj(key string) bool {
-	ETCDRootPath := Params.metaRootPath()
+	ETCDRootPath := Params.MetaRootPath
 
 	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
 	prefix = strings.TrimSpace(prefix)
@@ -110,9 +97,8 @@ func isSegmentChannelRangeInQueryNodeChannelRange(segment *etcdpb.SegmentMeta) b
 		return false
 	}
 
-	Params.Init()
-	var queryNodeChannelStart = Params.insertChannelRange()[0]
-	var queryNodeChannelEnd = Params.insertChannelRange()[1]
+	var queryNodeChannelStart = Params.InsertChannelRange[0]
+	var queryNodeChannelEnd = Params.InsertChannelRange[1]
 
 	if segment.ChannelStart >= int32(queryNodeChannelStart) && segment.ChannelEnd <= int32(queryNodeChannelEnd) {
 		return true
@@ -149,7 +135,9 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 
 	col := mService.collectionUnmarshal(value)
 	if col != nil {
-		err := mService.replica.addCollection(col, value)
+		schema := col.Schema
+		schemaBlob := proto.MarshalTextString(schema)
+		err := mService.replica.addCollection(col.ID, schemaBlob)
 		if err != nil {
 			log.Println(err)
 		}

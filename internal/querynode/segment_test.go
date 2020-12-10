@@ -18,12 +18,12 @@ func TestSegment_newSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -36,12 +36,12 @@ func TestSegment_deleteSegment(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -56,12 +56,12 @@ func TestSegment_getRowCount(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -107,12 +107,12 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -164,12 +164,12 @@ func TestSegment_getMemSize(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -216,12 +216,12 @@ func TestSegment_segmentInsert(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
 	assert.Equal(t, segmentID, segment.segmentID)
@@ -262,12 +262,12 @@ func TestSegment_segmentDelete(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -315,12 +315,12 @@ func TestSegment_segmentSearch(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -400,12 +400,12 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)
@@ -442,12 +442,12 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
-	collectionMetaBlob := proto.MarshalTextString(collectionMeta)
-	assert.NotEqual(t, "", collectionMetaBlob)
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta, collectionMetaBlob)
-	assert.Equal(t, collection.meta.Schema.Name, collectionName)
-	assert.Equal(t, collection.meta.ID, collectionID)
+	collection := newCollection(collectionMeta.ID, schemaBlob)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
 	segment := newSegment(collection, segmentID)

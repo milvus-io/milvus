@@ -47,12 +47,6 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
-		if len(task.RowIDs) != len(task.Timestamps) || len(task.RowIDs) != len(task.RowData) {
-			// TODO: what if the messages are misaligned?
-			// Here, we ignore those messages and print error
-			log.Println("Error, misaligned messages detected")
-			continue
-		}
 		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
 		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
@@ -128,8 +122,8 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 }
 
 func newInsertNode(replica collectionReplica) *insertNode {
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
