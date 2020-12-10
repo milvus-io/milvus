@@ -270,6 +270,30 @@ class SizeValue : public BaseValue {
     Get() override;
 };
 
+class TimeValue : public BaseValue {
+ public:
+    TimeValue(const char* name, const char* alias, bool modifiable, int64_t lower_bound, int64_t upper_bound,
+              Value<int64_t>& config, int64_t default_value,
+              std::function<bool(int64_t val, std::string& err)> is_valid_fn = nullptr);
+
+ private:
+    Value<int64_t>& config_;
+    int64_t lower_bound_;
+    int64_t upper_bound_;
+    const int64_t default_value_;
+    std::function<bool(int64_t val, std::string& err)> is_valid_fn_;
+
+ public:
+    void
+    Init() override;
+
+    void
+    Set(const std::string& value, bool update) override;
+
+    std::string
+    Get() override;
+};
+
 /* create config with {is_valid} function */
 
 #define CreateBoolValue(name, modifiable, config_addr, default, is_valid) \
@@ -291,5 +315,8 @@ class SizeValue : public BaseValue {
 
 #define CreateSizeValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid) \
     std::make_shared<SizeValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), is_valid)
+
+#define CreateTimeValue(name, modifiable, lower_bound, upper_bound, config_addr, default, is_valid) \
+    std::make_shared<TimeValue>(name, nullptr, modifiable, lower_bound, upper_bound, config_addr, (default), is_valid)
 
 }  // namespace milvus
