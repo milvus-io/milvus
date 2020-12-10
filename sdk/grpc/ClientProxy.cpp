@@ -594,7 +594,9 @@ ClientProxy::CountEntities(const std::string& collection_name, int64_t& row_coun
         Status status;
         ::milvus::grpc::CollectionName grpc_collection_name;
         grpc_collection_name.set_collection_name(collection_name);
-        row_count = client_ptr_->CountEntities(grpc_collection_name, status);
+        milvus::grpc::CollectionRowCount grpc_row_count;
+        status = client_ptr_->CountEntities(grpc_collection_name, grpc_row_count);
+        row_count = grpc_row_count.collection_row_count();
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to count collection: " + std::string(ex.what()));
