@@ -73,12 +73,6 @@ enum class DataType {
 
 class ExecutionEngine {
  public:
-    virtual Status
-    AddWithIds(int64_t n, const float* xdata, const int64_t* xids) = 0;
-
-    virtual Status
-    AddWithIds(int64_t n, const uint8_t* xdata, const int64_t* xids) = 0;
-
     virtual size_t
     Count() const = 0;
 
