@@ -31,7 +31,8 @@ std::vector<SPTAG::QueryResult>
 ConvertToQueryResult(const DatasetPtr& dataset_ptr, const Config& config);
 
 DatasetPtr
-ConvertToDataset(std::vector<SPTAG::QueryResult> query_results);
+ConvertToDataset(std::vector<SPTAG::QueryResult> query_results,
+                 std::shared_ptr<std::vector<int64_t>> uid);
 
 }  // namespace knowhere
 }  // namespace milvus

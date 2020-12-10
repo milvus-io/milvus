@@ -53,10 +53,10 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+GPUIVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (auto spt = res_.lock()) {
         ResScope rs(res_, gpu_id_);
-        IVF::Add(dataset_ptr, config);
+        IVF::AddWithoutIds(dataset_ptr, config);
     } else {
         KNOWHERE_THROW_MSG("Add IVF can't get gpu resource");
     }
@@ -152,6 +152,8 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
             device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k,
                                  GetBlacklist());
         }
+
+        MapOffsetToUid(labels, static_cast<size_t>(n * k));
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }

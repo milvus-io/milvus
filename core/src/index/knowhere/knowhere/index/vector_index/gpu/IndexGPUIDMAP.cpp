@@ -98,21 +98,17 @@ GPUIDMAP::GetRawVectors() {
     KNOWHERE_THROW_MSG("Not support");
 }
 
-const int64_t*
-GPUIDMAP::GetRawIds() {
-    KNOWHERE_THROW_MSG("Not support");
-}
-
 void
 GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
     ResScope rs(res_, gpu_id_);
 
-    auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
-    auto default_type = flat_index->metric_type;
+    auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
-        flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    flat_index->search(n, (float*)data, k, distances, labels, GetBlacklist());
-    flat_index->metric_type = default_type;
+        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
+    index_->metric_type = default_type;
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 void

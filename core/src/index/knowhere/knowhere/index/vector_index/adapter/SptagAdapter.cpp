@@ -54,7 +54,8 @@ ConvertToQueryResult(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
+ConvertToDataset(std::vector<SPTAG::QueryResult> query_results,
+                 std::shared_ptr<std::vector<int64_t>> uid) {
     auto k = query_results[0].GetResultNum();
     auto elems = query_results.size() * k;
 
@@ -69,7 +70,13 @@ ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
         auto num_result = query_results[i].GetResultNum();
         for (auto j = 0; j < num_result; ++j) {
             //            p_id[i * k + j] = results[j].VID;
-            p_id[i * k + j] = *(int64_t*)query_results[i].GetMetadata(j).Data();
+            auto id = *(int64_t*)query_results[i].GetMetadata(j).Data();
+            if (uid != nullptr) {
+                if ( id >= 0) {
+                    id = uid->at(id);
+                }
+            }
+            p_id[i * k + j] = id;
             p_dist[i * k + j] = results[j].Dist;
         }
     }

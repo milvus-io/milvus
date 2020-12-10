@@ -98,6 +98,8 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
                            blacklist);
         }
 
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
+
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
         ret_ds->Set(meta::DISTANCE, p_dist);
@@ -139,7 +141,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GETTENSOR(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
     auto metric_str = config[Metric::TYPE].get<std::string>();
@@ -153,7 +155,7 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
-    index_->Build_with_ids(rows, (float*)p_data, (int64_t*)p_ids, b_params);
+    index_->Build(rows, (float*)p_data, nullptr, b_params);
 }
 
 int64_t

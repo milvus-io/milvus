@@ -49,11 +49,6 @@ class NSG : public VecIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override {
         KNOWHERE_THROW_MSG("Addwithoutids is not supported");
     }

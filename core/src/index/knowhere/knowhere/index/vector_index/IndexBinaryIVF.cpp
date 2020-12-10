@@ -73,52 +73,6 @@ BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 }
 
-#if 0
-DatasetPtr
-BinaryIVF::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    try {
-        int64_t k = config[meta::TOPK].get<int64_t>();
-        auto elems = rows * k;
-
-        size_t p_id_size = sizeof(int64_t) * elems;
-        size_t p_dist_size = sizeof(float) * elems;
-        auto p_id = (int64_t*)malloc(p_id_size);
-        auto p_dist = (float*)malloc(p_dist_size);
-
-        int32_t* pdistances = (int32_t*)p_dist;
-        index_->search_by_id(rows, p_data, k, pdistances, p_id, bitset_);
-
-        auto ret_ds = std::make_shared<Dataset>();
-        if (index_->metric_type == faiss::METRIC_Hamming) {
-            auto pf_dist = (float*)malloc(p_dist_size);
-            int32_t* pi_dist = (int32_t*)p_dist;
-            for (int i = 0; i < elems; i++) {
-                *(pf_dist + i) = (float)(*(pi_dist + i));
-            }
-            ret_ds->Set(meta::IDS, p_id);
-            ret_ds->Set(meta::DISTANCE, pf_dist);
-            free(p_dist);
-        } else {
-            ret_ds->Set(meta::IDS, p_id);
-            ret_ds->Set(meta::DISTANCE, p_dist);
-        }
-
-        return ret_ds;
-    } catch (faiss::FaissException& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-#endif
-
 int64_t
 BinaryIVF::Count() {
     if (!index_) {
@@ -151,7 +105,7 @@ BinaryIVF::UpdateIndexSize() {
 
 void
 BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    GETTENSORWITHIDS(dataset_ptr)
+    GETTENSOR(dataset_ptr)
 
     int64_t nlist = config[IndexParams::nlist];
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
@@ -159,7 +113,7 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
     index->own_fields = true;
     index->train(rows, static_cast<const uint8_t*>(p_data));
-    index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
+    index->add(rows, static_cast<const uint8_t*>(p_data));
     index_ = index;
 }
 
@@ -226,6 +180,8 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
             distances[i] = static_cast<float>(i_distances[i]);
         }
     }
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 }  // namespace knowhere

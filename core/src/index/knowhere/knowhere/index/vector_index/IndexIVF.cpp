@@ -16,7 +16,6 @@
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuAutoTune.h>
@@ -78,17 +77,6 @@ IVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
-    index_->add_with_ids(rows, (float*)p_data, p_ids);
-}
-
-void
 IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
@@ -119,19 +107,6 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_dist = (float*)malloc(p_dist_size);
 
         QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
-
-        //    std::stringstream ss_res_id, ss_res_dist;
-        //    for (int i = 0; i < 10; ++i) {
-        //        printf("%llu", p_id[i]);
-        //        printf("\n");
-        //        printf("%.6f", p_dist[i]);
-        //        printf("\n");
-        //        ss_res_id << p_id[i] << " ";
-        //        ss_res_dist << p_dist[i] << " ";
-        //    }
-        //    std::cout << std::endl << "after search: " << std::endl;
-        //    std::cout << ss_res_id.str() << std::endl;
-        //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
@@ -339,6 +314,8 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
                         << ", data search cost: " << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
     faiss::indexIVF_stats.search_time = 0;
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 void

@@ -15,7 +15,6 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 #ifdef MILVUS_GPU_VERSION
 #include <faiss/gpu/GpuCloner.h>
@@ -23,6 +22,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -54,22 +54,10 @@ IDMAP::Load(const BinarySet& binary_set) {
 
 void
 IDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    const char* desc = "IDMap,Flat";
     int64_t dim = config[meta::DIM].get<int64_t>();
     faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto index = faiss::index_factory(dim, desc, metric_type);
-    index_.reset(index);
-}
-
-void
-IDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
-    index_->add_with_ids(rows, (float*)p_data, p_ids);
+    auto index = std::make_shared<faiss::IndexFlat>(dim, metric_type);
+    index_ = index;
 }
 
 void
@@ -79,16 +67,8 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const void*>(meta::TENSOR);
-
-    // TODO: caiyd need check
-    std::vector<int64_t> new_ids(rows);
-    for (int i = 0; i < rows; ++i) {
-        new_ids[i] = i;
-    }
-
-    index_->add_with_ids(rows, (float*)p_data, new_ids.data());
+    GETTENSOR(dataset_ptr)
+    index_->add(rows, (float*)p_data);
 }
 
 DatasetPtr
@@ -105,42 +85,12 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    //    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, Config());
     QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
     return ret_ds;
 }
-
-#if 0
-DatasetPtr
-IDMAP::QueryById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-    //    GETTENSOR(dataset)
-    auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
-    int64_t k = config[meta::TOPK].get<int64_t>();
-    auto elems = rows * k;
-    size_t p_id_size = sizeof(int64_t) * elems;
-    size_t p_dist_size = sizeof(float) * elems;
-    auto p_id = (int64_t*)malloc(p_id_size);
-    auto p_dist = (float*)malloc(p_dist_size);
-
-    // todo: enable search by id (zhiru)
-    //    auto blacklist = dataset_ptr->Get<faiss::ConcurrentBitsetPtr>("bitset");
-    //    index_->searchById(rows, (float*)p_data, config[meta::TOPK].get<int64_t>(), p_dist, p_id, blacklist);
-    index_->search_by_id(rows, p_data, k, p_dist, p_id, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::IDS, p_id);
-    ret_ds->Set(meta::DISTANCE, p_dist);
-    return ret_ds;
-}
-#endif
 
 int64_t
 IDMAP::Count() {
@@ -179,54 +129,22 @@ IDMAP::CopyCpuToGpu(const int64_t device_id, const Config& config) {
 const float*
 IDMAP::GetRawVectors() {
     try {
-        auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());
-        auto flat_index = dynamic_cast<faiss::IndexFlat*>(file_index->index);
+        auto flat_index = dynamic_cast<faiss::IndexFlat*>(index_.get());
         return flat_index->xb.data();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
-const int64_t*
-IDMAP::GetRawIds() {
-    try {
-        auto file_index = dynamic_cast<faiss::IndexIDMap*>(index_.get());
-        return file_index->id_map.data();
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-#if 0
-DatasetPtr
-IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-    //    GETTENSOR(dataset)
-    // auto rows = dataset_ptr->Get<int64_t>(meta::ROWS);
-    auto p_data = dataset_ptr->Get<const int64_t*>(meta::IDS);
-    auto elems = dataset_ptr->Get<int64_t>(meta::DIM);
-
-    size_t p_x_size = sizeof(float) * elems;
-    auto p_x = (float*)malloc(p_x_size);
-
-    index_->get_vector_by_id(1, p_data, p_x, bitset_);
-
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::TENSOR, p_x);
-    return ret_ds;
-}
-#endif
-
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
-    auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
-    auto default_type = flat_index->metric_type;
+    auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
-        flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    flat_index->search(n, (float*)data, k, distances, labels, GetBlacklist());
-    flat_index->metric_type = default_type;
+        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
+    index_->metric_type = default_type;
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 }  // namespace knowhere

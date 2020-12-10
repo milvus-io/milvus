@@ -13,7 +13,6 @@
 
 #include <faiss/IndexBinaryFlat.h>
 #include <faiss/MetaIndexes.h>
-#include <faiss/index_factory.h>
 
 #include <string>
 
@@ -78,48 +77,6 @@ BinaryIDMAP::Dim() {
 }
 
 void
-BinaryIDMAP::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_) {
-        KNOWHERE_THROW_MSG("index not initialize");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GETTENSORWITHIDS(dataset_ptr)
-
-    index_->add_with_ids(rows, (uint8_t*)p_data, p_ids);
-}
-
-void
-BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
-    const char* desc = "BFlat";
-    int64_t dim = config[meta::DIM].get<int64_t>();
-    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    auto index = faiss::index_binary_factory(dim, desc, metric_type);
-    index_.reset(index);
-}
-
-const uint8_t*
-BinaryIDMAP::GetRawVectors() {
-    try {
-        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
-        auto flat_index = dynamic_cast<faiss::IndexBinaryFlat*>(file_index->index);
-        return flat_index->xb.data();
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-const int64_t*
-BinaryIDMAP::GetRawIds() {
-    try {
-        auto file_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get());
-        return file_index->id_map.data();
-    } catch (std::exception& e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-void
 BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
@@ -128,34 +85,48 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset_ptr)
 
-    std::vector<int64_t> new_ids(rows);
-    for (int i = 0; i < rows; ++i) {
-        new_ids[i] = i;
-    }
+    index_->add(rows, (uint8_t*)p_data);
+}
 
-    index_->add_with_ids(rows, (uint8_t*)p_data, new_ids.data());
+void
+BinaryIDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+    int64_t dim = config[meta::DIM].get<int64_t>();
+    faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    auto index = std::make_shared<faiss::IndexBinaryFlat>(dim, metric_type);
+    index_ = index;
+}
+
+const uint8_t*
+BinaryIDMAP::GetRawVectors() {
+    try {
+        auto flat_index = dynamic_cast<faiss::IndexBinaryFlat*>(index_.get());
+        return flat_index->xb.data();
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
 }
 
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
                        const Config& config) {
-    auto flat_index = dynamic_cast<faiss::IndexBinaryIDMap*>(index_.get())->index;
-    auto default_type = flat_index->metric_type;
+    auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
-        flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 
     int32_t* i_distances = reinterpret_cast<int32_t*>(distances);
-    flat_index->search(n, (uint8_t*)data, k, i_distances, labels, GetBlacklist());
+    index_->search(n, (uint8_t*)data, k, i_distances, labels, GetBlacklist());
 
     // if hamming, it need transform int32 to float
-    if (flat_index->metric_type == faiss::METRIC_Hamming) {
+    if (index_->metric_type == faiss::METRIC_Hamming) {
         int64_t num = n * k;
         for (int64_t i = 0; i < num; i++) {
             distances[i] = static_cast<float>(i_distances[i]);
         }
     }
 
-    flat_index->metric_type = default_type;
+    index_->metric_type = default_type;
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 }  // namespace knowhere

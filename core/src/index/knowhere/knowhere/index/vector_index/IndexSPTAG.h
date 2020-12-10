@@ -42,11 +42,6 @@ class CPUSPTAGRNG : public VecIndex {
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override {
         KNOWHERE_THROW_MSG("Incremental index is not supported");
     }
