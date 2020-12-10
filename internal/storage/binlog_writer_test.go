@@ -17,7 +17,8 @@ func TestBinlogWriterReader(t *testing.T) {
 	assert.Nil(t, err)
 	err = eventWriter.AddInt32ToPayload([]int32{1, 2, 3})
 	assert.Nil(t, err)
-	assert.Nil(t, nil, binlogWriter.GetBuffer())
+	_, err = binlogWriter.GetBuffer()
+	assert.NotNil(t, err)
 	err = binlogWriter.Close()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, binlogWriter.GetEventNums())
@@ -30,7 +31,8 @@ func TestBinlogWriterReader(t *testing.T) {
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, nums)
 
-	buffer := binlogWriter.GetBuffer()
+	buffer, err := binlogWriter.GetBuffer()
+	assert.Nil(t, err)
 	fmt.Println("reader offset : " + strconv.Itoa(len(buffer)))
 
 	binlogReader, err := NewBinlogReader(buffer)

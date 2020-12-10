@@ -274,7 +274,10 @@ func (insertCodec *InsertCodec) Serialize(logIdx int, partitionID UniqueID, segm
 			return nil, err
 		}
 
-		buffer := writer.GetBuffer()
+		buffer, err := writer.GetBuffer()
+		if err != nil {
+			return nil, err
+		}
 		blobKey := fmt.Sprintf("%d/insert_log/%d/%d/%d/%d/%d",
 			insertCodec.TenantID, insertCodec.Schema.ID, partitionID, segmentID, fieldID, logIdx)
 		blobs = append(blobs, &Blob{
@@ -566,7 +569,10 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(logIdx int, ts []Times
 	if err != nil {
 		return nil, err
 	}
-	buffer := writer.GetBuffer()
+	buffer, err := writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
 	blobKey := fmt.Sprintf("%d/data_definition_log/%d/%d/%d",
 		dataDefinitionCodec.TenantID, dataDefinitionCodec.Schema.ID, RequestField, logIdx)
 	blobs = append(blobs, &Blob{
@@ -595,7 +601,10 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(logIdx int, ts []Times
 	if err != nil {
 		return nil, err
 	}
-	buffer = writer.GetBuffer()
+	buffer, err = writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
 	blobKey = fmt.Sprintf("%d/data_definition_log/%d/%d/%d",
 		dataDefinitionCodec.TenantID, dataDefinitionCodec.Schema.ID, TsField, logIdx)
 	blobs = append(blobs, &Blob{
