@@ -294,6 +294,7 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
             // TODO: Should not happen
             continue;
         }
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         alive_cids_.erase(cid);
         name_id_map_.erase(ss->GetName());
         holders_.erase(cid);
@@ -353,7 +354,6 @@ Snapshots::Reset() {
 void
 Snapshots::SnapshotGCCallback(Snapshot::Ptr ss_ptr) {
     ss_ptr->UnRef();
-    LOG_ENGINE_DEBUG_ << "Snapshot " << ss_ptr->GetID() << " ref_count = " << ss_ptr->ref_count() << " To be removed";
 }
 
 Status
