@@ -5,9 +5,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func TestSizeofStruct(t *testing.T) {
@@ -34,12 +33,13 @@ func TestSizeofStruct(t *testing.T) {
 func TestEventWriter(t *testing.T) {
 	insertEvent, err := newInsertEventWriter(schemapb.DataType_INT32, 0)
 	assert.Nil(t, err)
-	defer insertEvent.Close()
 	err = insertEvent.Close()
 	assert.Nil(t, err)
 
 	insertEvent, err = newInsertEventWriter(schemapb.DataType_INT32, 0)
 	assert.Nil(t, err)
+	defer insertEvent.Close()
+
 	err = insertEvent.AddInt64ToPayload([]int64{1, 1})
 	assert.NotNil(t, err)
 	err = insertEvent.AddInt32ToPayload([]int32{1, 2, 3})

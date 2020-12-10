@@ -412,7 +412,10 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, er
 	if len(buf) == 0 {
 		return nil, errors.New("create Payload reader failed, buffer is empty")
 	}
-	r := C.NewPayloadReader(C.int(colType), (*C.uchar)(unsafe.Pointer(&buf[0])), C.long(len(buf)))
+	r := C.NewPayloadReader(C.int(colType), (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.long(len(buf)))
+	if r == nil {
+		return nil, errors.New("failed to read parquet from buffer")
+	}
 	return &PayloadReader{payloadReaderPtr: r, colType: colType}, nil
 }
 
@@ -487,6 +490,10 @@ func (r *PayloadReader) ReleasePayloadReader() error {
 }
 
 func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
+	if r.colType != schemapb.DataType_BOOL {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.bool
 	var cSize C.int
 
@@ -503,6 +510,10 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 }
 
 func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
+	if r.colType != schemapb.DataType_INT8 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.int8_t
 	var cSize C.int
 
@@ -519,6 +530,10 @@ func (r *PayloadReader) GetInt8FromPayload() ([]int8, error) {
 }
 
 func (r *PayloadReader) GetInt16FromPayload() ([]int16, error) {
+	if r.colType != schemapb.DataType_INT16 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.int16_t
 	var cSize C.int
 
@@ -535,6 +550,10 @@ func (r *PayloadReader) GetInt16FromPayload() ([]int16, error) {
 }
 
 func (r *PayloadReader) GetInt32FromPayload() ([]int32, error) {
+	if r.colType != schemapb.DataType_INT32 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.int32_t
 	var cSize C.int
 
@@ -551,6 +570,10 @@ func (r *PayloadReader) GetInt32FromPayload() ([]int32, error) {
 }
 
 func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
+	if r.colType != schemapb.DataType_INT64 {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.int64_t
 	var cSize C.int
 
@@ -567,6 +590,10 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
 }
 
 func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {
+	if r.colType != schemapb.DataType_FLOAT {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.float
 	var cSize C.int
 
@@ -583,6 +610,10 @@ func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {
 }
 
 func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
+	if r.colType != schemapb.DataType_DOUBLE {
+		return nil, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.double
 	var cSize C.int
 
@@ -599,6 +630,10 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
 }
 
 func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
+	if r.colType != schemapb.DataType_STRING {
+		return "", errors.New("incorrect data type")
+	}
+
 	var cStr *C.char
 	var cSize C.int
 
@@ -615,6 +650,10 @@ func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
 
 // ,dimension, error
 func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
+	if r.colType != schemapb.DataType_VECTOR_BINARY {
+		return nil, 0, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.uint8_t
 	var cDim C.int
 	var cLen C.int
@@ -634,6 +673,10 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, error) {
 
 // ,dimension, error
 func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
+	if r.colType != schemapb.DataType_VECTOR_FLOAT {
+		return nil, 0, errors.New("incorrect data type")
+	}
+
 	var cMsg *C.float
 	var cDim C.int
 	var cLen C.int
