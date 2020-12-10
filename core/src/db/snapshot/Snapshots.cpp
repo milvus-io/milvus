@@ -289,8 +289,8 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
                 std::inserter(diff, diff.begin()));
-
     }
+
     for (auto& cid : diff) {
         ScopedSnapshotT ss;
         status = GetSnapshot(ss, cid);
