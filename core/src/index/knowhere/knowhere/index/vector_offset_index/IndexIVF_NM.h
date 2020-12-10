@@ -86,8 +86,7 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     GenParams(const Config&);
 
     virtual void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&,
-              const faiss::BitsetView& bitset);
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView& bitset);
 
     void
     SealImpl() override;
