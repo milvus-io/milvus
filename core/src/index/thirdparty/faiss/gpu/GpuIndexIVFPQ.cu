@@ -378,8 +378,8 @@ GpuIndexIVFPQ::searchImpl_(int n,
     index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
   } else {
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-                                             const_cast<uint8_t*>(bitset->data()), stream,
-                                             {(int) bitset->size()});
+                                             const_cast<uint8_t*>(bitset.data()), stream,
+                                             {(int) bitset.u8size()});
     index_->query(queries, bitsetDevice, nprobe, k, outDistances, outLabels);
   }
 }

@@ -42,9 +42,21 @@ class BitsetView {
         return size_ == 0;
     }
     
+    // return count of all bits
     int64_t 
     size() const {
         return size_;
+    }
+
+    // return sizeof bitmap in bytes
+    int64_t
+    u8size() const {
+        return (size_ + 8 - 1) / 8;
+    }
+
+    const uint8_t*
+    data() const {
+        return blocks_;
     }
 
     operator bool() const {
