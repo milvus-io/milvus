@@ -242,7 +242,7 @@ IVFSQHybrid::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 
 void
 IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                       const faiss::ConcurrentBitsetPtr& bitset) {
+                       const faiss::BitsetView& bitset) {
     if (gpu_mode_ == 2) {
         GPUIVF::QueryImpl(n, data, k, distances, labels, config, bitset);
         //        index_->search(n, (float*)data, k, distances, labels);

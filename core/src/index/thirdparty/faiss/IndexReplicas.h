@@ -61,7 +61,7 @@ class IndexReplicasTemplate : public ThreadedIndex<IndexT> {
               idx_t k,
               distance_t* distances,
               idx_t* labels,
-              ConcurrentBitsetPtr bitset = nullptr) const override;
+              const BitsetView& bitset = nullptr) const override;
 
   /// reconstructs from the first index
   void reconstruct(idx_t, component_t *v) const override;

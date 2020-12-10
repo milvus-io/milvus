@@ -48,7 +48,7 @@ BinaryIVF::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+BinaryIVF::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -133,7 +133,7 @@ BinaryIVF::GenParams(const Config& config) {
 
 void
 BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                     const faiss::ConcurrentBitsetPtr& bitset) {
+                     const faiss::BitsetView& bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     ivf_index->nprobe = params->nprobe;

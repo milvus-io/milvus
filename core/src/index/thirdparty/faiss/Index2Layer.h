@@ -61,7 +61,7 @@ struct Index2Layer: Index {
         idx_t k,
         float* distances,
         idx_t* labels,
-        ConcurrentBitsetPtr bitset = nullptr) const override;
+        const BitsetView& bitset = nullptr) const override;
 
     void reconstruct_n(idx_t i0, idx_t ni, float* recons) const override;
 

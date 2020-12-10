@@ -204,6 +204,7 @@ class ConcurrentBitset {
     std::vector<std::atomic<uint8_t>> bitset_;
 };
 
+
 using ConcurrentBitsetPtr = std::shared_ptr<ConcurrentBitset>;
 
 }  // namespace faiss

@@ -121,6 +121,7 @@ inline void set_error_from_string(char **error, const char* msg) {
 #elif defined(__GNUC__)
 #include <x86intrin.h>
 #include <src/index/thirdparty/faiss/utils/ConcurrentBitset.h>
+#include <src/index/thirdparty/faiss/utils/BitsetView.h>
 
 #endif
 #endif
@@ -838,9 +839,9 @@ class AnnoyIndexInterface {
   virtual bool load_index(void* index_data, const int64_t& index_size, char** error = nullptr) = 0;
   virtual T get_distance(S i, S j) const = 0;
   virtual void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                               const faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
+                               const faiss::BitsetView& bitset = nullptr) const = 0;
   virtual void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                               const faiss::ConcurrentBitsetPtr& bitset = nullptr) const = 0;
+                               const faiss::BitsetView& bitset = nullptr) const = 0;
   virtual S get_n_items() const = 0;
   virtual S get_dim() const = 0;
   virtual S get_n_trees() const = 0;
@@ -1177,14 +1178,14 @@ public:
   }
 
   void get_nns_by_item(S item, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                       const faiss::ConcurrentBitsetPtr& bitset) const {
+                       const faiss::BitsetView& bitset) const {
     // TODO: handle OOB
     const Node* m = _get(item);
     _get_all_nns(m->v, n, search_k, result, distances, bitset);
   }
 
   void get_nns_by_vector(const T* w, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                         const faiss::ConcurrentBitsetPtr& bitset) const {
+                         const faiss::BitsetView& bitset) const {
     _get_all_nns(w, n, search_k, result, distances, bitset);
   }
 
@@ -1334,7 +1335,7 @@ protected:
   }
 
   void _get_all_nns(const T* v, size_t n, int64_t search_k, vector<S>* result, vector<T>* distances,
-                    const faiss::ConcurrentBitsetPtr& bitset) const {
+                    const faiss::BitsetView& bitset) const {
     Node* v_node = (Node *)alloca(_s);
     D::template zero_value<Node>(v_node);
     memcpy(v_node->v, v, sizeof(T) * _f);
@@ -1358,12 +1359,12 @@ protected:
       Node* nd = _get(i);
       q.pop();
       if (nd->n_descendants == 1 && i < _n_items) { // raw data
-        if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)i))
+        if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)i))
           nns.push_back(i);
       } else if (nd->n_descendants <= _K) {
         const S* dst = nd->children;
         for (auto ii = 0; ii < nd->n_descendants; ++ ii) {
-          if (bitset == nullptr || !bitset->test((faiss::ConcurrentBitset::id_type_t)dst[ii]))
+          if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)dst[ii]))
             nns.push_back(dst[ii]);
 //            nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
         }

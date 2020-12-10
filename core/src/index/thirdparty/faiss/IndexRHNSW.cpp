@@ -203,7 +203,7 @@ void IndexRHNSW::train(idx_t n, const float* x)
 }
 
 void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
-                        float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
+                        float *distances, idx_t *labels, const BitsetView& bitset) const
 
 {
     FAISS_THROW_IF_NOT_MSG(storage,
@@ -682,7 +682,7 @@ int search_from_candidates_2(const RHNSW & hnsw,
 }  // namespace
 
 void IndexRHNSW2Level::search (idx_t n, const float *x, idx_t k,
-                              float *distances, idx_t *labels, ConcurrentBitsetPtr bitset) const
+                              float *distances, idx_t *labels, const BitsetView& bitset) const
 {
     if (dynamic_cast<const Index2Layer*>(storage)) {
         IndexRHNSW::search (n, x, k, distances, labels);

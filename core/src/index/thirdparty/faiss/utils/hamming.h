@@ -29,6 +29,7 @@
 
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/utils/BitsetView.h>
 
 /* The Hamming distance type */
 typedef int32_t hamdis_t;
@@ -148,7 +149,7 @@ void hammings_knn_hc (
         size_t nb,
         size_t ncodes,
         int ordered,
-        ConcurrentBitsetPtr bitset = nullptr);
+        const BitsetView& bitset = nullptr);
 
 /* Legacy alias to hammings_knn_hc. */
 void hammings_knn (
@@ -158,7 +159,7 @@ void hammings_knn (
   size_t nb,
   size_t ncodes,
   int ordered,
-  ConcurrentBitsetPtr bitset = nullptr);
+  const BitsetView& bitset = nullptr);
 
 /** Return the k smallest Hamming distances for a set of binary query vectors,
  * using counting max.
@@ -181,7 +182,7 @@ void hammings_knn_mc (
   size_t ncodes,
   int32_t *distances,
   int64_t *labels,
-  ConcurrentBitsetPtr bitset = nullptr);
+  const BitsetView& bitset = nullptr);
 
 /** same as hammings_knn except we are doing a range search with radius */
 void hamming_range_search (

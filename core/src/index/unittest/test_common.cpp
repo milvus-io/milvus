@@ -14,6 +14,9 @@
 #include "knowhere/common/Timer.h"
 #include "knowhere/knowhere/common/Exception.h"
 #include "unittest/utils.h"
+#include "index/thirdparty/faiss/utils/BitsetView.h"
+#include "index/thirdparty/faiss/utils/ConcurrentBitset.h"
+#include <boost/dynamic_bitset.hpp>
 
 /*Some unittest for knowhere/common, mainly for improve code coverage.*/
 
@@ -42,4 +45,28 @@ TEST(COMMON_TEST, time_recoder) {
     sleep(1);
     double span = recoder.ElapseFromBegin("get time");
     ASSERT_GE(span, 1.0);
+}
+
+TEST(COMMON_TEST, BitsetView) {
+    using faiss::BitsetView;
+    using faiss::ConcurrentBitset;
+    int N = 1000 * 3;
+    auto con_bitset = std::make_shared<ConcurrentBitset>(N);
+    for(int i = 0; i < N; ++i) {
+        if(i % 3 == 0) {
+            con_bitset->set(i);
+        } else {
+            con_bitset->clear(i);
+        }
+    }
+
+    auto view = [](const BitsetView& view_para) {
+        return view_para;
+    }(con_bitset);
+
+    boost::dynamic_bitset<> boo_bitset(N);
+    for(int i = 0; i < N; ++i) {
+        boo_bitset[i] = con_bitset->test(i);    
+    } 
+    ASSERT_EQ(boo_bitset.count(), N / 3);
 }

@@ -100,7 +100,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -229,7 +229,7 @@ IDMAP::GetVectorById(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                 const faiss::ConcurrentBitsetPtr& bitset) {
+                 const faiss::BitsetView& bitset) {
     // assign the metric type
     auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
     flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());

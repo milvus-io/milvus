@@ -80,7 +80,7 @@ IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
