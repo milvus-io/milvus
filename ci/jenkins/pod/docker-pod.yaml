@@ -7,13 +7,10 @@ metadata:
 spec:
   containers:
   - name: publish-images
-    image: registry.zilliz.com/library/docker:v1.1.0
+    image: registry.zilliz.com/library/dind-compose:v0.1
     imagePullPolicy: Always
     securityContext:
       privileged: true
-    command:
-    - cat
-    tty: true
     resources:
       limits:
         memory: "8Gi"
@@ -22,12 +19,11 @@ spec:
         memory: "2Gi"
         cpu: "1"
     volumeMounts:
-    - name: docker-sock
-      mountPath: /var/run/docker.sock
+    - name: docker-graph-storage
+      mountPath: /var/lib/docker
   volumes:
-  - name: docker-sock
-    hostPath:
-      path: /var/run/docker.sock
+  - name: docker-graph-storage
+    emptyDir: {}
   tolerations:
   - key: dedicated
     operator: Equal
