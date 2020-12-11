@@ -26,6 +26,7 @@
 #include "db/Types.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "knowhere/index/structured_index/StructuredIndexFlat.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
@@ -43,35 +44,41 @@ namespace segment {
 namespace {
 template <typename T>
 knowhere::IndexPtr
-CreateSortedIndex(engine::BinaryDataPtr& raw_data) {
+GenStructuredIndex(engine::BinaryDataPtr& raw_data, bool flat) {
     if (raw_data == nullptr) {
         return nullptr;
     }
 
     auto count = raw_data->data_.size() / sizeof(T);
-    auto index_ptr =
-        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data->data_.data()));
-    return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    if (flat) {
+        auto index_ptr = std::make_shared<knowhere::StructuredIndexFlat<T>>(
+            count, reinterpret_cast<const T*>(raw_data->data_.data()));
+        return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    } else {
+        auto index_ptr = std::make_shared<knowhere::StructuredIndexSort<T>>(
+            count, reinterpret_cast<const T*>(raw_data->data_.data()));
+        return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    }
 }
 
 Status
-CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
-                      knowhere::IndexPtr& index_ptr) {
+CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data, knowhere::IndexPtr& index_ptr,
+                      bool flat = false) {
     switch (field_type) {
         case engine::DataType::INT32: {
-            index_ptr = CreateSortedIndex<int32_t>(raw_data);
+            index_ptr = GenStructuredIndex<int32_t>(raw_data, flat);
             break;
         }
         case engine::DataType::INT64: {
-            index_ptr = CreateSortedIndex<int64_t>(raw_data);
+            index_ptr = GenStructuredIndex<int64_t>(raw_data, flat);
             break;
         }
         case engine::DataType::FLOAT: {
-            index_ptr = CreateSortedIndex<float>(raw_data);
+            index_ptr = GenStructuredIndex<float>(raw_data, flat);
             break;
         }
         case engine::DataType::DOUBLE: {
-            index_ptr = CreateSortedIndex<double>(raw_data);
+            index_ptr = GenStructuredIndex<double>(raw_data, flat);
             break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }
@@ -512,7 +519,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 }
 
 Status
-SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
+SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr, bool flat) {
     try {
         TimeRecorder recorder("SegmentReader::LoadStructuredIndex: " + field_name);
 
@@ -564,7 +571,7 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
                 engine::BinaryDataPtr raw_data;
                 LoadField(field_name, raw_data, false);
-                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
+                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr, flat));
 
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);  // put into cache
 

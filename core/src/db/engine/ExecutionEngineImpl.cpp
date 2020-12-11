@@ -68,15 +68,10 @@ Status
 ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
         context_ = context;
-        return LoadForSearch(context.query_ptr_);
+        return Load(context.query_ptr_->index_fields);
     } else {
         return Load(context.target_fields_);
     }
-}
-
-Status
-ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
-    return Load(query_ptr->index_fields);
 }
 
 Status
@@ -129,7 +124,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             }
         } else {
             knowhere::IndexPtr index_ptr;
-            STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr));
+            STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr, context_.query_ptr_ ? true : false));
             index_exist = (index_ptr != nullptr);
             if (!index_exist) {
                 LOG_ENGINE_ERROR_ << "Structure index doesn't exist";
@@ -392,7 +387,7 @@ template <typename T>
 Status
 ProcessIndexedTermQuery(ConCurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr, milvus::json& term_values_json) {
     try {
-        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndex<T>>(index_ptr);
         if (not T_index) {
             return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
         }
@@ -481,7 +476,7 @@ template <typename T>
 Status
 ProcessIndexedRangeQuery(ConCurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
     try {
-        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndex<T>>(index_ptr);
 
         bool flag = false;
         for (auto& range_value_it : range_values_json.items()) {

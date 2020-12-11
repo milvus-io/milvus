@@ -49,9 +49,6 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CreateVecIndex(const std::string& index_name, knowhere::IndexMode mode);
 
     Status
-    LoadForSearch(const query::QueryPtr& query_ptr);
-
-    Status
     Load(const TargetFields& field_names);
 
     Status
