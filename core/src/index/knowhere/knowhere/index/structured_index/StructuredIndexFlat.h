@@ -37,9 +37,6 @@ class StructuredIndexFlat : public StructuredIndex<T> {
     void
     Build(const size_t n, const T* values) override;
 
-    void
-    build();
-
     const faiss::ConcurrentBitsetPtr
     In(const size_t n, const T* values) override;
 
@@ -59,7 +56,7 @@ class StructuredIndexFlat : public StructuredIndex<T> {
 
     int64_t
     Size() override {
-        return (int64_t)data_.size();
+        return (int64_t)data_.size() * sizeof(IndexStructure<T>);
     }
 
     bool

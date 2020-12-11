@@ -277,7 +277,7 @@ LoadCollectionHandler::Handle(const snapshot::SegmentPtr& segment) {
             segment_reader->LoadVectorIndex(field_name, vec_index_ptr);
             index_ptr = vec_index_ptr;
         } else {
-            segment_reader->LoadStructuredIndex(field_name, index_ptr);
+            segment_reader->LoadStructuredIndex(field_name, index_ptr, true);
         }
 
         // if index doesn't exist, load the raw file

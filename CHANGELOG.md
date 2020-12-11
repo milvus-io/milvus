@@ -13,6 +13,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4363 Put starting process of prometheus and grafana into docker-compose
 -   \#4376 Add an optional parameter naming `client_tag` on client constructor in c++ sdk
 -   \#4398 Change status proto to remove enum ErrorCode and replace it as int type & Remove ErrorMap in Server
+-   \#4447 Add flat structured index
 
 ## Improvement
 
