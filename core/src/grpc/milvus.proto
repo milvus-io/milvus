@@ -114,6 +114,14 @@ message SearchByIDParam {
 }
 
 /**
+ * @brief Params for preload collection/partitions
+ */
+message PreloadCollectionParam {
+    string collection_name = 1;
+    repeated string partition_tag_array = 2;
+}
+
+/**
  * @brief Params for reloading segments
  */
 message ReLoadSegmentsParam {
@@ -624,13 +632,13 @@ service MilvusService {
     rpc DeleteByID(DeleteByIDParam) returns (Status) {}
 
     /**
-     * @brief This method is used to preload collection
+     * @brief This method is used to preload collection/partitions
      *
-     * @param CollectionName, target collection name.
+     * @param PreloadCollectionParam, target collection/partitions.
      *
      * @return Status
      */
-    rpc PreloadCollection(CollectionName) returns (Status) {}
+    rpc PreloadCollection(PreloadCollectionParam) returns (Status) {}
 
     /**
      * @brief This method is used to reload collection segments

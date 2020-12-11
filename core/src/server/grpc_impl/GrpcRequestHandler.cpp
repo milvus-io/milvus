@@ -747,12 +747,18 @@ GrpcRequestHandler::DeleteByID(::grpc::ServerContext* context, const ::milvus::g
 }
 
 ::grpc::Status
-GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+GrpcRequestHandler::PreloadCollection(::grpc::ServerContext* context,
+                                      const ::milvus::grpc::PreloadCollectionParam* request,
                                       ::milvus::grpc::Status* response) {
     CHECK_NULLPTR_RETURN(request);
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s begin.", GetContext(context)->RequestID().c_str(), __func__);
 
-    Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name());
+    std::vector<std::string> partition_tags;
+    for (int i = 0; i < request->partition_tag_array_size(); i++) {
+        partition_tags.push_back(request->partition_tag_array(i));
+    }
+
+    Status status = request_handler_.PreloadCollection(GetContext(context), request->collection_name(), partition_tags);
 
     LOG_SERVER_INFO_ << LogOut("Request [%s] %s end.", GetContext(context)->RequestID().c_str(), __func__);
     SET_RESPONSE(response, status, context);

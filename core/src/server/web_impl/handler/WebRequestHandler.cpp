@@ -259,7 +259,9 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
     }
 
     auto collection_name = json["collection_name"];
-    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>());
+    std::vector<std::string> partition_tags;
+    // TODO: set partition_tags
+    auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>(), partition_tags);
     if (status.ok()) {
         nlohmann::json result;
         AddStatusToJson(result, status.code(), status.message());

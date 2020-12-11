@@ -294,7 +294,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service, 
     //
     // @return Status
     ::grpc::Status
-    PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request,
+    PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::PreloadCollectionParam* request,
                       ::milvus::grpc::Status* response) override;
 
     // *

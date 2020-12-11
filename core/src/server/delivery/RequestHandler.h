@@ -88,7 +88,8 @@ class RequestHandler {
                const std::vector<int64_t>& vector_ids);
 
     Status
-    PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name);
+    PreloadCollection(const std::shared_ptr<Context>& context, const std::string& collection_name,
+                      const std::vector<std::string>& partition_tags);
 
     Status
     ReLoadSegments(const std::shared_ptr<Context>& context, const std::string& collection_name,

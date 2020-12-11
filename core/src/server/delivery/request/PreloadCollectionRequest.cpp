@@ -22,14 +22,17 @@ namespace milvus {
 namespace server {
 
 PreloadCollectionRequest::PreloadCollectionRequest(const std::shared_ptr<milvus::server::Context>& context,
-                                                   const std::string& collection_name)
-    : BaseRequest(context, BaseRequest::kPreloadCollection), collection_name_(collection_name) {
+                                                   const std::string& collection_name,
+                                                   const std::vector<std::string>& partition_tags)
+    : BaseRequest(context, BaseRequest::kPreloadCollection),
+      collection_name_(collection_name),
+      partition_tags_(partition_tags) {
 }
 
 BaseRequestPtr
 PreloadCollectionRequest::Create(const std::shared_ptr<milvus::server::Context>& context,
-                                 const std::string& collection_name) {
-    return std::shared_ptr<BaseRequest>(new PreloadCollectionRequest(context, collection_name));
+                                 const std::string& collection_name, const std::vector<std::string>& partition_tags) {
+    return std::shared_ptr<BaseRequest>(new PreloadCollectionRequest(context, collection_name, partition_tags));
 }
 
 Status
@@ -62,7 +65,7 @@ PreloadCollectionRequest::OnExecute() {
 
         // step 2: force load collection data into cache
         // load each segment and insert into cache even cache capacity is not enough
-        status = DBWrapper::DB()->PreloadCollection(context_, collection_name_, true);
+        status = DBWrapper::DB()->PreloadCollection(context_, collection_name_, partition_tags_, true);
         fiu_do_on("PreloadCollectionRequest.OnExecute.preload_collection_fail",
                   status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
         fiu_do_on("PreloadCollectionRequest.OnExecute.throw_std_exception", throw std::exception());

@@ -272,8 +272,9 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
         std::vector<engine::meta::CollectionSchema> table_schema_array;
         db_->AllCollections(table_schema_array);
 
+        std::vector<std::string> partition_tags;
         for (auto& schema : table_schema_array) {
-            auto status = db_->PreloadCollection(nullptr, schema.collection_id_);
+            auto status = db_->PreloadCollection(nullptr, schema.collection_id_, partition_tags);
             if (!status.ok()) {
                 return status;
             }
@@ -281,8 +282,10 @@ DBWrapper::PreloadCollections(const std::string& preload_collections) {
     } else {
         std::vector<std::string> collection_names;
         StringHelpFunctions::SplitStringByDelimeter(preload_collections, ",", collection_names);
+
+        std::vector<std::string> partition_tags;
         for (auto& name : collection_names) {
-            auto status = db_->PreloadCollection(nullptr, name);
+            auto status = db_->PreloadCollection(nullptr, name, partition_tags);
             if (!status.ok()) {
                 return status;
             }
