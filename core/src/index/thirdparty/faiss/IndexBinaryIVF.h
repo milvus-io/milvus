@@ -56,9 +56,8 @@ struct IndexBinaryIVF : IndexBinary {
 
     ClusteringParameters cp; ///< to override default clustering params
     Index *clustering_index; ///< to override index used during clustering
-    mutable std::vector<int> nprobe_statistics;
+    mutable std::vector<size_t> nprobe_statistics;
     mutable IndexIVFStats index_ivf_stats;
-//    mutable std::mutex nprobe_stat_lock;
 
     /** The Inverted file takes a quantizer (an IndexBinary) on input,
      * which implements the function mapping a vector to a list

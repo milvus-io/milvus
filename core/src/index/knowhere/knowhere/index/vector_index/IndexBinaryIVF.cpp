@@ -46,7 +46,7 @@ BinaryIVF::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 
-    if (STATISTICS_LEVEL) {
+    if (STATISTICS_LEVEL >= 3) {
         auto ivf_index = static_cast<faiss::IndexBinaryIVF*>(index_.get());
         ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
     }
@@ -120,9 +120,8 @@ BinaryIVF::GetStatistics() {
         return stats;
     }
     auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    auto ivf_index = dynamic_cast<faiss::IndexBinaryIVF*>(index_.get());
     auto lock = ivf_stats->Lock();
-    //    auto ivf_lock = ivf_index->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
     return ivf_stats;
 }
@@ -152,11 +151,6 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index->train(rows, static_cast<const uint8_t*>(p_data));
     index->add_with_ids(rows, static_cast<const uint8_t*>(p_data), p_ids);
     index_ = index;
-
-    if (STATISTICS_LEVEL) {
-        auto ivf_index = static_cast<faiss::IndexBinaryIVF*>(index_.get());
-        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
-    }
 }
 
 std::shared_ptr<faiss::IVFSearchParameters>
@@ -181,16 +175,16 @@ BinaryIVF::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances
 
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
+    LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
+                        << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
+                        << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
+
     if (STATISTICS_LEVEL) {
         auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
         auto lock = ivf_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
             ivf_stats->update_nq(n);
             ivf_stats->count_nprobe(ivf_index->nprobe);
-
-            LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
-                                << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
-                                << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
             ivf_stats->update_total_query_time(ivf_index->index_ivf_stats.quantization_time +
                                                ivf_index->index_ivf_stats.search_time);
             ivf_index->index_ivf_stats.quantization_time = 0;

@@ -67,7 +67,8 @@ IVF::Load(const BinarySet& binary_set) {
     std::lock_guard<std::mutex> lk(mutex_);
     index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     LoadImpl(binary_set, index_type_);
-    if (STATISTICS_LEVEL) {
+
+    if (IndexMode() == IndexMode::MODE_CPU && STATISTICS_LEVEL >= 3) {
         auto ivf_index = static_cast<faiss::IndexIVFFlat*>(index_.get());
         ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
     }
@@ -380,11 +381,11 @@ IVF::SealImpl() {
 
 StatisticsPtr
 IVF::GetStatistics() {
-    if (!STATISTICS_LEVEL) {
+    if (IndexMode() != IndexMode::MODE_CPU || !STATISTICS_LEVEL) {
         return stats;
     }
-    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    auto ivf_stats = std::static_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
     auto lock = ivf_stats->Lock();
     ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
     return ivf_stats;
@@ -392,11 +393,11 @@ IVF::GetStatistics() {
 
 void
 IVF::ClearStatistics() {
-    if (!STATISTICS_LEVEL) {
+    if (IndexMode() != IndexMode::MODE_CPU || !STATISTICS_LEVEL) {
         return;
     }
-    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
-    auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    auto ivf_stats = std::static_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->clear_nprobe_statistics();
     ivf_index->index_ivf_stats.reset();
     auto lock = ivf_stats->Lock();

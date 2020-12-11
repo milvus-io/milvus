@@ -45,7 +45,7 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist)
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_LEVEL) {
+  if(STATISTICS_LEVEL >= 3) {
       nprobe_statistics.resize(nlist, 0);
   }
 }
@@ -65,10 +65,9 @@ IndexBinaryIVF::IndexBinaryIVF(IndexBinary *quantizer, size_t d, size_t nlist, M
   is_trained = quantizer->is_trained && (quantizer->ntotal == nlist);
 
   cp.niter = 10;
-  if(STATISTICS_LEVEL) {
+  if(STATISTICS_LEVEL >= 3) {
       nprobe_statistics.resize(nlist, 0);
   }
-
 }
 
 IndexBinaryIVF::IndexBinaryIVF()
@@ -152,32 +151,24 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
   std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
   std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
-
   double t0 = getmillisecs();
   quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-  if(STATISTICS_LEVEL) {
-      index_ivf_stats.quantization_time += getmillisecs() - t0;
-      if (STATISTICS_LEVEL >= 3) {
-//          auto lock = Lock();
-//          std::unique_lock<std::mutex> lock(nprobe_stat_lock);
-          for (auto i = 0; i < n; ++ i) {
-              for (auto j = 0; j < nprobe; ++ j) {
-                  nprobe_statistics[idx.get()[i * nprobe + j]] ++;
-              }
-          }
+
+  index_ivf_stats.quantization_time += getmillisecs() - t0;
+  if (STATISTICS_LEVEL >= 3) {
+      int64_t size = n * nprobe;
+      for (int64_t i = 0; i < size; i++) {
+          nprobe_statistics[idx[i]]++;
       }
   }
-
 
   t0 = getmillisecs();
   invlists->prefetch_lists(idx.get(), n * nprobe);
 
   search_preassigned(n, x, k, idx.get(), coarse_dis.get(),
                      distances, labels, false, nullptr, bitset);
-  if(STATISTICS_LEVEL) {
-      index_ivf_stats.search_time += getmillisecs() - t0;
-  }
 
+  index_ivf_stats.search_time += getmillisecs() - t0;
 }
 
 #if 0
@@ -620,7 +611,6 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
         index_ivf_stats.nheap_updates += nheap;
     }
 
-
 }
 
 void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
@@ -931,9 +921,7 @@ void IndexBinaryIVF::range_search(
     double t0 = getmillisecs();
 
     quantizer->search(n, x, nprobe, coarse_dis.get(), idx.get());
-    if (STATISTICS_LEVEL >= 1) {
-        index_ivf_stats.quantization_time += getmillisecs() - t0;
-    }
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
 
     t0 = getmillisecs();
     invlists->prefetch_lists(idx.get(), n * nprobe);

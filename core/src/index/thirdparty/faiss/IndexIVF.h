@@ -139,7 +139,6 @@ struct IndexIVF: Index, Level1Quantizer {
     DirectMap direct_map;
     mutable std::vector<size_t> nprobe_statistics;
     mutable IndexIVFStats index_ivf_stats;
-//    mutable std::mutex nprobe_stat_lock;
 
     /** The Inverted file takes a quantizer (an Index) on input,
      * which implements the function mapping a vector to a list

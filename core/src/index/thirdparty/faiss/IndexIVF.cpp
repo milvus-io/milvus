@@ -182,7 +182,7 @@ IndexIVF::IndexIVF (Index * quantizer, size_t d,
     if (metric_type == METRIC_INNER_PRODUCT) {
         cp.spherical = true;
     }
-    if(STATISTICS_LEVEL) {
+    if(STATISTICS_LEVEL >= 3) {
         nprobe_statistics.resize(nlist, 0);
     }
 }
@@ -196,9 +196,6 @@ IndexIVF::IndexIVF ():
 void IndexIVF::add (idx_t n, const float * x)
 {
     add_with_ids (n, x, nullptr);
-    if(STATISTICS_LEVEL) {
-        nprobe_statistics.resize(nlist, 0);
-    }
 }
 
 void IndexIVF::add_without_codes (idx_t n, const float * x)
@@ -328,15 +325,12 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    if(STATISTICS_LEVEL >= 1) {
-        index_ivf_stats.quantization_time += getmillisecs() - t0;
-        if (STATISTICS_LEVEL >= 3) {
-//            std::unique_lock<std::mutex> lock(nprobe_stat_lock);
-            for (auto i = 0; i < n; ++ i) {
-                for (auto j = 0; j < nprobe; ++ j) {
-                    nprobe_statistics[idx.get()[i * nprobe + j]] ++;
-                }
-            }
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
+
+    if (STATISTICS_LEVEL >= 3) {
+        int64_t size = n * nprobe;
+        for (int64_t i = 0; i < size; i++) {
+            nprobe_statistics[idx[i]]++;
         }
     }
 
@@ -345,9 +339,8 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false, nullptr, bitset);
-    if (STATISTICS_LEVEL >= 1) {
-        index_ivf_stats.search_time += getmillisecs() - t0;
-    }
+    index_ivf_stats.search_time += getmillisecs() - t0;
+
 }
 
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
@@ -361,14 +354,13 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    if(STATISTICS_LEVEL) {
-        index_ivf_stats.quantization_time += getmillisecs() - t0;
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
+
+    if (STATISTICS_LEVEL >= 3) {
         if (STATISTICS_LEVEL >= 3) {
-//            std::unique_lock<std::mutex> lock(nprobe_stat_lock);
-            for (auto i = 0; i < n; ++ i) {
-                for (auto j = 0; j < nprobe; ++ j) {
-                    nprobe_statistics[idx.get()[i * nprobe + j]] ++;
-                }
+            int64_t size = n * nprobe;
+            for (int64_t i = 0; i < size; i++) {
+                nprobe_statistics[idx[i]]++;
             }
         }
     }
@@ -378,9 +370,7 @@ void IndexIVF::search_without_codes (idx_t n, const float *x,
 
     search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, is_sq8, k, idx.get(), coarse_dis.get(),
                                       distances, labels, false, nullptr, bitset);
-    if (STATISTICS_LEVEL) {
-        index_ivf_stats.search_time += getmillisecs() - t0;
-    }
+    index_ivf_stats.search_time += getmillisecs() - t0;
 }
 
 #if 0
@@ -829,18 +819,14 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 
     double t0 = getmillisecs();
     quantizer->search (nx, x, nprobe, coarse_dis.get (), keys.get ());
-    if (STATISTICS_LEVEL) {
-        index_ivf_stats.quantization_time += getmillisecs() - t0;
-    }
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
 
     t0 = getmillisecs();
     invlists->prefetch_lists (keys.get(), nx * nprobe);
 
     range_search_preassigned (nx, x, radius, keys.get (), coarse_dis.get (),
                               result, bitset);
-    if (STATISTICS_LEVEL) {
-        index_ivf_stats.search_time += getmillisecs() - t0;
-    }
+    index_ivf_stats.search_time += getmillisecs() - t0;
 
 }
 

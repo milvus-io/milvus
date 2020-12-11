@@ -75,7 +75,7 @@ IVF_NM::Load(const BinarySet& binary_set) {
     prefix_sum.resize(invlists->nlist);
     size_t curr_index = 0;
 
-    if (STATISTICS_LEVEL) {
+    if (STATISTICS_LEVEL >= 3) {
         ivf_index->nprobe_statistics.resize(invlists->nlist, 0);
     }
 
@@ -342,15 +342,15 @@ IVF_NM::QueryImpl(int64_t n, const float* query, int64_t k, float* distances, in
                                     labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
+    LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
+                        << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
+                        << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
+
     if (STATISTICS_LEVEL) {
         auto lock = ivf_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
             ivf_stats->update_nq(n);
             ivf_stats->count_nprobe(ivf_index->nprobe);
-
-            LOG_KNOWHERE_DEBUG_ << "IVF_NM search cost: " << search_cost
-                                << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
-                                << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
             ivf_stats->update_total_query_time(ivf_index->index_ivf_stats.quantization_time +
                                                ivf_index->index_ivf_stats.search_time);
             ivf_index->index_ivf_stats.quantization_time = 0;
