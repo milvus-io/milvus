@@ -22,6 +22,7 @@ type DescriptorEventDataFixPart struct {
 	CollectionID    int64
 	PartitionID     int64
 	SegmentID       int64
+	FieldID         int64
 	StartTimestamp  typeutil.Timestamp
 	EndTimestamp    typeutil.Timestamp
 	PayloadDataType schemapb.DataType
@@ -92,6 +93,12 @@ func (data *insertEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *insertEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -113,6 +120,12 @@ func (data *deleteEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *deleteEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -134,6 +147,12 @@ func (data *createCollectionEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *createCollectionEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -155,6 +174,12 @@ func (data *dropCollectionEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *dropCollectionEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -176,6 +201,12 @@ func (data *createPartitionEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *createPartitionEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -197,6 +228,12 @@ func (data *dropPartitionEventData) GetEventDataFixPartSize() int32 {
 }
 
 func (data *dropPartitionEventData) WriteEventData(buffer io.Writer) error {
+	if data.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if data.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
 	return binary.Write(buffer, binary.LittleEndian, data)
 }
 
@@ -230,6 +267,7 @@ func newDescriptorEventData() (*descriptorEventData, error) {
 			CollectionID:    -1,
 			PartitionID:     -1,
 			SegmentID:       -1,
+			FieldID:         -1,
 			StartTimestamp:  0,
 			EndTimestamp:    0,
 			PayloadDataType: -1,

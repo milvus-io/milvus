@@ -77,6 +77,13 @@ func (writer *baseBinlogWriter) Close() error {
 	if writer.buffer != nil {
 		return nil
 	}
+	if writer.StartTimestamp == 0 {
+		return errors.New("hasn't set start time stamp")
+	}
+	if writer.EndTimestamp == 0 {
+		return errors.New("hasn't set end time stamp")
+	}
+
 	var offset int32
 	writer.buffer = new(bytes.Buffer)
 	if err := binary.Write(writer.buffer, binary.LittleEndian, int32(MagicNumber)); err != nil {
@@ -85,7 +92,7 @@ func (writer *baseBinlogWriter) Close() error {
 	if err := writer.descriptorEvent.Write(writer.buffer); err != nil {
 		return err
 	}
-	offset = writer.descriptorEvent.GetMemoryUsageInBytes()
+	offset = writer.descriptorEvent.GetMemoryUsageInBytes() + int32(binary.Size(MagicNumber))
 	writer.length = 0
 	for _, w := range writer.eventWriters {
 		w.SetOffset(offset)
@@ -196,12 +203,16 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
-func NewInsertBinlogWriter(dataType schemapb.DataType) (*InsertBinlogWriter, error) {
+func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) (*InsertBinlogWriter, error) {
 	descriptorEvent, err := newDescriptorEvent()
 	if err != nil {
 		return nil, err
 	}
 	descriptorEvent.PayloadDataType = dataType
+	descriptorEvent.CollectionID = collectionID
+	descriptorEvent.PartitionID = partitionID
+	descriptorEvent.SegmentID = segmentID
+	descriptorEvent.FieldID = FieldID
 	return &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,

@@ -20,17 +20,17 @@ func checkEventHeader(
 	length int32) {
 	ts := UnsafeReadInt64(buf, 0)
 	assert.Greater(t, ts, int64(0))
-	curts := time.Now().UnixNano() / int64(time.Millisecond)
-	curts = int64(tsoutil.ComposeTS(curts, 0))
-	assert.GreaterOrEqual(t, curts, ts)
+	curTs := time.Now().UnixNano() / int64(time.Millisecond)
+	curTs = int64(tsoutil.ComposeTS(curTs, 0))
+	assert.GreaterOrEqual(t, curTs, ts)
 	utc := UnsafeReadInt8(buf, int(unsafe.Sizeof(ts)))
 	assert.Equal(t, EventTypeCode(utc), tc)
-	usid := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
-	assert.Equal(t, usid, svrID)
-	elen := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usid)))
+	usID := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
+	assert.Equal(t, usID, svrID)
+	elen := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)))
 	assert.Equal(t, elen, length)
-	npos := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usid)+unsafe.Sizeof(elen)))
-	assert.Equal(t, npos, length)
+	nPos := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)+unsafe.Sizeof(elen)))
+	assert.Equal(t, nPos, length)
 }
 
 func TestDescriptorEvent(t *testing.T) {
@@ -46,80 +46,92 @@ func TestDescriptorEvent(t *testing.T) {
 
 	ts := UnsafeReadInt64(buffer, 0)
 	assert.Greater(t, ts, int64(0))
-	curts := time.Now().UnixNano() / int64(time.Millisecond)
-	curts = int64(tsoutil.ComposeTS(curts, 0))
-	assert.GreaterOrEqual(t, curts, ts)
+	curTs := time.Now().UnixNano() / int64(time.Millisecond)
+	curTs = int64(tsoutil.ComposeTS(curTs, 0))
+	assert.GreaterOrEqual(t, curTs, ts)
 
 	utc := UnsafeReadInt8(buffer, int(unsafe.Sizeof(ts)))
 	assert.Equal(t, EventTypeCode(utc), DescriptorEventType)
-	usid := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
-	assert.Equal(t, usid, int32(ServerID))
-	elen := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usid)))
+	usID := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
+	assert.Equal(t, usID, int32(ServerID))
+	elen := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)))
 	assert.Equal(t, elen, int32(len(buffer)))
-	npos := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usid)+unsafe.Sizeof(elen)))
-	assert.GreaterOrEqual(t, npos, int32(binary.Size(MagicNumber)+len(buffer)))
-	t.Logf("next position = %d", npos)
+	nPos := UnsafeReadInt32(buffer, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)+unsafe.Sizeof(elen)))
+	assert.GreaterOrEqual(t, nPos, int32(binary.Size(MagicNumber)+len(buffer)))
+	t.Logf("next position = %d", nPos)
 
 	binVersion := UnsafeReadInt16(buffer, binary.Size(eventHeader{}))
 	assert.Equal(t, binVersion, int16(BinlogVersion))
 	svrVersion := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion)))
 	assert.Equal(t, svrVersion, int64(ServerVersion))
-	cmitID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion))+int(unsafe.Sizeof(svrVersion)))
-	assert.Equal(t, cmitID, int64(CommitID))
+	commitID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+int(unsafe.Sizeof(binVersion))+int(unsafe.Sizeof(svrVersion)))
+	assert.Equal(t, commitID, int64(CommitID))
 	headLen := UnsafeReadInt8(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID)))
+		int(unsafe.Sizeof(commitID)))
 	assert.Equal(t, headLen, int8(binary.Size(eventHeader{})))
 	t.Logf("head len = %d", headLen)
 	collID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen)))
 	assert.Equal(t, collID, int64(-1))
 	partID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID)))
 	assert.Equal(t, partID, int64(-1))
 	segID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID)))
 	assert.Equal(t, segID, int64(-1))
-	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
+	fieldID := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID)))
-	assert.Equal(t, startTs, int64(0))
-	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
+	assert.Equal(t, fieldID, int64(-1))
+	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
+		int(unsafe.Sizeof(fieldID)))
+	assert.Equal(t, startTs, int64(0))
+	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
+		int(unsafe.Sizeof(binVersion))+
+		int(unsafe.Sizeof(svrVersion))+
+		int(unsafe.Sizeof(commitID))+
+		int(unsafe.Sizeof(headLen))+
+		int(unsafe.Sizeof(collID))+
+		int(unsafe.Sizeof(partID))+
+		int(unsafe.Sizeof(segID))+
+		int(unsafe.Sizeof(fieldID))+
 		int(unsafe.Sizeof(startTs)))
 	assert.Equal(t, endTs, int64(0))
 	colType := UnsafeReadInt32(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(binVersion))+
 		int(unsafe.Sizeof(svrVersion))+
-		int(unsafe.Sizeof(cmitID))+
+		int(unsafe.Sizeof(commitID))+
 		int(unsafe.Sizeof(headLen))+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
+		int(unsafe.Sizeof(fieldID))+
 		int(unsafe.Sizeof(startTs))+
 		int(unsafe.Sizeof(endTs)))
 	assert.Equal(t, colType, int32(-1))
@@ -127,11 +139,12 @@ func TestDescriptorEvent(t *testing.T) {
 	postHeadOffset := binary.Size(eventHeader{}) +
 		int(unsafe.Sizeof(binVersion)) +
 		int(unsafe.Sizeof(svrVersion)) +
-		int(unsafe.Sizeof(cmitID)) +
+		int(unsafe.Sizeof(commitID)) +
 		int(unsafe.Sizeof(headLen)) +
 		int(unsafe.Sizeof(collID)) +
 		int(unsafe.Sizeof(partID)) +
 		int(unsafe.Sizeof(segID)) +
+		int(unsafe.Sizeof(fieldID)) +
 		int(unsafe.Sizeof(startTs)) +
 		int(unsafe.Sizeof(endTs)) +
 		int(unsafe.Sizeof(colType))
@@ -182,9 +195,9 @@ func TestInsertEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(dt, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, ev)
+		assert.Equal(t, values, ev)
 		err = pR.Close()
 		assert.Nil(t, err)
 
@@ -431,9 +444,9 @@ func TestDeleteEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(dt, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, ev)
+		assert.Equal(t, values, ev)
 		err = pR.Close()
 		assert.Nil(t, err)
 
@@ -680,9 +693,9 @@ func TestCreateCollectionEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(schemapb.DataType_INT64, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, []int64{1, 2, 3, 4, 5, 6})
+		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		err = pR.Close()
 		assert.Nil(t, err)
 
@@ -803,9 +816,9 @@ func TestDropCollectionEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(schemapb.DataType_INT64, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, []int64{1, 2, 3, 4, 5, 6})
+		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		err = pR.Close()
 		assert.Nil(t, err)
 
@@ -926,9 +939,9 @@ func TestCreatePartitionEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(schemapb.DataType_INT64, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, []int64{1, 2, 3, 4, 5, 6})
+		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		err = pR.Close()
 		assert.Nil(t, err)
 
@@ -1049,9 +1062,9 @@ func TestDropPartitionEvent(t *testing.T) {
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(schemapb.DataType_INT64, pBuf)
 		assert.Nil(t, err)
-		vals, _, err := pR.GetDataFromPayload()
+		values, _, err := pR.GetDataFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, vals, []int64{1, 2, 3, 4, 5, 6})
+		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		err = pR.Close()
 		assert.Nil(t, err)
 
