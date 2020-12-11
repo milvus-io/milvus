@@ -22,7 +22,6 @@
 
 #include <string>
 #include <vector>
-#include <memory>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"

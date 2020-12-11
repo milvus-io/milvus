@@ -82,10 +82,10 @@ class VecIndex : public Index {
     }
 
     void
-    MapOffsetToUid(IDType * id, size_t n) {
+    MapOffsetToUid(IDType* id, size_t n) {
         if (uids_) {
-            for (size_t i = 0; i < n; i++){
-                if (id[i] >= 0 && id[i] < n) {
+            for (size_t i = 0; i < n; i++) {
+                if (id[i] >= 0) {
                     id[i] = uids_->at(id[i]);
                 }
             }

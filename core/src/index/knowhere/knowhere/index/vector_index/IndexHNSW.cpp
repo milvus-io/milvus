@@ -154,7 +154,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
-        MapOffsetToUid(ids.data(), id_size);
+        MapOffsetToUid(ids.data(), ids.size());
         memcpy(p_dist + i * k, dist.data(), dist_size);
         memcpy(p_id + i * k, ids.data(), id_size);
     }
