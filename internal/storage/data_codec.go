@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -141,6 +142,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(BinaryVectorFieldData).data, singleData.(BinaryVectorFieldData).dim)
 		case schemapb.DataType_VECTOR_FLOAT:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(FloatVectorFieldData).data, singleData.(FloatVectorFieldData).dim)
+		default:
+			return nil, errors.Errorf("undefined data type %d", field.DataType)
 		}
 		if err != nil {
 			return nil, err
@@ -330,6 +333,8 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			floatVectorFieldData.NumRows = len(floatVectorFieldData.data) / 8
 			resultData.Data[fieldID] = floatVectorFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
+		default:
+			return -1, -1, nil, errors.Errorf("undefined data type %d", dataType)
 		}
 	}
 
