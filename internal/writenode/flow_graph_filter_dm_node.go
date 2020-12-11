@@ -39,6 +39,8 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		switch msg.Type() {
 		case internalPb.MsgType_kInsert:
 			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
+		case internalPb.MsgType_kFlush:
+			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
 		// case internalPb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:

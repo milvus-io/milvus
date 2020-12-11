@@ -59,3 +59,4 @@ cwrapper_build
 **/.clangd/*
 **/compile_commands.json
 **/.lint
+typescript

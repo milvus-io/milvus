@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -165,8 +164,8 @@ func TestMaster(t *testing.T) {
 	schemaBytes, err := proto.Marshal(&sch)
 	assert.Nil(t, err)
 
-	createCollectionReq := internalpb.CreateCollectionRequest{
-		MsgType:   internalpb.MsgType_kCreateCollection,
+	createCollectionReq := internalPb.CreateCollectionRequest{
+		MsgType:   internalPb.MsgType_kCreateCollection,
 		ReqID:     1,
 		Timestamp: 11,
 		ProxyID:   1,
@@ -196,8 +195,8 @@ func TestMaster(t *testing.T) {
 
 	////////////////////////////CreatePartition////////////////////////
 	partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)
-	createPartitionReq := internalpb.CreatePartitionRequest{
-		MsgType:   internalpb.MsgType_kCreatePartition,
+	createPartitionReq := internalPb.CreatePartitionRequest{
+		MsgType:   internalPb.MsgType_kCreatePartition,
 		ReqID:     1,
 		Timestamp: 11,
 		ProxyID:   1,
@@ -230,8 +229,8 @@ func TestMaster(t *testing.T) {
 	assert.Equal(t, createPartitionReq.PartitionName.Tag, createPartitionMsg.CreatePartitionRequest.PartitionName.Tag)
 
 	////////////////////////////DropPartition////////////////////////
-	dropPartitionReq := internalpb.DropPartitionRequest{
-		MsgType:   internalpb.MsgType_kDropPartition,
+	dropPartitionReq := internalPb.DropPartitionRequest{
+		MsgType:   internalPb.MsgType_kDropPartition,
 		ReqID:     1,
 		Timestamp: 11,
 		ProxyID:   1,
@@ -263,8 +262,8 @@ func TestMaster(t *testing.T) {
 	assert.Equal(t, dropPartitionReq.PartitionName.CollectionName, dropPartitionMsg.DropPartitionRequest.PartitionName.CollectionName)
 
 	////////////////////////////DropCollection////////////////////////
-	dropCollectionReq := internalpb.DropCollectionRequest{
-		MsgType:        internalpb.MsgType_kDropCollection,
+	dropCollectionReq := internalPb.DropCollectionRequest{
+		MsgType:        internalPb.MsgType_kDropCollection,
 		ReqID:          1,
 		Timestamp:      11,
 		ProxyID:        1,

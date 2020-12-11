@@ -359,10 +359,7 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	err := ss.searchResultMsgStream.Produce(&msgPack)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {

@@ -15,6 +15,7 @@ const (
 
 type (
 	UniqueID  = typeutil.UniqueID
+	FieldID   = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 )
 
@@ -86,7 +87,7 @@ type FloatVectorFieldData struct {
 // example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
-	Data map[int64]FieldData // field id to field data
+	Data map[FieldID]FieldData // field id to field data
 }
 
 // Blob key example:
@@ -179,7 +180,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	var resultData InsertData
 	var pID UniqueID
 	var sID UniqueID
-	resultData.Data = make(map[int64]FieldData)
+	resultData.Data = make(map[FieldID]FieldData)
 	for _, blob := range blobs {
 		binlogReader, err := NewBinlogReader(blob.value)
 		if err != nil {

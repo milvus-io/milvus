@@ -38,12 +38,12 @@ func (dsService *dataSyncService) initNodes() {
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx)
 	var filterDmNode Node = newFilteredDmNode()
-	var writeNode Node = newWriteNode()
+	var insertBufferNode Node = newInsertBufferNode()
 	var serviceTimeNode Node = newServiceTimeNode()
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&filterDmNode)
-	dsService.fg.AddNode(&writeNode)
+	dsService.fg.AddNode(&insertBufferNode)
 	dsService.fg.AddNode(&serviceTimeNode)
 
 	var err = dsService.fg.SetEdges(dmStreamNode.Name(),
@@ -56,22 +56,22 @@ func (dsService *dataSyncService) initNodes() {
 
 	err = dsService.fg.SetEdges(filterDmNode.Name(),
 		[]string{dmStreamNode.Name()},
-		[]string{writeNode.Name()},
+		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
 		log.Fatal("set edges failed in node:", filterDmNode.Name())
 	}
 
-	err = dsService.fg.SetEdges(writeNode.Name(),
+	err = dsService.fg.SetEdges(insertBufferNode.Name(),
 		[]string{filterDmNode.Name()},
 		[]string{serviceTimeNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", writeNode.Name())
+		log.Fatal("set edges failed in node:", insertBufferNode.Name())
 	}
 
 	err = dsService.fg.SetEdges(serviceTimeNode.Name(),
-		[]string{writeNode.Name()},
+		[]string{insertBufferNode.Name()},
 		[]string{},
 	)
 	if err != nil {

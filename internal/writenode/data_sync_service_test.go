@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -66,8 +65,6 @@ func TestDataSyncService_Start(t *testing.T) {
 	const MSGLENGTH = 10
 	insertMessages := make([]msgstream.TsMsg, 0)
 	for i := 0; i < MSGLENGTH; i++ {
-		randt := rand.Intn(MSGLENGTH)
-		// randt := i
 		var msg msgstream.TsMsg = &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{
@@ -76,14 +73,15 @@ func TestDataSyncService_Start(t *testing.T) {
 			},
 			InsertRequest: internalPb.InsertRequest{
 				MsgType:        internalPb.MsgType_kInsert,
-				ReqID:          int64(0),
+				ReqID:          UniqueID(0),
 				CollectionName: "collection0",
 				PartitionTag:   "default",
-				SegmentID:      int64(0),
-				ChannelID:      int64(0),
-				ProxyID:        int64(0),
-				Timestamps:     []uint64{uint64(randt + 1000), uint64(randt + 1000)},
-				RowIDs:         []int64{int64(i), int64(i)},
+				SegmentID:      UniqueID(0),
+				ChannelID:      UniqueID(0),
+				ProxyID:        UniqueID(0),
+				Timestamps:     []Timestamp{Timestamp(i + 1000), Timestamp(i + 1000)},
+				RowIDs:         []UniqueID{UniqueID(i), UniqueID(i)},
+
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 					{Value: rawData},
@@ -104,8 +102,8 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: 0,
-			EndTimestamp:   0,
+			BeginTimestamp: Timestamp(0),
+			EndTimestamp:   Timestamp(0),
 			HashValues:     []uint32{0},
 		},
 		TimeTickMsg: internalPb.TimeTickMsg{

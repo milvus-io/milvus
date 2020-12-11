@@ -5,20 +5,16 @@ import (
 )
 
 type WriteNode struct {
-	ctx context.Context
-
-	WriteNodeID uint64
-
+	ctx             context.Context
+	WriteNodeID     uint64
 	dataSyncService *dataSyncService
 }
 
 func NewWriteNode(ctx context.Context, writeNodeID uint64) *WriteNode {
 
 	return &WriteNode{
-		ctx: ctx,
-
-		WriteNodeID: writeNodeID,
-
+		ctx:             ctx,
+		WriteNodeID:     writeNodeID,
 		dataSyncService: nil,
 	}
 }
