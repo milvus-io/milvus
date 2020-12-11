@@ -354,7 +354,7 @@ type DataDefinitionCodec struct {
 }
 
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
-	writer, err := NewDDLBinlogWriter(schemapb.DataType_STRING)
+	writer, err := NewDDLBinlogWriter(schemapb.DataType_STRING, dataDefinitionCodec.Schema.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +426,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		value: buffer,
 	})
 
-	writer, err = NewDDLBinlogWriter(schemapb.DataType_INT64)
+	writer, err = NewDDLBinlogWriter(schemapb.DataType_INT64, dataDefinitionCodec.Schema.ID)
 	if err != nil {
 		return nil, err
 	}
