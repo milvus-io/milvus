@@ -35,14 +35,14 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
 
-	queryNodeSegStatsMsg := QueryNodeSegStatsMsg{}
+	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	dispatcher.tempMap = make(map[internalPb.MsgType]UnmarshalFunc)
 	dispatcher.tempMap[internalPb.MsgType_kInsert] = insertMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kDelete] = deleteMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kSearch] = searchMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kSearchResult] = searchResultMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kTimeTick] = timeTickMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kQueryNodeSegStats] = queryNodeSegStatsMsg.Unmarshal
+	dispatcher.tempMap[internalPb.MsgType_kQueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kCreateCollection] = createCollectionMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kDropCollection] = dropCollectionMsg.Unmarshal
 	dispatcher.tempMap[internalPb.MsgType_kCreatePartition] = createPartitionMsg.Unmarshal

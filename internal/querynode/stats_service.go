@@ -69,12 +69,12 @@ func (sService *statsService) sendSegmentStatistic() {
 	sService.publicStatistic(statisticData)
 }
 
-func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeSegStats) {
-	var msg msgstream.TsMsg = &msgstream.QueryNodeSegStatsMsg{
+func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeStats) {
+	var msg msgstream.TsMsg = &msgstream.QueryNodeStatsMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		QueryNodeSegStats: *statistic,
+		QueryNodeStats: *statistic,
 	}
 
 	var msgPack = msgstream.MsgPack{

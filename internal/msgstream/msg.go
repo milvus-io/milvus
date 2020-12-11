@@ -221,19 +221,19 @@ func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
 	return timeTick, nil
 }
 
-/////////////////////////////////////////QueryNodeSegStats//////////////////////////////////////////
-type QueryNodeSegStatsMsg struct {
+/////////////////////////////////////////QueryNodeStats//////////////////////////////////////////
+type QueryNodeStatsMsg struct {
 	BaseMsg
-	internalPb.QueryNodeSegStats
+	internalPb.QueryNodeStats
 }
 
-func (qs *QueryNodeSegStatsMsg) Type() MsgType {
+func (qs *QueryNodeStatsMsg) Type() MsgType {
 	return qs.MsgType
 }
 
-func (qs *QueryNodeSegStatsMsg) Marshal(input TsMsg) ([]byte, error) {
-	queryNodeSegStatsTask := input.(*QueryNodeSegStatsMsg)
-	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeSegStats
+func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) ([]byte, error) {
+	queryNodeSegStatsTask := input.(*QueryNodeStatsMsg)
+	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeStats
 	mb, err := proto.Marshal(queryNodeSegStats)
 	if err != nil {
 		return nil, err
@@ -241,13 +241,13 @@ func (qs *QueryNodeSegStatsMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (qs *QueryNodeSegStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
-	queryNodeSegStats := internalPb.QueryNodeSegStats{}
+func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
+	queryNodeSegStats := internalPb.QueryNodeStats{}
 	err := proto.Unmarshal(input, &queryNodeSegStats)
 	if err != nil {
 		return nil, err
 	}
-	queryNodeSegStatsMsg := &QueryNodeSegStatsMsg{QueryNodeSegStats: queryNodeSegStats}
+	queryNodeSegStatsMsg := &QueryNodeStatsMsg{QueryNodeStats: queryNodeSegStats}
 
 	return queryNodeSegStatsMsg, nil
 }
@@ -590,4 +590,35 @@ func (sc *ShowPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
 	showPartitionMsg.EndTimestamp = showPartitionMsg.Timestamp
 
 	return showPartitionMsg, nil
+}
+
+/////////////////////////////////////////LoadIndex//////////////////////////////////////////
+type LoadIndexMsg struct {
+	BaseMsg
+	internalPb.LoadIndex
+}
+
+func (lim *LoadIndexMsg) Type() MsgType {
+	return lim.MsgType
+}
+
+func (lim *LoadIndexMsg) Marshal(input TsMsg) ([]byte, error) {
+	loadIndexMsg := input.(*LoadIndexMsg)
+	loadIndexRequest := &loadIndexMsg.LoadIndex
+	mb, err := proto.Marshal(loadIndexRequest)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (lim *LoadIndexMsg) Unmarshal(input []byte) (TsMsg, error) {
+	loadIndexRequest := internalPb.LoadIndex{}
+	err := proto.Unmarshal(input, &loadIndexRequest)
+	if err != nil {
+		return nil, err
+	}
+	loadIndexMsg := &LoadIndexMsg{LoadIndex: loadIndexRequest}
+
+	return loadIndexMsg, nil
 }

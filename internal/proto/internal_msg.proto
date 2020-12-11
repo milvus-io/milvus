@@ -33,7 +33,8 @@ enum MsgType {
 
     /* System Control */
     kTimeTick = 1200;
-    kQueryNodeSegStats = 1201;
+    kQueryNodeStats = 1201;
+    kLoadIndex = 1202;
 
 }
 
@@ -276,6 +277,24 @@ message Key2SegMsg {
     repeated Key2Seg key2seg = 2;
 }
 
+message LoadIndex {
+    MsgType msg_type = 1;
+    int64 segmentID = 2;
+    int64 fieldID = 3;
+    repeated string index_paths = 4;
+}
+
+message IndexStats {
+    repeated common.KeyValuePair index_params = 1;
+    int64 num_related_segments = 2;
+}
+
+message FieldStats {
+    int64 collectionID = 1;
+    int64 fieldID = 2;
+    repeated IndexStats index_stats = 3;
+}
+
 message SegmentStats {
     int64 segmentID = 1;
     int64 memory_size = 2;
@@ -283,8 +302,9 @@ message SegmentStats {
     bool recently_modified = 4;
 }
 
-message QueryNodeSegStats {
+message QueryNodeStats {
     MsgType msg_type = 1;
     int64 peerID = 2;
     repeated SegmentStats seg_stats = 3;
+    repeated FieldStats field_stats = 4;
 }
