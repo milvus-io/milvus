@@ -144,9 +144,9 @@ func (ss *searchService) receiveSearchMsg() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
-					if err != nil {
-						log.Println("publish FailedSearchResult failed, error message: ", err)
+					err2 := ss.publishFailedSearchResult(msg, err.Error())
+					if err2 != nil {
+						log.Println("publish FailedSearchResult failed, error message: ", err2)
 					}
 				}
 			}
@@ -196,9 +196,9 @@ func (ss *searchService) doUnsolvedMsgSearch() {
 				err := ss.search(msg)
 				if err != nil {
 					log.Println(err)
-					err = ss.publishFailedSearchResult(msg, err.Error())
-					if err != nil {
-						log.Println("publish FailedSearchResult failed, error message: ", err)
+					err2 := ss.publishFailedSearchResult(msg, err.Error())
+					if err2 != nil {
+						log.Println("publish FailedSearchResult failed, error message: ", err2)
 					}
 				}
 			}
