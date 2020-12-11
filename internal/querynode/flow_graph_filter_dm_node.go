@@ -9,8 +9,8 @@ import (
 )
 
 type filterDmNode struct {
-	ddMsg *ddMsg
 	BaseNode
+	ddMsg *ddMsg
 }
 
 func (fdmNode *filterDmNode) Name() string {

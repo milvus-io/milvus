@@ -38,7 +38,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	iMsg, ok := (*in[0]).(*insertMsg)
+	_, ok := (*in[0]).(*insertMsg)
 	if !ok {
 		log.Println("type assertion failed for insertMsg")
 		// TODO: add error handling
@@ -64,18 +64,13 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	//     log.Printf("t(%d) : %v ", task.Timestamps[0], task.RowData[0])
 	// }
 
-	var res Msg = &serviceTimeMsg{
-		timeRange: iMsg.timeRange,
-	}
-
 	// TODO
-	return []*Msg{&res}
-
+	return nil
 }
 
 func newInsertBufferNode() *insertBufferNode {
-	maxQueueLength := Params.flowGraphMaxQueueLength()
-	maxParallelism := Params.flowGraphMaxParallelism()
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
 
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

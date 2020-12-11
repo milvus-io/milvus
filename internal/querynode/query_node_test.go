@@ -118,7 +118,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func refreshChannelNames() {
-	suffix := "_test_query_node" + strconv.FormatInt(rand.Int63n(100), 10)
+	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
 	Params.SearchChannelNames = makeNewChannelNames(Params.SearchChannelNames, suffix)

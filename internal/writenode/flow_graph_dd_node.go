@@ -1,4 +1,4 @@
-package querynode
+package writenode
 
 import (
 	"log"
@@ -13,8 +13,8 @@ import (
 
 type ddNode struct {
 	BaseNode
-	ddMsg   *ddMsg
-	replica collectionReplica
+	ddMsg    *ddMsg
+	ddBuffer *ddBuffer
 }
 
 func (ddNode *ddNode) Name() string {
@@ -75,47 +75,34 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	collectionID := msg.CollectionID
 
-	hasCollection := ddNode.replica.hasCollection(collectionID)
-	if hasCollection {
-		log.Println("collection already exists, id = ", collectionID)
+	err := ddNode.ddBuffer.addCollection(collectionID)
+	if err != nil {
+		log.Println(err)
 		return
 	}
+
+	// TODO: add default partition?
 
 	var schema schemapb.CollectionSchema
-	err := proto.Unmarshal((*msg.Schema).Value, &schema)
+	err = proto.Unmarshal((*msg.Schema).Value, &schema)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-
-	schemaBlob := proto.MarshalTextString(&schema)
-
-	// add collection
-	err = ddNode.replica.addCollection(collectionID, schemaBlob)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	// add default partition
-	err = ddNode.replica.addPartition(collectionID, Params.DefaultPartitionTag)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
 	collectionName := schema.Name
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Timestamp,
 		})
+
+	// TODO: write dd binlog
 }
 
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	collectionID := msg.CollectionID
 
-	err := ddNode.replica.removeCollection(collectionID)
+	err := ddNode.ddBuffer.removeCollection(collectionID)
 	if err != nil {
 		log.Println(err)
 		return
@@ -127,43 +114,49 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 			createOrDrop: false,
 			timestamp:    msg.Timestamp,
 		})
+
+	// TODO: write dd binlog
 }
 
 func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
-	collectionID := msg.CollectionID
-	partitionTag := msg.PartitionName.Tag
+	partitionID := msg.PartitionID
 
-	err := ddNode.replica.addPartition(collectionID, partitionTag)
+	err := ddNode.ddBuffer.addPartition(partitionID)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
+	partitionTag := msg.PartitionName.Tag
 	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Timestamp,
 		})
+
+	// TODO: write dd binlog
 }
 
 func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
-	collectionID := msg.CollectionID
-	partitionTag := msg.PartitionName.Tag
+	partitionID := msg.PartitionID
 
-	err := ddNode.replica.removePartition(collectionID, partitionTag)
+	err := ddNode.ddBuffer.removePartition(partitionID)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
+	partitionTag := msg.PartitionName.Tag
 	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Timestamp,
 		})
+
+	// TODO: write dd binlog
 }
 
-func newDDNode(replica collectionReplica) *ddNode {
+func newDDNode() *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -171,8 +164,13 @@ func newDDNode(replica collectionReplica) *ddNode {
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
+	ddBuffer := &ddBuffer{
+		collectionBuffer: make(map[UniqueID]interface{}),
+		partitionBuffer:  make(map[UniqueID]interface{}),
+	}
+
 	return &ddNode{
 		BaseNode: baseNode,
-		replica:  replica,
+		ddBuffer: ddBuffer,
 	}
 }

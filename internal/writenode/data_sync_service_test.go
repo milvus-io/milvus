@@ -16,7 +16,6 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	Params.Init()
 	const ctxTimeInMillisecond = 200
 	const closeWithDeadline = true
 	var ctx context.Context
@@ -31,7 +30,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	// init write node
-	pulsarURL, _ := Params.pulsarAddress()
+	pulsarURL := Params.PulsarAddress
 	node := NewWriteNode(ctx, 0)
 
 	// test data generate
@@ -116,19 +115,29 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// pulsar produce
 	const receiveBufSize = 1024
-	producerChannels := Params.insertChannelNames()
+	insertChannels := Params.InsertChannelNames
+	ddChannels := Params.DDChannelNames
 
 	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
-	insertStream.CreatePulsarProducers(producerChannels)
+	insertStream.CreatePulsarProducers(insertChannels)
+
+	ddStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
+
+	var ddMsgStream msgstream.MsgStream = ddStream
+	ddMsgStream.Start()
 
 	err := insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
+	err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

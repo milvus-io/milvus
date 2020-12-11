@@ -10,6 +10,30 @@ import (
 
 type ParamTable struct {
 	paramtable.BaseTable
+
+	PulsarAddress string
+
+	WriteNodeID                  UniqueID
+	WriteNodeNum                 int
+	WriteNodeTimeTickChannelName string
+
+	FlowGraphMaxQueueLength int32
+	FlowGraphMaxParallelism int32
+
+	// dm
+	InsertChannelNames   []string
+	InsertChannelRange   []int
+	InsertReceiveBufSize int64
+	InsertPulsarBufSize  int64
+
+	// dd
+	DDChannelNames   []string
+	DDReceiveBufSize int64
+	DDPulsarBufSize  int64
+
+	MsgChannelSubName   string
+	DefaultPartitionTag string
+	SliceIndex          int
 }
 
 var Params ParamTable
@@ -30,18 +54,35 @@ func (p *ParamTable) Init() {
 			writeNodeIDStr = strconv.Itoa(int(writeNodeIDList[0]))
 		}
 	}
-	p.Save("_writeNodeID", writeNodeIDStr)
-}
-
-func (p *ParamTable) pulsarAddress() (string, error) {
-	url, err := p.Load("_PulsarAddress")
+	err = p.Save("_writeNodeID", writeNodeIDStr)
 	if err != nil {
 		panic(err)
 	}
-	return url, nil
+
+	p.initPulsarAddress()
+
+	p.initWriteNodeID()
+	p.initWriteNodeNum()
+	p.initWriteNodeTimeTickChannelName()
+
+	p.initMsgChannelSubName()
+	p.initDefaultPartitionTag()
+	p.initSliceIndex()
+
+	p.initFlowGraphMaxQueueLength()
+	p.initFlowGraphMaxParallelism()
+
+	p.initInsertChannelNames()
+	p.initInsertChannelRange()
+	p.initInsertReceiveBufSize()
+	p.initInsertPulsarBufSize()
+
+	p.initDDChannelNames()
+	p.initDDReceiveBufSize()
+	p.initDDPulsarBufSize()
 }
 
-func (p *ParamTable) WriteNodeID() UniqueID {
+func (p *ParamTable) initWriteNodeID() {
 	writeNodeID, err := p.Load("_writeNodeID")
 	if err != nil {
 		panic(err)
@@ -50,187 +91,153 @@ func (p *ParamTable) WriteNodeID() UniqueID {
 	if err != nil {
 		panic(err)
 	}
-	return UniqueID(id)
+	p.WriteNodeID = UniqueID(id)
 }
 
-func (p *ParamTable) insertChannelRange() []int {
+func (p *ParamTable) initPulsarAddress() {
+	url, err := p.Load("_PulsarAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.PulsarAddress = url
+}
+
+func (p *ParamTable) initInsertChannelRange() {
 	insertChannelRange, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
 		panic(err)
 	}
-
-	return paramtable.ConvertRangeToIntRange(insertChannelRange, ",")
+	p.InsertChannelRange = paramtable.ConvertRangeToIntRange(insertChannelRange, ",")
 }
 
 // advanced params
-// stats
-func (p *ParamTable) statsPublishInterval() int {
-	return p.ParseInt("writeNode.stats.publishInterval")
-}
-
 // dataSync:
-func (p *ParamTable) flowGraphMaxQueueLength() int32 {
-	return p.ParseInt32("writeNode.dataSync.flowGraph.maxQueueLength")
+func (p *ParamTable) initFlowGraphMaxQueueLength() {
+	p.FlowGraphMaxQueueLength = p.ParseInt32("writeNode.dataSync.flowGraph.maxQueueLength")
 }
 
-func (p *ParamTable) flowGraphMaxParallelism() int32 {
-	return p.ParseInt32("writeNode.dataSync.flowGraph.maxParallelism")
+func (p *ParamTable) initFlowGraphMaxParallelism() {
+	p.FlowGraphMaxParallelism = p.ParseInt32("writeNode.dataSync.flowGraph.maxParallelism")
 }
 
 // msgStream
-func (p *ParamTable) insertReceiveBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.insert.recvBufSize")
+func (p *ParamTable) initInsertReceiveBufSize() {
+	p.InsertReceiveBufSize = p.ParseInt64("writeNode.msgStream.insert.recvBufSize")
 }
 
-func (p *ParamTable) insertPulsarBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.insert.pulsarBufSize")
+func (p *ParamTable) initInsertPulsarBufSize() {
+	p.InsertPulsarBufSize = p.ParseInt64("writeNode.msgStream.insert.pulsarBufSize")
 }
 
-func (p *ParamTable) searchReceiveBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.search.recvBufSize")
-}
-
-func (p *ParamTable) searchPulsarBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.search.pulsarBufSize")
-}
-
-func (p *ParamTable) searchResultReceiveBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.searchResult.recvBufSize")
-}
-
-func (p *ParamTable) statsReceiveBufSize() int64 {
-	return p.ParseInt64("writeNode.msgStream.stats.recvBufSize")
-}
-
-func (p *ParamTable) etcdAddress() string {
-	etcdAddress, err := p.Load("_EtcdAddress")
+func (p *ParamTable) initDDReceiveBufSize() {
+	revBufSize, err := p.Load("writeNode.msgStream.dataDefinition.recvBufSize")
 	if err != nil {
 		panic(err)
 	}
-	return etcdAddress
+	bufSize, err := strconv.Atoi(revBufSize)
+	if err != nil {
+		panic(err)
+	}
+	p.DDReceiveBufSize = int64(bufSize)
 }
 
-func (p *ParamTable) metaRootPath() string {
-	rootPath, err := p.Load("etcd.rootPath")
+func (p *ParamTable) initDDPulsarBufSize() {
+	pulsarBufSize, err := p.Load("writeNode.msgStream.dataDefinition.pulsarBufSize")
 	if err != nil {
 		panic(err)
 	}
-	subPath, err := p.Load("etcd.metaSubPath")
+	bufSize, err := strconv.Atoi(pulsarBufSize)
 	if err != nil {
 		panic(err)
 	}
-	return rootPath + "/" + subPath
+	p.DDPulsarBufSize = int64(bufSize)
 }
 
-func (p *ParamTable) gracefulTime() int64 {
-	gracefulTime, err := p.Load("writeNode.gracefulTime")
-	if err != nil {
-		panic(err)
-	}
-	time, err := strconv.Atoi(gracefulTime)
-	if err != nil {
-		panic(err)
-	}
-	return int64(time)
-}
+func (p *ParamTable) initInsertChannelNames() {
 
-func (p *ParamTable) insertChannelNames() []string {
 	prefix, err := p.Load("msgChannel.chanNamePrefix.insert")
 	if err != nil {
 		log.Fatal(err)
 	}
+	prefix += "-"
 	channelRange, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
 		panic(err)
 	}
-
 	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
 
 	var ret []string
 	for _, ID := range channelIDs {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
-	sep := len(channelIDs) / p.writeNodeNum()
-	index := p.sliceIndex()
+	sep := len(channelIDs) / p.WriteNodeNum
+	index := p.SliceIndex
 	if index == -1 {
 		panic("writeNodeID not Match with Config")
 	}
 	start := index * sep
-	return ret[start : start+sep]
+	p.InsertChannelNames = ret[start : start+sep]
 }
 
-func (p *ParamTable) searchChannelNames() []string {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.search")
-	if err != nil {
-		log.Fatal(err)
-	}
-	channelRange, err := p.Load("msgChannel.channelRange.search")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	return ret
-}
-
-func (p *ParamTable) searchResultChannelNames() []string {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.searchResult")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	prefix += "-"
-	channelRange, err := p.Load("msgChannel.channelRange.searchResult")
-	if err != nil {
-		panic(err)
-	}
-
-	channelIDs := paramtable.ConvertRangeToIntSlice(channelRange, ",")
-
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	return ret
-}
-
-func (p *ParamTable) msgChannelSubName() string {
-	// TODO: subName = namePrefix + "-" + writeNodeID, writeNodeID is assigned by master
+func (p *ParamTable) initMsgChannelSubName() {
 	name, err := p.Load("msgChannel.subNamePrefix.writeNodeSubNamePrefix")
 	if err != nil {
 		log.Panic(err)
 	}
-	writeNodeIDStr, err := p.Load("_WriteNodeID")
+	writeNodeIDStr, err := p.Load("_writeNodeID")
 	if err != nil {
 		panic(err)
 	}
-	return name + "-" + writeNodeIDStr
+	p.MsgChannelSubName = name + "-" + writeNodeIDStr
 }
 
-func (p *ParamTable) writeNodeTimeTickChannelName() string {
+func (p *ParamTable) initDDChannelNames() {
+	prefix, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
+	if err != nil {
+		panic(err)
+	}
+	prefix += "-"
+	iRangeStr, err := p.Load("msgChannel.channelRange.dataDefinition")
+	if err != nil {
+		panic(err)
+	}
+	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
+	var ret []string
+	for _, ID := range channelIDs {
+		ret = append(ret, prefix+strconv.Itoa(ID))
+	}
+	p.DDChannelNames = ret
+}
+
+func (p *ParamTable) initDefaultPartitionTag() {
+	defaultTag, err := p.Load("common.defaultPartitionTag")
+	if err != nil {
+		panic(err)
+	}
+
+	p.DefaultPartitionTag = defaultTag
+}
+
+func (p *ParamTable) initWriteNodeTimeTickChannelName() {
 	channels, err := p.Load("msgChannel.chanNamePrefix.writeNodeTimeTick")
 	if err != nil {
 		panic(err)
 	}
-	return channels
+	p.WriteNodeTimeTickChannelName = channels
 }
 
-func (p *ParamTable) sliceIndex() int {
-	writeNodeID := p.WriteNodeID()
+func (p *ParamTable) initSliceIndex() {
+	writeNodeID := p.WriteNodeID
 	writeNodeIDList := p.WriteNodeIDList()
 	for i := 0; i < len(writeNodeIDList); i++ {
 		if writeNodeID == writeNodeIDList[i] {
-			return i
+			p.SliceIndex = i
+			return
 		}
 	}
-	return -1
+	p.SliceIndex = -1
 }
 
-func (p *ParamTable) writeNodeNum() int {
-	return len(p.WriteNodeIDList())
+func (p *ParamTable) initWriteNodeNum() {
+	p.WriteNodeNum = len(p.WriteNodeIDList())
 }

@@ -20,6 +20,10 @@ writeNode:
       maxParallelism: 1024
 
   msgStream:
+    dataDefinition:
+      recvBufSize: 64 # msgPack chan buffer size
+      pulsarBufSize: 64 # pulsar chan buffer size
+
     insert:
       #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size
@@ -29,13 +33,3 @@ writeNode:
       #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
-
-    search:
-      recvBufSize: 512
-      pulsarBufSize: 512
-
-    searchResult:
-      recvBufSize: 64
-
-    stats:
-      recvBufSize: 64

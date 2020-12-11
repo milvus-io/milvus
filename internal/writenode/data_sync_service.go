@@ -37,15 +37,21 @@ func (dsService *dataSyncService) initNodes() {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx)
+	var ddStreamNode Node = newDDInputNode(dsService.ctx)
+
+	var ddNode Node = newDDNode()
 	var filterDmNode Node = newFilteredDmNode()
 	var insertBufferNode Node = newInsertBufferNode()
-	var serviceTimeNode Node = newServiceTimeNode()
 
 	dsService.fg.AddNode(&dmStreamNode)
-	dsService.fg.AddNode(&filterDmNode)
-	dsService.fg.AddNode(&insertBufferNode)
-	dsService.fg.AddNode(&serviceTimeNode)
+	dsService.fg.AddNode(&ddStreamNode)
 
+	dsService.fg.AddNode(&filterDmNode)
+	dsService.fg.AddNode(&ddNode)
+
+	dsService.fg.AddNode(&insertBufferNode)
+
+	// dmStreamNode
 	var err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{},
 		[]string{filterDmNode.Name()},
@@ -54,27 +60,39 @@ func (dsService *dataSyncService) initNodes() {
 		log.Fatal("set edges failed in node:", dmStreamNode.Name())
 	}
 
+	// ddStreamNode
+	err = dsService.fg.SetEdges(ddStreamNode.Name(),
+		[]string{},
+		[]string{ddNode.Name()},
+	)
+	if err != nil {
+		log.Fatal("set edges failed in node:", ddStreamNode.Name())
+	}
+
+	// filterDmNode
 	err = dsService.fg.SetEdges(filterDmNode.Name(),
-		[]string{dmStreamNode.Name()},
+		[]string{dmStreamNode.Name(), ddNode.Name()},
 		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
 		log.Fatal("set edges failed in node:", filterDmNode.Name())
 	}
 
-	err = dsService.fg.SetEdges(insertBufferNode.Name(),
+	// ddNode
+	err = dsService.fg.SetEdges(ddNode.Name(),
+		[]string{ddStreamNode.Name()},
 		[]string{filterDmNode.Name()},
-		[]string{serviceTimeNode.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", insertBufferNode.Name())
+		log.Fatal("set edges failed in node:", ddNode.Name())
 	}
 
-	err = dsService.fg.SetEdges(serviceTimeNode.Name(),
-		[]string{insertBufferNode.Name()},
+	// insertBufferNode
+	err = dsService.fg.SetEdges(insertBufferNode.Name(),
+		[]string{filterDmNode.Name()},
 		[]string{},
 	)
 	if err != nil {
-		log.Fatal("set edges failed in node:", serviceTimeNode.Name())
+		log.Fatal("set edges failed in node:", insertBufferNode.Name())
 	}
 }
