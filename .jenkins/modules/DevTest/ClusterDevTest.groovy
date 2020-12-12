@@ -35,7 +35,7 @@ timeout(time: 150, unit: 'MINUTES') {
             try {
                 dir ('charts/milvus') {
                     writeFile file: 'test.yaml', text: "extraConfiguration:\n  engine:\n    build_index_threshold: 1000\n    max_partition_num: 256"
-                    def helmCMD_mysql = "${helmCMD}" + " --set cluster.enabled=true --set readonly.replicas=0 --set persistence.enabled=true -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.CLUSTER_HELM_RELEASE_NAME} ."
+                    def helmCMD_mysql = "${helmCMD}" + " --set cluster.enabled=true --set readonly.replicas=1 --set nginx.repository=threaddao/nginx-delay --set nginx.tag=v1 --set nginx.delay.enabled=true --set persistence.enabled=true -f ci/db_backend/mysql_${BINARY_VERSION}_values.yaml ${env.CLUSTER_HELM_RELEASE_NAME} ."
                     sh "${helmCMD_mysql}"
                 }
             } catch (exc) {
