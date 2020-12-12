@@ -59,12 +59,58 @@ class ExecExprVisitor : ExprVisitor {
 
 void
 ExecExprVisitor::visit(BoolUnaryExpr& expr) {
-    PanicInfo("unimplemented");
+    using OpType = BoolUnaryExpr::OpType;
+    auto vec = call_child(*expr.child_);
+    RetType ret;
+    for (int chunk_id = 0; chunk_id < vec.size(); ++chunk_id) {
+        auto chunk = vec[chunk_id];
+        switch (expr.op_type_) {
+            case OpType::LogicalNot: {
+                chunk.flip();
+            }
+            default: {
+                PanicInfo("Invalid OpType");
+            }
+        }
+        ret.emplace_back(std::move(chunk));
+    }
+    ret_ = std::move(ret);
 }
 
 void
 ExecExprVisitor::visit(BoolBinaryExpr& expr) {
-    PanicInfo("unimplemented");
+    using OpType = BoolBinaryExpr::OpType;
+    RetType ret;
+    auto left = call_child(*expr.left_);
+    auto right = call_child(*expr.right_);
+    Assert(left.size() == right.size());
+
+    for (int chunk_id = 0; chunk_id < left.size(); ++chunk_id) {
+        boost::dynamic_bitset<> chunk_res;
+        auto left_chunk = std::move(left[chunk_id]);
+        auto right_chunk = std::move(right[chunk_id]);
+        chunk_res = std::move(left_chunk);
+        switch (expr.op_type_) {
+            case OpType::LogicalAnd: {
+                chunk_res &= right_chunk;
+                break;
+            }
+            case OpType::LogicalOr: {
+                chunk_res |= right_chunk;
+                break;
+            }
+            case OpType::LogicalXor: {
+                chunk_res ^= right_chunk;
+                break;
+            }
+            case OpType::LogicalMinus: {
+                chunk_res -= right_chunk;
+                break;
+            }
+        }
+        ret.emplace_back(std::move(chunk_res));
+    }
+    ret_ = std::move(ret);
 }
 
 template <typename T, typename IndexFunc, typename ElementFunc>
@@ -105,7 +151,6 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_fu
     }
     return results;
 }
-
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
