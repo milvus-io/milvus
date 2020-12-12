@@ -71,6 +71,30 @@ class BitsetView {
         return (blocks_[block_id] >> block_offset) & 0x1;
     }
 
+    uint64_t
+    count_1() const {
+        uint64_t ret = 0;
+        auto p_data = reinterpret_cast<const uint64_t *>(blocks_);
+        auto len = size_ >> 6;
+        //auto remainder = size() % 8;
+        auto popcount8 = [&](uint8_t x) -> int{
+            x = (x & 0x55) + ((x >> 1) & 0x55);
+            x = (x & 0x33) + ((x >> 2) & 0x33);
+            x = (x & 0x0F) + ((x >> 4) & 0x0F);
+            return x;
+        };
+        for (int64_t i = 0; i < len; ++ i) {
+            ret += __builtin_popcountl(*p_data);
+            p_data ++;
+        }
+        auto p_byte = blocks_ + (len << 3);
+        for (auto i = (len << 3); i < u8size(); ++ i) {
+            ret += popcount8(*p_byte);
+            p_byte ++;
+        }
+        return ret;
+    }
+
  private:
     const uint8_t* blocks_ = nullptr;
     int64_t size_ = 0;  // size of bits

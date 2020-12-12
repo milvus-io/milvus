@@ -26,6 +26,7 @@ class IndexHNSW : public VecIndex {
  public:
     IndexHNSW() {
         index_type_ = IndexEnum::INDEX_HNSW;
+        stats = std::make_shared<milvus::knowhere::LibHNSWStatistics>(index_type_);
     }
 
     BinarySet
@@ -56,6 +57,9 @@ class IndexHNSW : public VecIndex {
 
     void
     UpdateIndexSize() override;
+
+    void
+    ClearStatistics() override;
 
  private:
     bool normalize = false;

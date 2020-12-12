@@ -12,7 +12,9 @@
 #include <vector>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <queue>
+#include <algorithm>
 
 #include <omp.h>
 
@@ -20,6 +22,7 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/random.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/common.h>
 
 
 namespace faiss {
@@ -44,6 +47,8 @@ namespace faiss {
 
 struct DistanceComputer; // from AuxIndexStructures
 class VisitedListPool;
+struct RHNSWStatistics;
+struct RHNSWStatInfo;
 
 struct RHNSW {
   /// internal storage of vectors (32 bits: this is expensive)
@@ -153,6 +158,8 @@ struct RHNSW {
 
   /// level of each vector (base level = 1), size = ntotal
   std::vector<int> levels;
+  std::vector<int> level_stats;
+  int target_level;
 
   /// number of entry points in levels > 0.
   int upper_beam;
@@ -237,7 +244,7 @@ struct RHNSW {
 
   /// search interface inspired by hnswlib
   void searchKnn(DistanceComputer& qdis, int k,
-                 idx_t *I, float *D,
+                 idx_t *I, float *D, RHNSWStatInfo &rsi,
                  const BitsetView& bitset = nullptr) const;
 
   size_t cal_size();
@@ -358,6 +365,35 @@ struct RHNSWStats {
     nreorder = 0;
     view = false;
   }
+};
+
+struct RHNSWStatistics {
+    RHNSWStatistics():max_level(0) {}
+    int max_level;
+    std::mutex hash_lock;
+    std::vector<int> distribution;
+    std::unordered_map<unsigned int, uint64_t> access_cnt;
+    void GetStatistics(std::vector<size_t> &ret, size_t &access_total) {
+        access_total = 0;
+        std::unique_lock<std::mutex> lock(hash_lock);
+        ret.clear();
+        ret.reserve(access_cnt.size());
+        for (auto &elem : access_cnt) {
+            ret.push_back(elem.second);
+            access_total += elem.second;
+        }
+        lock.unlock();
+        std::sort(ret.begin(), ret.end(), std::greater<int64_t>());
+    }
+
+    void
+    Clear() {
+        access_cnt.clear();
+    }
+};
+
+struct RHNSWStatInfo {
+    std::vector<unsigned int> access_points;
 };
 
 // global var that collects them all

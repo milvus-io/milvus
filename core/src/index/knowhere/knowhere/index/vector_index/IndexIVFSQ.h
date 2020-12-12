@@ -23,10 +23,12 @@ class IVFSQ : public IVF {
  public:
     IVFSQ() : IVF() {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFSQ8;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     void

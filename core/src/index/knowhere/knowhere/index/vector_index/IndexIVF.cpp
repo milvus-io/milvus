@@ -65,7 +65,13 @@ void
 IVF::Load(const BinarySet& binary_set) {
     Assemble(const_cast<BinarySet&>(binary_set));
     std::lock_guard<std::mutex> lk(mutex_);
+    index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     LoadImpl(binary_set, index_type_);
+
+    if (IndexMode() == IndexMode::MODE_CPU && STATISTICS_LEVEL >= 3) {
+        auto ivf_index = static_cast<faiss::IndexIVFFlat*>(index_.get());
+        ivf_index->nprobe_statistics.resize(ivf_index->nlist, 0);
+    }
 }
 
 void
@@ -252,7 +258,7 @@ IVF::UpdateIndexSize() {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
-    auto ivf_index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
+    auto ivf_index = static_cast<faiss::IndexIVFFlat*>(index_.get());
     auto nb = ivf_index->invlists->compute_ntotal();
     auto nlist = ivf_index->nlist;
     auto code_size = ivf_index->code_size;
@@ -336,14 +342,30 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     } else {
         ivf_index->parallel_mode = 0;
     }
+    auto ivf_stats = std::dynamic_pointer_cast<IVFStatistics>(stats);
     ivf_index->search(n, data, k, distances, labels, bitset);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
-    LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost
-                        << ", quantization cost: " << faiss::indexIVF_stats.quantization_time
-                        << ", data search cost: " << faiss::indexIVF_stats.search_time;
-    faiss::indexIVF_stats.quantization_time = 0;
-    faiss::indexIVF_stats.search_time = 0;
+    if (STATISTICS_LEVEL) {
+        auto lock = ivf_stats->Lock();
+        if (STATISTICS_LEVEL >= 1) {
+            ivf_stats->update_nq(n);
+            ivf_stats->count_nprobe(ivf_index->nprobe);
+
+            LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost
+                                << ", quantization cost: " << ivf_index->index_ivf_stats.quantization_time
+                                << ", data search cost: " << ivf_index->index_ivf_stats.search_time;
+            ivf_stats->update_total_query_time(ivf_index->index_ivf_stats.quantization_time +
+                                               ivf_index->index_ivf_stats.search_time);
+            ivf_index->index_ivf_stats.quantization_time = 0;
+            ivf_index->index_ivf_stats.search_time = 0;
+        }
+        if (STATISTICS_LEVEL >= 2) {
+            ivf_stats->update_filter_percentage(bitset);
+        }
+    }
+    //     LOG_KNOWHERE_DEBUG_ << "IndexIVF::QueryImpl finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 void
@@ -355,6 +377,31 @@ IVF::SealImpl() {
         idx->to_readonly();
     }
 #endif
+}
+
+StatisticsPtr
+IVF::GetStatistics() {
+    if (IndexMode() != IndexMode::MODE_CPU || !STATISTICS_LEVEL) {
+        return stats;
+    }
+    auto ivf_stats = std::static_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
+    auto lock = ivf_stats->Lock();
+    ivf_stats->update_ivf_access_stats(ivf_index->nprobe_statistics);
+    return ivf_stats;
+}
+
+void
+IVF::ClearStatistics() {
+    if (IndexMode() != IndexMode::MODE_CPU || !STATISTICS_LEVEL) {
+        return;
+    }
+    auto ivf_stats = std::static_pointer_cast<IVFStatistics>(stats);
+    auto ivf_index = static_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->clear_nprobe_statistics();
+    ivf_index->index_ivf_stats.reset();
+    auto lock = ivf_stats->Lock();
+    ivf_stats->clear();
 }
 
 }  // namespace knowhere

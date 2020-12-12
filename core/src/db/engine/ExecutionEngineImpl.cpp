@@ -217,7 +217,6 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
         throw Exception(DB_ERROR, "Illegal search params");
     }
-
     if (hybrid) {
         //        HybridLoad();
     }
@@ -233,6 +232,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     auto result = vec_index->Query(dataset, conf, bitset);
     MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
                      context.query_result_->result_ids_.data());
+
     if (hybrid) {
         //        HybridUnset();
     }

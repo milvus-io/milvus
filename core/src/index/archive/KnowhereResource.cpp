@@ -18,8 +18,11 @@
 
 #include "NGT/lib/NGT/defines.h"
 #include "faiss/FaissHook.h"
+#include "faiss/common.h"
 #include "faiss/utils/utils.h"
 #include "knowhere/common/Log.h"
+#include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "scheduler/Utils.h"
 #include "utils/ConfigUtils.h"
@@ -119,12 +122,14 @@ KnowhereResource::Initialize() {
 
     faiss::LOG_ERROR_ = &knowhere::log_error_;
     faiss::LOG_WARNING_ = &knowhere::log_warning_;
+    // faiss::LOG_DEBUG_ = &knowhere::log_debug_;
     NGT_LOG_ERROR_ = &knowhere::log_error_;
     NGT_LOG_WARNING_ = &knowhere::log_warning_;
-    //    NGT_LOG_DEBUG_ = &knowhere::log_debug_;
-    if (config.engine.stat_optimizer_enable()) {
-        faiss::LOG_DEBUG_ = &knowhere::log_debug_;
-    }
+    // NGT_LOG_DEBUG_ = &knowhere::log_debug_;
+
+    auto stat_level = config.engine.statistics_level();
+    milvus::knowhere::STATISTICS_LEVEL = stat_level;
+    faiss::STATISTICS_LEVEL = stat_level;
 
     return Status::OK();
 }

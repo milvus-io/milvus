@@ -81,13 +81,20 @@ namespace hnswlib {
         virtual ~SpaceInterface() =default;
     };
 
+    class StatisticsInfo {
+    public:
+        StatisticsInfo(): target_level(1) {}
+        int target_level;
+        std::vector<unsigned int> accessed_points;
+    };
+
     template<typename dist_t>
     class AlgorithmInterface {
     public:
         virtual void addPoint(const void *datapoint, labeltype label)=0;
-        virtual std::priority_queue<std::pair<dist_t, labeltype >> searchKnn(const void *, size_t, const faiss::BitsetView& bitset) const = 0;
+        virtual std::priority_queue<std::pair<dist_t, labeltype >> searchKnn(const void *, size_t, const faiss::BitsetView& bitset, hnswlib::StatisticsInfo &stats) const = 0;
         template <typename Comp>
-        std::vector<std::pair<dist_t, labeltype>> searchKnn(const void*, size_t, Comp, const faiss::BitsetView& bitset) {
+        std::vector<std::pair<dist_t, labeltype>> searchKnn(const void*, size_t, Comp, const faiss::BitsetView& bitset, hnswlib::StatisticsInfo &stats) {
         }
         virtual void saveIndex(const std::string &location)=0;
         virtual ~AlgorithmInterface(){

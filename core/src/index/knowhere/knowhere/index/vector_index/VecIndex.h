@@ -23,6 +23,7 @@
 #include "knowhere/common/Utils.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/Statistics.h"
 
 namespace milvus {
 namespace knowhere {
@@ -68,6 +69,15 @@ class VecIndex : public Index {
 
     virtual int64_t
     Count() = 0;
+
+    virtual StatisticsPtr
+    GetStatistics() {
+        return stats;
+    }
+
+    virtual void
+    ClearStatistics() {
+    }
 
     virtual IndexType
     index_type() const {
@@ -128,6 +138,7 @@ class VecIndex : public Index {
     IndexMode index_mode_ = IndexMode::MODE_CPU;
     std::shared_ptr<std::vector<IDType>> uids_ = nullptr;
     int64_t index_size_ = -1;
+    StatisticsPtr stats = nullptr;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;

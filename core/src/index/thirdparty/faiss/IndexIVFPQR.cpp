@@ -116,9 +116,8 @@ void IndexIVFPQR::search_preassigned (idx_t n, const float *x, idx_t k,
         IndexIVFPQ::search_preassigned (
                    n, x, k_coarse,
                    idx, L1_dis, coarse_distances, coarse_labels,
-                   true, params);
+                   true, params, bitset);
     }
-
 
     indexIVFPQ_stats.search_cycles += TOC;
 
