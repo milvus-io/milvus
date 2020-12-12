@@ -223,12 +223,13 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 		},
 	}, nil
 }
-func NewDeleteBinlogWriter(dataType schemapb.DataType) (*DeleteBinlogWriter, error) {
+func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) (*DeleteBinlogWriter, error) {
 	descriptorEvent, err := newDescriptorEvent()
 	if err != nil {
 		return nil, err
 	}
 	descriptorEvent.PayloadDataType = dataType
+	descriptorEvent.CollectionID = collectionID
 	return &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
@@ -239,12 +240,13 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType) (*DeleteBinlogWriter, err
 		},
 	}, nil
 }
-func NewDDLBinlogWriter(dataType schemapb.DataType) (*DDLBinlogWriter, error) {
+func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) (*DDLBinlogWriter, error) {
 	descriptorEvent, err := newDescriptorEvent()
 	if err != nil {
 		return nil, err
 	}
 	descriptorEvent.PayloadDataType = dataType
+	descriptorEvent.CollectionID = collectionID
 	return &DDLBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
