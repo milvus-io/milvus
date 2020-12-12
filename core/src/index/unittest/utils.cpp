@@ -44,7 +44,7 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
         assert(xb.size() == (size_t)dim * nb);
         assert(xq.size() == (size_t)dim * nq);
 
-        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb.data(), ids.data());
+        base_dataset = milvus::knowhere::GenDataset(nb, dim, xb.data());
         query_dataset = milvus::knowhere::GenDataset(nq, dim, xq.data());
     } else {
         int64_t dim_x = dim / 8;
@@ -52,12 +52,12 @@ DataGen::Generate(const int dim, const int nb, const int nq, const bool is_binar
         assert(xb_bin.size() == (size_t)dim_x * nb);
         assert(xq_bin.size() == (size_t)dim_x * nq);
 
-        base_dataset = milvus::knowhere::GenDatasetWithIds(nb, dim, xb_bin.data(), ids.data());
+        base_dataset = milvus::knowhere::GenDataset(nb, dim, xb_bin.data());
         query_dataset = milvus::knowhere::GenDataset(nq, dim, xq_bin.data());
     }
 
-    id_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, ids.data());
-    xid_dataset = milvus::knowhere::GenDatasetWithIds(nq, dim, nullptr, xids.data());
+    id_dataset = milvus::knowhere::GenDataset(nq, dim, nullptr);
+    xid_dataset = milvus::knowhere::GenDataset(nq, dim, nullptr);
 }
 
 void

@@ -61,10 +61,7 @@ TEST_P(SPTAGTest, sptag_basic) {
     assert(!xb.empty());
 
     // null faiss index
-    {
-        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
-        ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
-    }
+    ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
 
     index_->BuildAll(base_dataset, conf);
     // index_->Add(base_dataset, conf);

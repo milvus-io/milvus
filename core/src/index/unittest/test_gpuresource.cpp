@@ -73,7 +73,7 @@ TEST_F(GPURESTEST, copyandsearch) {
 
     auto conf = ParamGenerator::GetInstance().Gen(index_type_);
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     auto result = index_->Query(query_dataset, conf);
     AssertAnns(result, nq, k);
 
@@ -128,7 +128,7 @@ TEST_F(GPURESTEST, trainandsearch) {
 
     auto conf = ParamGenerator::GetInstance().Gen(index_type_);
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     index_->SetIndexSize(nb * dim * sizeof(float));
     auto cpu_idx = milvus::knowhere::cloner::CopyGpuToCpu(index_, milvus::knowhere::Config());
     milvus::knowhere::IVFPtr ivf_idx = std::dynamic_pointer_cast<milvus::knowhere::IVF>(cpu_idx);
@@ -140,7 +140,7 @@ TEST_F(GPURESTEST, trainandsearch) {
     auto train_stage = [&] {
         for (int i = 0; i < train_count; ++i) {
             index_->Train(base_dataset, conf);
-            index_->Add(base_dataset, conf);
+            index_->AddWithoutIds(base_dataset, conf);
         }
     };
     auto search_stage = [&](milvus::knowhere::VecIndexPtr& search_idx) {
