@@ -2,8 +2,12 @@ package indexbuilder
 
 import (
 	"context"
+	"log"
+	"time"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 )
 
 type task interface {
@@ -14,12 +18,14 @@ type task interface {
 	PostExecute() error
 	WaitToFinish() error
 	Notify(err error)
+	OnEnqueue() error
 }
 
 type BaseTask struct {
-	done chan error
-	ctx  context.Context
-	id   UniqueID
+	done  chan error
+	ctx   context.Context
+	id    UniqueID
+	table *metaTable
 }
 
 func (bt *BaseTask) ID() UniqueID {
@@ -31,13 +37,11 @@ func (bt *BaseTask) setID(id UniqueID) {
 }
 
 func (bt *BaseTask) WaitToFinish() error {
-	for {
-		select {
-		case <-bt.ctx.Done():
-			return errors.New("timeout")
-		case err := <-bt.done:
-			return err
-		}
+	select {
+	case <-bt.ctx.Done():
+		return errors.New("timeout")
+	case err := <-bt.done:
+		return err
 	}
 }
 
@@ -45,38 +49,104 @@ func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
 
-type IndexBuildTask struct {
+type IndexAddTask struct {
 	BaseTask
-	rowIDAllocator *allocator.IDAllocator
+	req         *indexbuilderpb.BuildIndexRequest
+	indexID     UniqueID
+	idAllocator *allocator.IDAllocator
+	buildQueue  TaskQueue
 }
 
-func (it *IndexBuildTask) PreExecute() error {
+func (it *IndexAddTask) SetID(ID UniqueID) {
+	it.BaseTask.setID(ID)
+}
 
+func (it *IndexAddTask) OnEnqueue() error {
+	var err error
+	it.indexID, err = it.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (it *IndexBuildTask) Execute() error {
+func (it *IndexAddTask) PreExecute() error {
+	log.Println("pretend to check Index Req")
+	err := it.table.AddIndex(it.indexID, it.req)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
+func (it *IndexAddTask) Execute() error {
+	t := newIndexBuildTask()
+	t.table = it.table
+	t.indexID = it.indexID
+	var cancel func()
+	t.ctx, cancel = context.WithTimeout(it.ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-t.ctx.Done():
+			return errors.New("index add timeout")
+		default:
+			return it.buildQueue.Enqueue(t)
+		}
+	}
+	return fn()
+}
+
+func (it *IndexAddTask) PostExecute() error {
+	return nil
+}
+
+func NewIndexAddTask() *IndexAddTask {
+	return &IndexAddTask{
+		BaseTask: BaseTask{
+			done: make(chan error),
+		},
+	}
+}
+
+type IndexBuildTask struct {
+	BaseTask
+	indexID   UniqueID
+	indexMeta *indexbuilderpb.IndexMeta
+}
+
+func newIndexBuildTask() *IndexBuildTask {
+	return &IndexBuildTask{
+		BaseTask: BaseTask{
+			done: make(chan error, 1), // intend to do this
+		},
+	}
+}
+
+func (it *IndexBuildTask) SetID(ID UniqueID) {
+	it.BaseTask.setID(ID)
+}
+
+func (it *IndexBuildTask) OnEnqueue() error {
+	return it.table.UpdateIndexEnqueTime(it.indexID, time.Now())
+}
+
+func (it *IndexBuildTask) PreExecute() error {
+	return it.table.UpdateIndexScheduleTime(it.indexID, time.Now())
+}
+
+func (it *IndexBuildTask) Execute() error {
+	err := it.table.UpdateIndexStatus(it.indexID, indexbuilderpb.IndexStatus_INPROGRESS)
+	if err != nil {
+		return err
+	}
+	time.Sleep(time.Second)
+	log.Println("Pretend to Execute for 1 second")
 	return nil
 }
 
 func (it *IndexBuildTask) PostExecute() error {
-	return nil
-}
-
-type DescribeIndexTask struct {
-	BaseTask
-	ctx context.Context
-}
-
-func (dct *DescribeIndexTask) PreExecute() error {
-	return nil
-}
-
-func (dct *DescribeIndexTask) Execute() error {
-	return nil
-}
-
-func (dct *DescribeIndexTask) PostExecute() error {
-	return nil
+	dataPaths := []string{"file1", "file2"}
+	return it.table.CompleteIndex(it.indexID, dataPaths)
 }

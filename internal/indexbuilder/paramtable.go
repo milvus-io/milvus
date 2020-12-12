@@ -25,6 +25,9 @@ func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 	pt.initAddress()
 	pt.initPort()
+	pt.initEtcdAddress()
+	pt.initMasterAddress()
+	pt.initMetaRootPath()
 }
 
 func (pt *ParamTable) initAddress() {
