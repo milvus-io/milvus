@@ -62,7 +62,7 @@ We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issu
 
 ## Join our community
 
-:heart:To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
+:heart:  To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
 
 See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
 
