@@ -10,7 +10,7 @@ MarkupSafe==1.1.1
 marshmallow==2.19.5
 pymysql==0.9.3
 protobuf==3.9.1
-py==1.8.0
+py==1.10.0
 pyasn1==0.4.7
 pyasn1-modules==0.2.6
 pylint==2.5.0
