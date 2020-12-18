@@ -143,7 +143,7 @@ GPUIVF::QueryImpl(int64_t n,
                   float* distances,
                   int64_t* labels,
                   const Config& config,
-                  const faiss::ConcurrentBitsetPtr& bitset) {
+                  const faiss::BitsetView& bitset) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);

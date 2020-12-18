@@ -11,6 +11,7 @@
 #include <faiss/gpu/utils/MemorySpace.h>
 #include <faiss/gpu/utils/StaticUtils.h>
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/utils.h>
 #include <stdio.h>
 #include <sstream>
 
@@ -68,11 +69,11 @@ StackDeviceMemory::Stack::getAlloc(size_t size,
     // Too large for our stack
     DeviceScope s(device_);
 
-    if (cudaMallocWarning_) {
+    if (cudaMallocWarning_ && LOG_WARNING_) {
       // Print our requested size before we attempt the allocation
-      fprintf(stderr, "WARN: increase temp memory to avoid cudaMalloc, "
-              "or decrease query/add size (alloc %zu B, highwater %zu B)\n",
-              size, highWaterMalloc_);
+        (*LOG_WARNING_)("WARN: increase temp memory to avoid cudaMalloc, "
+                        "or decrease query/add size (alloc " + std::to_string(size) +
+                        " B, highwater " + std::to_string(highWaterMalloc_) + " B)");
     }
 
     char* p = nullptr;

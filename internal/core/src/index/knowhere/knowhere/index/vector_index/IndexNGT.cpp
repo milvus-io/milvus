@@ -52,11 +52,15 @@ IndexNGT::Serialize(const Config& config) {
     res_set.Append("ngt_grp_data", grp_data, grp_size);
     res_set.Append("ngt_prf_data", prf_data, prf_size);
     res_set.Append("ngt_tre_data", tre_data, tre_size);
+    if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
+    }
     return res_set;
 }
 
 void
 IndexNGT::Load(const BinarySet& index_binary) {
+    Assemble(const_cast<BinarySet&>(index_binary));
     auto obj_data = index_binary.GetByName("ngt_obj_data");
     std::string obj_str(reinterpret_cast<char*>(obj_data->data.get()), obj_data->size);
 
@@ -118,13 +122,18 @@ IndexNGT::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 #endif
 
 DatasetPtr
-IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     GET_TENSOR_DATA(dataset_ptr);
 
-    size_t k = config[meta::TOPK].get<int64_t>();
+    int k = config[meta::TOPK].get<int>();
+    auto epsilon = config[IndexParams::epsilon].get<float>();
+    auto edge_size = config[IndexParams::max_search_edges].get<int>();
+    if (edge_size == -1) {  // pass -1
+        edge_size--;
+    }
     size_t id_size = sizeof(int64_t) * k;
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
@@ -140,11 +149,11 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         NGT::Object* object = index_->allocateObject(single_query, Dim());
         NGT::SearchContainer sc(*object);
 
-        double epsilon = sp.beginOfEpsilon;
+        //        double epsilon = sp.beginOfEpsilon;
 
         NGT::ObjectDistances res;
         sc.setResults(&res);
-        sc.setSize(sp.size);
+        sc.setSize(static_cast<size_t>(sp.size));
         sc.setRadius(sp.radius);
 
         if (sp.accuracy > 0.0) {
@@ -152,7 +161,8 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         } else {
             sc.setEpsilon(epsilon);
         }
-        sc.setEdgeSize(sp.edgeSize);
+        //        sc.setEdgeSize(sp.edgeSize);
+        sc.setEdgeSize(edge_size);
 
         try {
             index_->search(sc, bitset);
@@ -164,9 +174,13 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
         auto local_dist = p_dist + i * k;
 
         int64_t res_num = res.size();
+        float dis_coefficient = 1.0;
+        if (index_->getObjectSpace().getDistanceType() == NGT::ObjectSpace::DistanceType::DistanceTypeIP) {
+            dis_coefficient = -1.0;
+        }
         for (int64_t idx = 0; idx < res_num; ++idx) {
             *(local_id + idx) = res[idx].id - 1;
-            *(local_dist + idx) = res[idx].distance;
+            *(local_dist + idx) = res[idx].distance * dis_coefficient;
         }
         while (res_num < static_cast<int64_t>(k)) {
             *(local_id + res_num) = -1;
@@ -195,6 +209,11 @@ IndexNGT::Dim() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     return index_->getDimension();
+}
+
+void
+IndexNGT::UpdateIndexSize() {
+    KNOWHERE_THROW_MSG("IndexNGT has no implementation of UpdateIndexSize, please use IndexNGT(PANNG/ONNG) instead!");
 }
 
 }  // namespace knowhere

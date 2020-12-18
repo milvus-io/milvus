@@ -28,7 +28,7 @@ void binary_distence_knn_hc(
         size_t n2,
         bool order = true,
         bool init_heap = true,
-        ConcurrentBitsetPtr bitset = nullptr)
+        const BitsetView& bitset = nullptr)
 {
     size_t k = ha->k;
 
@@ -51,7 +51,7 @@ void binary_distence_knn_hc(
 
 #pragma omp parallel for
         for (size_t j = 0; j < n2; j++) {
-            if(!bitset || !bitset->test(j)) {
+            if(!bitset || !bitset.test(j)) {
                 int thread_no = omp_get_thread_num();
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
@@ -106,7 +106,7 @@ void binary_distence_knn_hc(
                 int64_t * __restrict bh_ids_ = ha->ids + i * k;
                 size_t j;
                 for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         dis = hc.compute (bs2_);
                         if (dis < bh_val_[0]) {
                             faiss::maxheap_swap_top<tadis_t> (k, bh_val_, bh_ids_, dis, j);
@@ -129,7 +129,7 @@ void binary_distence_knn_hc (
         size_t nb,
         size_t ncodes,
         int order,
-        ConcurrentBitsetPtr bitset)
+        const BitsetView& bitset)
 {
     switch (metric_type) {
     case METRIC_Jaccard:
@@ -171,7 +171,7 @@ void binary_distence_knn_mc(
         size_t k,
         float *distances,
         int64_t *labels,
-        ConcurrentBitsetPtr bitset)
+        const BitsetView& bitset)
 {
     if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
         int thread_max_num = omp_get_max_threads();
@@ -190,7 +190,7 @@ void binary_distence_knn_mc(
 
 #pragma omp parallel for
         for (size_t j = 0; j < n2; j++) {
-            if(!bitset || !bitset->test(j)) {
+            if(!bitset || !bitset.test(j)) {
                 int thread_no = omp_get_thread_num();
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
@@ -247,7 +247,7 @@ void binary_distence_knn_mc(
                 T hc (bs1 + i * bytes_per_code, bytes_per_code);
                 const uint8_t * bs2_ = bs2 + j0 * bytes_per_code;
                 for (size_t j = j0; j < j1; j++, bs2_ += bytes_per_code) {
-                    if(!bitset || !bitset->test(j)){
+                    if(!bitset || !bitset.test(j)){
                         if (hc.compute (bs2_)) {
                             dis[num_i] = 0;
                             lab[num_i] = j;
@@ -282,7 +282,7 @@ void binary_distence_knn_mc (
         size_t ncodes,
         float *distances,
         int64_t *labels,
-        ConcurrentBitsetPtr bitset) {
+        const BitsetView& bitset) {
 
     switch (metric_type) {
     case METRIC_Substructure:

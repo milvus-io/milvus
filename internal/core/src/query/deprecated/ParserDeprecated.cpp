@@ -62,27 +62,27 @@ CopyRowRecords(const RepeatedPtrField<proto::service::PlaceholderValue>& grpc_re
 #endif
 
 Status
-ProcessLeafQueryJson(const milvus::Json& query_json, query_old::BooleanQueryPtr& query, std::string& field_name) {
+ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr& query, std::string& field_name) {
 #if 1
     if (query_json.contains("term")) {
         auto leaf_query = std::make_shared<query_old::LeafQuery>();
         auto term_query = std::make_shared<query_old::TermQuery>();
-        milvus::Json json_obj = query_json["term"];
+        milvus::json json_obj = query_json["term"];
         JSON_NULL_CHECK(json_obj);
         JSON_OBJECT_CHECK(json_obj);
         term_query->json_obj = json_obj;
-        milvus::Json::iterator json_it = json_obj.begin();
+        milvus::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
         leaf_query->term_query = term_query;
         query->AddLeafQuery(leaf_query);
     } else if (query_json.contains("range")) {
         auto leaf_query = std::make_shared<query_old::LeafQuery>();
         auto range_query = std::make_shared<query_old::RangeQuery>();
-        milvus::Json json_obj = query_json["range"];
+        milvus::json json_obj = query_json["range"];
         JSON_NULL_CHECK(json_obj);
         JSON_OBJECT_CHECK(json_obj);
         range_query->json_obj = json_obj;
-        milvus::Json::iterator json_it = json_obj.begin();
+        milvus::json::iterator json_it = json_obj.begin();
         field_name = json_it.key();
 
         leaf_query->range_query = range_query;
@@ -102,7 +102,7 @@ ProcessLeafQueryJson(const milvus::Json& query_json, query_old::BooleanQueryPtr&
 }
 
 Status
-ProcessBooleanQueryJson(const milvus::Json& query_json,
+ProcessBooleanQueryJson(const milvus::json& query_json,
                         query_old::BooleanQueryPtr& boolean_query,
                         query_old::QueryPtr& query_ptr) {
 #if 1
@@ -189,7 +189,7 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
                            query_old::QueryPtr& query_ptr) {
 #if 1
     try {
-        milvus::Json dsl_json = Json::parse(dsl_string);
+        milvus::json dsl_json = Json::parse(dsl_string);
 
         if (dsl_json.empty()) {
             return Status{SERVER_INVALID_ARGUMENT, "Query dsl is null"};
@@ -200,16 +200,16 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
         }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
-            milvus::Json vector_json = Json::parse(vector_string);
-            milvus::Json::iterator it = vector_json.begin();
+            milvus::json vector_json = Json::parse(vector_string);
+            milvus::json::iterator it = vector_json.begin();
             std::string placeholder = it.key();
 
             auto vector_query = std::make_shared<query_old::VectorQuery>();
-            milvus::Json::iterator vector_param_it = it.value().begin();
+            milvus::json::iterator vector_param_it = it.value().begin();
             if (vector_param_it != it.value().end()) {
                 const std::string& field_name = vector_param_it.key();
                 vector_query->field_name = field_name;
-                milvus::Json param_json = vector_param_it.value();
+                milvus::json param_json = vector_param_it.value();
                 int64_t topk = param_json["topk"];
                 // STATUS_CHECK(server::ValidateSearchTopk(topk));
                 vector_query->topk = topk;

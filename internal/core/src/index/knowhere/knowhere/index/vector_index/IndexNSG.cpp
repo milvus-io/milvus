@@ -48,6 +48,9 @@ NSG::Serialize(const Config& config) {
 
         BinarySet res_set;
         res_set.Append("NSG", data, writer.rp);
+        if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+            Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
+        }
         return res_set;
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
@@ -57,6 +60,7 @@ NSG::Serialize(const Config& config) {
 void
 NSG::Load(const BinarySet& index_binary) {
     try {
+        Assemble(const_cast<BinarySet&>(index_binary));
         fiu_do_on("NSG.Load.throw_exception", throw std::exception());
         std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG");
@@ -73,7 +77,7 @@ NSG::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) {
+NSG::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }

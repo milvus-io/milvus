@@ -115,12 +115,12 @@ struct IVFSQScannerIP: InvertedListScanner {
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
                        size_t k,
-                       ConcurrentBitsetPtr bitset) const override
+                       const BitsetView& bitset) const override
     {
         size_t nup = 0;
 
         for (size_t j = 0; j < list_size; j++) {
-            if(!bitset || !bitset->test(ids[j])){
+            if(!bitset || !bitset.test(ids[j])){
                 float accu = accu0 + dc.query_to_code (codes);
 
                 if (accu > simi [0]) {
@@ -139,7 +139,7 @@ struct IVFSQScannerIP: InvertedListScanner {
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & res,
-                           ConcurrentBitsetPtr bitset = nullptr) const override
+                           const BitsetView& bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
             float accu = accu0 + dc.query_to_code (codes);
@@ -203,11 +203,11 @@ struct IVFSQScannerL2: InvertedListScanner {
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
                        size_t k,
-                       ConcurrentBitsetPtr bitset) const override
+                       const BitsetView& bitset) const override
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
-            if(!bitset || !bitset->test(ids[j])){
+            if(!bitset || !bitset.test(ids[j])){
                 float dis = dc.query_to_code (codes);
 
                 if (dis < simi [0]) {
@@ -226,7 +226,7 @@ struct IVFSQScannerL2: InvertedListScanner {
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & res,
-                           ConcurrentBitsetPtr bitset = nullptr) const override
+                           const BitsetView& bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
             float dis = dc.query_to_code (codes);

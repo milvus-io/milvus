@@ -140,6 +140,9 @@ public:
                 case DistanceType::DistanceTypeL2:
                     p.set("DistanceType", "L2");
                     break;
+                case DistanceType::DistanceTypeIP:
+                    p.set("DistanceType", "IP");
+                    break;
                 case DistanceType::DistanceTypeHamming:
                     p.set("DistanceType", "Hamming");
                     break;
@@ -254,6 +257,10 @@ public:
                 else if (it->second == "L2")
                 {
                     distanceType = DistanceType::DistanceTypeL2;
+                }
+                else if (it->second == "IP")
+                {
+                    distanceType = DistanceType::DistanceTypeIP;
                 }
                 else if (it->second == "Hamming")
                 {
@@ -379,6 +386,7 @@ public:
 
         void set(NGT::Property & prop);
         void get(NGT::Property & prop);
+        int64_t memSize() { return sizeof(*this); }
         int dimension;
         int threadPoolSize;
         ObjectSpace::ObjectType objectType;
@@ -403,6 +411,7 @@ public:
     public:
         InsertionResult() : id(0), identical(false), distance(0.0) {}
         InsertionResult(size_t i, bool tf, Distance d) : id(i), identical(tf), distance(d) {}
+        int64_t memSize() { return sizeof(*this); }
         size_t id;
         bool identical;
         Distance distance; // the distance between the centroid and the inserted object.
@@ -415,6 +424,7 @@ public:
         AccuracyTable(std::vector<std::pair<float, double>> & t) { set(t); }
         AccuracyTable(std::string str) { set(str); }
         void set(std::vector<std::pair<float, double>> & t) { table = t; }
+        int64_t memSize() { return sizeof(*this) + table.capacity() * sizeof(table[0]); }
         void set(std::string str)
         {
             std::vector<std::string> tokens;
@@ -645,7 +655,7 @@ public:
     virtual void linearSearch(NGT::SearchContainer & sc) { getIndex().linearSearch(sc); }
     virtual void linearSearch(NGT::SearchQuery & sc) { getIndex().linearSearch(sc); }
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset) { getIndex().search(sc, bitset); }
+    virtual void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset) { getIndex().search(sc, bitset); }
     virtual void search(NGT::SearchContainer & sc) { getIndex().search(sc); }
     virtual void search(NGT::SearchQuery & sc) { getIndex().search(sc); }
     virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds) { getIndex().search(sc, seeds); }
@@ -710,6 +720,8 @@ public:
     static void version(std::ostream & os);
     static std::string getVersion();
     std::string getPath() { return path; }
+
+    virtual int64_t memSize() { return redirector.memSize() + sizeof(path) + (index ? getIndex().memSize() : 0); }
 
 protected:
     Object * allocateObject(void * vec, const std::type_info & objectType)
@@ -1046,7 +1058,7 @@ public:
     }
 
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset)
+    virtual void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset)
     {
         sc.distanceComputationCount = 0;
         sc.visitCount = 0;
@@ -1574,7 +1586,7 @@ protected:
     }
 
     // for milvus
-    virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::ConcurrentBitsetPtr & bitset)
+    virtual void search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::BitsetView&bitset)
     {
         if (sc.size == 0)
         {
@@ -1628,6 +1640,8 @@ protected:
             throw e;
         }
     }
+
+    virtual int64_t memSize() { return property.memSize() + sizeof(readOnly) + accuracyTable.memSize() + Index::memSize() + NeighborhoodGraph::memSize(); }
     Index::Property property;
 
     bool readOnly;
@@ -1641,6 +1655,9 @@ protected:
 class GraphAndTreeIndex : public GraphIndex, public DVPTree
 {
 public:
+
+    virtual int64_t memSize() { return GraphIndex::memSize() + DVPTree::memSize(); }
+
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
     GraphAndTreeIndex(const std::string & allocator, bool rdOnly = false) : GraphIndex(allocator, false) { initialize(allocator, 0); }
     GraphAndTreeIndex(const std::string & allocator, NGT::Property & prop);
@@ -2130,7 +2147,7 @@ public:
 
     // for milvus
     void
-    getSeedsFromTree(NGT::SearchContainer& sc, ObjectDistances& seeds, const faiss::ConcurrentBitsetPtr& bitset) {
+    getSeedsFromTree(NGT::SearchContainer& sc, ObjectDistances& seeds, const faiss::BitsetView& bitset) {
         DVPTree::SearchContainer tso(sc.object);
         tso.mode = DVPTree::SearchContainer::SearchLeaf;
         tso.radius = 0.0;
@@ -2187,7 +2204,7 @@ public:
     }
 
     // for milvus
-    void search(NGT::SearchContainer & sc, const faiss::ConcurrentBitsetPtr & bitset)
+    void search(NGT::SearchContainer & sc, const faiss::BitsetView&bitset)
     {
         sc.distanceComputationCount = 0;
         sc.visitCount = 0;

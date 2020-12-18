@@ -129,3 +129,36 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
 #endif
 }
+
+TEST_P(IVFNMCPUTest, ivf_slice) {
+    assert(!xb.empty());
+
+    if (index_mode_ != milvus::knowhere::IndexMode::MODE_CPU) {
+        return;
+    }
+
+    // null faiss index
+    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
+    ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
+
+    index_->Train(base_dataset, conf_);
+    index_->AddWithoutIds(base_dataset, conf_);
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dim(), dim);
+
+    index_->SetIndexSize(nq * dim * sizeof(float));
+
+    milvus::knowhere::BinarySet bs = index_->Serialize(conf_);
+
+    int64_t dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    int64_t rows = base_dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
+    auto raw_data = base_dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data, [&](uint8_t*) {});
+    bptr->size = dim * rows * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+    index_->Load(bs);
+
+    auto result = index_->Query(query_dataset, conf_, nullptr);
+    AssertAnns(result, nq, k);
+}

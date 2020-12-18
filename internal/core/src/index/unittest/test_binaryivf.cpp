@@ -150,3 +150,18 @@ TEST_P(BinaryIVFTest, binaryivf_serialize) {
         // PrintResult(result, nq, k);
     }
 }
+
+TEST_P(BinaryIVFTest, binaryivf_slice) {
+    {
+        // serialize index
+        index_->BuildAll(base_dataset, conf);
+        auto binaryset = index_->Serialize(conf);
+
+        index_->Load(binaryset);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        auto result = index_->Query(query_dataset, conf, nullptr);
+        AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
+        // PrintResult(result, nq, k);
+    }
+}

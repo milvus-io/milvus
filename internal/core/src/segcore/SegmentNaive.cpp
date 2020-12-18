@@ -19,6 +19,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
+#include <faiss/utils/BitsetView.h>
 #include "segcore/Reduce.h"
 
 namespace milvus::segcore {
@@ -266,7 +267,6 @@ SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestam
     }
 
     auto indexing = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_entry.index_name]);
-    indexing->SetBlacklist(bitmap);
     auto ds = knowhere::GenDataset(query_info->num_queries, dim, query_info->query_raw_data.data());
     auto final = indexing->Query(ds, conf, bitmap);
 
@@ -326,8 +326,8 @@ SegmentNaive::QueryBruteForceImpl(query::QueryDeprecatedPtr query_info, Timestam
         auto nsize =
             chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
         auto offset = chunk_id * DefaultElementPerChunk;
-
-        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf, bitmap, offset);
+        faiss::BitsetView view(bitmap->data() + offset / 8, DefaultElementPerChunk);
+        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf, view);
         if (chunk_id == 0) {
             final_uids = buf_uids;
             final_dis = buf_dis;

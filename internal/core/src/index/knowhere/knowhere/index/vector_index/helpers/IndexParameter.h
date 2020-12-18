@@ -54,6 +54,9 @@ constexpr const char* PQM = "PQM";
 
 // NGT Params
 constexpr const char* edge_size = "edge_size";
+// NGT Search Params
+constexpr const char* epsilon = "epsilon";
+constexpr const char* max_search_edges = "max_search_edges";
 // NGT_PANNG Params
 constexpr const char* forcedly_pruned_edge_size = "forcedly_pruned_edge_size";
 constexpr const char* selectively_pruned_edge_size = "selectively_pruned_edge_size";

@@ -14,6 +14,9 @@
 #include <vector>
 #include <unordered_map>
 #include <stdint.h>
+#include <algorithm>
+#include <numeric>
+#include <mutex>
 
 #include <faiss/Index.h>
 #include <faiss/InvertedLists.h>
@@ -21,6 +24,7 @@
 #include <faiss/Clustering.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/common.h>
 
 namespace faiss {
 
@@ -72,6 +76,18 @@ struct IVFSearchParameters {
     virtual ~IVFSearchParameters () {}
 };
 
+struct IndexIVFStats {
+    size_t nq;       // nb of queries run
+    size_t nlist;    // nb of inverted lists scanned
+    size_t ndis;     // nb of distancs computed
+    size_t nheap_updates; // nb of times the heap was updated
+    double quantization_time; // time spent quantizing vectors (in ms)
+    double search_time;       // time spent searching lists (in ms)
+
+
+    IndexIVFStats () {reset (); }
+    void reset ();
+};
 
 
 struct InvertedListScanner;
@@ -121,6 +137,8 @@ struct IndexIVF: Index, Level1Quantizer {
     /** optional map that maps back ids to invlist entries. This
      *  enables reconstruct() */
     DirectMap direct_map;
+    mutable std::vector<size_t> nprobe_statistics;
+    mutable IndexIVFStats index_ivf_stats;
 
     /** The Inverted file takes a quantizer (an Index) on input,
      * which implements the function mapping a vector to a list
@@ -190,7 +208,7 @@ struct IndexIVF: Index, Level1Quantizer {
                                      float *distances, idx_t *labels,
                                      bool store_pairs,
                                      const IVFSearchParameters *params=nullptr,
-                                     ConcurrentBitsetPtr bitset = nullptr
+                                     const BitsetView& bitset = nullptr
                                      ) const;
 
     /** Similar to search_preassigned, but does not store codes **/
@@ -203,35 +221,36 @@ struct IndexIVF: Index, Level1Quantizer {
                                                    float *distances, idx_t *labels,
                                                    bool store_pairs,
                                                    const IVFSearchParameters *params = nullptr,
-                                                   ConcurrentBitsetPtr bitset = nullptr);
+                                                   const BitsetView& bitset = nullptr);
 
     /** assign the vectors, then call search_preassign */
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels,
-                 ConcurrentBitsetPtr bitset = nullptr) const override;
+                 const BitsetView& bitset = nullptr) const override;
+
 
     /** Similar to search, but does not store codes **/
     void search_without_codes (idx_t n, const float *x, 
                                const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
                                bool is_sq8, idx_t k, float *distances, idx_t *labels,
-                               ConcurrentBitsetPtr bitset = nullptr);
+                               const BitsetView& bitset = nullptr);
 
 #if 0
     /** get raw vectors by ids */
-    void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr) override;
+    void get_vector_by_id (idx_t n, const idx_t *xid, float *x, const BitsetView& bitset = nullptr) override;
 
     void search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
-                       ConcurrentBitsetPtr bitset = nullptr) override;
+                       const BitsetView& bitset = nullptr) override;
 #endif
 
     void range_search (idx_t n, const float* x, float radius,
                        RangeSearchResult* result,
-                       ConcurrentBitsetPtr bitset = nullptr) const override;
+                       const BitsetView& bitset = nullptr) const override;
 
     void range_search_preassigned(idx_t nx, const float *x, float radius,
                                   const idx_t *keys, const float *coarse_dis,
                                   RangeSearchResult *result,
-                                  ConcurrentBitsetPtr bitset = nullptr) const;
+                                  const BitsetView& bitset = nullptr) const;
 
     /// get a scanner for this index (store_pairs means ignore labels)
     virtual InvertedListScanner *get_InvertedListScanner (
@@ -335,6 +354,19 @@ struct IndexIVF: Index, Level1Quantizer {
     /// replace the inverted lists, old one is deallocated if own_invlists
     void replace_invlists (InvertedLists *il, bool own=false);
 
+
+    /// clear nprobe statistics
+    void clear_nprobe_statistics() {
+        if(!STATISTICS_LEVEL)
+            return ;
+        nprobe_statistics.clear();
+    }
+
+//    virtual std::unique_lock<std::mutex>
+//    Lock() const {
+//        return std::unique_lock<std::mutex>(nprobe_stat_lock);
+//    }
+
     /* The standalone codec interface (except sa_decode that is specific) */
     size_t sa_code_size () const override;
 
@@ -381,7 +413,7 @@ struct InvertedListScanner {
                                const idx_t *ids,
                                float *distances, idx_t *labels,
                                size_t k,
-                               ConcurrentBitsetPtr bitset = nullptr) const = 0;
+                               const BitsetView& bitset = nullptr) const = 0;
 
     /** scan a set of codes, compute distances to current query and
      * update results if distances are below radius
@@ -392,27 +424,13 @@ struct InvertedListScanner {
                                    const idx_t *ids,
                                    float radius,
                                    RangeQueryResult &result,
-                                   ConcurrentBitsetPtr bitset = nullptr) const;
+                                   const BitsetView& bitset = nullptr) const;
 
     virtual ~InvertedListScanner () {}
 
 };
 
 
-struct IndexIVFStats {
-    size_t nq;       // nb of queries run
-    size_t nlist;    // nb of inverted lists scanned
-    size_t ndis;     // nb of distancs computed
-    size_t nheap_updates; // nb of times the heap was updated
-    double quantization_time; // time spent quantizing vectors (in ms)
-    double search_time;       // time spent searching lists (in ms)
-
-    IndexIVFStats () {reset (); }
-    void reset ();
-};
-
-// global var that collects them all
-extern IndexIVFStats indexIVF_stats;
 
 
 } // namespace faiss

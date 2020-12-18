@@ -20,6 +20,7 @@
 #include "NGT/Node.h"
 #include "NGT/defines.h"
 #include "faiss/utils/ConcurrentBitset.h"
+#include "faiss/utils/BitsetView.h"
 
 #include <sstream>
 #include	<string>
@@ -262,7 +263,7 @@ namespace NGT {
 
     // for milvus
     void
-    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, const faiss::ConcurrentBitsetPtr& bitset) {
+    getObjectIDsFromLeaf(Node::ID nid, ObjectDistances& rl, const faiss::BitsetView& bitset) {
         LeafNode& ln = *(LeafNode*)getNode(nid);
         rl.clear();
         ObjectDistance r;
@@ -274,7 +275,7 @@ namespace NGT {
         r.id = ln.getObjectIDs()[i].id;
         r.distance = ln.getObjectIDs()[i].distance;
 #endif
-        if (bitset != nullptr && bitset->test(r.id - 1)) {
+        if (!bitset.empty() && bitset.test(r.id - 1)) {
             continue;
         }
         rl.push_back(r);
@@ -486,6 +487,8 @@ namespace NGT {
 	}
       }
     }
+
+    virtual int64_t memSize() { return sizeof(size_t) * 2 + sizeof(splitMode) + name.size() + leafNodes.memSize() + internalNodes.memSize(); }
 
   public:
     size_t		internalChildrenSize;

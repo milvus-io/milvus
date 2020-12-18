@@ -38,10 +38,8 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 
     if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    } else if (metric_type == Metric::HAMMING) {
-        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
-    } else if (metric_type == Metric::JACCARD) {
-        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
+    } else if (metric_type == Metric::IP) {
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeIP;
     } else {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     }
@@ -50,7 +48,7 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         std::shared_ptr<NGT::Index>(NGT::Index::createGraphAndTree(reinterpret_cast<const float*>(p_data), prop, rows));
 
     // reconstruct graph
-    NGT::GraphOptimizer graphOptimizer(true);
+    NGT::GraphOptimizer graphOptimizer(false);
 
     auto number_of_outgoing_edges = config[IndexParams::outgoing_edge_size].get<size_t>();
     auto number_of_incoming_edges = config[IndexParams::incoming_edge_size].get<size_t>();
@@ -65,6 +63,14 @@ IndexNGTONNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     graphOptimizer.set(number_of_outgoing_edges, number_of_incoming_edges, 1000, 20);
 
     graphOptimizer.execute(*index_);
+}
+
+void
+IndexNGTONNG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->memSize();
 }
 
 }  // namespace knowhere

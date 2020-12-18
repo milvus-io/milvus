@@ -47,7 +47,6 @@ CacheMgr<ItemObj>::GetItem(const std::string& key) {
         LOG_SERVER_ERROR_ << "Cache doesn't exist";
         return nullptr;
     }
-    // server::Metrics::GetInstance().CacheAccessTotalIncrement();
     return cache_->get(key);
 }
 
@@ -59,7 +58,6 @@ CacheMgr<ItemObj>::InsertItem(const std::string& key, const ItemObj& data) {
         return;
     }
     cache_->insert(key, data);
-    // server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
 template <typename ItemObj>
@@ -70,7 +68,6 @@ CacheMgr<ItemObj>::EraseItem(const std::string& key) {
         return;
     }
     cache_->erase(key);
-    // server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
 template <typename ItemObj>

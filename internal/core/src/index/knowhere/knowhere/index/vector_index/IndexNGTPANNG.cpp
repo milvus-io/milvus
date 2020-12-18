@@ -27,16 +27,14 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     prop.dimension = dim;
 
     auto edge_size = config[IndexParams::edge_size].get<int64_t>();
-    prop.edgeSizeLimitForCreation = edge_size;
+    prop.edgeSizeForCreation = edge_size;
 
     MetricType metric_type = config[Metric::TYPE];
 
     if (metric_type == Metric::L2) {
         prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeL2;
-    } else if (metric_type == Metric::HAMMING) {
-        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeHamming;
-    } else if (metric_type == Metric::JACCARD) {
-        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeJaccard;
+    } else if (metric_type == Metric::IP) {
+        prop.distanceType = NGT::Index::Property::DistanceType::DistanceTypeIP;
     } else {
         KNOWHERE_THROW_MSG("Metric type not supported: " + metric_type);
     }
@@ -48,6 +46,8 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto selectively_pruned_edge_size = config[IndexParams::selectively_pruned_edge_size].get<int64_t>();
 
     if (!forcedly_pruned_edge_size && !selectively_pruned_edge_size) {
+        KNOWHERE_THROW_MSG(
+            "a lack of parameters forcedly_pruned_edge_size and selectively_pruned_edge_size 4 index NGTPANNG");
         return;
     }
 
@@ -56,11 +56,23 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("Selectively pruned edge size should less than remaining edge size");
     }
 
+    //    std::map<size_t, size_t> stats;
+    //    size_t max_len = 0;
+
     // prune
     auto& graph = dynamic_cast<NGT::GraphIndex&>(index_->getIndex());
     for (size_t id = 1; id < graph.repository.size(); id++) {
         try {
             NGT::GraphNode& node = *graph.getNode(id);
+            //            auto sz = node.size();
+            //            if (max_len < sz)
+            //                max_len = sz;
+            //            auto fd = stats.find(sz);
+            //            if (fd != stats.end()) {
+            //                fd->second ++;
+            //            } else {
+            //                stats[sz] = 1;
+            //            }
             if (node.size() >= forcedly_pruned_edge_size) {
                 node.resize(forcedly_pruned_edge_size);
             }
@@ -73,7 +85,7 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
                             if (t1 >= selectively_pruned_edge_size) {
                                 break;
                             }
-                            if (rank == t1) {
+                            if (rank == t1) {  // can't reach here
                                 continue;
                             }
                             NGT::GraphNode& node2 = *graph.getNode(node[t1].id);
@@ -101,6 +113,25 @@ IndexNGTPANNG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
             continue;
         }
     }
+    /*
+    std::vector<size_t> cnt(max_len, 0);
+    for (auto &pr : stats) {
+        cnt[pr.first] = pr.second;
+    }
+    for (auto i = 0; i < cnt.size(); ++ i) {
+        if (cnt[i]) {
+            std::cout << "len = " << i << ", cnt = " << cnt[i] << std::endl;
+        }
+    }
+    */
+}
+
+void
+IndexNGTPANNG::UpdateIndexSize() {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    index_size_ = index_->memSize();
 }
 
 }  // namespace knowhere

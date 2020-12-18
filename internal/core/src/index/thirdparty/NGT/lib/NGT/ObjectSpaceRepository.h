@@ -73,6 +73,27 @@ namespace NGT {
 #endif
     };
 
+    class ComparatorIP : public Comparator {
+     public:
+#ifdef NGT_SHARED_MEMORY_ALLOCATOR
+        ComparatorIP(size_t d, SharedMemoryAllocator &a) : Comparator(d, a) {}
+	double operator()(Object &objecta, Object &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
+	}
+	double operator()(Object &objecta, PersistentObject &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb.at(0, allocator), dimension);
+	}
+	double operator()(PersistentObject &objecta, PersistentObject &objectb) {
+	  return PrimitiveComparator::compareIP((OBJECT_TYPE*)&objecta.at(0, allocator), (OBJECT_TYPE*)&objectb.at(0, allocator), dimension);
+	}
+#else
+        ComparatorIP(size_t d) : Comparator(d) {}
+        double operator()(Object &objecta, Object &objectb) {
+                return PrimitiveComparator::compareInnerProduct((OBJECT_TYPE*)&objecta[0], (OBJECT_TYPE*)&objectb[0], dimension);
+            }
+#endif
+    };
+
     class ComparatorHammingDistance : public Comparator {
       public:
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
@@ -281,6 +302,8 @@ namespace NGT {
       objecta.copy(objectb, getByteSizeOfObject());
     }
 
+    DistanceType getDistanceType() { return distanceType; }
+
     void setDistanceType(DistanceType t) {
       if (comparator != 0) {
 	delete comparator;
@@ -326,6 +349,9 @@ namespace NGT {
       case DistanceTypeL2:
 	comparator = new ObjectSpaceRepository::ComparatorL2(ObjectSpace::getPaddedDimension());
 	break;
+	case DistanceTypeIP:
+	    comparator = new ObjectSpaceRepository::ComparatorIP(ObjectSpace::getPaddedDimension());
+	break;
       case DistanceTypeHamming:
 	comparator = new ObjectSpaceRepository::ComparatorHammingDistance(ObjectSpace::getPaddedDimension());
 	break;
@@ -352,7 +378,9 @@ namespace NGT {
 	break;
 #endif
       default:
-	std::cerr << "Distance type is not specified" << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("Distance type is not specified");
+//	std::cerr << "Distance type is not specified" << std::endl;
 	assert(distanceType != DistanceTypeNone);
 	abort();
       }
@@ -587,7 +615,9 @@ namespace NGT {
     } else if (t == typeid(uint32_t)) {
       NGT::Serializer::writeAsText(os, (uint32_t*)ref, dimension); 
     } else {
-      std::cerr << "ObjectT::serializeAsText: not supported data type. [" << t.name() << "]" << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("ObjectT::serializeAsText: not supported data type. [" + std::to_string(t.name()) + "]");
+//      std::cerr << "ObjectT::serializeAsText: not supported data type. [" << t.name() << "]" << std::endl;
       assert(0);
     }
   }
@@ -610,7 +640,9 @@ namespace NGT {
     } else if (t == typeid(uint32_t)) {
       NGT::Serializer::readAsText(is, (uint32_t*)ref, dimension); 
     } else {
-      std::cerr << "Object::deserializeAsText: not supported data type. [" << t.name() << "]" << std::endl;
+          if (NGT_LOG_DEBUG_)
+              (*NGT_LOG_DEBUG_)("Object::deserializeAsText: not supported data type. [" + std::to_string(t.name()) + "]");
+//      std::cerr << "Object::deserializeAsText: not supported data type. [" << t.name() << "]" << std::endl;
       assert(0);
     }
   }

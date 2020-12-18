@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "defines.h"
 #include <iostream>
 #include <cstring>
 #include <stdint.h>
@@ -53,7 +54,9 @@ class HashBasedBooleanSet{
     _mask = _tableSize - 1;
     const uint32_t checkValue = _hash1(tableSize);
     if(checkValue != 0){
-      std::cerr << "[WARN] table size is not 2^N :  " <<  tableSize << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("[WARN] table size is not 2^N :  " +  std::to_string(tableSize));
+//      std::cerr << "[WARN] table size is not 2^N :  " <<  tableSize << std::endl;
     }
     
     _table = new uint32_t[tableSize];

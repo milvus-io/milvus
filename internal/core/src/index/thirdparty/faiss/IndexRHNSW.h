@@ -72,6 +72,7 @@ struct IndexRHNSW : Index {
 
     // the link strcuture
     RHNSW hnsw;
+    mutable RHNSWStatistics stats;
 
     // the sequential storage
     bool own_fields;
@@ -92,7 +93,7 @@ struct IndexRHNSW : Index {
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels,
-                 ConcurrentBitsetPtr bitset = nullptr) const override;
+                 const BitsetView& bitset = nullptr) const override;
 
     void reconstruct(idx_t key, float* recons) const override;
 
@@ -101,6 +102,12 @@ struct IndexRHNSW : Index {
     size_t cal_size();
 
     void init_hnsw();
+
+    void update_stats(idx_t n, std::vector<RHNSWStatInfo> &ret);
+
+    void get_sorted_access_counts(std::vector<size_t> &ret, size_t &tot);
+    void clear_stats();
+    void set_target_level(const int tl);
 };
 
 
@@ -144,7 +151,7 @@ struct IndexRHNSW2Level : IndexRHNSW {
     /// entry point for search
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels,
-                 ConcurrentBitsetPtr bitset = nullptr) const override;
+                 const BitsetView& bitset = nullptr) const override;
     size_t cal_size();
 };
 

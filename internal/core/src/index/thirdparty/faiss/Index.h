@@ -12,6 +12,7 @@
 
 #include <faiss/MetricType.h>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/utils/BitsetView.h>
 #include <cstdio>
 #include <typeinfo>
 #include <string>
@@ -128,7 +129,7 @@ struct Index {
      */
     virtual void search (idx_t n, const float *x, idx_t k,
                          float *distances, idx_t *labels,
-                         ConcurrentBitsetPtr bitset = nullptr) const = 0;
+                         const BitsetView& bitset = nullptr) const = 0;
 
 #if 0
     /** query n raw vectors from the index by ids.
@@ -140,7 +141,7 @@ struct Index {
      * @param x           output raw vectors, size n * d
      * @param bitset      flags to check the validity of vectors
      */
-    virtual void get_vector_by_id (idx_t n, const idx_t *xid, float *x, ConcurrentBitsetPtr bitset = nullptr);
+    virtual void get_vector_by_id (idx_t n, const idx_t *xid, float *x, const BitsetView& bitset = nullptr);
 
     /** query n vectors of dimension d to the index by ids.
      *
@@ -153,7 +154,7 @@ struct Index {
      * @param bitset      flags to check the validity of vectors
      */
      virtual void search_by_id (idx_t n, const idx_t *xid, idx_t k, float *distances, idx_t *labels,
-                                ConcurrentBitsetPtr bitset = nullptr);
+                                const BitsetView& bitset = nullptr);
 #endif
 
     /** query n vectors of dimension d to the index.
@@ -168,7 +169,7 @@ struct Index {
      */
     virtual void range_search (idx_t n, const float *x, float radius,
                                RangeSearchResult *result,
-                               ConcurrentBitsetPtr bitset = nullptr) const;
+                               const BitsetView& bitset = nullptr) const;
 
     /** return the indexes of the k vectors closest to the query x.
      *

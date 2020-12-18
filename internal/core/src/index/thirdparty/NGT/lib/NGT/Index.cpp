@@ -266,7 +266,9 @@ void NGT::Index::loadRawDataAndCreateIndex(NGT::Index * index_, const float * ro
     timer.start();
     index_->createIndex(threadSize);
     timer.stop();
-    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Index creation time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+//    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
 }
 
 void 
@@ -280,17 +282,23 @@ NGT::Index::loadAndCreateIndex(Index &index, const string &database, const strin
     return;
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Data loading time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
   if (index.getObjectRepositorySize() == 0) {
     NGTThrowException("Index::create: Data file is empty.");
   }
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(index.getObjectRepositorySize() - 1));
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Index creation time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
 }
 
 // For milvus
@@ -307,13 +315,21 @@ void NGT::Index::append(NGT::Index * index_, const float * data, size_t dataSize
         NGTThrowException("Index::append: No data.");
     }
     timer.stop();
-    cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-    cerr << "# of objects=" << index_->getObjectRepositorySize() - 1 << endl;
+//    cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//    cerr << "# of objects=" << index_->getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_) {
+        (*NGT_LOG_DEBUG_)(
+            "Data loading time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0)
+            + " (msec)");
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(index_->getObjectRepositorySize() - 1));
+    }
     timer.reset();
     timer.start();
     index_->createIndex(threadSize);
     timer.stop();
-    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//    cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Index creation time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
     return;
 }
 
@@ -326,14 +342,20 @@ NGT::Index::append(const string &database, const string &dataFile, size_t thread
     index.append(dataFile, dataSize);
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+  if (NGT_LOG_DEBUG_) {
+      (*NGT_LOG_DEBUG_)("Data loading time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+      (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(index.getObjectRepositorySize() - 1));
+  }
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Index creation time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
   return;
 }
 
@@ -348,14 +370,20 @@ NGT::Index::append(const string &database, const float *data, size_t dataSize, s
     NGTThrowException("Index::append: No data.");
   }
   timer.stop();
-  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data loading time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_) {
+        (*NGT_LOG_DEBUG_)("Data loading time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(index.getObjectRepositorySize() - 1));
+    }
   timer.reset();
   timer.start();
   index.createIndex(threadSize);
   timer.stop();
   index.saveIndex(database);
-  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "Index creation time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Index creation time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
   return;
 }
 
@@ -368,13 +396,19 @@ NGT::Index::remove(const string &database, vector<ObjectID> &objects, bool force
     try {
       index.remove(*i, force);
     } catch (Exception &err) {
-      cerr << "Warning: Cannot remove the node. ID=" << *i << " : " << err.what() << endl;
+//      cerr << "Warning: Cannot remove the node. ID=" << *i << " : " << err.what() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Warning: Cannot remove the node. ID=" + std::to_string(*i) + " : " + err.what());
       continue;
     }
   }
   timer.stop();
-  cerr << "Data removing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data removing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << index.getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_) {
+        (*NGT_LOG_DEBUG_)("Data removing time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(index.getObjectRepositorySize() - 1));
+    }
   index.saveIndex(database);
   return;
 }
@@ -411,8 +445,12 @@ NGT::Index::importIndex(const string &database, const string &file) {
   }
   idx->importIndex(file);
   timer.stop();
-  cerr << "Data importing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << idx->getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data importing time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << idx->getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_) {
+        (*NGT_LOG_DEBUG_)("Data importing time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(idx->getObjectRepositorySize() - 1));
+    }
   idx->saveIndex(database);
   delete idx;
 }
@@ -424,8 +462,12 @@ NGT::Index::exportIndex(const string &database, const string &file) {
   timer.start();
   idx.exportIndex(file);
   timer.stop();
-  cerr << "Data exporting time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
-  cerr << "# of objects=" << idx.getObjectRepositorySize() - 1 << endl;
+//  cerr << "Data exporting time=" << timer.time << " (sec) " << timer.time * 1000.0 << " (msec)" << endl;
+//  cerr << "# of objects=" << idx.getObjectRepositorySize() - 1 << endl;
+    if (NGT_LOG_DEBUG_) {
+        (*NGT_LOG_DEBUG_)("Data exporting time=" + std::to_string(timer.time) + " (sec) " + std::to_string(timer.time * 1000.0) + " (msec)");
+        (*NGT_LOG_DEBUG_)("# of objects=" + std::to_string(idx.getObjectRepositorySize() - 1));
+    }
 }
 
 std::vector<float>
@@ -535,7 +577,9 @@ CreateIndexThread::run() {
     } catch(NGT::ThreadTerminationException &err) {
       break;
     } catch(NGT::Exception &err) {
-      cerr << "CreateIndex::search:Error! popFront " << err.what() << endl;
+//      cerr << "CreateIndex::search:Error! popFront " << err.what() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("CreateIndex::search:Error! popFront " + std::string(err.what()));
       break;
     }
     ObjectDistances *rs = new ObjectDistances;
@@ -547,7 +591,9 @@ CreateIndexThread::run() {
 	graphIndex.searchForNNGInsertion(obj, *rs);
       }
     } catch(NGT::Exception &err) {
-      cerr << "CreateIndex::search:Fatal error! ID=" << job.id << " " << err.what() << endl;
+//      cerr << "CreateIndex::search:Fatal error! ID=" << job.id << " " << err.what() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("CreateIndex::search:Fatal error! ID=" + std::to_string(job.id) + " " + err.what());
       abort();
     } 
     job.results = rs;
@@ -684,7 +730,9 @@ GraphAndTreeIndex::createTreeIndex()
   ObjectRepository &fr = GraphIndex::objectSpace->getRepository();
   for (size_t id = 0; id < fr.size(); id++){
     if (id % 100000 == 0) {
-      cerr << " Processed id=" << id << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)(" Processed id=" + std::to_string(id));
+//      cerr << " Processed id=" << id << endl;
     }
     if (fr.isEmpty(id)) {
       continue;
@@ -698,8 +746,12 @@ GraphAndTreeIndex::createTreeIndex()
     try {
       DVPTree::insert(tiobj);
     } catch (Exception &err) {
-      cerr << "GraphAndTreeIndex::createTreeIndex: Warning. ID=" << id << ":";
-      cerr << err.what() << " continue.." << endl;
+//      cerr << "GraphAndTreeIndex::createTreeIndex: Warning. ID=" << id << ":";
+//      cerr << err.what() << " continue.." << endl;
+        if (NGT_LOG_DEBUG_) {
+            (*NGT_LOG_DEBUG_)("GraphAndTreeIndex::createTreeIndex: Warning. ID=" + std::to_string(id) + ":");
+            (*NGT_LOG_DEBUG_)(std::string(err.what()) + " continue..");
+        }
     }
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
     GraphIndex::objectSpace->deleteObject(f);
@@ -840,10 +892,16 @@ insertMultipleSearchResults(GraphIndex &neighborhoodGraph,
     }
     if (static_cast<int>(gr.id) > neighborhoodGraph.NeighborhoodGraph::property.edgeSizeForCreation &&
 	static_cast<int>(gr.results->size()) < neighborhoodGraph.NeighborhoodGraph::property.edgeSizeForCreation) {
-      cerr << "createIndex: Warning. The specified number of edges could not be acquired, because the pruned parameter [-S] might be set." << endl;
-      cerr << "  The node id=" << gr.id << endl;
-      cerr << "  The number of edges for the node=" << gr.results->size() << endl;
-      cerr << "  The pruned parameter (edgeSizeForSearch [-S])=" << neighborhoodGraph.NeighborhoodGraph::property.edgeSizeForSearch << endl;
+//      cerr << "createIndex: Warning. The specified number of edges could not be acquired, because the pruned parameter [-S] might be set." << endl;
+//      cerr << "  The node id=" << gr.id << endl;
+//      cerr << "  The number of edges for the node=" << gr.results->size() << endl;
+//      cerr << "  The pruned parameter (edgeSizeForSearch [-S])=" << neighborhoodGraph.NeighborhoodGraph::property.edgeSizeForSearch << endl;
+      if (NGT_LOG_DEBUG_) {
+          (*NGT_LOG_DEBUG_)("createIndex: Warning. The specified number of edges could not be acquired, because the pruned parameter [-S] might be set.");
+          (*NGT_LOG_DEBUG_)("  The node id=" + std::to_string(gr.id));
+          (*NGT_LOG_DEBUG_)("  The number of edges for the node=" + std::to_string(gr.results->size()));
+          (*NGT_LOG_DEBUG_)("  The pruned parameter (edgeSizeForSearch [-S])=" + std::to_string(neighborhoodGraph.NeighborhoodGraph::property.edgeSizeForSearch));
+      }
     }
     neighborhoodGraph.insertNode(gr.id, *gr.results);
   }
@@ -886,7 +944,9 @@ GraphIndex::createIndex(size_t threadPoolSize, size_t sizeOfRepository)
 	// wait for the completion of the search
 	threads.waitForFinish();
 	if (output.size() != cnt) {
-	  cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+//	  cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong.");
 	  cnt = output.size();
 	}
 	// insertion
@@ -903,7 +963,9 @@ GraphIndex::createIndex(size_t threadPoolSize, size_t sizeOfRepository)
 	count += cnt;
 	if (timerCount <= count) {
 	  timer.stop();
-	  cerr << "Processed " << timerCount << " time= " << timer << endl;
+//	  cerr << "Processed " << timerCount << " time= " << timer << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Processed " + std::to_string(timerCount )+ " time= " + std::to_string(timer.time));
 	  timerCount += timerInterval;
 	  timer.start();
 	}
@@ -956,13 +1018,17 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
     try {
       node = outGraph.getNode(id);
     } catch(NGT::Exception &err) {
-      std::cerr << "ngt info: Error. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+//      std::cerr << "ngt info: Error. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("ngt info: Error. Cannot get the node. ID=" + std::to_string(id) + ":" + err.what());
       valid = false;
       continue;
     }
     numberOfNodes++;
     if (numberOfNodes % 1000000 == 0) {
-      std::cerr << "Processed " << numberOfNodes << std::endl;
+//      std::cerr << "Processed " << numberOfNodes << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Processed " + std::to_string(numberOfNodes));
     }
     size_t esize = node->size() > edgeSize ? edgeSize : node->size();
     if (esize == 0) {
@@ -988,7 +1054,9 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
       NGT::ObjectDistance &n = (*node)[i];
 #endif
       if (n.id == 0) {
-	std::cerr << "ngt info: Warning. id is zero." << std::endl;
+//	std::cerr << "ngt info: Warning. id is zero." << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("ngt info: Warning. id is zero.");
 	valid = false;
       }
       indegreeCount[n.id]++;
@@ -1029,10 +1097,15 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
 	} catch(NGT::Exception &err) {
 	  count++;
 #if defined(NGT_SHARED_MEMORY_ALLOCATOR)
-	  std::cerr << "Directed edge! " << id << "->" << node.at(i, graph.allocator).id << " no object. " 
-		    << node.at(i, graph.allocator).id << std::endl; 
+//	  std::cerr << "Directed edge! " << id << "->" << node.at(i, graph.allocator).id << " no object. "
+//		    << node.at(i, graph.allocator).id << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Directed edge! " + std::to_string(id) + "->" + std::to_string(node.at(i, graph.allocator).id) + " no object. "
+		    + std::to_string(node.at(i, graph.allocator).id));
 #else
-	  std::cerr << "Directed edge! " << id << "->" << node[i].id << " no object. " << node[i].id << std::endl; 
+//	  std::cerr << "Directed edge! " << id << "->" << node[i].id << " no object. " << node[i].id << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Directed edge! " + std::to_string(id) + "->" + std::to_string(node[i].id) + " no object. " + std::to_string(node[i].id));
 #endif
 	  continue;
 	}
@@ -1050,16 +1123,23 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
 	}
 	if (!found) {
 #if defined(NGT_SHARED_MEMORY_ALLOCATOR)
-	    std::cerr << "Directed edge! " << id << "->" << node.at(i, graph.allocator).id << " no edge. " 
-		      << node.at(i, graph.allocator).id << "->" << id << std::endl; 
+//	    std::cerr << "Directed edge! " << id << "->" << node.at(i, graph.allocator).id << " no edge. "
+//		      << node.at(i, graph.allocator).id << "->" << id << std::endl;
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Directed edge! " + std::to_string(id) + "->" + std::to_string(node.at(i, graph.allocator).id) + " no edge. "
+		      + std::to_string(node.at(i, graph.allocator).id) + "->" + std::to_string(id));
 #else
-	    std::cerr << "Directed edge! " << id << "->" << node[i].id << " no edge. " << node[i].id << "->" << id << std::endl; 
+	    if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Directed edge! " + std::to_string(id) + "->" + std::to_string(node[i].id) + " no edge. " + std::to_string(node[i].id) + "->" + std::to_string(id));
+//	    std::cerr << "Directed edge! " << id << "->" << node[i].id << " no edge. " << node[i].id << "->" << id << std::endl;
 #endif
 	    count++;
 	}
       }
     }
-    std::cerr << "The number of directed edges=" << count << std::endl;
+//    std::cerr << "The number of directed edges=" << count << std::endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("The number of directed edges=" + std::to_string(count));
   }
 
   // calculate outdegree distance 10
@@ -1075,7 +1155,9 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
     try {
       n = outGraph.getNode(id);
     } catch(NGT::Exception &err) {
-      std::cerr << "ngt info: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+//      std::cerr << "ngt info: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("ngt info: Warning. Cannot get the node. ID=" + std::to_string(id) + ":" + err.what());
       continue;
     }
     NGT::GraphNode &node = *n;
@@ -1131,7 +1213,9 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
     try {
       node = outGraph.getNode(id);
     } catch(NGT::Exception &err) {
-      std::cerr << "ngt info: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+//      std::cerr << "ngt info: Warning. Cannot get the node. ID=" << id << ":" << err.what() << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("ngt info: Warning. Cannot get the node. ID=" + std::to_string(id) + ":" + err.what());
       continue;
     }
     size_t esize = node->size();
@@ -1148,7 +1232,9 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
     }
     if (indegreeCount[id] == 0) {
       numberOfNodesWithoutIndegree++;
-      std::cerr << "Error! The node without incoming edges. " << id << std::endl;
+//      std::cerr << "Error! The node without incoming edges. " << id << std::endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Error! The node without incoming edges. " + std::to_string(id));
       valid = false;
     }
     if (indegreeCount[id] > static_cast<int>(maxNumberOfIndegree)) {
@@ -1229,6 +1315,47 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
   c5 /= (double)numberOfNodes * 0.05;
   c1 /= (double)numberOfNodes * 0.01;
 
+  if (NGT_LOG_DEBUG_) {
+      (*NGT_LOG_DEBUG_)("The size of the object repository (not the number of the objects):\t" + std::to_string(repo.size() - 1));
+      (*NGT_LOG_DEBUG_)("The number of the removed objects:\t" + std::to_string(removedObjectCount) + "/" + std::to_string(repo.size() - 1));
+      (*NGT_LOG_DEBUG_)("The number of the nodes:\t" + std::to_string(numberOfNodes));
+      (*NGT_LOG_DEBUG_)("The number of the edges:\t" + std::to_string(numberOfOutdegree));
+      (*NGT_LOG_DEBUG_)("The mean of the edge lengths:\t" + std::to_string(distance / (double)numberOfOutdegree));
+      (*NGT_LOG_DEBUG_)("The mean of the number of the edges per node:\t" + std::to_string((double)numberOfOutdegree / (double)numberOfNodes));
+      (*NGT_LOG_DEBUG_)("The number of the nodes without edges:\t" + std::to_string(numberOfNodesWithoutEdges));
+      (*NGT_LOG_DEBUG_)("The maximum of the outdegrees:\t" + std::to_string(maxNumberOfOutdegree));
+      if (minNumberOfOutdegree == SIZE_MAX) {
+          (*NGT_LOG_DEBUG_)("The minimum of the outdegrees:\t-NA-");
+      } else {
+          (*NGT_LOG_DEBUG_)("The minimum of the outdegrees:\t" + std::to_string(minNumberOfOutdegree));
+      }
+      (*NGT_LOG_DEBUG_)("The number of the nodes where indegree is 0:\t" + std::to_string(numberOfNodesWithoutIndegree));
+      (*NGT_LOG_DEBUG_)("The maximum of the indegrees:\t" + std::to_string(maxNumberOfIndegree));
+      if (minNumberOfIndegree == INT64_MAX) {
+          (*NGT_LOG_DEBUG_)("The minimum of the indegrees:\t-NA-");
+      } else {
+          (*NGT_LOG_DEBUG_)("The minimum of the indegrees:\t" + std::to_string(minNumberOfIndegree));
+      }
+      (*NGT_LOG_DEBUG_)("#-nodes,#-edges,#-no-indegree,avg-edges,avg-dist,max-out,min-out,v-out,max-in,min-in,v-in,med-out,"
+                   "med-in,mode-out,mode-in,c95,c5,o-distance(10),o-skip,i-distance(10),i-skip:"
+                + std::to_string(numberOfNodes) + ":" + std::to_string(numberOfOutdegree) + ":" + std::to_string(numberOfNodesWithoutIndegree) + ":"
+                + std::to_string((double)numberOfOutdegree / (double)numberOfNodes) + ":"
+                + std::to_string(distance / (double)numberOfOutdegree) + ":"
+                + std::to_string(maxNumberOfOutdegree) + ":" + std::to_string(minNumberOfOutdegree) + ":" + std::to_string(sumOfSquareOfOutdegree / (double)numberOfOutdegree) + ":"
+                + std::to_string(maxNumberOfIndegree) + ":" + std::to_string(minNumberOfIndegree) + ":" + std::to_string(sumOfSquareOfIndegree / (double)numberOfOutdegree) + ":"
+                + std::to_string(medianOutdegree) + ":" + std::to_string(medianIndegree) + ":" + std::to_string(modeOutdegree) + ":" + std::to_string(modeIndegree)
+                + ":" + std::to_string(c95) + ":" + std::to_string(c5) + ":" + std::to_string(c99) + ":" + std::to_string(c1) + ":" + std::to_string(distance10) + ":" + std::to_string(d10SkipCount) + ":"
+                + std::to_string(indegreeDistance10) + ":" + std::to_string(ind10SkipCount));
+      if (mode == 'h') {
+          (*NGT_LOG_DEBUG_)("#\tout\tin");
+          for (size_t i = 0; i < outdegreeHistogram.size() || i < indegreeHistogram.size(); i++) {
+              size_t out = outdegreeHistogram.size() <= i ? 0 : outdegreeHistogram[i];
+              size_t in = indegreeHistogram.size() <= i ? 0 : indegreeHistogram[i];
+              (*NGT_LOG_DEBUG_)(std::to_string(i) + "\t" + std::to_string(out) + "\t" + std::to_string(in));
+          }
+      }
+  }
+  /*
   std::cerr << "The size of the object repository (not the number of the objects):\t" << repo.size() - 1 << std::endl;
   std::cerr << "The number of the removed objects:\t" << removedObjectCount << "/" << repo.size() - 1 << std::endl;
   std::cerr << "The number of the nodes:\t" << numberOfNodes << std::endl;
@@ -1250,13 +1377,13 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
     std::cerr << "The minimum of the indegrees:\t" << minNumberOfIndegree << std::endl;
   }
   std::cerr << "#-nodes,#-edges,#-no-indegree,avg-edges,avg-dist,max-out,min-out,v-out,max-in,min-in,v-in,med-out,"
-    "med-in,mode-out,mode-in,c95,c5,o-distance(10),o-skip,i-distance(10),i-skip:" 
-	    << numberOfNodes << ":" << numberOfOutdegree << ":" << numberOfNodesWithoutIndegree << ":" 
+    "med-in,mode-out,mode-in,c95,c5,o-distance(10),o-skip,i-distance(10),i-skip:"
+	    << numberOfNodes << ":" << numberOfOutdegree << ":" << numberOfNodesWithoutIndegree << ":"
 	    << std::setprecision(10) << (double)numberOfOutdegree / (double)numberOfNodes << ":"
 	    << distance / (double)numberOfOutdegree << ":"
 	    << maxNumberOfOutdegree << ":" << minNumberOfOutdegree << ":" << sumOfSquareOfOutdegree / (double)numberOfOutdegree<< ":"
 	    << maxNumberOfIndegree << ":" << minNumberOfIndegree << ":" << sumOfSquareOfIndegree / (double)numberOfOutdegree << ":"
-	    << medianOutdegree << ":" << medianIndegree << ":" << modeOutdegree << ":" << modeIndegree 
+	    << medianOutdegree << ":" << medianIndegree << ":" << modeOutdegree << ":" << modeIndegree
 	    << ":" << c95 << ":" << c5 << ":" << c99 << ":" << c1 << ":" << distance10 << ":" << d10SkipCount << ":"
 	    << indegreeDistance10 << ":" << ind10SkipCount << std::endl;
   if (mode == 'h') {
@@ -1267,6 +1394,7 @@ NGT::GraphIndex::showStatisticsOfGraph(NGT::GraphIndex &outGraph, char mode, siz
       std::cerr << i << "\t" << out << "\t" << in << std::endl;
     }
   }
+  */
   return valid;
 }
 
@@ -1309,7 +1437,9 @@ GraphAndTreeIndex::createIndex(size_t threadPoolSize, size_t sizeOfRepository)
       threads.waitForFinish();
 
       if (output.size() != cnt) {
-	cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+//	cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong.");
 	cnt = output.size();
       }
 
@@ -1331,12 +1461,16 @@ GraphAndTreeIndex::createIndex(size_t threadPoolSize, size_t sizeOfRepository)
 	    GraphIndex::objectSpace->deleteObject(f);
 #endif
 	  } catch (Exception &err) {
-	    cerr << "NGT::createIndex: Fatal error. ID=" << job.id << ":";
+//	    cerr << "NGT::createIndex: Fatal error. ID=" << job.id << ":";
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("NGT::createIndex: Fatal error. ID=" + std::to_string(job.id) + ":");
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
 	    GraphIndex::objectSpace->deleteObject(f);
 #endif
 	    if (NeighborhoodGraph::property.graphType == NeighborhoodGraph::GraphTypeKNNG) {
-	      cerr << err.what() << " continue.." << endl;
+//	      cerr << err.what() << " continue.." << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)(std::string(err.what()) + " continue..");
 	    } else {
 	      throw err;
 	    }
@@ -1354,10 +1488,14 @@ GraphAndTreeIndex::createIndex(size_t threadPoolSize, size_t sizeOfRepository)
 
       count += cnt;
       if (timerCount <= count) {
-	timer.stop();
-	cerr << "Processed " << timerCount << " objects. time= " << timer << endl;
-	timerCount += timerInterval;
-	timer.start();
+	    timer.stop();
+//	cerr << "Processed " << timerCount << " objects. time= " << timer << endl;
+        if (NGT_LOG_DEBUG_) {
+            (*NGT_LOG_DEBUG_)(
+                "Processed " + std::to_string(timerCount) + " objects. time= " + std::to_string(timer.time));
+        }
+	    timerCount += timerInterval;
+	    timer.start();
       }
       buildTimeController.adjustEdgeSize(count);
       if (pathAdjustCount > 0 && pathAdjustCount <= count) {
@@ -1384,7 +1522,9 @@ GraphAndTreeIndex::createIndex(const vector<pair<NGT::Object*, size_t> > &object
   size_t	count = 0;
   timer.start();
   if (threadPoolSize <= 0) {
-    cerr << "Not implemented!!" << endl;
+//    cerr << "Not implemented!!" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Not implemented!!");
     abort();
   } else {
     CreateIndexThreadPool threads(threadPoolSize);
@@ -1422,7 +1562,9 @@ GraphAndTreeIndex::createIndex(const vector<pair<NGT::Object*, size_t> > &object
 	}
 	threads.waitForFinish();
 	if (output.size() != cnt) {
-	  cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+//	  cerr << "NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong." << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("NNTGIndex::insertGraphIndexByThread: Warning!! Thread response size is wrong.");
 	  cnt = output.size();
 	}
 	{
@@ -1488,19 +1630,25 @@ GraphAndTreeIndex::createIndex(const vector<pair<NGT::Object*, size_t> > &object
 		GraphIndex::objectSpace->deleteObject(f);
 #endif
 	      } catch (Exception &err) {
-		cerr << "NGT::createIndex: Fatal error. ID=" << job.id << ":" << err.what();
+//		cerr << "NGT::createIndex: Fatal error. ID=" << job.id << ":" << err.what();
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("NGT::createIndex: Fatal error. ID=" + std::to_string(job.id) + ":" + err.what());
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
 		GraphIndex::objectSpace->deleteObject(f);
 #endif
 		if (NeighborhoodGraph::property.graphType == NeighborhoodGraph::GraphTypeKNNG) {
-		  cerr << err.what() << " continue.." << endl;
+//		  cerr << err.what() << " continue.." << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)(std::string(err.what()) + " continue..");
 		} else {
 		  throw err;
 		}
 	      }
 	    }
 	    if (((*job.results).size() == 0) && (job.id != 1)) {
-	      cerr  << "insert warning!! No searched nodes!. If the first time, no problem. " << job.id << endl;
+//	      cerr  << "insert warning!! No searched nodes!. If the first time, no problem. " << job.id << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("insert warning!! No searched nodes!. If the first time, no problem. " + std::to_string(job.id));
 	    }
 	    GraphIndex::insertNode(job.id, *job.results);
 	  } 
@@ -1513,13 +1661,17 @@ GraphAndTreeIndex::createIndex(const vector<pair<NGT::Object*, size_t> > &object
 	count += cnt;
 	if (timerCount <= count) {
 	  timer.stop();
-	  cerr << "Processed " << timerCount << " time= " << timer << endl;
+//	  cerr << "Processed " << timerCount << " time= " << timer << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Processed " + std::to_string(timerCount) + " time= " + std::to_string(timer.time));
 	  timerCount += timerInterval;
 	  timer.start();
 	}
       }
     } catch(Exception &err) {
-      cerr << "thread terminate!" << endl;
+//      cerr << "thread terminate!" << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("thread terminate!");
       threads.terminate();
       throw err;
     }
@@ -1560,18 +1712,26 @@ bool
 GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
   bool valid = GraphIndex::verify(status, info);
   if (!valid) {
-    cerr << "The graph or object is invalid!" << endl;
+//    cerr << "The graph or object is invalid!" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("The graph or object is invalid!");
   }
   bool treeValid = DVPTree::verify(GraphIndex::objectSpace->getRepository().size(), status);
   if (!treeValid) {
-    cerr << "The tree is invalid" << endl;
+//    cerr << "The tree is invalid" << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("The tree is invalid");
   }
   valid = valid && treeValid;
   // status: tree|graph|object
-  cerr << "Started checking consistency..." << endl;
+//  cerr << "Started checking consistency..." << endl;
+    if (NGT_LOG_DEBUG_)
+        (*NGT_LOG_DEBUG_)("Started checking consistency...");
   for (size_t id = 1; id < status.size(); id++) {
     if (id % 100000 == 0) {
-      cerr << "The number of processed objects=" << id << endl;
+//      cerr << "The number of processed objects=" << id << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("The number of processed objects=" + std::to_string(id));
     }
     if (status[id] != 0x00 && status[id] != 0x07) {
       if (status[id] == 0x03) {
@@ -1596,7 +1756,9 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 #ifdef NGT_SHARED_MEMORY_ALLOCATOR
 	  GraphIndex::objectSpace->deleteObject(po);
 #endif
-	  cerr << "Fatal Error!: Cannot search! " << err.what() << endl;
+//	  cerr << "Fatal Error!: Cannot search! " << err.what() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Fatal Error!: Cannot search! " + std::string(err.what()));
 	  objects.clear();
 	}
 	size_t n = 0;
@@ -1609,7 +1771,9 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	}
 	if (!registeredIdenticalObject) {
 	  if (info) {
-	    cerr << "info: not found the registered same objects. id=" << id << " size=" << objects.size() << endl;
+//	    cerr << "info: not found the registered same objects. id=" << id << " size=" << objects.size() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("info: not found the registered same objects. id=" + std::to_string(id) + " size=" + std::to_string(objects.size()));
 	  }
 	  sc.id = 0;
 	  sc.radius = FLT_MAX;
@@ -1622,7 +1786,10 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	  try {
 	    GraphIndex::search(sc, seeds);
 	  } catch(Exception &err) {
-	    cerr << "Fatal Error!: Cannot search! " << err.what() << endl;
+//	    cerr << "Fatal Error!: Cannot search! " << err.what() << endl;
+        if (NGT_LOG_DEBUG_) {
+            (*NGT_LOG_DEBUG_)("Fatal Error!: Cannot search! " + std::string(err.what()));
+        }
 	    objects.clear();
 	  }
 	  registeredIdenticalObject = false;
@@ -1631,7 +1798,9 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	    if (objects[n].id != id && status[objects[n].id] == 0x07) {
 	      registeredIdenticalObject = true;
 	      if (info) {
-		cerr << "info: found by using mode accurate search. " << objects[n].id << endl;
+//		cerr << "info: found by using mode accurate search. " << objects[n].id << endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("info: found by using mode accurate search. " + std::to_string(objects[n].id));
 	      }
 	      break;
 	    }
@@ -1639,7 +1808,9 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	}
 	if (!registeredIdenticalObject && mode != 's') {
 	  if (info) {
-	    cerr << "info: not found by using more accurate search." << endl;
+//	    cerr << "info: not found by using more accurate search." << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("info: not found by using more accurate search.");
 	  }
 	  sc.id = 0;
 	  sc.radius = 0.0;
@@ -1655,7 +1826,9 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	    if (objects[n].id != id && status[objects[n].id] == 0x07) {
 	      registeredIdenticalObject = true;
 	      if (info) {
-		cerr << "info: found by using linear search. " << objects[n].id << endl;
+//		cerr << "info: found by using linear search. " << objects[n].id << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("info: found by using linear search. " + std::to_string(objects[n].id));
 	      }
 	      break;
 	    }
@@ -1666,8 +1839,12 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 #endif
 	if (registeredIdenticalObject) {
 	  if (info) {
-	    cerr << "Info ID=" << id << ":" << static_cast<int>(status[id]) << endl;
-	    cerr << "  found the valid same objects. " << objects[n].id << endl;
+//	    cerr << "Info ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+//	    cerr << "  found the valid same objects. " << objects[n].id << endl;
+        if (NGT_LOG_DEBUG_){
+            (*NGT_LOG_DEBUG_)("Info ID=" + std::to_string(id) + ":" + std::to_string(static_cast<int>(status[id])));
+            (*NGT_LOG_DEBUG_)("  found the valid same objects. " + std::to_string(objects[n].id));
+        }
 	  }
 	  GraphNode &fromNode = *GraphIndex::getNode(id);
 	  bool fromFound = false;
@@ -1694,40 +1871,67 @@ GraphAndTreeIndex::verify(vector<uint8_t> &status, bool info, char mode) {
 	  if (!fromFound || !toFound) {
 	    if (info) {
 	      if (!fromFound && !toFound) {
-		cerr << "Warning no undirected edge between " << id << "(" << fromNode.size() << ") and " 
-		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+//		cerr << "Warning no undirected edge between " << id << "(" << fromNode.size() << ") and "
+//		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+		    if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning no undirected edge between " + std::to_string(id) + "(" + std::to_string(fromNode.size()) + ") and "
+		     + std::to_string(objects[n].id) + "(" + std::to_string(toNode.size()) + ").");
 	      } else if (!fromFound) {
-		cerr << "Warning no directed edge from " << id << "(" << fromNode.size() << ") to " 
-		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+//		cerr << "Warning no directed edge from " << id << "(" << fromNode.size() << ") to "
+//		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+		    if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning no directed edge from " + std::to_string(id) + "(" + std::to_string(fromNode.size()) + ") to "
+		     + std::to_string(objects[n].id) + "(" + std::to_string(toNode.size()) + ").");
 	      } else if (!toFound) {
-		cerr << "Warning no reverse directed edge from " << id << "(" << fromNode.size() << ") to " 
-		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+//		cerr << "Warning no reverse directed edge from " << id << "(" << fromNode.size() << ") to "
+//		     << objects[n].id << "(" << toNode.size() << ")." << endl;
+		    if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning no reverse directed edge from " + std::to_string(id) + "(" + std::to_string(fromNode.size()) + ") to "
+		     + std::to_string(objects[n].id) + "(" + std::to_string(toNode.size()) + ").");
 	      }
 	    }
 	    if (!findPathAmongIdenticalObjects(*this, id, objects[n].id)) {
-	      cerr << "Warning no path from " << id << " to " << objects[n].id << endl;
+//	      cerr << "Warning no path from " << id << " to " << objects[n].id << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning no path from " + std::to_string(id) + " to " + std::to_string(objects[n].id));
 	    }
 	    if (!findPathAmongIdenticalObjects(*this, objects[n].id, id)) {
-	      cerr << "Warning no reverse path from " << id << " to " << objects[n].id << endl;
+//	      cerr << "Warning no reverse path from " << id << " to " << objects[n].id << endl;
+	        if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning no reverse path from " + std::to_string(id) + " to " + std::to_string(objects[n].id));
 	    }
 	  }
 	} else {
 	  if (mode == 's') {
-	    cerr << "Warning: not found the valid same object, but not try to use linear search." << endl;
-	    cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+//	    cerr << "Warning: not found the valid same object, but not try to use linear search." << endl;
+//	    cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+	    if (NGT_LOG_DEBUG_) {
+            (*NGT_LOG_DEBUG_)("Warning: not found the valid same object, but not try to use linear search.");
+            (*NGT_LOG_DEBUG_)("Error! ID=" + std::to_string(id) + ":" + std::to_string(static_cast<int>(status[id])));
+	    }
 	  } else {
-	    cerr << "Warning: not found the valid same object even by using linear search." << endl;
-	    cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+//	    cerr << "Warning: not found the valid same object even by using linear search." << endl;
+//	    cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+          if (NGT_LOG_DEBUG_) {
+              (*NGT_LOG_DEBUG_)("Warning: not found the valid same object even by using linear search.");
+              (*NGT_LOG_DEBUG_)("Error! ID=" + std::to_string(id) + ":" + std::to_string(static_cast<int>(status[id])));
+          }
 	    valid = false;
 	  }
 	}
       } else if (status[id] == 0x01) {
 	  if (info) {
-	    cerr << "Warning! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
-	    cerr << "  not inserted into the indexes" << endl;
+//	    cerr << "Warning! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+//	    cerr << "  not inserted into the indexes" << endl;
+	    if (NGT_LOG_DEBUG_) {
+            (*NGT_LOG_DEBUG_)("Warning! ID=" + std::to_string(id) + ":" + std::to_string(static_cast<int>(status[id])));
+            (*NGT_LOG_DEBUG_)("  not inserted into the indexes");
+	    }
 	  }
       } else {
-	  cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+//	  cerr << "Error! ID=" << id << ":" << static_cast<int>(status[id]) << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("Error! ID=" + std::to_string(id) + ":" + std::to_string(static_cast<int>(status[id])));
 	  valid = false;
       }
     }

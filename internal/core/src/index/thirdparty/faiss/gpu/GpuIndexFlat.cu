@@ -196,7 +196,7 @@ GpuIndexFlat::searchImpl_(int n,
                           int k,
                           float* distances,
                           Index::idx_t* labels,
-                          ConcurrentBitsetPtr bitset) const {
+                          const BitsetView& bitset) const {
   auto stream = resources_->getDefaultStream(device_);
 
   // Input and output data are already resident on the GPU
@@ -214,8 +214,8 @@ GpuIndexFlat::searchImpl_(int n,
     data_->query(queries, bitsetDevice, k, metric_type, metric_arg, outDistances, outIntLabels, true);
   } else {
     auto bitsetDevice = toDevice<uint8_t, 1>(resources_, device_,
-                                             const_cast<uint8_t*>(bitset->data()), stream,
-                                             {(int) bitset->size()});
+                                             const_cast<uint8_t*>(bitset.data()), stream,
+                                             {(int) bitset.u8size()});
     data_->query(queries, bitsetDevice, k, metric_type, metric_arg, outDistances, outIntLabels, true);
   }
 

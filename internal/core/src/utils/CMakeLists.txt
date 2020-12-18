@@ -11,14 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
-set(UTILS_FILES 
-    Status.cpp
-    EasyAssert.cpp
-)
+aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
 
 add_library( milvus_utils STATIC ${UTILS_FILES} )
 
-target_link_libraries(milvus_utils
-        libboost_filesystem.a
-        libboost_system.a)
+target_link_libraries( milvus_utils PRIVATE fiu )

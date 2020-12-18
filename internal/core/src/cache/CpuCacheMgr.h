@@ -16,20 +16,24 @@
 
 #include "cache/CacheMgr.h"
 #include "cache/DataObj.h"
-#include "config/ConfigMgr.h"
+#include "value/config/ConfigMgr.h"
 
 namespace milvus {
 namespace cache {
 
 class CpuCacheMgr : public CacheMgr<DataObjPtr>, public ConfigObserver {
+ public:
+    static CpuCacheMgr&
+    GetInstance();
+
  private:
     CpuCacheMgr();
 
     ~CpuCacheMgr();
 
  public:
-    static CpuCacheMgr&
-    GetInstance();
+    DataObjPtr
+    GetItem(const std::string& key) override;
 
  public:
     void

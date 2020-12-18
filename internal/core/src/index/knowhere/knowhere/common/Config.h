@@ -16,7 +16,7 @@
 namespace milvus {
 namespace knowhere {
 
-using Config = milvus::Json;
+using Config = milvus::json;
 
 }  // namespace knowhere
 }  // namespace milvus

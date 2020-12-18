@@ -29,10 +29,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
  public:
     IVF() : FaissBaseIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -51,7 +53,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr&, const Config&, const faiss::ConcurrentBitsetPtr&) override;
+    Query(const DatasetPtr&, const Config&, const faiss::BitsetView&) override;
 
 #if 0
     DatasetPtr
@@ -66,6 +68,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
 #if 0
     DatasetPtr
@@ -86,7 +94,7 @@ class IVF : public VecIndex, public FaissBaseIndex {
     GenParams(const Config&);
 
     virtual void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::ConcurrentBitsetPtr&);
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&, const faiss::BitsetView&);
 
     void
     SealImpl() override;

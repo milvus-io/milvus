@@ -17,6 +17,7 @@
 #pragma once
 
 #include "NGT/Index.h"
+#include "defines.h"
 
 using namespace std;
 
@@ -185,8 +186,10 @@ class Clustering {
             }
         }
         if ((numberOfClusters != 0) && (clusters.size() < numberOfClusters)) {
-            std::cerr << "initial cluster data are not enough. " << clusters.size() << ":" << numberOfClusters
-                      << std::endl;
+//            std::cerr << "initial cluster data are not enough. " << clusters.size() << ":" << numberOfClusters
+//                      << std::endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("initial cluster data are not enough. " + std::to_string(clusters.size()) + ":" + std::to_string(numberOfClusters));
             exit(1);
         }
     }
@@ -365,7 +368,9 @@ class Clustering {
         for (auto soi = sortedObjects.rbegin(); soi != sortedObjects.rend();) {
             Entry& entry = *soi;
             if (entry.centroidID >= clusters.size()) {
-                std::cerr << "Something wrong. " << entry.centroidID << ":" << clusters.size() << std::endl;
+//                std::cerr << "Something wrong. " << entry.centroidID << ":" << clusters.size() << std::endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Something wrong. " + std::to_string(entry.centroidID) + ":" + std::to_string(clusters.size()));
                 soi++;
                 continue;
             }
@@ -547,7 +552,9 @@ class Clustering {
                 distance += distanceL2((*it).centroid, mean);
                 (*it).centroid = mean;
             } else {
-                cerr << "Clustering: Fatal Error. No member!" << endl;
+//                cerr << "Clustering: Fatal Error. No member!" << endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Clustering: Fatal Error. No member!");
                 abort();
             }
         }
@@ -579,7 +586,9 @@ class Clustering {
 
         double diff = 0;
         for (size_t i = 0; i < maximumIteration; i++) {
-            std::cerr << "iteration=" << i << std::endl;
+//            std::cerr << "iteration=" << i << std::endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("iteration=" + std::to_string(i));
             assign(vectors, clusters, clusterSize);
             // centroid is recomputed.
             // diff is distance between the current centroids and the previous centroids.
@@ -610,7 +619,9 @@ class Clustering {
             std::vector<Cluster> prevClusters = clusters;
             diff = calculateCentroid(vectors, clusters);
             timer.stop();
-            std::cerr << "iteration=" << i << " time=" << timer << " diff=" << diff << std::endl;
+//            std::cerr << "iteration=" << i << " time=" << timer << " diff=" << diff << std::endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("iteration=" + std::to_string(i) + " time=" + std::to_string(timer.time)+ " diff=" + std::to_string(diff));
             timer.start();
             diffHistory.push_back(diff);
 
@@ -664,15 +675,21 @@ class Clustering {
             try {
                 os.getObject(idx, vectors[idx - 1]);
             } catch (...) {
-                cerr << "Cannot get object " << idx << endl;
+//                cerr << "Cannot get object " << idx << endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("Cannot get object " + std::to_string(idx));
             }
         }
-        cerr << "# of data for clustering=" << vectors.size() << endl;
+//        cerr << "# of data for clustering=" << vectors.size() << endl;
+        if (NGT_LOG_DEBUG_)
+            (*NGT_LOG_DEBUG_)("# of data for clustering=" + std::to_string(vectors.size()));
         double diff = DBL_MAX;
         clusters.clear();
         setupInitialClusters(vectors, numberOfClusters, clusters);
         for (float epsilon = epsilonFrom; epsilon <= epsilonTo; epsilon += epsilonStep) {
-            cerr << "epsilon=" << epsilon << endl;
+//            cerr << "epsilon=" << epsilon << endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("epsilon=" + std::to_string(epsilon));
             diff = kmeansWithNGT(index, vectors, numberOfClusters, clusters, epsilon);
             if (diff == 0.0) {
                 return diff;
@@ -748,7 +765,9 @@ class Clustering {
             }
         }
         if (vectors.size() != count) {
-            std::cerr << "Warning! vectors.size() != count" << std::endl;
+//            std::cerr << "Warning! vectors.size() != count" << std::endl;
+            if (NGT_LOG_DEBUG_)
+                (*NGT_LOG_DEBUG_)("Warning! vectors.size() != count");
         }
 
         return d / (double)vectors.size();
@@ -787,7 +806,9 @@ class Clustering {
                     break;
                 }
                 default:
-                    std::cerr << "proper initMode is not specified." << std::endl;
+//                    std::cerr << "proper initMode is not specified." << std::endl;
+                    if (NGT_LOG_DEBUG_)
+                        (*NGT_LOG_DEBUG_)("proper initMode is not specified.");
                     exit(1);
             }
         }
@@ -805,7 +826,9 @@ class Clustering {
                 return kmeansWithNGT(vectors, numberOfClusters, clusters);
                 break;
             default:
-                cerr << "kmeans::fatal error!. invalid clustering type. " << clusteringType << endl;
+//                cerr << "kmeans::fatal error!. invalid clustering type. " << clusteringType << endl;
+                if (NGT_LOG_DEBUG_)
+                    (*NGT_LOG_DEBUG_)("kmeans::fatal error!. invalid clustering type. " + std::to_string(clusteringType));
                 abort();
                 break;
         }
@@ -817,16 +840,16 @@ class Clustering {
         size_t clusterSize = std::numeric_limits<size_t>::max();
         assign(vectors, clusters, clusterSize);
 
-        std::cout << "The number of vectors=" << vectors.size() << std::endl;
-        std::cout << "The number of centroids=" << clusters.size() << std::endl;
+//        std::cout << "The number of vectors=" << vectors.size() << std::endl;
+//        std::cout << "The number of centroids=" << clusters.size() << std::endl;
         if (centroidIds.size() == 0) {
             switch (mode) {
                 case 'e':
-                    std::cout << "MSE=" << calculateMSE(vectors, clusters) << std::endl;
+//                    std::cout << "MSE=" << calculateMSE(vectors, clusters) << std::endl;
                     break;
                 case '2':
                 default:
-                    std::cout << "ML2=" << calculateML2(vectors, clusters) << std::endl;
+//                    std::cout << "ML2=" << calculateML2(vectors, clusters) << std::endl;
                     break;
             }
         } else {
@@ -835,8 +858,8 @@ class Clustering {
                     break;
                 case '2':
                 default:
-                    std::cout << "ML2=" << calculateML2FromSpecifiedCentroids(vectors, clusters, centroidIds)
-                              << std::endl;
+//                    std::cout << "ML2=" << calculateML2FromSpecifiedCentroids(vectors, clusters, centroidIds)
+//                              << std::endl;
                     break;
             }
         }

@@ -29,10 +29,12 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
  public:
     BinaryIVF() : FaissBaseBinaryIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit BinaryIVF(std::shared_ptr<faiss::IndexBinary> index) : FaissBaseBinaryIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -60,7 +62,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     }
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::ConcurrentBitsetPtr& bitset) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
 
     int64_t
     Count() override;
@@ -70,6 +72,12 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
@@ -82,7 +90,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
               float* distances,
               int64_t* labels,
               const Config& config,
-              const faiss::ConcurrentBitsetPtr& bitset);
+              const faiss::BitsetView& bitset);
 
  protected:
     std::mutex mutex_;

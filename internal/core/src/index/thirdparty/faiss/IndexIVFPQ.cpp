@@ -41,7 +41,7 @@ IndexIVFPQ::IndexIVFPQ (Index * quantizer, size_t d, size_t nlist,
     IndexIVF (quantizer, d, nlist, 0, metric),
     pq (d, M, nbits_per_idx)
 {
-    FAISS_THROW_IF_NOT (nbits_per_idx <= 8);
+    // FAISS_THROW_IF_NOT (nbits_per_idx <= 8);
     code_size = pq.code_size;
     invlists->code_size = code_size;
     is_trained = false;
@@ -801,10 +801,10 @@ struct KnnSearchResults {
 
     size_t nup;
 
-    inline void add (idx_t j, float dis, ConcurrentBitsetPtr bitset = nullptr) {
+    inline void add (idx_t j, float dis, const BitsetView& bitset = nullptr) {
         if (C::cmp (heap_sim[0], dis)) {
             idx_t id = ids ? ids[j] : lo_build (key, j);
-            if (bitset != nullptr && bitset->test((faiss::ConcurrentBitset::id_type_t)id))
+            if (!bitset.empty() && bitset.test((faiss::ConcurrentBitset::id_type_t)id))
                 return;
             heap_swap_top<C> (k, heap_sim, heap_ids, dis, id);
             nup++;
@@ -822,7 +822,7 @@ struct RangeSearchResults {
     float radius;
     RangeQueryResult & rres;
 
-    inline void add (idx_t j, float dis, faiss::ConcurrentBitsetPtr bitset = nullptr) {
+    inline void add (idx_t j, float dis, const faiss::BitsetView& bitset = nullptr) {
         if (C::cmp (radius, dis)) {
             idx_t id = ids ? ids[j] : lo_build (key, j);
             rres.add (dis, id);
@@ -872,7 +872,7 @@ struct IVFPQScannerT: QueryTables {
     template<class SearchResultType>
     void scan_list_with_table (size_t ncode, const uint8_t *codes,
                                SearchResultType & res,
-                               ConcurrentBitsetPtr bitset = nullptr) const
+                               const BitsetView& bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
             PQDecoder decoder(codes, pq.nbits);
@@ -895,7 +895,7 @@ struct IVFPQScannerT: QueryTables {
     template<class SearchResultType>
     void scan_list_with_pointer (size_t ncode, const uint8_t *codes,
                                  SearchResultType & res,
-                                 faiss::ConcurrentBitsetPtr bitset = nullptr) const
+                                 const faiss::BitsetView& bitset = nullptr) const
     {
         for (size_t j = 0; j < ncode; j++) {
             PQDecoder decoder(codes, pq.nbits);
@@ -918,7 +918,7 @@ struct IVFPQScannerT: QueryTables {
     template<class SearchResultType>
     void scan_on_the_fly_dist (size_t ncode, const uint8_t *codes,
                                SearchResultType &res,
-                               faiss::ConcurrentBitsetPtr bitset = nullptr) const
+                               const faiss::BitsetView& bitset = nullptr) const
     {
         const float *dvec;
         float dis0 = 0;
@@ -958,7 +958,7 @@ struct IVFPQScannerT: QueryTables {
     void scan_list_polysemous_hc (
              size_t ncode, const uint8_t *codes,
              SearchResultType & res,
-             faiss::ConcurrentBitsetPtr bitset = nullptr) const
+             const faiss::BitsetView& bitset = nullptr) const
     {
         int ht = ivfpq.polysemous_ht;
         size_t n_hamming_pass = 0, nup = 0;
@@ -996,7 +996,7 @@ struct IVFPQScannerT: QueryTables {
     void scan_list_polysemous (
              size_t ncode, const uint8_t *codes,
              SearchResultType &res,
-             faiss::ConcurrentBitsetPtr bitset = nullptr) const
+             const faiss::BitsetView& bitset = nullptr) const
     {
         switch (pq.code_size) {
 #define HANDLE_CODE_SIZE(cs)                                            \
@@ -1075,7 +1075,7 @@ struct IVFPQScanner:
                        const idx_t *ids,
                        float *heap_sim, idx_t *heap_ids,
                        size_t k,
-                       faiss::ConcurrentBitsetPtr bitset) const override
+                       const faiss::BitsetView& bitset) const override
     {
         KnnSearchResults<C> res = {
             /* key */      this->key,
@@ -1106,7 +1106,7 @@ struct IVFPQScanner:
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & rres,
-                           faiss::ConcurrentBitsetPtr bitset = nullptr) const override
+                           const faiss::BitsetView& bitset = nullptr) const override
     {
         RangeSearchResults<C> res = {
             /* key */      this->key,

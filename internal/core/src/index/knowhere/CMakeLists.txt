@@ -39,11 +39,21 @@ endif ()
 
 set(external_srcs
         knowhere/common/Exception.cpp
-        knowhere/common/Log.cpp
         knowhere/common/Timer.cpp
+        knowhere/common/Utils.cpp
         )
 
+set (LOG_SRC
+        knowhere/common/Log.cpp
+        ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+        )
+add_library(index_log STATIC ${LOG_SRC})
+set_target_properties(index_log PROPERTIES RULE_LAUNCH_COMPILE "")
+set_target_properties(index_log PROPERTIES RULE_LAUNCH_LINK "")
+include_directories(${MILVUS_THIRDPARTY_SRC})
+
 set(vector_index_srcs
+        knowhere/index/IndexType.cpp
         knowhere/index/vector_index/adapter/VectorAdapter.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
         knowhere/index/vector_index/helpers/IndexParameter.cpp
@@ -61,8 +71,6 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexIVF.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
-        knowhere/index/IndexType.cpp
-        knowhere/index/vector_index/VecIndexFactory.cpp
         knowhere/index/vector_index/IndexAnnoy.cpp
         knowhere/index/vector_index/IndexRHNSW.cpp
         knowhere/index/vector_index/IndexHNSW.cpp
@@ -72,6 +80,8 @@ set(vector_index_srcs
         knowhere/index/vector_index/IndexNGT.cpp
         knowhere/index/vector_index/IndexNGTPANNG.cpp
         knowhere/index/vector_index/IndexNGTONNG.cpp
+        knowhere/index/vector_index/Statistics.cpp
+        knowhere/index/vector_index/VecIndexFactory.cpp
         )
 
 set(vector_offset_index_srcs
@@ -96,6 +106,7 @@ set(depend_libs
         pthread
         fiu
         ngt
+        index_log
         )
 
 if (MILVUS_SUPPORT_SPTAG)
@@ -143,7 +154,6 @@ endif ()
 
 target_link_libraries(
         knowhere
-        milvus_utils
         ${depend_libs}
 )
 
