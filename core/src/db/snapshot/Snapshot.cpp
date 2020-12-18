@@ -69,10 +69,11 @@ Snapshot::Snapshot(StorePtr store, ID_TYPE ss_id) {
     auto& collection_commit_mappings = collection_commit->GetMappings();
     for (auto p_c_id : collection_commit_mappings) {
         auto partition_commit = partition_commits_holder.GetResource(store, p_c_id, false);
+        CHECK_NOT_NULL_AND_RETURN(partition_commit);
         auto partition_id = partition_commit->GetPartitionId();
         auto partition = partitions_holder.GetResource(store, partition_id, false);
+        CHECK_NOT_NULL_AND_RETURN(partition);
         auto partition_name = partition->GetName();
-        CHECK_NOT_NULL_AND_RETURN(partition_commit);
         AddResource<PartitionCommit>(partition_commit);
         base_path = GetResPath<Partition>(store->GetRootPath(), std::make_shared<Partition>(*partition));
         partition_commit->LoadIds(base_path);
