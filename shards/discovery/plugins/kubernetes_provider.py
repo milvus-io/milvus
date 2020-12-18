@@ -14,6 +14,7 @@ import enum
 from functools import partial
 from collections import defaultdict
 from kubernetes import client, config as kconfig, watch
+from mishards.exceptions import ConnectionConnectError
 from mishards.topology import StatusType
 
 logger = logging.getLogger(__name__)
@@ -325,7 +326,7 @@ class KubernetesProvider(object):
                 status, pool = group.create(name=name, uri=uri)
         except ConnectionConnectError as exc:
             ok = False
-            logger.error('Connection error to: {}'.format(addr))
+            logger.error('Connection error to: POD {} with IP {}'.format(name, ip))
 
         # if ok and status == StatusType.OK:
         #     logger.info('KubernetesProvider Add Group \"{}\" Of 1 Address: {}'.format(name, uri))
