@@ -11,29 +11,17 @@
 
 #pragma once
 
-#include <memory>
 #include <string>
-#include <vector>
-
-#include "db/metax/MetaResField.h"
-#include "utils/Status.h"
 
 namespace milvus::engine::metax {
 
-class MetaEngineWare {
- public:
-    virtual ~MetaEngineWare() = default;
-
-    virtual Status
-    Insert(const MetaResFieldTuple& fields, snapshot::ID_TYPE& result_id) = 0;
+struct SelectedTableColumn {
+    std::string table_;
+    std::string column_;
 };
 
-using MetaEngineWarePtr = std::shared_ptr<MetaEngineWare>;
-
-////////////////////////////////////////////
-struct WareQueryContext {
-    MetaResFieldListTuple selected_;
-    std::vector<std::string> tables_;
+struct SelectedTable {
+    std::string table_;
 };
 
 }  // namespace milvus::engine::metax

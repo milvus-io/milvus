@@ -265,7 +265,7 @@ MetaTest::TearDown() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void
 MetaxTest::SetUp() {
-    auto proxy = std::make_shared<milvus::engine::metax::MetaProxy>(milvus::engine::metax::EngineType::mock);
+    auto proxy = std::make_shared<milvus::engine::metax::MetaProxy>(milvus::engine::metax::mock_);
     meta_ = std::make_shared<milvus::engine::metax::MetaAdapter>(proxy);
 }
 

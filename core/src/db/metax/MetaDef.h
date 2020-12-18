@@ -18,6 +18,6 @@
 
 namespace milvus::engine::metax {
 
-enum class EngineType { mock_, mysql_, sqlite_ };
+enum EngineType { mock_, mysql_, sqlite_ };
 
 }  // namespace milvus::engine::metax

@@ -33,11 +33,18 @@ class MetaAdapter {
     explicit MetaAdapter(MetaProxyPtr proxy) : proxy_(proxy) {
     }
 
-    template <typename R, typename std::enable_if<is_decay_base_of_v<snapshot::BaseResource<R>, R>>::type* = nullptr>
+    template <typename R/*, typename std::enable_if<is_decay_base_of_v<snapshot::BaseResource<R>, R>>::type* = nullptr*/>
     Status
     Insert(std::shared_ptr<R> res, snapshot::ID_TYPE& result_id) {
+        static_assert(is_decay_base_of_v<snapshot::BaseResource<R>, R>);
         auto fields = GenFieldTupleFromRes<R>(res);
         return proxy_->Insert(fields, result_id);
+    }
+
+    template <typename... Args>
+    Status
+    Select(Args... args) {
+        return proxy_->Select(std::forward<Args>(args)...);
     }
 
  private:

@@ -14,6 +14,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "db/metax/MetaTraits.h"
 #include "db/snapshot/Resources.h"
@@ -76,5 +77,20 @@ using MetaResFieldTuple = std::tuple<
     MetaResField<snapshot::FieldElementIdField>, MetaResField<snapshot::PartitionIdField>,
     MetaResField<snapshot::SegmentIdField>, MetaResField<snapshot::TypeNameField>, MetaResField<snapshot::NameField>,
     MetaResField<snapshot::ParamsField>, MetaResField<snapshot::SizeField>, MetaResField<snapshot::RowCountField> >;
+
+template <typename F>
+using MetaResFieldList = std::vector<MetaResField<F>>;
+
+using MetaResFieldListTuple = std::tuple<
+    MetaResFieldList<snapshot::MappingsField>       , MetaResFieldList<snapshot::StateField>        ,
+    MetaResFieldList<snapshot::LsnField>            , MetaResFieldList<snapshot::CreatedOnField>    ,
+    MetaResFieldList<snapshot::UpdatedOnField>      , MetaResFieldList<snapshot::IdField>           ,
+    MetaResFieldList<snapshot::CollectionIdField>   , MetaResFieldList<snapshot::SchemaIdField>     ,
+    MetaResFieldList<snapshot::NumField>            , MetaResFieldList<snapshot::FtypeField>        ,
+    MetaResFieldList<snapshot::FEtypeField>         , MetaResFieldList<snapshot::FieldIdField>      ,
+    MetaResFieldList<snapshot::FieldElementIdField> , MetaResFieldList<snapshot::PartitionIdField>  ,
+    MetaResFieldList<snapshot::SegmentIdField>      , MetaResFieldList<snapshot::TypeNameField>     ,
+    MetaResFieldList<snapshot::NameField>           , MetaResFieldList<snapshot::ParamsField>       ,
+    MetaResFieldList<snapshot::SizeField>           , MetaResFieldList<snapshot::RowCountField>>;
 
 }  // namespace milvus::engine::metax
