@@ -50,7 +50,7 @@ template <typename Arg>
 struct is_table<Table<Arg>> : std::true_type {};
 
 template <typename Arg>
-constexpr bool is_table_v = is_table<Arg>::value;
+constexpr bool is_table_v = is_table<remove_cr_t<Arg>>::value;
 
 /////////////// Tables
 template <typename... Args>

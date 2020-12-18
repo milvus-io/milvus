@@ -36,6 +36,7 @@ using RangeType = milvus::engine::metax::RangeType;
 
 //template <typename ... Args>
 using milvus::engine::metax::Cols_;
+using milvus::engine::metax::AllCols_;
 using milvus::engine::metax::Col_;
 using milvus::engine::metax::From_;
 using milvus::engine::metax::Where_;
@@ -46,6 +47,7 @@ using milvus::engine::metax::One_;
 using milvus::engine::metax::And_;
 
 using milvus::engine::metax::is_columns_v;
+using milvus::engine::metax::is_table_v;
 
 TEST_F(MetaxTest, HelperTest) {
     auto proxy = std::make_shared<milvus::engine::metax::MetaProxy>(EngineType::mysql_);
@@ -59,12 +61,18 @@ TEST_F(MetaxTest, HelperTest) {
 }
 
 TEST_F(MetaxTest, SelectTest) {
-    meta_->Select(Cols_(Col_<Collection, IdField>(), Col_<Collection, NameField>()),
+//    meta_->Select(Cols_(Col_<Collection, IdField>(), Col_<Collection, NameField>()),
+//                  From_(Tab_<Collection>()),
+//                  Where_(Or_(In_(Col_<Collection, IdField>(), {1, 2, 3}), Range_(Col_<Collection, IdField>(), 1, RangeType::eq_)))
+//                  );
+    meta_->Select(AllCols_(Tab_<Collection>()),
                   From_(Tab_<Collection>()),
-                  Where_(And_(In_(Col_<Collection, IdField>(), {1, 2, 3}), Range_(Col_<Collection, IdField>(), 1, RangeType::eq_)))
-                  );
+                  Where_(Or_(In_(Col_<Collection, IdField>(), {1, 2, 3}), Range_(Col_<Collection, IdField>(), 1, RangeType::eq_)))
+    );
     auto cols = Cols_(Col_<Collection, IdField>(), Col_<Collection, NameField>());
     std::cout << std::boolalpha << is_columns_v<decltype(cols)> << std::endl;
+    auto tab = Tab_<Collection>();
+    std::cout << std::boolalpha << is_table_v<decltype(AllCols_(tab))> << std::endl;
 }
 
 TEST_F(MetaxTest, TraitsTest) {

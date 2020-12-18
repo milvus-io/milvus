@@ -16,21 +16,6 @@
 
 namespace milvus::engine::metax {
 
-//template <template<typename> typename H, typename L, typename R>
-//struct In {
-//    using LType = remove_cr_t<L>;
-//    using RType = remove_cr_t<H<R>>;
-//    using RVType = remove_cr_t<R>;
-//
-//    L l_cond_;
-//    H<R> r_value_;
-//};
-enum Relation {
-    one_,
-    and_,
-    or_
-};
-
 ////////////// One
 template <typename Cond>
 struct One {
@@ -87,7 +72,7 @@ struct is_cond_or<Or<Args...>> : std::true_type {};
 
 template <typename...Args>
 Or<Args...>
-Or_(Args&... args) {
+Or_(Args&&... args) {
     return {std::make_tuple(std::forward<Args>(args)...)};
 }
 

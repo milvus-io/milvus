@@ -16,6 +16,7 @@
 
 #include "db/metax/MetaQuery.h"
 #include "db/metax/MetaQueryTraits.h"
+#include "db/metax/MetaResField.h"
 #include "utils/StringHelpFunctions.h"
 
 namespace milvus::engine::metax {
@@ -39,7 +40,7 @@ v2sqlstring(const T& t) {
 
 template <typename R, typename F>
 inline std::string
-SerializeColumn(Column<R,F>& c, bool as = false) {
+SerializeColumn(Column<R,F> c, bool as = false) {
     std::string tfs = std::string(c.ResName) + "." + c.FieldName;
     std::stringstream ss;
     ss << tfs;
@@ -69,6 +70,43 @@ void TraverseColumns(Columns<Ts...>& t, std::vector<std::string>& selected, bool
     size_t constexpr size = std::tuple_size<std::tuple<Ts...>>::value;
     decltype(auto) columns = t.cols_;
     ColumnsTraverser<size - 1, Ts...>{}(columns, selected, as);
+}
+
+template<int index, typename T>
+struct TableTraverser {
+    void operator() (MetaResFieldTuple& t, Table<T> tab, std::vector<std::string>& selected, bool as = false) {
+        using element_type = typename std::tuple_element_t<index, MetaResFieldTuple>::FType;
+        if constexpr(is_decay_base_of_v<element_type, T>) {
+            selected.emplace_back(SerializeColumn(Col_<T, element_type>(), as));
+            TableTraverser<index - 1, T>{}(t, tab, selected, as);
+            return;
+        } else {
+            TableTraverser<index - 1, T>{}(t, tab, selected, as);
+            return;
+        }
+//        selected.emplace_back(SerializeColumn(std::get<index>(t), as));
+//        ColumnsTraverser<index - 1, Ts...>{}(t, selected, as);
+    }
+};
+
+template<typename T>
+struct TableTraverser<0, T> {
+    void operator() (MetaResFieldTuple& t, Table<T> tab, std::vector<std::string>& selected, bool as = false) {
+        using element_type = std::tuple_element_t<0, MetaResFieldTuple>;
+        if constexpr(is_decay_base_of_v<element_type, T>) {
+            selected.emplace_back(SerializeColumn(Col_<T, element_type>(), as));
+            return;
+        } else {
+            return;
+        }
+    }
+};
+
+template<typename T>
+void TraverseColumns(Table<T>& t, std::vector<std::string>& selected, bool as = false) {
+    MetaResFieldTuple fields;
+    size_t constexpr size = std::tuple_size<decltype(fields)>::value;
+    TableTraverser<size - 1, T>{}(fields, t, selected, as);
 }
 /////////////////////////////////////////////////////////////
 template <typename R>
@@ -120,23 +158,33 @@ void TraverseTables(FullJoin<Ts...>& t, std::vector<std::string>& selected) {
 }
 
 //////////////////////
-template <typename R, typename F>
-inline std::string
-SerializeRangeItem(Column<R, F>& col) {
-    return SerializeColumn<R, F>(col);
-}
+//template <typename R, typename F>
+//inline std::string
+//SerializeRangeItem(Column<R, F> col) {
+//    return SerializeColumn<R, F>(col);
+//}
 
 template <typename T>
 inline std::string
-SerializeRangeItem(std::enable_if_t<std::is_arithmetic_v<T>, T>& num) {
-    return std::to_string(num);
+SerializeRangeItem(T t) {
+    if constexpr(is_column_v<T>) {
+        return SerializeColumn<typename T::RType, typename T::FType>(t);
+    } else if constexpr(std::is_arithmetic_v<T>) {
+        return std::to_string(t);
+    } else if constexpr(decay_equal_v<T, std::string>) {
+        return v2sqlstring<std::string>(t);
+    } else {
+        static_assert(is_column_v<T>, "Unknown Range item type");
+        return "";
+    }
+//    return std::to_string(num);
 }
 
-template <typename T>
-inline std::string
-SerializeRangeItem(std::enable_if_t<decay_equal_v<T, std::string>, T>& str) {
-    return v2sqlstring<std::string>(str);
-}
+//template <typename T>
+//inline std::string
+//SerializeRangeItem(std::enable_if_t<decay_equal_v<T, std::string>, T>& str) {
+//    return v2sqlstring<std::string>(str);
+//}
 
 // TODO(yhz): To be completed
 template <typename L, typename R>
@@ -190,7 +238,7 @@ template<int index, typename... Ts>
 struct ConditionRelationTraverser {
     void operator() (std::tuple<Ts...>& t, std::vector<std::string>& selected) {
         selected.emplace_back(SerializeConditionCase(std::get<index>(t)));
-        ColumnsTraverser<index - 1, Ts...>{}(t);
+        ConditionRelationTraverser<index - 1, Ts...>{}(t, selected);
     }
 };
 
@@ -203,14 +251,14 @@ struct ConditionRelationTraverser<0, Ts...> {
 
 template<typename... Ts>
 void TraverseConditionRelation(And<Ts...>& t, std::vector<std::string>& selected) {
-    size_t constexpr size = std::tuple_size_v<And<Ts...>::cond_tuple>;
+    size_t constexpr size = std::tuple_size_v<typename And<Ts...>::cond_tuple>;
     decltype(auto) conds = t.conds_;
     ConditionRelationTraverser<size - 1, Ts...>{}(conds, selected);
 }
 
 template<typename... Ts>
 void TraverseConditionRelation(Or<Ts...>& t, std::vector<std::string>& selected) {
-    size_t constexpr size = std::tuple_size_v<And<Ts...>::cond_tuple>;
+    size_t constexpr size = std::tuple_size_v<typename And<Ts...>::cond_tuple>;
     decltype(auto) conds = t.conds_;
     ConditionRelationTraverser<size - 1, Ts...>{}(conds, selected);
 }
@@ -226,15 +274,23 @@ SerializeConditionRelation(One<Case>& c) {
 // TODO(yhz): And case
 template <typename... Args>
 inline std::string
-SerializeConditionRelation(And<Args...>& c) {
-    return TraverseConditionRelation(c);
+SerializeConditionRelation(And<Args...> c) {
+    std::vector<std::string> selected;
+    TraverseConditionRelation(c, selected);
+    std::string out;
+    StringHelpFunctions::MergeStringWithDelimeter(selected, " AND ", out);
+    return out;
 }
 
 // TODO(yhz): Or case
 template <typename...Args>
 inline std::string
 SerializeConditionRelation(Or<Args...>& c) {
-    return SerializeConditionCase(c);
+    std::vector<std::string> selected;
+    TraverseConditionRelation(c, selected);
+    std::string out;
+    StringHelpFunctions::MergeStringWithDelimeter(selected, " OR ", out);
+    return out;
 }
 
 ///////////////////

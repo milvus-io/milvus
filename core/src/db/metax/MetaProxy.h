@@ -59,12 +59,13 @@ class MetaProxy {
     Select(Args... args) {
         static_assert(sizeof...(args) >= 3, "Select clause must at least 3");
         using args_tuple_type = std::tuple<Args...>;
-        using columns_type = std::tuple_element_t<0, args_tuple_type>;
+//        using columns_type = std::tuple_element_t<0, args_tuple_type>;
 //        static_assert(is_columns<columns_type::template_type>::value, "");
         // TODO(yhz): Hard Code for template check
         args_tuple_type args_tuple = std::make_tuple(std::forward<Args>(args)...);
         decltype(auto) columns = std::get<0>(args_tuple);
-        static_assert(is_columns_v<remove_cr_t<decltype(columns)>>, "It must be columns type");
+        static_assert(/*(is_columns_v<remove_cr_t<decltype(columns)>>) ||*/
+                                                                     (is_table_v<decltype(columns)>), "It must be columns type");
         decltype(auto) tables = std::get<1>(args_tuple);
         static_assert(is_table_relation_v<remove_cr_t<decltype(tables)>>, "It must be tables type");
         decltype(auto) conditions = std::get<2>(args_tuple);

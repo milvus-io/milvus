@@ -89,6 +89,15 @@ Cols_(Args...cols) {
     return {std::make_tuple(std::forward<Args>(cols)...)};
 }
 
+template <typename R>
+struct Table;
+
+template <typename T>
+Table<T>
+AllCols_(Table<T> t) {
+    return {std::move(t)};
+}
+
 /////////////// Columns helper
 //template<class T, template<class> class C>
 //struct is_clumns;
@@ -147,21 +156,5 @@ constexpr size_t Columns<Tabs...>::size;
  *        )
  */
 
-/////////////// Conditions
-template <typename C,   /*!< Columns */
-          typename T,   /*!< From or Join */
-          typename W    /*!< Where */
-          >
-struct Select {
-    C cols_;
-    T tables_;
-    W where_;
-};
-
-template <typename C, typename T, typename W>
-Select<C, T, W>
-Select_(C c, T t, W w) {
-    return {std::move(c), std::move(t), std::move(w)};
-}
 
 }  // namespace milvus::engine::metax
