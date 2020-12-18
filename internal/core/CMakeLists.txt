@@ -205,3 +205,12 @@ install(
 
 install(FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
         DESTINATION lib)
+
+install(
+        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
+        DESTINATION include/indexbuilder/
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
+install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
+        DESTINATION lib)
