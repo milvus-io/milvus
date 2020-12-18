@@ -134,7 +134,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 futures = []
                 for addr, files_tuple in routing.items():
                     search_file_ids, ud_file_ids = files_tuple
-                    logger.info(f"<{addr}> needed update segment ids {ud_file_ids}")
+                    if ud_file_ids:
+                        logger.debug(f"<{addr}> needed update segment ids {ud_file_ids}")
                     conn = self.router.query_conn(addr, metadata=metadata)
                     start = time.time()
                     ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
