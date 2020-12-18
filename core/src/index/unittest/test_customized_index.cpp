@@ -54,7 +54,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
     fiu_init(0);
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 

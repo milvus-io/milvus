@@ -38,12 +38,7 @@ class IndexHNSW : public VecIndex {
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config) override;

@@ -55,7 +55,6 @@ TEST_P(AnnoyTest, annoy_basic) {
         ASSERT_ANY_THROW(index_->Train(base_dataset, conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
         ASSERT_ANY_THROW(index_->Serialize(conf));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf));
         ASSERT_ANY_THROW(index_->Count());
         ASSERT_ANY_THROW(index_->Dim());

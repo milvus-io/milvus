@@ -195,7 +195,7 @@ CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         index_ptr_->SearchIndex(query_results[i]);
     }
 
-    return ConvertToDataset(query_results);
+    return ConvertToDataset(query_results, uids_);
 }
 
 int64_t

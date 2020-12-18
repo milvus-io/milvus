@@ -51,14 +51,13 @@ TEST_P(HNSWTest, HNSW_basic) {
     {
         ASSERT_ANY_THROW(index_->Serialize());
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
-        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
         ASSERT_ANY_THROW(index_->Count());
         ASSERT_ANY_THROW(index_->Dim());
     }
 
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -70,7 +69,7 @@ TEST_P(HNSWTest, HNSW_delete) {
     assert(!xb.empty());
 
     index_->Train(base_dataset, conf);
-    index_->Add(base_dataset, conf);
+    index_->AddWithoutIds(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -120,7 +119,7 @@ TEST_P(HNSWTest, HNSW_serialize) {
 
     {
         index_->Train(base_dataset, conf);
-        index_->Add(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, conf);
         auto binaryset = index_->Serialize();
         auto bin = binaryset.GetByName("HNSW");
 

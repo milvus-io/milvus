@@ -95,38 +95,20 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
     std::lock_guard<std::mutex> lk(mutex_);
 
-    GETTENSORWITHIDS(dataset_ptr)
+    GETTENSOR(dataset_ptr)
 
-    //     if (normalize) {
-    //         std::vector<float> ep_norm_vector(Dim());
-    //         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dim());
-    //         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             std::vector<float> norm_vector(Dim());
-    //             normalize_vector((float*)(p_data + Dim() * i), norm_vector.data(), Dim());
-    //             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
-    //         }
-    //     } else {
-    //         index_->addPoint((void*)(p_data), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             index_->addPoint((void*)(p_data + Dim() * i), p_ids[i]);
-    //         }
-    //     }
-
-    index_->addPoint(p_data, p_ids[0]);
+    index_->addPoint(p_data, 0);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
         faiss::BuilderSuspend::check_wait();
-        index_->addPoint(((float*)p_data + Dim() * i), p_ids[i]);
+        index_->addPoint(((float*)p_data + Dim() * i), i);
     }
 }
 
@@ -154,13 +136,6 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::vector<P> ret;
         const float* single_query = (float*)p_data + i * Dim();
 
-        // if (normalize) {
-        //     std::vector<float> norm_vector(Dim());
-        //     normalize_vector((float*)(single_query), norm_vector.data(), Dim());
-        //     ret = index_->searchKnn((float*)(norm_vector.data()), config[meta::TOPK].get<int64_t>(), compare);
-        // } else {
-        //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
-        // }
         ret = index_->searchKnn((float*)single_query, k, compare, blacklist);
 
         while (ret.size() < k) {
@@ -179,6 +154,7 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
+        MapOffsetToUid(ids.data(), ids.size());
         memcpy(p_dist + i * k, dist.data(), dist_size);
         memcpy(p_id + i * k, ids.data(), id_size);
     }

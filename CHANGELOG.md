@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#4454 Optimize the process of indexing and querying
 
 ## Task
 

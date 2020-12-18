@@ -18,6 +18,7 @@
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "db/utils.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include <fiu-local.h>
 #include <fiu-control.h>
 
@@ -47,8 +48,11 @@ CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType met
         }
     }
 
-    auto status = engine_ptr->AddWithIds((int64_t)ids->size(), data.data(), ids->data());
-    (std::static_pointer_cast<milvus::engine::ExecutionEngineImpl>(engine_ptr))->index_->SetUids(ids);
+    auto engine_impl = (std::static_pointer_cast<milvus::engine::ExecutionEngineImpl>(engine_ptr));
+
+    auto dataset = milvus::knowhere::GenDataset(ROW_COUNT, DIMENSION, data.data());
+    engine_impl->index_->AddWithoutIds(dataset, milvus::knowhere::Config());
+    engine_impl->index_->SetUids(ids);
     return engine_ptr;
 }
 

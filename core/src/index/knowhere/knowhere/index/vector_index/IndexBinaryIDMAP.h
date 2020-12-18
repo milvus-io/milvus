@@ -42,9 +42,6 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
@@ -63,9 +60,6 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
 
     virtual const uint8_t*
     GetRawVectors();
-
-    virtual const int64_t*
-    GetRawIds();
 
  protected:
     virtual void

@@ -45,9 +45,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr

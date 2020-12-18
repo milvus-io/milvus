@@ -14,7 +14,6 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
-#include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"

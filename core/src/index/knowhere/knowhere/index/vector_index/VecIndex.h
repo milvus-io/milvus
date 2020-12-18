@@ -31,33 +31,17 @@ class VecIndex : public Index {
     virtual void
     BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
         Train(dataset_ptr, config);
-        Add(dataset_ptr, config);
+        AddWithoutIds(dataset_ptr, config);
     }
 
     virtual void
     Train(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual void
-    Add(const DatasetPtr& dataset, const Config& config) = 0;
-
-    virtual void
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
     Query(const DatasetPtr& dataset, const Config& config) = 0;
-
-#if 0
-    virtual DatasetPtr
-    QueryById(const DatasetPtr& dataset, const Config& config) {
-        return nullptr;
-    }
-#endif
-
-    // virtual DatasetPtr
-    // QueryByRange(const DatasetPtr&, const Config&) = 0;
-    //
-    // virtual MetricType
-    // metric_type() = 0;
 
     virtual int64_t
     Dim() = 0;
@@ -74,13 +58,6 @@ class VecIndex : public Index {
     index_mode() const {
         return index_mode_;
     }
-
-#if 0
-    virtual DatasetPtr
-    GetVectorById(const DatasetPtr& dataset, const Config& config) {
-        return nullptr;
-    }
-#endif
 
     faiss::ConcurrentBitsetPtr
     GetBlacklist() {
@@ -102,6 +79,17 @@ class VecIndex : public Index {
     void
     SetUids(std::shared_ptr<std::vector<IDType>> uids) {
         uids_ = uids;
+    }
+
+    void
+    MapOffsetToUid(IDType* id, size_t n) {
+        if (uids_) {
+            for (size_t i = 0; i < n; i++) {
+                if (id[i] >= 0) {
+                    id[i] = uids_->at(id[i]);
+                }
+            }
+        }
     }
 
     size_t

@@ -82,7 +82,6 @@ TEST_F(NSGInterfaceTest, basic_test) {
     {
         ASSERT_ANY_THROW(index_->Serialize());
         ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
