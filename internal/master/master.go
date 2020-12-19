@@ -54,7 +54,9 @@ type Master struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
-	segmentMgr       *SegmentManager
+	segmentManager   *SegmentManager
+	segmentAssigner  *SegmentAssigner
+	statProcessor    *StatsProcessor
 	segmentStatusMsg ms.MsgStream
 
 	//id allocator
@@ -137,6 +139,11 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	pulsarK2SStream.CreatePulsarProducers(Params.K2SChannelNames)
 	tsMsgProducer.SetK2sSyncStream(pulsarK2SStream)
 
+	proxyTtBarrierWatcher := make(chan *ms.TimeTickMsg, 1024)
+	writeNodeTtBarrierWatcher := make(chan *ms.TimeTickMsg, 1024)
+	tsMsgProducer.WatchProxyTtBarrier(proxyTtBarrierWatcher)
+	tsMsgProducer.WatchWriteNodeTtBarrier(writeNodeTtBarrierWatcher)
+
 	// stats msg stream
 	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
 	statsMs.SetPulsarClient(pulsarAddr)
@@ -169,8 +176,22 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	m.scheduler.SetDDMsgStream(pulsarDDStream)
 	m.scheduler.SetIDAllocator(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
 
-	m.segmentMgr = NewSegmentManager(metakv,
+	m.segmentAssigner = NewSegmentAssigner(ctx, metakv,
+		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
+		proxyTtBarrierWatcher,
+	)
+	m.segmentManager, err = NewSegmentManager(ctx, metakv,
 		func() (UniqueID, error) { return m.idAllocator.AllocOne() },
+		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
+		writeNodeTtBarrierWatcher,
+		&MockFlushScheduler{}, // todo replace mock with real flush scheduler
+		m.segmentAssigner)
+
+	if err != nil {
+		return nil, err
+	}
+
+	m.statProcessor = NewStatsProcessor(metakv,
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 	)
 
@@ -199,7 +220,8 @@ func (s *Master) Close() {
 	log.Print("closing server")
 
 	s.stopServerLoop()
-
+	s.segmentAssigner.Close()
+	s.segmentManager.Close()
 	if s.kvBase != nil {
 		s.kvBase.Close()
 	}
@@ -226,6 +248,8 @@ func (s *Master) Run(grpcPort int64) error {
 	if err := s.startServerLoop(s.ctx, grpcPort); err != nil {
 		return err
 	}
+	s.segmentAssigner.Start()
+	s.segmentManager.Start()
 	atomic.StoreInt64(&s.isServing, 1)
 
 	// Run callbacks
@@ -268,7 +292,7 @@ func (s *Master) startServerLoop(ctx context.Context, grpcPort int64) error {
 	}
 
 	s.serverLoopWg.Add(1)
-	go s.segmentStatisticsLoop()
+	go s.statisticsLoop()
 
 	s.serverLoopWg.Add(1)
 	go s.tsLoop()
@@ -348,7 +372,7 @@ func (s *Master) tsLoop() {
 	}
 }
 
-func (s *Master) segmentStatisticsLoop() {
+func (s *Master) statisticsLoop() {
 	defer s.serverLoopWg.Done()
 	defer s.segmentStatusMsg.Close()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
@@ -357,7 +381,7 @@ func (s *Master) segmentStatisticsLoop() {
 	for {
 		select {
 		case msg := <-s.segmentStatusMsg.Chan():
-			err := s.segmentMgr.HandleQueryNodeMsgPack(msg)
+			err := s.statProcessor.ProcessQueryNodeStats(msg)
 			if err != nil {
 				log.Println(err)
 			}

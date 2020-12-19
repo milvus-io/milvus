@@ -20,7 +20,6 @@
 #include <memory>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/algorithm/string.hpp>
-#include <algorithm>
 
 namespace milvus::query {
 
@@ -40,8 +39,10 @@ const std::map<std::string, RangeExpr::OpType> RangeExpr::mapping_ = {
 
 class Parser {
  public:
-    friend std::unique_ptr<Plan>
-    CreatePlan(const Schema& schema, const std::string& dsl_str);
+    static std::unique_ptr<Plan>
+    CreatePlan(const Schema& schema, const std::string& dsl_str) {
+        return Parser(schema).CreatePlanImpl(dsl_str);
+    }
 
  private:
     std::unique_ptr<Plan>
@@ -50,55 +51,29 @@ class Parser {
     explicit Parser(const Schema& schema) : schema(schema) {
     }
 
-    // vector node parser, should be called exactly once per pass.
     std::unique_ptr<VectorPlanNode>
     ParseVecNode(const Json& out_body);
 
-    // Dispatcher of all parse function
-    // NOTE: when nullptr, it is a pure vector node
-    ExprPtr
-    ParseAnyNode(const Json& body);
-
-    ExprPtr
-    ParseMustNode(const Json& body);
-
-    ExprPtr
-    ParseShouldNode(const Json& body);
-
-    ExprPtr
-    ParseShouldNotNode(const Json& body);
-
-    // parse the value of "should"/"must"/"should_not" entry
-    std::vector<ExprPtr>
-    ParseItemList(const Json& body);
-
-    // parse the value of "range" entry
-    ExprPtr
-    ParseRangeNode(const Json& out_body);
-
-    // parse the value of "term" entry
-    ExprPtr
-    ParseTermNode(const Json& out_body);
-
- private:
-    // template implementation of leaf parser
-    // used by corresponding parser
-
     template <typename T>
-    ExprPtr
+    std::unique_ptr<Expr>
     ParseRangeNodeImpl(const std::string& field_name, const Json& body);
 
     template <typename T>
-    ExprPtr
+    std::unique_ptr<Expr>
     ParseTermNodeImpl(const std::string& field_name, const Json& body);
+
+    std::unique_ptr<Expr>
+    ParseRangeNode(const Json& out_body);
+
+    std::unique_ptr<Expr>
+    ParseTermNode(const Json& out_body);
 
  private:
     const Schema& schema;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
-    std::optional<std::unique_ptr<VectorPlanNode>> vector_node_opt_;
 };
 
-ExprPtr
+std::unique_ptr<Expr>
 Parser::ParseRangeNode(const Json& out_body) {
     Assert(out_body.is_object());
     Assert(out_body.size() == 1);
@@ -109,8 +84,9 @@ Parser::ParseRangeNode(const Json& out_body) {
     Assert(!field_is_vector(data_type));
 
     switch (data_type) {
-        case DataType::BOOL:
+        case DataType::BOOL: {
             return ParseRangeNodeImpl<bool>(field_name, body);
+        }
         case DataType::INT8:
             return ParseRangeNodeImpl<int8_t>(field_name, body);
         case DataType::INT16:
@@ -130,22 +106,51 @@ Parser::ParseRangeNode(const Json& out_body) {
 
 std::unique_ptr<Plan>
 Parser::CreatePlanImpl(const std::string& dsl_str) {
-    auto dsl = Json::parse(dsl_str);
-    auto bool_dsl = dsl.at("bool");
-    auto predicate = ParseAnyNode(bool_dsl);
-    Assert(vector_node_opt_.has_value());
-    auto vec_node = std::move(vector_node_opt_).value();
-    if (predicate != nullptr) {
-        vec_node->predicate_ = std::move(predicate);
-    }
-
     auto plan = std::make_unique<Plan>(schema);
+    auto dsl = nlohmann::json::parse(dsl_str);
+    nlohmann::json vec_pack;
+    std::optional<std::unique_ptr<Expr>> predicate;
+    // top level
+    auto& bool_dsl = dsl.at("bool");
+    if (bool_dsl.contains("must")) {
+        auto& packs = bool_dsl.at("must");
+        Assert(packs.is_array());
+        for (auto& pack : packs) {
+            if (pack.contains("vector")) {
+                auto& out_body = pack.at("vector");
+                plan->plan_node_ = ParseVecNode(out_body);
+            } else if (pack.contains("term")) {
+                AssertInfo(!predicate, "unsupported complex DSL");
+                auto& out_body = pack.at("term");
+                predicate = ParseTermNode(out_body);
+            } else if (pack.contains("range")) {
+                AssertInfo(!predicate, "unsupported complex DSL");
+                auto& out_body = pack.at("range");
+                predicate = ParseRangeNode(out_body);
+            } else {
+                PanicInfo("unsupported node");
+            }
+        }
+        AssertInfo(plan->plan_node_, "vector node not found");
+    } else if (bool_dsl.contains("vector")) {
+        auto& out_body = bool_dsl.at("vector");
+        plan->plan_node_ = ParseVecNode(out_body);
+        Assert(plan->plan_node_);
+    } else {
+        PanicInfo("Unsupported DSL");
+    }
+    plan->plan_node_->predicate_ = std::move(predicate);
     plan->tag2field_ = std::move(tag2field_);
-    plan->plan_node_ = std::move(vec_node);
+    // TODO: target_entry parser
+    // if schema autoid is true,
+    //     prepend target_entries_ with row_id
+    // else
+    //     with primary_key
+    //
     return plan;
 }
 
-ExprPtr
+std::unique_ptr<Expr>
 Parser::ParseTermNode(const Json& out_body) {
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
@@ -216,7 +221,7 @@ Parser::ParseVecNode(const Json& out_body) {
 }
 
 template <typename T>
-ExprPtr
+std::unique_ptr<Expr>
 Parser::ParseTermNodeImpl(const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<TermExprImpl<T>>();
     auto data_type = schema[field_name].get_data_type();
@@ -244,7 +249,7 @@ Parser::ParseTermNodeImpl(const std::string& field_name, const Json& body) {
 }
 
 template <typename T>
-ExprPtr
+std::unique_ptr<Expr>
 Parser::ParseRangeNodeImpl(const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<RangeExprImpl<T>>();
     auto data_type = schema[field_name].get_data_type();
@@ -271,6 +276,12 @@ Parser::ParseRangeNodeImpl(const std::string& field_name, const Json& body) {
     }
     std::sort(expr->conditions_.begin(), expr->conditions_.end());
     return expr;
+}
+
+std::unique_ptr<Plan>
+CreatePlan(const Schema& schema, const std::string& dsl_str) {
+    auto plan = Parser::CreatePlan(schema, dsl_str);
+    return plan;
 }
 
 std::unique_ptr<PlaceholderGroup>
@@ -300,150 +311,6 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
         result->emplace_back(std::move(element));
     }
     return result;
-}
-
-std::unique_ptr<Plan>
-CreatePlan(const Schema& schema, const std::string& dsl_str) {
-    auto plan = Parser(schema).CreatePlanImpl(dsl_str);
-    return plan;
-}
-
-std::vector<ExprPtr>
-Parser::ParseItemList(const Json& body) {
-    std::vector<ExprPtr> results;
-    if (body.is_object()) {
-        // only one item;
-        auto new_entry = ParseAnyNode(body);
-        results.emplace_back(std::move(new_entry));
-    } else {
-        // item array
-        Assert(body.is_array());
-        for (auto& item : body) {
-            auto new_entry = ParseAnyNode(item);
-            results.emplace_back(std::move(new_entry));
-        }
-    }
-    auto old_size = results.size();
-
-    auto new_end = std::remove_if(results.begin(), results.end(), [](const ExprPtr& x) { return x == nullptr; });
-
-    results.resize(new_end - results.begin());
-
-    return results;
-}
-
-ExprPtr
-Parser::ParseAnyNode(const Json& out_body) {
-    Assert(out_body.is_object());
-    Assert(out_body.size() == 1);
-
-    auto out_iter = out_body.begin();
-
-    auto key = out_iter.key();
-    auto body = out_iter.value();
-
-    if (key == "must") {
-        return ParseMustNode(body);
-    } else if (key == "should") {
-        return ParseShouldNode(body);
-    } else if (key == "should_not") {
-        return ParseShouldNotNode(body);
-    } else if (key == "range") {
-        return ParseRangeNode(body);
-    } else if (key == "term") {
-        return ParseTermNode(body);
-    } else if (key == "vector") {
-        auto vec_node = ParseVecNode(body);
-        Assert(!vector_node_opt_.has_value());
-        vector_node_opt_ = std::move(vec_node);
-        return nullptr;
-    } else {
-        PanicInfo("unsupported key: " + key);
-    }
-}
-
-template <typename Merger>
-static ExprPtr
-ConstructTree(Merger merger, std::vector<ExprPtr> item_list) {
-    if (item_list.size() == 0) {
-        return nullptr;
-    }
-
-    if (item_list.size() == 1) {
-        return std::move(item_list[0]);
-    }
-
-    // Note: use deque to construct a binary tree
-    //     Op
-    //   /    \
-    // Op     Op
-    // | \    | \
-    // A  B   C D
-    std::deque<ExprPtr> binary_queue;
-    for (auto& item : item_list) {
-        Assert(item != nullptr);
-        binary_queue.push_back(std::move(item));
-    }
-    while (binary_queue.size() > 1) {
-        auto left = std::move(binary_queue.front());
-        binary_queue.pop_front();
-        auto right = std::move(binary_queue.front());
-        binary_queue.pop_front();
-        binary_queue.push_back(merger(std::move(left), std::move(right)));
-    }
-    Assert(binary_queue.size() == 1);
-    return std::move(binary_queue.front());
-}
-
-ExprPtr
-Parser::ParseMustNode(const Json& body) {
-    auto item_list = ParseItemList(body);
-    auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
-        res->op_type_ = OpType::LogicalAnd;
-        res->left_ = std::move(left);
-        res->right_ = std::move(right);
-        return res;
-    };
-    return ConstructTree(merger, std::move(item_list));
-}
-
-ExprPtr
-Parser::ParseShouldNode(const Json& body) {
-    auto item_list = ParseItemList(body);
-    Assert(item_list.size() >= 1);
-    auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
-        res->op_type_ = OpType::LogicalOr;
-        res->left_ = std::move(left);
-        res->right_ = std::move(right);
-        return res;
-    };
-    return ConstructTree(merger, std::move(item_list));
-}
-
-ExprPtr
-Parser::ParseShouldNotNode(const Json& body) {
-    auto item_list = ParseItemList(body);
-    Assert(item_list.size() >= 1);
-    auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
-        res->op_type_ = OpType::LogicalAnd;
-        res->left_ = std::move(left);
-        res->right_ = std::move(right);
-        return res;
-    };
-    auto subtree = ConstructTree(merger, std::move(item_list));
-
-    using OpType = BoolUnaryExpr::OpType;
-    auto res = std::make_unique<BoolUnaryExpr>();
-    res->op_type_ = OpType::LogicalNot;
-    res->child_ = std::move(subtree);
-
-    return res;
 }
 
 int64_t

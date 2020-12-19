@@ -437,7 +437,7 @@ func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*i
 }
 
 func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.AssignSegIDRequest) (*internalpb.AssignSegIDResponse, error) {
-	segInfos, err := s.segmentMgr.AssignSegmentID(request.GetPerChannelReq())
+	segInfos, err := s.segmentManager.AssignSegment(request.GetPerChannelReq())
 	if err != nil {
 		return &internalpb.AssignSegIDResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},

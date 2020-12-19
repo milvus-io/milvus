@@ -1,250 +1,191 @@
 package master
 
 import (
+	"context"
+	"log"
 	"sync"
-	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+
+	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type collectionStatus struct {
-	openedSegments []UniqueID
+	segments []*segmentStatus
 }
-
-type assignment struct {
-	MemSize    int64 // bytes
-	AssignTime time.Time
+type segmentStatus struct {
+	segmentID UniqueID
+	total     int
+	closable  bool
 }
 
 type channelRange struct {
 	channelStart int32
 	channelEnd   int32
 }
-
-type segmentStatus struct {
-	assignments []*assignment
-}
-
 type SegmentManager struct {
 	metaTable              *metaTable
-	statsStream            msgstream.MsgStream
 	channelRanges          []*channelRange
-	segmentStatus          map[UniqueID]*segmentStatus    // segment id to segment status
 	collStatus             map[UniqueID]*collectionStatus // collection id to collection status
 	defaultSizePerRecord   int64
-	minimumAssignSize      int64
 	segmentThreshold       float64
 	segmentThresholdFactor float64
-	segmentExpireDuration  int64
 	numOfChannels          int
 	numOfQueryNodes        int
 	globalIDAllocator      func() (UniqueID, error)
 	globalTSOAllocator     func() (Timestamp, error)
 	mu                     sync.RWMutex
+
+	assigner *SegmentAssigner
+
+	writeNodeTimeSyncChan chan *ms.TimeTickMsg
+	flushScheduler        persistenceScheduler
+
+	ctx       context.Context
+	cancel    context.CancelFunc
+	waitGroup sync.WaitGroup
 }
 
-func (segMgr *SegmentManager) HandleQueryNodeMsgPack(msgPack *msgstream.MsgPack) error {
-	segMgr.mu.Lock()
-	defer segMgr.mu.Unlock()
-	for _, msg := range msgPack.Msgs {
-		statsMsg, ok := msg.(*msgstream.QueryNodeStatsMsg)
-		if !ok {
-			return errors.Errorf("Type of message is not QueryNodeStatsMsg")
-		}
+func (manager *SegmentManager) AssignSegment(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
-		for _, segStat := range statsMsg.GetSegStats() {
-			err := segMgr.handleSegmentStat(segStat)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (segMgr *SegmentManager) handleSegmentStat(segStats *internalpb.SegmentStats) error {
-	if !segStats.GetRecentlyModified() {
-		return nil
-	}
-	segID := segStats.GetSegmentID()
-	segMeta, err := segMgr.metaTable.GetSegmentByID(segID)
-	if err != nil {
-		return err
-	}
-	segMeta.NumRows = segStats.NumRows
-	segMeta.MemSize = segStats.MemorySize
-
-	if segStats.MemorySize > int64(segMgr.segmentThresholdFactor*segMgr.segmentThreshold) {
-		if err := segMgr.metaTable.UpdateSegment(segMeta); err != nil {
-			return err
-		}
-		return segMgr.closeSegment(segMeta)
-	}
-	return segMgr.metaTable.UpdateSegment(segMeta)
-}
-
-func (segMgr *SegmentManager) closeSegment(segMeta *etcdpb.SegmentMeta) error {
-	if segMeta.GetCloseTime() == 0 {
-		// close the segment and remove from collStatus
-		collStatus, ok := segMgr.collStatus[segMeta.GetCollectionID()]
-		if ok {
-			openedSegments := collStatus.openedSegments
-			for i, openedSegID := range openedSegments {
-				if openedSegID == segMeta.SegmentID {
-					openedSegments[i] = openedSegments[len(openedSegments)-1]
-					collStatus.openedSegments = openedSegments[:len(openedSegments)-1]
-					break
-				}
-			}
-		}
-		ts, err := segMgr.globalTSOAllocator()
-		if err != nil {
-			return err
-		}
-		segMeta.CloseTime = ts
-	}
-
-	err := segMgr.metaTable.CloseSegment(segMeta.SegmentID, segMeta.GetCloseTime())
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error) {
-	segMgr.mu.Lock()
-	defer segMgr.mu.Unlock()
 	res := make([]*internalpb.SegIDAssignment, 0)
+
 	for _, req := range segIDReq {
 		collName := req.CollName
 		partitionTag := req.PartitionTag
 		count := req.Count
 		channelID := req.ChannelID
-		collMeta, err := segMgr.metaTable.GetCollectionByName(collName)
+
+		collMeta, err := manager.metaTable.GetCollectionByName(collName)
 		if err != nil {
 			return nil, err
 		}
 
 		collID := collMeta.GetID()
-		if !segMgr.metaTable.HasCollection(collID) {
-			return nil, errors.Errorf("can not find collection with id=%d", collID)
-		}
-		if !segMgr.metaTable.HasPartition(collID, partitionTag) {
+		if !manager.metaTable.HasPartition(collID, partitionTag) {
 			return nil, errors.Errorf("partition tag %s can not find in coll %d", partitionTag, collID)
 		}
-		collStatus, ok := segMgr.collStatus[collID]
-		if !ok {
-			collStatus = &collectionStatus{
-				openedSegments: make([]UniqueID, 0),
-			}
-			segMgr.collStatus[collID] = collStatus
-		}
 
-		assignInfo, err := segMgr.assignSegment(collName, collID, partitionTag, count, channelID, collStatus)
+		assignInfo, err := manager.assignSegment(collName, collID, partitionTag, count, channelID)
 		if err != nil {
 			return nil, err
 		}
+
 		res = append(res, assignInfo)
 	}
+
 	return res, nil
 }
 
-func (segMgr *SegmentManager) assignSegment(collName string, collID UniqueID, partitionTag string, count uint32, channelID int32,
-	collStatus *collectionStatus) (*internalpb.SegIDAssignment, error) {
-	segmentThreshold := int64(segMgr.segmentThreshold)
-	for _, segID := range collStatus.openedSegments {
-		segMeta, _ := segMgr.metaTable.GetSegmentByID(segID)
-		if segMeta.GetCloseTime() != 0 || channelID < segMeta.GetChannelStart() ||
-			channelID > segMeta.GetChannelEnd() || segMeta.PartitionTag != partitionTag {
+func (manager *SegmentManager) assignSegment(
+	collName string,
+	collID UniqueID,
+	partitionTag string,
+	count uint32,
+	channelID int32) (*internalpb.SegIDAssignment, error) {
+
+	collStatus, ok := manager.collStatus[collID]
+	if !ok {
+		collStatus = &collectionStatus{
+			segments: make([]*segmentStatus, 0),
+		}
+		manager.collStatus[collID] = collStatus
+	}
+	for _, segStatus := range collStatus.segments {
+		if segStatus.closable {
 			continue
 		}
-		// check whether segment has enough mem size
-		assignedMem := segMgr.checkAssignedSegExpire(segID)
-		memSize := segMeta.MemSize
-		neededMemSize := segMgr.calNeededSize(memSize, segMeta.NumRows, int64(count))
-		if memSize+assignedMem+neededMemSize <= segmentThreshold {
-			remainingSize := segmentThreshold - memSize - assignedMem
-			allocMemSize := segMgr.calAllocMemSize(neededMemSize, remainingSize)
-			segMgr.addAssignment(segID, allocMemSize)
-			return &internalpb.SegIDAssignment{
-				SegID:        segID,
-				ChannelID:    channelID,
-				Count:        uint32(segMgr.calNumRows(memSize, segMeta.NumRows, allocMemSize)),
-				CollName:     collName,
-				PartitionTag: partitionTag,
-			}, nil
+		match, err := manager.isMatch(segStatus.segmentID, partitionTag, channelID)
+		if err != nil {
+			return nil, err
 		}
-	}
-	neededMemSize := segMgr.defaultSizePerRecord * int64(count)
-	if neededMemSize > segmentThreshold {
-		return nil, errors.Errorf("request with count %d need about %d mem size which is larger than segment threshold",
-			count, neededMemSize)
+		if !match {
+			continue
+		}
+
+		result, err := manager.assigner.Assign(segStatus.segmentID, int(count))
+		if err != nil {
+			return nil, err
+		}
+		if !result {
+			continue
+		}
+
+		return &internalpb.SegIDAssignment{
+			SegID:        segStatus.segmentID,
+			ChannelID:    channelID,
+			Count:        count,
+			CollName:     collName,
+			PartitionTag: partitionTag,
+		}, nil
+
 	}
 
-	segMeta, err := segMgr.openNewSegment(channelID, collID, partitionTag)
+	total, err := manager.estimateTotalRows(collName)
+	if err != nil {
+		return nil, err
+	}
+	if int(count) > total {
+		return nil, errors.Errorf("request count %d is larger than total rows %d", count, total)
+	}
+
+	id, err := manager.openNewSegment(channelID, collID, partitionTag, total)
 	if err != nil {
 		return nil, err
 	}
 
-	allocMemSize := segMgr.calAllocMemSize(neededMemSize, segmentThreshold)
-	segMgr.addAssignment(segMeta.SegmentID, allocMemSize)
+	result, err := manager.assigner.Assign(id, int(count))
+	if err != nil {
+		return nil, err
+	}
+	if !result {
+		return nil, errors.Errorf("assign failed for segment %d", id)
+	}
 	return &internalpb.SegIDAssignment{
-		SegID:        segMeta.SegmentID,
+		SegID:        id,
 		ChannelID:    channelID,
-		Count:        uint32(segMgr.calNumRows(0, 0, allocMemSize)),
+		Count:        count,
 		CollName:     collName,
 		PartitionTag: partitionTag,
 	}, nil
 }
 
-func (segMgr *SegmentManager) addAssignment(segID UniqueID, allocSize int64) {
-	segStatus := segMgr.segmentStatus[segID]
-	segStatus.assignments = append(segStatus.assignments, &assignment{
-		MemSize:    allocSize,
-		AssignTime: time.Now(),
-	})
+func (manager *SegmentManager) isMatch(segmentID UniqueID, partitionTag string, channelID int32) (bool, error) {
+	segMeta, err := manager.metaTable.GetSegmentByID(segmentID)
+	if err != nil {
+		return false, err
+	}
+
+	if channelID < segMeta.GetChannelStart() ||
+		channelID > segMeta.GetChannelEnd() || segMeta.PartitionTag != partitionTag {
+		return false, nil
+	}
+	return true, nil
 }
 
-func (segMgr *SegmentManager) calNeededSize(memSize int64, numRows int64, count int64) int64 {
-	var avgSize int64
-	if memSize == 0 || numRows == 0 || memSize/numRows == 0 {
-		avgSize = segMgr.defaultSizePerRecord
-	} else {
-		avgSize = memSize / numRows
+func (manager *SegmentManager) estimateTotalRows(collName string) (int, error) {
+	collMeta, err := manager.metaTable.GetCollectionByName(collName)
+	if err != nil {
+		return -1, err
 	}
-	return avgSize * count
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(collMeta.Schema)
+	if err != nil {
+		return -1, err
+	}
+	return int(manager.segmentThreshold / float64(sizePerRecord)), nil
 }
 
-func (segMgr *SegmentManager) calAllocMemSize(neededSize int64, remainSize int64) int64 {
-	if neededSize > remainSize {
-		return 0
-	}
-	if remainSize < segMgr.minimumAssignSize {
-		return remainSize
-	}
-	if neededSize < segMgr.minimumAssignSize {
-		return segMgr.minimumAssignSize
-	}
-	return neededSize
-}
-
-func (segMgr *SegmentManager) calNumRows(memSize int64, numRows int64, allocMemSize int64) int64 {
-	var avgSize int64
-	if memSize == 0 || numRows == 0 || memSize/numRows == 0 {
-		avgSize = segMgr.defaultSizePerRecord
-	} else {
-		avgSize = memSize / numRows
-	}
-	return allocMemSize / avgSize
-}
-
-func (segMgr *SegmentManager) openNewSegment(channelID int32, collID UniqueID, partitionTag string) (*etcdpb.SegmentMeta, error) {
+func (manager *SegmentManager) openNewSegment(channelID int32, collID UniqueID, partitionTag string, numRows int) (UniqueID, error) {
 	// find the channel range
 	channelStart, channelEnd := int32(-1), int32(-1)
-	for _, r := range segMgr.channelRanges {
+	for _, r := range manager.channelRanges {
 		if channelID >= r.channelStart && channelID <= r.channelEnd {
 			channelStart = r.channelStart
 			channelEnd = r.channelEnd
@@ -252,18 +193,19 @@ func (segMgr *SegmentManager) openNewSegment(channelID int32, collID UniqueID, p
 		}
 	}
 	if channelStart == -1 {
-		return nil, errors.Errorf("can't find the channel range which contains channel %d", channelID)
+		return -1, errors.Errorf("can't find the channel range which contains channel %d", channelID)
 	}
 
-	newID, err := segMgr.globalIDAllocator()
+	newID, err := manager.globalIDAllocator()
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
-	openTime, err := segMgr.globalTSOAllocator()
+	openTime, err := manager.globalTSOAllocator()
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
-	newSegMeta := &etcdpb.SegmentMeta{
+
+	err = manager.metaTable.AddSegment(&etcdpb.SegmentMeta{
 		SegmentID:    newID,
 		CollectionID: collID,
 		PartitionTag: partitionTag,
@@ -272,51 +214,119 @@ func (segMgr *SegmentManager) openNewSegment(channelID int32, collID UniqueID, p
 		OpenTime:     openTime,
 		NumRows:      0,
 		MemSize:      0,
-	}
-
-	err = segMgr.metaTable.AddSegment(newSegMeta)
+	})
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
-	segMgr.segmentStatus[newID] = &segmentStatus{
-		assignments: make([]*assignment, 0),
+
+	err = manager.assigner.OpenSegment(newID, numRows)
+	if err != nil {
+		return -1, err
 	}
-	collStatus := segMgr.collStatus[collID]
-	collStatus.openedSegments = append(collStatus.openedSegments, newSegMeta.SegmentID)
-	return newSegMeta, nil
+
+	segStatus := &segmentStatus{
+		segmentID: newID,
+		total:     numRows,
+		closable:  false,
+	}
+
+	collStatus := manager.collStatus[collID]
+	collStatus.segments = append(collStatus.segments, segStatus)
+
+	return newID, nil
 }
 
-// checkAssignedSegExpire check the expire time of assignments and return the total sum of assignments that are not expired.
-func (segMgr *SegmentManager) checkAssignedSegExpire(segID UniqueID) int64 {
-	segStatus := segMgr.segmentStatus[segID]
-	assignments := segStatus.assignments
-	result := int64(0)
-	i := 0
-	for i < len(assignments) {
-		assign := assignments[i]
-		if time.Since(assign.AssignTime) >= time.Duration(segMgr.segmentExpireDuration)*time.Millisecond {
-			assignments[i] = assignments[len(assignments)-1]
-			assignments = assignments[:len(assignments)-1]
-			continue
+func (manager *SegmentManager) Start() {
+	manager.waitGroup.Add(1)
+	go manager.startWriteNodeTimeSync()
+}
+
+func (manager *SegmentManager) Close() {
+	manager.cancel()
+	manager.waitGroup.Wait()
+}
+
+func (manager *SegmentManager) startWriteNodeTimeSync() {
+	defer manager.waitGroup.Done()
+	for {
+		select {
+		case <-manager.ctx.Done():
+			log.Println("write node time sync stopped")
+			return
+		case msg := <-manager.writeNodeTimeSyncChan:
+			if err := manager.syncWriteNodeTimestamp(msg.TimeTickMsg.Timestamp); err != nil {
+				log.Println("write node time sync error: " + err.Error())
+			}
 		}
-		result += assign.MemSize
-		i++
 	}
-	segStatus.assignments = assignments
-	return result
 }
 
-func (segMgr *SegmentManager) createChannelRanges() error {
-	div, rem := segMgr.numOfChannels/segMgr.numOfQueryNodes, segMgr.numOfChannels%segMgr.numOfQueryNodes
-	for i, j := 0, 0; i < segMgr.numOfChannels; j++ {
+func (manager *SegmentManager) syncWriteNodeTimestamp(timeTick Timestamp) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for _, status := range manager.collStatus {
+		for i, segStatus := range status.segments {
+			if !segStatus.closable {
+				closable, err := manager.judgeSegmentClosable(segStatus)
+				if err != nil {
+					return err
+				}
+				segStatus.closable = closable
+				if !segStatus.closable {
+					continue
+				}
+			}
+
+			isExpired, err := manager.assigner.CheckAssignmentExpired(segStatus.segmentID, timeTick)
+			if err != nil {
+				return err
+			}
+			if !isExpired {
+				continue
+			}
+			status.segments = append(status.segments[:i], status.segments[i+1:]...)
+			ts, err := manager.globalTSOAllocator()
+			if err != nil {
+				return err
+			}
+			if err = manager.metaTable.CloseSegment(segStatus.segmentID, ts); err != nil {
+				return err
+			}
+			if err = manager.assigner.CloseSegment(segStatus.segmentID); err != nil {
+				return err
+			}
+			if err = manager.flushScheduler.Enqueue(segStatus.segmentID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (manager *SegmentManager) judgeSegmentClosable(status *segmentStatus) (bool, error) {
+	segMeta, err := manager.metaTable.GetSegmentByID(status.segmentID)
+	if err != nil {
+		return false, err
+	}
+
+	if segMeta.NumRows >= int64(manager.segmentThresholdFactor*float64(status.total)) {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (manager *SegmentManager) initChannelRanges() error {
+	div, rem := manager.numOfChannels/manager.numOfQueryNodes, manager.numOfChannels%manager.numOfQueryNodes
+	for i, j := 0, 0; i < manager.numOfChannels; j++ {
 		if j < rem {
-			segMgr.channelRanges = append(segMgr.channelRanges, &channelRange{
+			manager.channelRanges = append(manager.channelRanges, &channelRange{
 				channelStart: int32(i),
 				channelEnd:   int32(i + div),
 			})
 			i += div + 1
 		} else {
-			segMgr.channelRanges = append(segMgr.channelRanges, &channelRange{
+			manager.channelRanges = append(manager.channelRanges, &channelRange{
 				channelStart: int32(i),
 				channelEnd:   int32(i + div - 1),
 			})
@@ -325,26 +335,38 @@ func (segMgr *SegmentManager) createChannelRanges() error {
 	}
 	return nil
 }
-
-func NewSegmentManager(meta *metaTable,
+func NewSegmentManager(ctx context.Context,
+	meta *metaTable,
 	globalIDAllocator func() (UniqueID, error),
 	globalTSOAllocator func() (Timestamp, error),
-) *SegmentManager {
-	segMgr := &SegmentManager{
+	syncWriteNodeChan chan *ms.TimeTickMsg,
+	scheduler persistenceScheduler,
+	assigner *SegmentAssigner) (*SegmentManager, error) {
+
+	assignerCtx, cancel := context.WithCancel(ctx)
+	segAssigner := &SegmentManager{
 		metaTable:              meta,
 		channelRanges:          make([]*channelRange, 0),
-		segmentStatus:          make(map[UniqueID]*segmentStatus),
 		collStatus:             make(map[UniqueID]*collectionStatus),
 		segmentThreshold:       Params.SegmentSize * 1024 * 1024,
 		segmentThresholdFactor: Params.SegmentSizeFactor,
-		segmentExpireDuration:  Params.SegIDAssignExpiration,
-		minimumAssignSize:      Params.MinSegIDAssignCnt * Params.DefaultRecordSize,
 		defaultSizePerRecord:   Params.DefaultRecordSize,
 		numOfChannels:          Params.TopicNum,
 		numOfQueryNodes:        Params.QueryNodeNum,
 		globalIDAllocator:      globalIDAllocator,
 		globalTSOAllocator:     globalTSOAllocator,
+
+		assigner:              assigner,
+		writeNodeTimeSyncChan: syncWriteNodeChan,
+		flushScheduler:        scheduler,
+
+		ctx:    assignerCtx,
+		cancel: cancel,
 	}
-	segMgr.createChannelRanges()
-	return segMgr
+
+	if err := segAssigner.initChannelRanges(); err != nil {
+		return nil, err
+	}
+
+	return segAssigner, nil
 }

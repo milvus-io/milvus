@@ -2,15 +2,12 @@ package master
 
 import (
 	"context"
-	"log"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -25,61 +22,11 @@ import (
 	"google.golang.org/grpc"
 )
 
-var mt *metaTable
-var segMgr *SegmentManager
-var collName = "coll_segmgr_test"
-var collID = int64(1001)
-var partitionTag = "test"
-var kvBase kv.TxnBase
-var master *Master
-var masterCancelFunc context.CancelFunc
+func TestSegmentManager_AssignSegment(t *testing.T) {
+	ctx, cancelFunc := context.WithCancel(context.TODO())
+	defer cancelFunc()
 
-func setup() {
 	Init()
-	etcdAddress := Params.EtcdAddress
-
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
-	if err != nil {
-		panic(err)
-	}
-	rootPath := "/test/root"
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-	_, err = cli.Delete(ctx, rootPath, clientv3.WithPrefix())
-	if err != nil {
-		panic(err)
-	}
-	kvBase = etcdkv.NewEtcdKV(cli, rootPath)
-	tmpMt, err := NewMetaTable(kvBase)
-	if err != nil {
-		panic(err)
-	}
-	mt = tmpMt
-	if mt.HasCollection(collID) {
-		err := mt.DeleteCollection(collID)
-		if err != nil {
-			panic(err)
-		}
-	}
-	err = mt.AddCollection(&pb.CollectionMeta{
-		ID: collID,
-		Schema: &schemapb.CollectionSchema{
-			Name: collName,
-		},
-		CreateTime:    0,
-		SegmentIDs:    []UniqueID{},
-		PartitionTags: []string{},
-	})
-	if err != nil {
-		panic(err)
-	}
-	err = mt.AddPartition(collID, partitionTag)
-	if err != nil {
-		panic(err)
-	}
-
-	var cnt int64
-
 	Params.TopicNum = 5
 	Params.QueryNodeNum = 3
 	Params.SegmentSize = 536870912 / 1024 / 1024
@@ -87,151 +34,143 @@ func setup() {
 	Params.DefaultRecordSize = 1024
 	Params.MinSegIDAssignCnt = 1048576 / 1024
 	Params.SegIDAssignExpiration = 2000
+	etcdAddress := Params.EtcdAddress
+	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+	assert.Nil(t, err)
+	rootPath := "/test/root"
+	_, err = cli.Delete(ctx, rootPath, clientv3.WithPrefix())
+	assert.Nil(t, err)
 
-	segMgr = NewSegmentManager(mt,
-		func() (UniqueID, error) {
-			val := atomic.AddInt64(&cnt, 1)
-			return val, nil
+	kvBase := etcdkv.NewEtcdKV(cli, rootPath)
+	defer kvBase.Close()
+	mt, err := NewMetaTable(kvBase)
+	assert.Nil(t, err)
+
+	collName := "segmgr_test_coll"
+	var collID int64 = 1001
+	partitionTag := "test_part"
+	schema := &schemapb.CollectionSchema{
+		Name: collName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_INT32},
+			{FieldID: 2, Name: "f2", IsPrimaryKey: false, DataType: schemapb.DataType_VECTOR_FLOAT, TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			}},
 		},
-		func() (Timestamp, error) {
-			val := atomic.AddInt64(&cnt, 1)
-			phy := time.Now().UnixNano() / int64(time.Millisecond)
-			ts := tsoutil.ComposeTS(phy, val)
-			return ts, nil
-		},
-	)
-}
-
-func teardown() {
-	err := mt.DeleteCollection(collID)
-	if err != nil {
-		log.Fatalf(err.Error())
 	}
-	kvBase.Close()
-}
+	err = mt.AddCollection(&pb.CollectionMeta{
+		ID:            collID,
+		Schema:        schema,
+		CreateTime:    0,
+		SegmentIDs:    []UniqueID{},
+		PartitionTags: []string{},
+	})
+	assert.Nil(t, err)
+	err = mt.AddPartition(collID, partitionTag)
+	assert.Nil(t, err)
 
-func TestSegmentManager_AssignSegmentID(t *testing.T) {
-	setup()
-	defer teardown()
-	reqs := []*internalpb.SegIDRequest{
-		{CollName: collName, PartitionTag: partitionTag, Count: 25000, ChannelID: 0},
-		{CollName: collName, PartitionTag: partitionTag, Count: 10000, ChannelID: 1},
-		{CollName: collName, PartitionTag: partitionTag, Count: 30000, ChannelID: 2},
-		{CollName: collName, PartitionTag: partitionTag, Count: 25000, ChannelID: 3},
-		{CollName: collName, PartitionTag: partitionTag, Count: 10000, ChannelID: 4},
+	var cnt int64
+	globalIDAllocator := func() (UniqueID, error) {
+		val := atomic.AddInt64(&cnt, 1)
+		return val, nil
+	}
+	globalTsoAllocator := func() (Timestamp, error) {
+		val := atomic.AddInt64(&cnt, 1)
+		phy := time.Now().UnixNano() / int64(time.Millisecond)
+		ts := tsoutil.ComposeTS(phy, val)
+		return ts, nil
+	}
+	syncWriteChan := make(chan *msgstream.TimeTickMsg)
+	syncProxyChan := make(chan *msgstream.TimeTickMsg)
+
+	segAssigner := NewSegmentAssigner(ctx, mt, globalTsoAllocator, syncProxyChan)
+	mockScheduler := &MockFlushScheduler{}
+	segManager, err := NewSegmentManager(ctx, mt, globalIDAllocator, globalTsoAllocator, syncWriteChan, mockScheduler, segAssigner)
+	assert.Nil(t, err)
+
+	segManager.Start()
+	defer segManager.Close()
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	assert.Nil(t, err)
+	maxCount := uint32(Params.SegmentSize * 1024 * 1024 / float64(sizePerRecord))
+	cases := []struct {
+		Count         uint32
+		ChannelID     int32
+		Err           bool
+		SameIDWith    int
+		NotSameIDWith int
+		ResultCount   int32
+	}{
+		{1000, 1, false, -1, -1, 1000},
+		{2000, 0, false, 0, -1, 2000},
+		{maxCount - 2999, 1, false, -1, 0, int32(maxCount - 2999)},
+		{maxCount - 3000, 1, false, 0, -1, int32(maxCount - 3000)},
+		{2000000000, 1, true, -1, -1, -1},
+		{1000, 3, false, -1, 0, 1000},
+		{maxCount, 2, false, -1, -1, int32(maxCount)},
 	}
 
-	segAssigns, err := segMgr.AssignSegmentID(reqs)
-	assert.Nil(t, err)
-
-	assert.Equal(t, uint32(25000), segAssigns[0].Count)
-	assert.Equal(t, uint32(10000), segAssigns[1].Count)
-	assert.Equal(t, uint32(30000), segAssigns[2].Count)
-	assert.Equal(t, uint32(25000), segAssigns[3].Count)
-	assert.Equal(t, uint32(10000), segAssigns[4].Count)
-
-	assert.Equal(t, segAssigns[0].SegID, segAssigns[1].SegID)
-	assert.Equal(t, segAssigns[2].SegID, segAssigns[3].SegID)
-
-	newReqs := []*internalpb.SegIDRequest{
-		{CollName: collName, PartitionTag: partitionTag, Count: 500000, ChannelID: 0},
+	var results = make([]*internalpb.SegIDAssignment, 0)
+	for _, c := range cases {
+		result, err := segManager.AssignSegment([]*internalpb.SegIDRequest{{Count: c.Count, ChannelID: c.ChannelID, CollName: collName, PartitionTag: partitionTag}})
+		results = append(results, result...)
+		if c.Err {
+			assert.NotNil(t, err)
+			continue
+		}
+		assert.Nil(t, err)
+		if c.SameIDWith != -1 {
+			assert.EqualValues(t, result[0].SegID, results[c.SameIDWith].SegID)
+		}
+		if c.NotSameIDWith != -1 {
+			assert.NotEqualValues(t, result[0].SegID, results[c.NotSameIDWith].SegID)
+		}
+		if c.ResultCount != -1 {
+			assert.EqualValues(t, result[0].Count, c.ResultCount)
+		}
 	}
-	// test open a new segment
-	newAssign, err := segMgr.AssignSegmentID(newReqs)
+
+	time.Sleep(time.Duration(Params.SegIDAssignExpiration))
+	timestamp, err := globalTsoAllocator()
 	assert.Nil(t, err)
-	assert.NotNil(t, newAssign)
-	assert.Equal(t, uint32(500000), newAssign[0].Count)
-	assert.NotEqual(t, segAssigns[0].SegID, newAssign[0].SegID)
-
-	// test assignment expiration
-	time.Sleep(3 * time.Second)
-
-	assignAfterExpiration, err := segMgr.AssignSegmentID(newReqs)
-	assert.Nil(t, err)
-	assert.NotNil(t, assignAfterExpiration)
-	assert.Equal(t, uint32(500000), assignAfterExpiration[0].Count)
-	assert.Equal(t, segAssigns[0].SegID, assignAfterExpiration[0].SegID)
-
-	// test invalid params
-	newReqs[0].CollName = "wrong_collname"
-	_, err = segMgr.AssignSegmentID(newReqs)
-	assert.Error(t, errors.Errorf("can not find collection with id=%d", collID), err)
-
-	newReqs[0].Count = 1000000
-	_, err = segMgr.AssignSegmentID(newReqs)
-	assert.Error(t, errors.Errorf("request with count %d need about %d mem size which is larger than segment threshold",
-		1000000, 1024*1000000), err)
-}
-
-func TestSegmentManager_SegmentStats(t *testing.T) {
-	setup()
-	defer teardown()
-	ts, err := segMgr.globalTSOAllocator()
-	assert.Nil(t, err)
-	err = mt.AddSegment(&pb.SegmentMeta{
-		SegmentID:    100,
+	err = mt.UpdateSegment(&pb.SegmentMeta{
+		SegmentID:    results[0].SegID,
 		CollectionID: collID,
 		PartitionTag: partitionTag,
 		ChannelStart: 0,
 		ChannelEnd:   1,
-		OpenTime:     ts,
+		CloseTime:    timestamp,
+		NumRows:      400000,
+		MemSize:      500000,
 	})
 	assert.Nil(t, err)
-	stats := internalpb.QueryNodeStats{
-		MsgType: internalpb.MsgType_kQueryNodeStats,
-		PeerID:  1,
-		SegStats: []*internalpb.SegmentStats{
-			{SegmentID: 100, MemorySize: 2500000, NumRows: 25000, RecentlyModified: true},
+	tsMsg := &msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
+		},
+		TimeTickMsg: internalpb.TimeTickMsg{
+			MsgType:   internalpb.MsgType_kTimeTick,
+			PeerID:    1,
+			Timestamp: timestamp,
 		},
 	}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{1},
-	}
-	msg := msgstream.QueryNodeStatsMsg{
-		QueryNodeStats: stats,
-		BaseMsg:        baseMsg,
-	}
-
-	var tsMsg msgstream.TsMsg = &msg
-	msgPack := msgstream.MsgPack{
-		Msgs: make([]msgstream.TsMsg, 0),
-	}
-	msgPack.Msgs = append(msgPack.Msgs, tsMsg)
-	err = segMgr.HandleQueryNodeMsgPack(&msgPack)
+	syncWriteChan <- tsMsg
+	time.Sleep(300 * time.Millisecond)
+	segMeta, err := mt.GetSegmentByID(results[0].SegID)
 	assert.Nil(t, err)
-
-	segMeta, _ := mt.GetSegmentByID(100)
-	assert.Equal(t, int64(100), segMeta.SegmentID)
-	assert.Equal(t, int64(2500000), segMeta.MemSize)
-	assert.Equal(t, int64(25000), segMeta.NumRows)
-
-	// close segment
-	stats.SegStats[0].NumRows = 600000
-	stats.SegStats[0].MemorySize = int64(0.8 * segMgr.segmentThreshold)
-	err = segMgr.HandleQueryNodeMsgPack(&msgPack)
-	assert.Nil(t, err)
-	segMeta, _ = mt.GetSegmentByID(100)
-	assert.Equal(t, int64(100), segMeta.SegmentID)
-	assert.NotEqual(t, uint64(0), segMeta.CloseTime)
+	assert.NotEqualValues(t, 0, segMeta.CloseTime)
 }
-
-func startupMaster() {
+func TestSegmentManager_RPC(t *testing.T) {
 	Init()
 	refreshMasterAddress()
 	etcdAddress := Params.EtcdAddress
 	rootPath := "/test/root"
 	ctx, cancel := context.WithCancel(context.TODO())
-	masterCancelFunc = cancel
+	defer cancel()
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
-	if err != nil {
-		panic(err)
-	}
+	assert.Nil(t, err)
 	_, err = cli.Delete(ctx, rootPath, clientv3.WithPrefix())
-	if err != nil {
-		panic(err)
-	}
+	assert.Nil(t, err)
 	Params = ParamTable{
 		Address: Params.Address,
 		Port:    Params.Port,
@@ -268,27 +207,13 @@ func startupMaster() {
 		DefaultPartitionTag: "_default",
 	}
 
-	master, err = CreateServer(ctx)
-	if err != nil {
-		panic(err)
-	}
+	collName := "test_coll"
+	partitionTag := "test_part"
+	master, err := CreateServer(ctx)
+	assert.Nil(t, err)
+	defer master.Close()
 	err = master.Run(int64(Params.Port))
-
-	if err != nil {
-		panic(err)
-	}
-}
-
-func shutdownMaster() {
-	masterCancelFunc()
-	master.Close()
-}
-
-func TestSegmentManager_RPC(t *testing.T) {
-	startupMaster()
-	defer shutdownMaster()
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
+	assert.Nil(t, err)
 	dialContext, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
 	assert.Nil(t, err)
 	defer dialContext.Close()
@@ -297,7 +222,10 @@ func TestSegmentManager_RPC(t *testing.T) {
 		Name:        collName,
 		Description: "test coll",
 		AutoID:      false,
-		Fields:      []*schemapb.FieldSchema{},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_INT32},
+			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_VECTOR_FLOAT, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		},
 	}
 	schemaBytes, err := proto.Marshal(schema)
 	assert.Nil(t, err)
@@ -329,13 +257,13 @@ func TestSegmentManager_RPC(t *testing.T) {
 		},
 	})
 	assert.Nil(t, err)
-	assert.Equal(t, commonpb.ErrorCode_SUCCESS, resp.Status.ErrorCode)
+	assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, resp.Status.ErrorCode)
 	assignments := resp.GetPerChannelAssignment()
-	assert.Equal(t, 1, len(assignments))
-	assert.Equal(t, collName, assignments[0].CollName)
-	assert.Equal(t, partitionTag, assignments[0].PartitionTag)
-	assert.Equal(t, int32(0), assignments[0].ChannelID)
-	assert.Equal(t, uint32(10000), assignments[0].Count)
+	assert.EqualValues(t, 1, len(assignments))
+	assert.EqualValues(t, collName, assignments[0].CollName)
+	assert.EqualValues(t, partitionTag, assignments[0].PartitionTag)
+	assert.EqualValues(t, int32(0), assignments[0].ChannelID)
+	assert.EqualValues(t, uint32(10000), assignments[0].Count)
 
 	// test stats
 	segID := assignments[0].SegID
@@ -369,6 +297,6 @@ func TestSegmentManager_RPC(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	segMeta, err := master.metaTable.GetSegmentByID(segID)
 	assert.Nil(t, err)
-	assert.NotEqual(t, uint64(0), segMeta.GetCloseTime())
-	assert.Equal(t, int64(600000000), segMeta.GetMemSize())
+	assert.EqualValues(t, 1000000, segMeta.GetNumRows())
+	assert.EqualValues(t, int64(600000000), segMeta.GetMemSize())
 }
