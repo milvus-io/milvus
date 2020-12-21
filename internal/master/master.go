@@ -203,7 +203,8 @@ func CreateServer(ctx context.Context) (*Master, error) {
 		return nil, err
 	}
 
-	m.statProcessor = NewStatsProcessor(metakv,
+	runtimeStats := NewRuntimeStats()
+	m.statProcessor = NewStatsProcessor(metakv, runtimeStats,
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 	)
 

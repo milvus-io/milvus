@@ -7,7 +7,9 @@ import (
 )
 
 type StatsProcessor struct {
-	metaTable              *metaTable
+	metaTable    *metaTable
+	runTimeStats *RuntimeStats
+
 	segmentThreshold       float64
 	segmentThresholdFactor float64
 	globalTSOAllocator     func() (Timestamp, error)
@@ -21,11 +23,17 @@ func (processor *StatsProcessor) ProcessQueryNodeStats(msgPack *msgstream.MsgPac
 		}
 
 		for _, segStat := range statsMsg.GetSegStats() {
-			err := processor.processSegmentStat(segStat)
-			if err != nil {
+			if err := processor.processSegmentStat(segStat); err != nil {
 				return err
 			}
 		}
+
+		for _, fieldStat := range statsMsg.GetFieldStats() {
+			if err := processor.processFieldStat(statsMsg.PeerID, fieldStat); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	return nil
@@ -48,9 +56,28 @@ func (processor *StatsProcessor) processSegmentStat(segStats *internalpb.Segment
 	return processor.metaTable.UpdateSegment(segMeta)
 }
 
-func NewStatsProcessor(mt *metaTable, globalTSOAllocator func() (Timestamp, error)) *StatsProcessor {
+func (processor *StatsProcessor) processFieldStat(peerID int64, fieldStats *internalpb.FieldStats) error {
+	collID := fieldStats.CollectionID
+	fieldID := fieldStats.FieldID
+
+	for _, stat := range fieldStats.IndexStats {
+		fieldStats := &FieldRuntimeStats{
+			peerID:               peerID,
+			indexParams:          stat.IndexParams,
+			numOfRelatedSegments: stat.NumRelatedSegments,
+		}
+
+		if err := processor.runTimeStats.UpdateFieldStat(collID, fieldID, fieldStats); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func NewStatsProcessor(mt *metaTable, runTimeStats *RuntimeStats, globalTSOAllocator func() (Timestamp, error)) *StatsProcessor {
 	return &StatsProcessor{
 		metaTable:              mt,
+		runTimeStats:           runTimeStats,
 		segmentThreshold:       Params.SegmentSize * 1024 * 1024,
 		segmentThresholdFactor: Params.SegmentSizeFactor,
 		globalTSOAllocator:     globalTSOAllocator,
