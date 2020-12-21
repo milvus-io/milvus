@@ -17,7 +17,7 @@ namespace indexbuilder {
 
 class IndexWrapper {
  public:
-    explicit IndexWrapper(const char* type_params_str, const char* index_params_str);
+    explicit IndexWrapper(const char* serialized_type_params, const char* serialized_index_params);
 
     int64_t
     dim();
@@ -25,11 +25,16 @@ class IndexWrapper {
     void
     BuildWithoutIds(const knowhere::DatasetPtr& dataset);
 
-    char*
+    struct Binary {
+        char* data;
+        int32_t size;
+    };
+
+    Binary
     Serialize();
 
     void
-    Load(const char* dumped_blob_buffer);
+    Load(const char* serialized_sliced_blob_buffer);
 
  private:
     void

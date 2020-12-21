@@ -32,20 +32,22 @@ extern "C" {
 typedef void* CIndex;
 
 // TODO: how could we pass map between go and c++ more efficiently?
+// Solution: using protobuf instead of json, this way significantly increase programming efficiency
+
 CIndex
-CreateIndex(const char* type_params_str, const char* index_params_str);
+CreateIndex(const char* serialized_type_params, const char* serialized_index_params);
 
 void
 DeleteIndex(CIndex index);
 
 void
-BuildFloatVecIndex(CIndex index, const float* vectors);
+BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
 
 char*
-SerializeToSlicedBuffer(CIndex index);
+SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size);
 
 void
-LoadFromSlicedBuffer(CIndex index, const char* dumped_blob_buffer);
+LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer);
 
 #ifdef __cplusplus
 };

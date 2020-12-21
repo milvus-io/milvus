@@ -24,6 +24,7 @@ mkdir -p internalpb
 mkdir -p servicepb
 mkdir -p masterpb
 mkdir -p indexbuilderpb
+mkdir -p indexcgopb
 mkdir -p writerpb
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
@@ -34,6 +35,7 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service_msg.pr
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexbuilderpb index_builder.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./writerpb write_node.proto
 
 popd

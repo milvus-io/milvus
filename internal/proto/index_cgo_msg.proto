@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package milvus.proto.indexcgo;
+option go_package="github.com/zilliztech/milvus-distributed/internal/proto/indexcgopb";
+
+import "common.proto";
+
+message TypeParams {
+  repeated common.KeyValuePair params = 1;
+}
+
+message IndexParams {
+  repeated common.KeyValuePair params = 1;
+}
+
+message Binary {
+  string key = 1;
+  bytes value = 2;
+}
+
+message BinarySet {
+  repeated Binary datas = 1;
+}
