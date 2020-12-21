@@ -32,45 +32,45 @@ type FieldData interface{}
 
 type BoolFieldData struct {
 	NumRows int
-	data    []bool
+	Data    []bool
 }
 type Int8FieldData struct {
 	NumRows int
-	data    []int8
+	Data    []int8
 }
 type Int16FieldData struct {
 	NumRows int
-	data    []int16
+	Data    []int16
 }
 type Int32FieldData struct {
 	NumRows int
-	data    []int32
+	Data    []int32
 }
 type Int64FieldData struct {
 	NumRows int
-	data    []int64
+	Data    []int64
 }
 type FloatFieldData struct {
 	NumRows int
-	data    []float32
+	Data    []float32
 }
 type DoubleFieldData struct {
 	NumRows int
-	data    []float64
+	Data    []float64
 }
 type StringFieldData struct {
 	NumRows int
-	data    []string
+	Data    []string
 }
 type BinaryVectorFieldData struct {
 	NumRows int
-	data    []byte
-	dim     int
+	Data    []byte
+	Dim     int
 }
 type FloatVectorFieldData struct {
 	NumRows int
-	data    []float32
-	dim     int
+	Data    []float32
+	Dim     int
 }
 
 // system filed id:
@@ -101,7 +101,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	if !ok {
 		return nil, errors.New("data doesn't contains timestamp field")
 	}
-	ts := timeFieldData.(Int64FieldData).data
+	ts := timeFieldData.(Int64FieldData).Data
 
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		singleData := data.Data[field.FieldID]
@@ -117,30 +117,30 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		eventWriter.SetEndTimestamp(typeutil.Timestamp(ts[len(ts)-1]))
 		switch field.DataType {
 		case schemapb.DataType_BOOL:
-			err = eventWriter.AddBoolToPayload(singleData.(BoolFieldData).data)
+			err = eventWriter.AddBoolToPayload(singleData.(BoolFieldData).Data)
 		case schemapb.DataType_INT8:
-			err = eventWriter.AddInt8ToPayload(singleData.(Int8FieldData).data)
+			err = eventWriter.AddInt8ToPayload(singleData.(Int8FieldData).Data)
 		case schemapb.DataType_INT16:
-			err = eventWriter.AddInt16ToPayload(singleData.(Int16FieldData).data)
+			err = eventWriter.AddInt16ToPayload(singleData.(Int16FieldData).Data)
 		case schemapb.DataType_INT32:
-			err = eventWriter.AddInt32ToPayload(singleData.(Int32FieldData).data)
+			err = eventWriter.AddInt32ToPayload(singleData.(Int32FieldData).Data)
 		case schemapb.DataType_INT64:
-			err = eventWriter.AddInt64ToPayload(singleData.(Int64FieldData).data)
+			err = eventWriter.AddInt64ToPayload(singleData.(Int64FieldData).Data)
 		case schemapb.DataType_FLOAT:
-			err = eventWriter.AddFloatToPayload(singleData.(FloatFieldData).data)
+			err = eventWriter.AddFloatToPayload(singleData.(FloatFieldData).Data)
 		case schemapb.DataType_DOUBLE:
-			err = eventWriter.AddDoubleToPayload(singleData.(DoubleFieldData).data)
+			err = eventWriter.AddDoubleToPayload(singleData.(DoubleFieldData).Data)
 		case schemapb.DataType_STRING:
-			for _, singleString := range singleData.(StringFieldData).data {
+			for _, singleString := range singleData.(StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
 					return nil, err
 				}
 			}
 		case schemapb.DataType_VECTOR_BINARY:
-			err = eventWriter.AddBinaryVectorToPayload(singleData.(BinaryVectorFieldData).data, singleData.(BinaryVectorFieldData).dim)
+			err = eventWriter.AddBinaryVectorToPayload(singleData.(BinaryVectorFieldData).Data, singleData.(BinaryVectorFieldData).Dim)
 		case schemapb.DataType_VECTOR_FLOAT:
-			err = eventWriter.AddFloatVectorToPayload(singleData.(FloatVectorFieldData).data, singleData.(FloatVectorFieldData).dim)
+			err = eventWriter.AddFloatVectorToPayload(singleData.(FloatVectorFieldData).Data, singleData.(FloatVectorFieldData).Dim)
 		default:
 			return nil, errors.Errorf("undefined data type %d", field.DataType)
 		}
@@ -201,11 +201,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			boolFieldData.data, err = eventReader.GetBoolFromPayload()
+			boolFieldData.Data, err = eventReader.GetBoolFromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			boolFieldData.NumRows = len(boolFieldData.data)
+			boolFieldData.NumRows = len(boolFieldData.Data)
 			resultData.Data[fieldID] = boolFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_INT8:
@@ -214,11 +214,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int8FieldData.data, err = eventReader.GetInt8FromPayload()
+			int8FieldData.Data, err = eventReader.GetInt8FromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int8FieldData.NumRows = len(int8FieldData.data)
+			int8FieldData.NumRows = len(int8FieldData.Data)
 			resultData.Data[fieldID] = int8FieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_INT16:
@@ -227,11 +227,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int16FieldData.data, err = eventReader.GetInt16FromPayload()
+			int16FieldData.Data, err = eventReader.GetInt16FromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int16FieldData.NumRows = len(int16FieldData.data)
+			int16FieldData.NumRows = len(int16FieldData.Data)
 			resultData.Data[fieldID] = int16FieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_INT32:
@@ -240,11 +240,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int32FieldData.data, err = eventReader.GetInt32FromPayload()
+			int32FieldData.Data, err = eventReader.GetInt32FromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int32FieldData.NumRows = len(int32FieldData.data)
+			int32FieldData.NumRows = len(int32FieldData.Data)
 			resultData.Data[fieldID] = int32FieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_INT64:
@@ -253,11 +253,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int64FieldData.data, err = eventReader.GetInt64FromPayload()
+			int64FieldData.Data, err = eventReader.GetInt64FromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			int64FieldData.NumRows = len(int64FieldData.data)
+			int64FieldData.NumRows = len(int64FieldData.Data)
 			resultData.Data[fieldID] = int64FieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_FLOAT:
@@ -266,11 +266,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			floatFieldData.data, err = eventReader.GetFloatFromPayload()
+			floatFieldData.Data, err = eventReader.GetFloatFromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			floatFieldData.NumRows = len(floatFieldData.data)
+			floatFieldData.NumRows = len(floatFieldData.Data)
 			resultData.Data[fieldID] = floatFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_DOUBLE:
@@ -279,11 +279,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			doubleFieldData.data, err = eventReader.GetDoubleFromPayload()
+			doubleFieldData.Data, err = eventReader.GetDoubleFromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			doubleFieldData.NumRows = len(doubleFieldData.data)
+			doubleFieldData.NumRows = len(doubleFieldData.Data)
 			resultData.Data[fieldID] = doubleFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_STRING:
@@ -302,7 +302,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
-				stringFieldData.data = append(stringFieldData.data, singleString)
+				stringFieldData.Data = append(stringFieldData.Data, singleString)
 			}
 			resultData.Data[fieldID] = stringFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
@@ -312,11 +312,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			binaryVectorFieldData.data, binaryVectorFieldData.dim, err = eventReader.GetBinaryVectorFromPayload()
+			binaryVectorFieldData.Data, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			binaryVectorFieldData.NumRows = len(binaryVectorFieldData.data)
+			binaryVectorFieldData.NumRows = len(binaryVectorFieldData.Data)
 			resultData.Data[fieldID] = binaryVectorFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		case schemapb.DataType_VECTOR_FLOAT:
@@ -325,11 +325,11 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			floatVectorFieldData.data, floatVectorFieldData.dim, err = eventReader.GetFloatVectorFromPayload()
+			floatVectorFieldData.Data, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
 			if err != nil {
 				return -1, -1, nil, err
 			}
-			floatVectorFieldData.NumRows = len(floatVectorFieldData.data) / 8
+			floatVectorFieldData.NumRows = len(floatVectorFieldData.Data) / 8
 			resultData.Data[fieldID] = floatVectorFieldData
 			insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 		default:

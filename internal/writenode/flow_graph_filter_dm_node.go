@@ -40,6 +40,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 
 	var iMsg = insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
+		flushMessages:  make([]*msgstream.FlushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
@@ -53,7 +54,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
 		case internalPb.MsgType_kFlush:
-			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
+			iMsg.flushMessages = append(iMsg.flushMessages, msg.(*msgstream.FlushMsg))
 		// case internalPb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:

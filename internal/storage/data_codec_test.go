@@ -112,49 +112,49 @@ func TestInsertCodec(t *testing.T) {
 		Data: map[int64]FieldData{
 			1: Int64FieldData{
 				NumRows: 2,
-				data:    []int64{1, 2},
+				Data:    []int64{1, 2},
 			},
 			100: BoolFieldData{
 				NumRows: 2,
-				data:    []bool{true, false},
+				Data:    []bool{true, false},
 			},
 			101: Int8FieldData{
 				NumRows: 2,
-				data:    []int8{1, 2},
+				Data:    []int8{1, 2},
 			},
 			102: Int16FieldData{
 				NumRows: 2,
-				data:    []int16{1, 2},
+				Data:    []int16{1, 2},
 			},
 			103: Int32FieldData{
 				NumRows: 2,
-				data:    []int32{1, 2},
+				Data:    []int32{1, 2},
 			},
 			104: Int64FieldData{
 				NumRows: 2,
-				data:    []int64{1, 2},
+				Data:    []int64{1, 2},
 			},
 			105: FloatFieldData{
 				NumRows: 2,
-				data:    []float32{1, 2},
+				Data:    []float32{1, 2},
 			},
 			106: DoubleFieldData{
 				NumRows: 2,
-				data:    []float64{1, 2},
+				Data:    []float64{1, 2},
 			},
 			107: StringFieldData{
 				NumRows: 2,
-				data:    []string{"1", "2"},
+				Data:    []string{"1", "2"},
 			},
 			108: BinaryVectorFieldData{
 				NumRows: 8,
-				data:    []byte{0, 255, 0, 1, 0, 1, 0, 1},
-				dim:     8,
+				Data:    []byte{0, 255, 0, 1, 0, 1, 0, 1},
+				Dim:     8,
 			},
 			109: FloatVectorFieldData{
 				NumRows: 1,
-				data:    []float32{0, 1, 2, 3, 4, 5, 6, 7},
-				dim:     8,
+				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:     8,
 			},
 		},
 	}
