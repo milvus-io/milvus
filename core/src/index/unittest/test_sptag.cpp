@@ -92,7 +92,7 @@ TEST_P(SPTAGTest, sptag_basic) {
 TEST_P(SPTAGTest, sptag_serialize) {
     assert(!xb.empty());
 
-    index_->Train(base_dataset, conf);
+    index_->BuildAll(base_dataset, conf);
     // index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::CPUSPTAGRNG>(IndexType);
