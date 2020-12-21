@@ -31,7 +31,8 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// init write node
 	pulsarURL := Params.PulsarAddress
-	node := NewWriteNode(ctx, 0)
+	node, err := NewWriteNode(ctx, 0)
+	assert.Nil(t, err)
 
 	// test data generate
 	const DIM = 16
@@ -132,7 +133,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err := insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)

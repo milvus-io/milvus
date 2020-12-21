@@ -2,21 +2,40 @@ package writenode
 
 import (
 	"context"
+
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type WriteNode struct {
 	ctx             context.Context
 	WriteNodeID     uint64
 	dataSyncService *dataSyncService
+
+	metaTable *metaTable
 }
 
-func NewWriteNode(ctx context.Context, writeNodeID uint64) *WriteNode {
+func NewWriteNode(ctx context.Context, writeNodeID uint64) (*WriteNode, error) {
 
-	return &WriteNode{
+	node := &WriteNode{
 		ctx:             ctx,
 		WriteNodeID:     writeNodeID,
 		dataSyncService: nil,
 	}
+
+	etcdAddress := Params.EtcdAddress
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+	if err != nil {
+		return nil, err
+	}
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+	metaKV, err2 := NewMetaTable(etcdKV)
+	if err2 != nil {
+		return nil, err
+	}
+	node.metaTable = metaKV
+
+	return node, nil
 }
 
 func (node *WriteNode) Start() {
