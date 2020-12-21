@@ -76,8 +76,8 @@ inline ThreadPool::ThreadPool(size_t threads, size_t queue_size)
                         return;
                     task = std::move(this->tasks_.front());
                     this->tasks_.pop();
-                    this->condition_.notify_all();
                 }
+                this->condition_.notify_all();
 
                 task();
             }
@@ -116,8 +116,8 @@ ThreadPool::Stop(bool immediate) {
         std::unique_lock<std::mutex> lock(queue_mutex_);
         stop_immediate_ = immediate;
         stop_ = true;
-        condition_.notify_all();
     }
+    condition_.notify_all();
     for (std::thread& worker : workers_) {
         worker.join();
     }
