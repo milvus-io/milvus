@@ -2385,7 +2385,7 @@ DBImpl::GetPartitionsByTags(const std::string& collection_id, const std::vector<
 
         if (valid_tag == milvus::engine::DEFAULT_PARTITON_TAG) {
             partition_name_array.insert(collection_id);
-            return status;
+            continue;
         }
 
         for (auto& schema : partition_array) {
