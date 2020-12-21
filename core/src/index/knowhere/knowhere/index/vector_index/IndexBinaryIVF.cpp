@@ -116,6 +116,10 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 BinaryIVF::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
     GETTENSOR(dataset_ptr)
     index_->add(rows, static_cast<const uint8_t*>(p_data));
 }
