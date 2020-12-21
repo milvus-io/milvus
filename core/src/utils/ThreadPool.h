@@ -38,7 +38,7 @@ class ThreadPool {
     enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>;
 
     void
-    Stop(bool immediate = true);
+    Stop(bool immediate = false);
 
     ~ThreadPool();
 

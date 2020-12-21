@@ -60,7 +60,7 @@ TimerManager::Stop() {
         }
     }
     if (timer_exeutors_) {
-        timer_exeutors_->Stop();
+        timer_exeutors_->Stop(true);
     }
 }
 
