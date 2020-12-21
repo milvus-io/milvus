@@ -65,9 +65,6 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
  protected:
     virtual void
     QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&);
-
- protected:
-    std::mutex mutex_;
 };
 
 using IDMAPPtr = std::shared_ptr<IDMAP>;

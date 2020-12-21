@@ -35,7 +35,7 @@ class FPGAIVFPQ : public IVFPQ {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     void
     CopyIndexToFpga();

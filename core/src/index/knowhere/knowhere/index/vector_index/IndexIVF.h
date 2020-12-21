@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -87,9 +86,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     SealImpl() override;
-
- protected:
-    std::mutex mutex_;
 };
 
 using IVFPtr = std::shared_ptr<IVF>;

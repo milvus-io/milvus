@@ -32,13 +32,11 @@ BinaryIVF::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     return SerializeImpl(index_type_);
 }
 
 void
 BinaryIVF::Load(const BinarySet& index_binary) {
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 }
 
@@ -115,6 +113,12 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index->train(rows, static_cast<const uint8_t*>(p_data));
     index->add(rows, static_cast<const uint8_t*>(p_data));
     index_ = index;
+}
+
+void
+BinaryIVF::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& config) {
+    GETTENSOR(dataset_ptr)
+    index_->add(rows, static_cast<const uint8_t*>(p_data));
 }
 
 #if 0

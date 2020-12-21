@@ -39,7 +39,6 @@ NSG::Serialize(const Config& config) {
 
     try {
         fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
@@ -58,7 +57,6 @@ void
 NSG::Load(const BinarySet& index_binary) {
     try {
         fiu_do_on("NSG.Load.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG");
 
         MemoryIOReader reader;
@@ -93,7 +91,6 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
         {
-            std::lock_guard<std::mutex> lk(mutex_);
             index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params,
                            blacklist);
         }
@@ -136,11 +133,6 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     preprocess_index->GenGraph(raw_data, k, knng, config);
 #endif
 
-    impl::BuildParams b_params;
-    b_params.candidate_pool_size = config[IndexParams::candidate];
-    b_params.out_degree = config[IndexParams::out_degree];
-    b_params.search_length = config[IndexParams::search_length];
-
     GETTENSOR(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
@@ -155,6 +147,16 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
+}
+
+void
+NSG::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& config) {
+    GETTENSOR(dataset_ptr)
+    impl::BuildParams b_params;
+    b_params.candidate_pool_size = config[IndexParams::candidate];
+    b_params.out_degree = config[IndexParams::out_degree];
+    b_params.search_length = config[IndexParams::search_length];
+
     index_->Build(rows, (float*)p_data, nullptr, b_params);
 }
 

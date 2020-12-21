@@ -41,17 +41,10 @@ class NSG : public VecIndex {
     Load(const BinarySet&) override;
 
     void
-    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
-        Train(dataset_ptr, config);
-    }
-
-    void
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Addwithoutids is not supported");
-    }
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;
@@ -66,7 +59,6 @@ class NSG : public VecIndex {
     UpdateIndexSize() override;
 
  private:
-    std::mutex mutex_;
     int64_t gpu_;
     std::shared_ptr<impl::NsgIndex> index_;
 };

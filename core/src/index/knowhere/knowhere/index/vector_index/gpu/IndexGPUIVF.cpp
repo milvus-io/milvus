@@ -64,8 +64,6 @@ GPUIVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
 VecIndexPtr
 GPUIVF::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     if (auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
         faiss::Index* device_index = index_.get();
         faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
@@ -136,8 +134,6 @@ GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 
 void
 GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
