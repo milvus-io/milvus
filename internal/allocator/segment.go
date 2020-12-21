@@ -180,7 +180,7 @@ func (sa *SegIDAssigner) syncSegments() {
 	}
 
 	now := time.Now()
-	expiredTime := now.Add(time.Millisecond * time.Duration(resp.ExpireDuration))
+	expiredTime := now.Add(time.Millisecond * time.Duration(1000))
 	for _, info := range resp.PerChannelAssignment {
 		sa.removeSegInfo(info.CollName, info.PartitionTag, info.ChannelID)
 	}
