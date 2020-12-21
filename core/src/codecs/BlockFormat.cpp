@@ -87,12 +87,7 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
 
     fs_ptr->reader_ptr_->Seekg(offset + MAGIC_SIZE + HEADER_SIZE);
     fs_ptr->reader_ptr_->Read(raw->data_.data(), num_bytes);
-
-    uint32_t record;
-    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
     fs_ptr->reader_ptr_->Close();
-
-    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(raw->data_.data()), num_bytes, record);
 
     return Status::OK();
 }
@@ -116,19 +111,9 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     HeaderMap map = TransformHeaderData(header);
     size_t total_num_bytes = stol(map.at("size"));
 
-    std::vector<char> data;
-    data.resize(total_num_bytes);
-
-    fs_ptr->reader_ptr_->Read(data.data(), total_num_bytes);
-    uint32_t record;
-    fs_ptr->reader_ptr_->Read(&record, SUM_SIZE);
-    fs_ptr->reader_ptr_->Close();
-
-    CHECK_SUM_VALID(header.data(), reinterpret_cast<const char*>(data.data()), total_num_bytes, record);
-
     int64_t total_bytes = 0;
     for (auto& range : read_ranges) {
-        if (range.offset_ > total_num_bytes) {
+        if (range.offset_ + range.num_bytes_ > total_num_bytes) {
             return Status(SERVER_INVALID_ARGUMENT, "Invalid argument to read: " + file_path);
         }
         total_bytes += range.num_bytes_;
@@ -139,9 +124,12 @@ BlockFormat::Read(const storage::FSHandlerPtr& fs_ptr, const std::string& file_p
     int64_t poz = 0;
     for (auto& range : read_ranges) {
         int64_t offset = range.offset_;
-        memcpy(raw->data_.data() + poz, data.data() + offset, range.num_bytes_);
+        fs_ptr->reader_ptr_->Seekg(offset + MAGIC_SIZE + HEADER_SIZE);
+        fs_ptr->reader_ptr_->Read(raw->data_.data() + poz, range.num_bytes_);
         poz += range.num_bytes_;
     }
+
+    fs_ptr->reader_ptr_->Close();
 
     return Status::OK();
 }
