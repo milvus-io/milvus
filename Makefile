@@ -61,7 +61,7 @@ ruleguard:
 verifiers: getdeps cppcheck fmt lint ruleguard
 
 # Builds various components locally.
-build-go:
+build-go: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
