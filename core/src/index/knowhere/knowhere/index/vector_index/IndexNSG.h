@@ -41,10 +41,17 @@ class NSG : public VecIndex {
     Load(const BinarySet&) override;
 
     void
-    Train(const DatasetPtr&, const Config&) override;
+    BuildAll(const DatasetPtr&, const Config&) override;
 
     void
-    AddWithoutIds(const DatasetPtr&, const Config&) override;
+    Train(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("NSG not support build item dynamically, please invoke BuildAll interface.");
+    }
+
+    void
+    AddWithoutIds(const DatasetPtr&, const Config&) override {
+        KNOWHERE_THROW_MSG("Incremental index NSG is not supported");
+    }
 
     DatasetPtr
     Query(const DatasetPtr&, const Config&) override;

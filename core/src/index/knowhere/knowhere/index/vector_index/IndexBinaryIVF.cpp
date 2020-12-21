@@ -111,7 +111,6 @@ BinaryIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto index = std::make_shared<faiss::IndexBinaryIVF>(coarse_quantizer, dim, nlist, metric_type);
     index->own_fields = true;
     index->train(rows, static_cast<const uint8_t*>(p_data));
-    index->add(rows, static_cast<const uint8_t*>(p_data));
     index_ = index;
 }
 

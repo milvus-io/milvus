@@ -107,7 +107,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
     idmap->AddWithoutIds(dataset_ptr, config);
@@ -133,6 +133,11 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     preprocess_index->GenGraph(raw_data, k, knng, config);
 #endif
 
+    impl::BuildParams b_params;
+    b_params.candidate_pool_size = config[IndexParams::candidate];
+    b_params.out_degree = config[IndexParams::out_degree];
+    b_params.search_length = config[IndexParams::search_length];
+
     GETTENSOR(dataset_ptr)
 
     impl::NsgIndex::Metric_Type metric;
@@ -147,16 +152,6 @@ NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric);
     index_->SetKnnGraph(knng);
-}
-
-void
-NSG::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset_ptr, const milvus::knowhere::Config& config) {
-    GETTENSOR(dataset_ptr)
-    impl::BuildParams b_params;
-    b_params.candidate_pool_size = config[IndexParams::candidate];
-    b_params.out_degree = config[IndexParams::out_degree];
-    b_params.search_length = config[IndexParams::search_length];
-
     index_->Build(rows, (float*)p_data, nullptr, b_params);
 }
 
