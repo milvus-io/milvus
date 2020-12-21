@@ -212,6 +212,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.Equal(t, len(collMeta.Schema.Fields[0].IndexParams), 2)
 	assert.Equal(t, len(collMeta.Schema.Fields[1].TypeParams), 2)
 	assert.Equal(t, len(collMeta.Schema.Fields[1].IndexParams), 2)
+	assert.Equal(t, int64(100), collMeta.Schema.Fields[0].FieldID)
 	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Key, "col1_f1_tk1")
 	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[1].Key, "col1_f1_tk2")
 	assert.Equal(t, collMeta.Schema.Fields[0].TypeParams[0].Value, "col1_f1_tv1")
@@ -221,6 +222,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[0].Value, "col1_f1_iv1")
 	assert.Equal(t, collMeta.Schema.Fields[0].IndexParams[1].Value, "col1_f1_iv2")
 
+	assert.Equal(t, int64(101), collMeta.Schema.Fields[1].FieldID)
 	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[0].Key, "col1_f2_tk1")
 	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[1].Key, "col1_f2_tk2")
 	assert.Equal(t, collMeta.Schema.Fields[1].TypeParams[0].Value, "col1_f2_tv1")
@@ -260,6 +262,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.Equal(t, 2, len(des.Schema.Fields[0].IndexParams))
 	assert.Equal(t, 2, len(des.Schema.Fields[1].TypeParams))
 	assert.Equal(t, 2, len(des.Schema.Fields[1].IndexParams))
+	assert.Equal(t, int64(100), des.Schema.Fields[0].FieldID)
 	assert.Equal(t, "col1_f1_tk1", des.Schema.Fields[0].TypeParams[0].Key)
 	assert.Equal(t, "col1_f1_tv1", des.Schema.Fields[0].TypeParams[0].Value)
 	assert.Equal(t, "col1_f1_ik1", des.Schema.Fields[0].IndexParams[0].Key)
@@ -269,6 +272,7 @@ func TestMaster_CollectionTask(t *testing.T) {
 	assert.Equal(t, "col1_f1_ik2", des.Schema.Fields[0].IndexParams[1].Key)
 	assert.Equal(t, "col1_f1_iv2", des.Schema.Fields[0].IndexParams[1].Value)
 
+	assert.Equal(t, int64(101), des.Schema.Fields[1].FieldID)
 	assert.Equal(t, "col1_f2_tk1", des.Schema.Fields[1].TypeParams[0].Key)
 	assert.Equal(t, "col1_f2_tv1", des.Schema.Fields[1].TypeParams[0].Value)
 	assert.Equal(t, "col1_f2_ik1", des.Schema.Fields[1].IndexParams[0].Key)
