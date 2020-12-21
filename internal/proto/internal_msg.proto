@@ -314,3 +314,36 @@ message QueryNodeStats {
     repeated SegmentStats seg_stats = 3;
     repeated FieldStats field_stats = 4;
 }
+
+message CreateIndexRequest {
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    uint64 timestamp = 3;
+    int64 proxyID = 4;
+    string collection_name = 5;
+    string field_name = 6;
+    string index_name = 7;
+    repeated common.KeyValuePair extra_params = 8;
+}
+
+message DescribeIndexRequest {
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    uint64 timestamp = 3;
+    int64 proxyID = 4;
+    string collection_name = 5;
+    string field_name = 6;
+    string index_name = 7;
+    repeated common.KeyValuePair extra_params = 8;
+}
+
+message DescribeIndexProgressRequest {
+    MsgType msg_type = 1;
+    int64 reqID = 2;
+    uint64 timestamp = 3;
+    int64 proxyID = 4;
+    string collection_name = 5;
+    string field_name = 6;
+    string index_name = 7;
+    repeated common.KeyValuePair extra_params = 8;
+}

@@ -451,3 +451,15 @@ func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.Assign
 		PerChannelAssignment: segInfos,
 	}, nil
 }
+
+func (s *Master) CreateIndex(context.Context, *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (s *Master) DescribeIndex(context.Context, *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
+	return nil, nil
+}
+
+func (s *Master) DescribeIndexProgress(context.Context, *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
+	return nil, nil
+}
