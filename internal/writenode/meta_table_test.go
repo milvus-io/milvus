@@ -13,9 +13,9 @@ func createMetaTable(t *testing.T) *metaTable {
 	etcdAddr := Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
+	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root/writer")
 
-	_, err = cli.Delete(context.TODO(), "/etcd/test/root", clientv3.WithPrefix())
+	_, err = cli.Delete(context.TODO(), "/etcd/test/root/writer", clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	meta, err := NewMetaTable(etcdKV)
