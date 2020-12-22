@@ -100,7 +100,7 @@ class ConnectionImpl : public Connection {
     DeleteEntityByID(const std::string& collection_name, const std::vector<int64_t>& id_array) override;
 
     Status
-    LoadCollection(const std::string& collection_name) const override;
+    LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const override;
 
     Status
     GetIndexInfo(const std::string& collection_name, IndexParam& index_param) const override;

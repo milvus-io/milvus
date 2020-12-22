@@ -242,7 +242,8 @@ ClientTest::CreateIndex(const std::string& collection_name, milvus::IndexType ty
 void
 ClientTest::LoadCollection(const std::string& collection_name) {
     milvus_sdk::TimeRecorder rc("Preload");
-    milvus::Status stat = conn_->LoadCollection(collection_name);
+    std::vector<std::string> partition_tags;
+    milvus::Status stat = conn_->LoadCollection(collection_name, partition_tags);
     std::cout << "PreloadCollection function call status: " << stat.message() << std::endl;
 }
 

@@ -78,7 +78,7 @@ class GrpcClient {
     DeleteEntityByID(grpc::DeleteByIDParam& delete_by_id_param);
 
     Status
-    LoadCollection(grpc::CollectionName& collection_name);
+    LoadCollection(grpc::PreloadCollectionParam& param);
 
     Status
     GetIndexInfo(grpc::CollectionName& collection_name, grpc::IndexParam& index_param);

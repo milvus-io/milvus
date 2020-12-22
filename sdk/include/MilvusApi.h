@@ -458,11 +458,12 @@ class Connection {
      * This method is used to load collection data into memory
      *
      * @param collection_name, target collection's name.
+     * @param partition_tag_array, target partitions tag.
      *
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    LoadCollection(const std::string& collection_name) const = 0;
+    LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const = 0;
 
     /**
      * @brief Get index information

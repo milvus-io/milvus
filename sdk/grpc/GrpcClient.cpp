@@ -284,10 +284,10 @@ GrpcClient::Cmd(const std::string& cmd, std::string& result) {
 }
 
 Status
-GrpcClient::LoadCollection(milvus::grpc::CollectionName& collection_name) {
+GrpcClient::LoadCollection(milvus::grpc::PreloadCollectionParam& param) {
     ClientContext context;
     ::milvus::grpc::Status response;
-    ::grpc::Status grpc_status = stub_->PreloadCollection(&context, collection_name, &response);
+    ::grpc::Status grpc_status = stub_->PreloadCollection(&context, param, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "PreloadCollection gRPC failed!" << std::endl;

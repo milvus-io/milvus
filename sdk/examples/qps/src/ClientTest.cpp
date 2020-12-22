@@ -216,7 +216,8 @@ ClientTest::PreloadCollection() {
 
     std::string title = "Load table " + parameters_.collection_name_;
     milvus_sdk::TimeRecorder rc(title);
-    milvus::Status stat = conn->LoadCollection(parameters_.collection_name_);
+    std::vector<std::string> partition_tags;
+    milvus::Status stat = conn->LoadCollection(parameters_.collection_name_, partition_tags);
     if (!stat.ok()) {
         std::string msg = "LoadCollection function call status: " + stat.message();
         std::cout << msg << std::endl;

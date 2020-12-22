@@ -153,8 +153,8 @@ ConnectionImpl::DeleteEntityByID(const std::string& collection_name, const std::
 }
 
 Status
-ConnectionImpl::LoadCollection(const std::string& collection_name) const {
-    return client_proxy_->LoadCollection(collection_name);
+ConnectionImpl::LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
+    return client_proxy_->LoadCollection(collection_name, partition_tag_array);
 }
 
 Status
