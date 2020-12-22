@@ -158,10 +158,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         bool exist = conn->HasPartition(COLLECTION_NAME, partition_tag);
         std::cout << "Partition " << partition_tag << (exist ? " exists" : " doesn't exist") << std::endl;
 
-        std::vector<std::string> partition_tags = {"aaa"};
+        std::vector<std::string> partition_tags = {partition_tag};
         auto status = conn->LoadCollection(COLLECTION_NAME, partition_tags);
-        std::cout << "Load partition " << partition_tag << " into cache" << status.message() << std::endl;
-        partition_tags = {partition_tag};
+        std::cout << "Load partition " << partition_tag << " into cache: " << status.message() << std::endl;
+
         std::cout << "Search in correct partition" << std::endl;
         milvus::TopKQueryResult topk_query_result;
         milvus_sdk::Utils::DoSearch(conn, COLLECTION_NAME, partition_tags, TOP_K, NPROBE, search_entity_array,
