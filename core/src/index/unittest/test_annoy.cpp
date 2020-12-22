@@ -60,7 +60,7 @@ TEST_P(AnnoyTest, annoy_basic) {
         ASSERT_ANY_THROW(index_->Dim());
     }
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);  // Train + AddWithoutIds
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 
@@ -94,7 +94,7 @@ TEST_P(AnnoyTest, annoy_basic) {
 TEST_P(AnnoyTest, annoy_delete) {
     assert(!xb.empty());
 
-    index_->BuildAll(base_dataset, conf);  // Train + Add
+    index_->BuildAll(base_dataset, conf);  // Train + AddWithoutIds
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
 

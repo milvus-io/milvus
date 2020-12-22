@@ -82,6 +82,8 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_dist = (float*)malloc(p_dist_size);
 
     QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+    MapOffsetToUid(p_id, static_cast<size_t>(elems));
+
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
     ret_ds->Set(meta::DISTANCE, p_dist);
@@ -139,8 +141,6 @@ IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int6
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
     index_->metric_type = default_type;
-
-    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 }  // namespace knowhere

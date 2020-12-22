@@ -148,8 +148,6 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
             device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k,
                                  GetBlacklist());
         }
-
-        MapOffsetToUid(labels, static_cast<size_t>(n * k));
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }
