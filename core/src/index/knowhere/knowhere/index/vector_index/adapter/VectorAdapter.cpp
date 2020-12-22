@@ -19,16 +19,6 @@ namespace milvus {
 namespace knowhere {
 
 DatasetPtr
-GenDatasetWithIds(const int64_t nb, const int64_t dim, const void* xb, const int64_t* ids) {
-    auto ret_ds = std::make_shared<Dataset>();
-    ret_ds->Set(meta::ROWS, nb);
-    ret_ds->Set(meta::DIM, dim);
-    ret_ds->Set(meta::TENSOR, xb);
-    ret_ds->Set(meta::IDS, ids);
-    return ret_ds;
-}
-
-DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::ROWS, nb);

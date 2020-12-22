@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -41,25 +40,13 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     Serialize(const Config& config) override;
 
     void
-    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
-        Train(dataset_ptr, config);
-    }
-
-    void
     Load(const BinarySet& index_binary) override;
 
     void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
-        KNOWHERE_THROW_MSG("not support yet");
-    }
-
-    void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("AddWithoutIds is not supported");
-    }
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
@@ -86,9 +73,6 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     virtual void
     QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config,
               const faiss::BitsetView& bitset);
-
- protected:
-    std::mutex mutex_;
 };
 
 using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;

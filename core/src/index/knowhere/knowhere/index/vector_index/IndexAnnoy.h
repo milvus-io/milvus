@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 
 #include "annoy/src/annoylib.h"
 #include "annoy/src/kissrandom.h"
@@ -41,11 +40,6 @@ class IndexAnnoy : public VecIndex {
     void
     Train(const DatasetPtr& dataset_ptr, const Config& config) override {
         KNOWHERE_THROW_MSG("Annoy not support build item dynamically, please invoke BuildAll interface.");
-    }
-
-    void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override {
-        KNOWHERE_THROW_MSG("Annoy not support add item dynamically, please invoke BuildAll interface.");
     }
 
     void

@@ -47,9 +47,6 @@ class IVF_NM : public VecIndex, public OffsetBaseIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr

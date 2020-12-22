@@ -80,7 +80,7 @@ IndexRHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IndexRHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexRHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -104,14 +104,12 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     GET_TENSOR_DATA(dataset_ptr)
-
     auto k = config[meta::TOPK].get<int64_t>();
-    int64_t id_size = sizeof(int64_t) * k;
-    int64_t dist_size = sizeof(float) * k;
-    auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
-    auto p_dist = static_cast<float*>(malloc(dist_size * rows));
-    auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
-    for (auto i = 0; i < k * rows; ++i) {
+    auto result_count = rows * k;
+
+    auto p_id = static_cast<int64_t*>(malloc(result_count * sizeof(int64_t)));
+    auto p_dist = static_cast<float*>(malloc(result_count * sizeof(float)));
+    for (int64_t i = 0; i < result_count; ++i) {
         p_id[i] = -1;
         p_dist[i] = -1;
     }
@@ -125,6 +123,7 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     real_index->search(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, bitset);
     query_end = std::chrono::high_resolution_clock::now();
     if (STATISTICS_LEVEL) {
+        auto hnsw_stats = std::dynamic_pointer_cast<RHNSWStatistics>(stats);
         auto lock = hnsw_stats->Lock();
         if (STATISTICS_LEVEL >= 1) {
             hnsw_stats->update_nq(rows);
@@ -138,6 +137,8 @@ IndexRHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fai
     }
     //     LOG_KNOWHERE_DEBUG_ << "IndexRHNSW::Load finished, show statistics:";
     //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
+
+    MapOffsetToUid(p_id, result_count);
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -202,9 +203,5 @@ void
 IndexRHNSW::LoadImpl(const milvus::knowhere::BinarySet &, const milvus::knowhere::IndexType &type) {}
 */
 
-void
-IndexRHNSW::AddWithoutIds(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& config) {
-    KNOWHERE_THROW_MSG("IndexRHNSW has no implementation of AddWithoutIds, please use IndexRHNSW(Flat/SQ/PQ) instead!");
-}
 }  // namespace knowhere
 }  // namespace milvus

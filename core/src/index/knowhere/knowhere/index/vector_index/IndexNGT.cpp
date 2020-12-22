@@ -182,6 +182,7 @@ IndexNGT::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss
             *(local_id + idx) = res[idx].id - 1;
             *(local_dist + idx) = res[idx].distance * dis_coefficient;
         }
+        MapOffsetToUid(local_id, res_num);
         while (res_num < static_cast<int64_t>(k)) {
             *(local_id + res_num) = -1;
             *(local_dist + res_num) = 1.0 / 0.0;

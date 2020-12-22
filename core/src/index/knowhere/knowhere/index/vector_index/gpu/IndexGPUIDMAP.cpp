@@ -31,8 +31,6 @@ namespace knowhere {
 
 VecIndexPtr
 GPUIDMAP::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
@@ -98,20 +96,16 @@ GPUIDMAP::GetRawVectors() {
     KNOWHERE_THROW_MSG("Not support");
 }
 
-const int64_t*
-GPUIDMAP::GetRawIds() {
-    KNOWHERE_THROW_MSG("Not support");
-}
-
 void
 GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
                     const faiss::BitsetView& bitset) {
     ResScope rs(res_, gpu_id_);
 
     // assign the metric type
-    auto flat_index = dynamic_cast<faiss::IndexIDMap*>(index_.get())->index;
-    flat_index->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, data, k, distances, labels, bitset);
+
+    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 void

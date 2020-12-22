@@ -53,11 +53,10 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    auto spt = res_.lock();
-    if (spt != nullptr) {
+GPUIVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
+    if (auto spt = res_.lock()) {
         ResScope rs(res_, gpu_id_);
-        IVF::Add(dataset_ptr, config);
+        IVF::AddWithoutIds(dataset_ptr, config);
     } else {
         KNOWHERE_THROW_MSG("Add IVF can't get gpu resource");
     }
@@ -65,8 +64,6 @@ GPUIVF::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
 VecIndexPtr
 GPUIVF::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     if (device_idx != nullptr) {
         faiss::Index* device_index = index_.get();
@@ -139,8 +136,6 @@ GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 void
 GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
                   const faiss::BitsetView& bitset) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
@@ -155,6 +150,8 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
             device_index->search(search_size, reinterpret_cast<const float*>(data) + i * dim, k, distances + i * k,
                                  labels + i * k, bitset);
         }
+
+        MapOffsetToUid(labels, static_cast<size_t>(n * k));
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }
