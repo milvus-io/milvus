@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
 type TaskQueue interface {
@@ -169,6 +170,7 @@ type TaskScheduler struct {
 
 	idAllocator *allocator.IDAllocator
 	metaTable   *metaTable
+	kv          kv.Base
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -177,11 +179,13 @@ type TaskScheduler struct {
 
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.IDAllocator,
+	kv kv.Base,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
 		idAllocator: idAllocator,
 		metaTable:   table,
+		kv:          kv,
 		ctx:         ctx1,
 		cancel:      cancel,
 	}

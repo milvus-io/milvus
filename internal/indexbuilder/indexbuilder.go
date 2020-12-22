@@ -9,9 +9,15 @@ import (
 	"sync"
 	"time"
 
+	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -30,6 +36,8 @@ type Builder struct {
 	sched      *TaskScheduler
 
 	idAllocator *allocator.IDAllocator
+
+	kv kv.Base
 
 	metaTable *metaTable
 	// Add callback functions at different stages
@@ -63,12 +71,22 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 
 	idAllocator, err := allocator.NewIDAllocator(b.loopCtx, Params.MasterAddress)
 
+	minIOEndPoint := Params.MinIOAddress
+	minIOAccessKeyID := Params.MinIOAccessKeyID
+	minIOSecretAccessKey := Params.MinIOSecretAccessKey
+	minIOUseSSL := Params.MinIOUseSSL
+	minIOClient, err := minio.New(minIOEndPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minIOAccessKeyID, minIOSecretAccessKey, ""),
+		Secure: minIOUseSSL,
+	})
+	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, "milvus-distributed-indexbuilder")
+
 	if err != nil {
 		return nil, err
 	}
 	b.idAllocator = idAllocator
 
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator, b.metaTable)
+	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator, b.kv, b.metaTable)
 	if err != nil {
 		return nil, err
 	}

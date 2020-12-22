@@ -17,6 +17,12 @@ type ParamTable struct {
 
 	EtcdAddress  string
 	MetaRootPath string
+
+	MinIOAddress         string
+	MinIOPort            int
+	MinIOAccessKeyID     string
+	MinIOSecretAccessKey string
+	MinIOUseSSL          bool
 }
 
 var Params ParamTable
@@ -85,4 +91,50 @@ func (pt *ParamTable) initMasterAddress() {
 		panic(err)
 	}
 	pt.MasterAddress = ret
+}
+
+func (pt *ParamTable) initMinIOAddress() {
+	ret, err := pt.Load("_MinioAddress")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIOAddress = ret
+}
+
+func (pt *ParamTable) initMinIOPort() {
+	ret, err := pt.Load("_MinIOPort")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIOPort, err = strconv.Atoi(ret)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (pt *ParamTable) initMinIOAccessKeyID() {
+	ret, err := pt.Load("minio.accessKeyID")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIOAccessKeyID = ret
+}
+
+func (pt *ParamTable) initMinIOSecretAccessKey() {
+	ret, err := pt.Load("minio.secretAccessKey")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIOSecretAccessKey = ret
+}
+
+func (pt *ParamTable) initMinIOUseSSL() {
+	ret, err := pt.Load("minio.useSSL")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIOUseSSL, err = strconv.ParseBool(ret)
+	if err != nil {
+		panic(err)
+	}
 }

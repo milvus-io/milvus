@@ -21,6 +21,18 @@ type Blob struct {
 	value []byte
 }
 
+func NewBlob(key string, value []byte) *Blob {
+	return &Blob{key, value}
+}
+
+func (b Blob) GetKey() string {
+	return b.key
+}
+
+func (b Blob) GetValue() []byte {
+	return b.value
+}
+
 type Base struct {
 	Version  int
 	CommitID int
