@@ -23,6 +23,11 @@ enum MsgType {
     kDescribePartition = 203;
     kShowPartitions = 204;
 
+    /* Definition Requests: Index */
+    kCreateIndex = 300;
+    kDescribeIndex = 301;
+    kDescribeIndexProgress = 302;
+    
     /* Manipulation Requests */
     kInsert = 400;
     kDelete = 401;
@@ -31,7 +36,7 @@ enum MsgType {
     /* Query */
     kSearch = 500;
     kSearchResult = 501;
-
+    
     /* System Control */
     kTimeTick = 1200;
     kQueryNodeStats = 1201;

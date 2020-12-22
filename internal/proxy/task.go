@@ -962,3 +962,168 @@ func (spt *ShowPartitionsTask) Execute() (err error) {
 func (spt *ShowPartitionsTask) PostExecute() error {
 	return nil
 }
+
+type CreateIndexTask struct {
+	Condition
+	internalpb.CreateIndexRequest
+	masterClient masterpb.MasterClient
+	result       *commonpb.Status
+	ctx          context.Context
+}
+
+func (cit *CreateIndexTask) ID() UniqueID {
+	return cit.ReqID
+}
+
+func (cit *CreateIndexTask) SetID(uid UniqueID) {
+	cit.ReqID = uid
+}
+
+func (cit *CreateIndexTask) Type() internalpb.MsgType {
+	return cit.MsgType
+}
+
+func (cit *CreateIndexTask) BeginTs() Timestamp {
+	return cit.Timestamp
+}
+
+func (cit *CreateIndexTask) EndTs() Timestamp {
+	return cit.Timestamp
+}
+
+func (cit *CreateIndexTask) SetTs(ts Timestamp) {
+	cit.Timestamp = ts
+}
+
+func (cit *CreateIndexTask) PreExecute() error {
+	collName, fieldName := cit.CollectionName, cit.FieldName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	if err := ValidateFieldName(fieldName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cit *CreateIndexTask) Execute() (err error) {
+	cit.result, err = cit.masterClient.CreateIndex(cit.ctx, &cit.CreateIndexRequest)
+	return err
+}
+
+func (cit *CreateIndexTask) PostExecute() error {
+	return nil
+}
+
+type DescribeIndexTask struct {
+	Condition
+	internalpb.DescribeIndexRequest
+	masterClient masterpb.MasterClient
+	result       *servicepb.DescribeIndexResponse
+	ctx          context.Context
+}
+
+func (dit *DescribeIndexTask) ID() UniqueID {
+	return dit.ReqID
+}
+
+func (dit *DescribeIndexTask) SetID(uid UniqueID) {
+	dit.ReqID = uid
+}
+
+func (dit *DescribeIndexTask) Type() internalpb.MsgType {
+	return dit.MsgType
+}
+
+func (dit *DescribeIndexTask) BeginTs() Timestamp {
+	return dit.Timestamp
+}
+
+func (dit *DescribeIndexTask) EndTs() Timestamp {
+	return dit.Timestamp
+}
+
+func (dit *DescribeIndexTask) SetTs(ts Timestamp) {
+	dit.Timestamp = ts
+}
+
+func (dit *DescribeIndexTask) PreExecute() error {
+	collName, fieldName := dit.CollectionName, dit.FieldName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	if err := ValidateFieldName(fieldName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dit *DescribeIndexTask) Execute() (err error) {
+	dit.result, err = dit.masterClient.DescribeIndex(dit.ctx, &dit.DescribeIndexRequest)
+	return err
+}
+
+func (dit *DescribeIndexTask) PostExecute() error {
+	return nil
+}
+
+type DescribeIndexProgressTask struct {
+	Condition
+	internalpb.DescribeIndexProgressRequest
+	masterClient masterpb.MasterClient
+	result       *servicepb.BoolResponse
+	ctx          context.Context
+}
+
+func (dipt *DescribeIndexProgressTask) ID() UniqueID {
+	return dipt.ReqID
+}
+
+func (dipt *DescribeIndexProgressTask) SetID(uid UniqueID) {
+	dipt.ReqID = uid
+}
+
+func (dipt *DescribeIndexProgressTask) Type() internalpb.MsgType {
+	return dipt.MsgType
+}
+
+func (dipt *DescribeIndexProgressTask) BeginTs() Timestamp {
+	return dipt.Timestamp
+}
+
+func (dipt *DescribeIndexProgressTask) EndTs() Timestamp {
+	return dipt.Timestamp
+}
+
+func (dipt *DescribeIndexProgressTask) SetTs(ts Timestamp) {
+	dipt.Timestamp = ts
+}
+
+func (dipt *DescribeIndexProgressTask) PreExecute() error {
+	collName, fieldName := dipt.CollectionName, dipt.FieldName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	if err := ValidateFieldName(fieldName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dipt *DescribeIndexProgressTask) Execute() (err error) {
+	dipt.result, err = dipt.masterClient.DescribeIndexProgress(dipt.ctx, &dipt.DescribeIndexProgressRequest)
+	return err
+}
+
+func (dipt *DescribeIndexProgressTask) PostExecute() error {
+	return nil
+}
