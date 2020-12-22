@@ -3,8 +3,8 @@
 We use GitHub for tracking bugs and feature requests. If you need any support for using Milvus, please refer to the following resources below.
 
 ## Documentation
--   [User Documentation](https://www.milvus.io/docs/guides/get_started/install_milvus/install_milvus.md)
--   [Troubleshooting Guide](https://www.milvus.io/docs/v0.6.0/guides/troubleshoot.md)
+-   [User Documentation](https://www.milvus.io/docs/install_milvus.md)
+-   [Troubleshooting Guide](https://www.milvus.io/docs/troubleshoot.md)
 -   [FAQ](https://www.milvus.io/docs/v0.6.0/faq/operational_faq.md)
 
 ## Real-time chat
