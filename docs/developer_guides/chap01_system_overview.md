@@ -26,7 +26,7 @@ A batch insert/delete is guaranteed to become visible atomically.
 
 
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/data_organization.png" width=550>
+<img src="./figs/data_organization.png" width=550>
 
 In Milvus, 'collection' refers to the concept of table. A collection can be optionally divided into several 'partitions'. Both collection and partition are the basic execution scopes of queries. When use parition, users should clearly know how a collection should be partitioned. In most cases, parition leads to more flexible data management and more efficient quering. For a partitioned collection, queries can be executed both on the collection or a set of specified partitions.
 
@@ -40,7 +40,7 @@ Each collection or parition contains a set of 'segment groups'. Segment group is
 
 
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/system_framework.png" width=800>
+<img src="./figs/system_framework.png" width=800>
 
 The main components, proxy, WAL, query node and write node can scale to multiple instances. These components scale seperately for better tradeoff between availability and cost.
 
@@ -58,7 +58,7 @@ Note that not all the components are necessarily replicated. The system provides
 
 #### 1.4 State Synchronization
 
-<img src="/Users/grt/Project/grt/milvus-distributed/docs/developer_guides/figs/state_sync.png" width=800>
+<img src="./figs/state_sync.png" width=800>
 
 Data in Milvus have three different forms, namely WAL, binlog, and index. As mentioned in the previous section, WAL can be viewed as a determined operation stream. Other two data forms keep themselves up to date by performing the operation stream in time order.
 
