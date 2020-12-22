@@ -727,11 +727,11 @@ void MilvusService::Stub::experimental_async::DeleteByID(::grpc::ClientContext* 
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_DeleteByID_, context, request, false);
 }
 
-::grpc::Status MilvusService::Stub::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::milvus::grpc::Status* response) {
+::grpc::Status MilvusService::Stub::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::PreloadCollectionParam& request, ::milvus::grpc::Status* response) {
   return ::grpc::internal::BlockingUnaryCall(channel_.get(), rpcmethod_PreloadCollection_, context, request, response);
 }
 
-void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
+void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::PreloadCollectionParam* request, ::milvus::grpc::Status* response, std::function<void(::grpc::Status)> f) {
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_PreloadCollection_, context, request, response, std::move(f));
 }
 
@@ -739,7 +739,7 @@ void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientCo
   ::grpc_impl::internal::CallbackUnaryCall(stub_->channel_.get(), stub_->rpcmethod_PreloadCollection_, context, request, response, std::move(f));
 }
 
-void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
+void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientContext* context, const ::milvus::grpc::PreloadCollectionParam* request, ::milvus::grpc::Status* response, ::grpc::experimental::ClientUnaryReactor* reactor) {
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_PreloadCollection_, context, request, response, reactor);
 }
 
@@ -747,11 +747,11 @@ void MilvusService::Stub::experimental_async::PreloadCollection(::grpc::ClientCo
   ::grpc_impl::internal::ClientCallbackUnaryFactory::Create(stub_->channel_.get(), stub_->rpcmethod_PreloadCollection_, context, request, response, reactor);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::AsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::AsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PreloadCollectionParam& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_PreloadCollection_, context, request, true);
 }
 
-::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::PrepareAsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::CollectionName& request, ::grpc::CompletionQueue* cq) {
+::grpc::ClientAsyncResponseReader< ::milvus::grpc::Status>* MilvusService::Stub::PrepareAsyncPreloadCollectionRaw(::grpc::ClientContext* context, const ::milvus::grpc::PreloadCollectionParam& request, ::grpc::CompletionQueue* cq) {
   return ::grpc_impl::internal::ClientAsyncResponseReaderFactory< ::milvus::grpc::Status>::Create(channel_.get(), cq, rpcmethod_PreloadCollection_, context, request, false);
 }
 
@@ -1345,7 +1345,7 @@ MilvusService::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[22],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
-      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::CollectionName, ::milvus::grpc::Status>(
+      new ::grpc::internal::RpcMethodHandler< MilvusService::Service, ::milvus::grpc::PreloadCollectionParam, ::milvus::grpc::Status>(
           std::mem_fn(&MilvusService::Service::PreloadCollection), this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       MilvusService_method_names[23],
@@ -1591,7 +1591,7 @@ MilvusService::Service::~Service() {
   return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
 }
 
-::grpc::Status MilvusService::Service::PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::CollectionName* request, ::milvus::grpc::Status* response) {
+::grpc::Status MilvusService::Service::PreloadCollection(::grpc::ServerContext* context, const ::milvus::grpc::PreloadCollectionParam* request, ::milvus::grpc::Status* response) {
   (void) context;
   (void) request;
   (void) response;

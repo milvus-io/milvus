@@ -451,11 +451,14 @@ ClientProxy::DeleteEntityByID(const std::string& collection_name, const std::vec
 }
 
 Status
-ClientProxy::LoadCollection(const std::string& collection_name) const {
+ClientProxy::LoadCollection(const std::string& collection_name, PartitionTagList& partition_tag_array) const {
     try {
-        ::milvus::grpc::CollectionName grpc_collection_name;
-        grpc_collection_name.set_collection_name(collection_name);
-        Status status = client_ptr_->LoadCollection(grpc_collection_name);
+        ::milvus::grpc::PreloadCollectionParam param;
+        param.set_collection_name(collection_name);
+        for (auto& tag : partition_tag_array) {
+            param.add_partition_tag_array(tag);
+        }
+        Status status = client_ptr_->LoadCollection(param);
         return status;
     } catch (std::exception& ex) {
         return Status(StatusCode::UnknownError, "Failed to preload collection: " + std::string(ex.what()));
