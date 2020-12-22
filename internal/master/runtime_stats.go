@@ -2,6 +2,7 @@ package master
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type RuntimeStats struct {
@@ -20,7 +21,7 @@ func (rs *RuntimeStats) UpdateFieldStat(collID UniqueID, fieldID UniqueID, stats
 	collRuntimeStats := rs.collStats[collID]
 	fieldStats := collRuntimeStats.fieldStats[fieldID]
 	for i, v := range fieldStats {
-		if v.peerID == peerID { // todo compare index params
+		if v.peerID == peerID && typeutil.CompareIndexParams(v.indexParams, stats.indexParams) {
 			fieldStats[i] = stats
 			return nil
 		}
