@@ -61,13 +61,13 @@ class VecIndex : public Index {
 
     faiss::ConcurrentBitsetPtr
     GetBlacklist() {
-        std::unique_lock<std::mutex> lck(mutex_);
+        std::unique_lock<std::mutex> lck(bitset_mutex_);
         return bitset_;
     }
 
     void
     SetBlacklist(faiss::ConcurrentBitsetPtr bitset_ptr) {
-        std::unique_lock<std::mutex> lck(mutex_);
+        std::unique_lock<std::mutex> lck(bitset_mutex_);
         bitset_ = std::move(bitset_ptr);
     }
 
@@ -94,7 +94,7 @@ class VecIndex : public Index {
 
     size_t
     BlacklistSize() {
-        std::unique_lock<std::mutex> lck(mutex_);
+        std::unique_lock<std::mutex> lck(bitset_mutex_);
         return bitset_ ? bitset_->size() : 0;
     }
 
@@ -133,7 +133,7 @@ class VecIndex : public Index {
 
  private:
     // multi thread may access bitset_
-    std::mutex mutex_;
+    std::mutex bitset_mutex_;
     faiss::ConcurrentBitsetPtr bitset_ = nullptr;
 };
 

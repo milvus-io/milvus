@@ -39,12 +39,11 @@ FPGAIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     index_->train(rows, (float*)p_data);
 }
 void
-FPGAIVFPQ::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+FPGAIVFPQ::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     LOG_ENGINE_DEBUG_ << " fpga ivpq add. ";
-    std::lock_guard<std::mutex> lk(mutex_);
     // GET_TENSOR_DATA_ID(dataset_ptr)
     GETTENSOR(dataset_ptr)
     index_->add(rows, (float*)p_data);  // we not support add_with_id ,maybe support latter
@@ -52,7 +51,6 @@ FPGAIVFPQ::Add(const DatasetPtr& dataset_ptr, const Config& config) {
 
 void
 FPGAIVFPQ::CopyIndexToFpga() {
-    std::lock_guard<std::mutex> lk(mutex_);
     auto Fpga = Fpga::FpgaInst::GetInstance();
     auto ivf_index = static_cast<faiss::IndexIVFPQ*>(index_.get());
     ivf_index->make_direct_map();
@@ -63,8 +61,6 @@ FPGAIVFPQ::CopyIndexToFpga() {
 }
 void
 FPGAIVFPQ::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     try {
         LOG_ENGINE_DEBUG_ << " run fpga search QueryImpl";
         auto params = GenParams(config);

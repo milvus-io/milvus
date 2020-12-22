@@ -39,7 +39,6 @@ NSG::Serialize(const Config& config) {
 
     try {
         fiu_do_on("NSG.Serialize.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
@@ -58,7 +57,6 @@ void
 NSG::Load(const BinarySet& index_binary) {
     try {
         fiu_do_on("NSG.Load.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG");
 
         MemoryIOReader reader;
@@ -93,7 +91,6 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
         {
-            std::lock_guard<std::mutex> lk(mutex_);
             index_->Search((float*)p_data, rows, dim, config[meta::TOPK].get<int64_t>(), p_dist, p_id, s_params,
                            blacklist);
         }
@@ -110,7 +107,7 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-NSG::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
     idmap->AddWithoutIds(dataset_ptr, config);

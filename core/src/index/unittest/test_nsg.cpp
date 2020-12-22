@@ -139,7 +139,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     assert(!xb.empty());
 
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
-    index_->Train(base_dataset, train_conf);
+    index_->BuildAll(base_dataset, train_conf);
 
     auto result = index_->Query(query_dataset, search_conf);
     AssertAnns(result, nq, k);

@@ -34,16 +34,16 @@ class CPUSPTAGRNG : public VecIndex {
     Load(const BinarySet& index_array) override;
 
     void
-    BuildAll(const DatasetPtr& dataset_ptr, const Config& config) override {
-        Train(dataset_ptr, config);
+    BuildAll(const DatasetPtr&, const Config&) override;
+
+    void
+    Train(const DatasetPtr& dataset_ptr, const Config& config) override {
+        KNOWHERE_THROW_MSG("SPTAGRNG not support build item dynamically, please invoke BuildAll interface.");
     }
 
     void
-    Train(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
+        KNOWHERE_THROW_MSG("Incremental index SPTAGRNG is not supported");
     }
 
     DatasetPtr

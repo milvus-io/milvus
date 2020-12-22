@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -64,9 +63,6 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
  protected:
     virtual void
     QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config);
-
- protected:
-    std::mutex mutex_;
 };
 
 using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;

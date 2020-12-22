@@ -31,8 +31,6 @@ namespace knowhere {
 
 VecIndexPtr
 GPUIDMAP::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 

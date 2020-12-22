@@ -28,13 +28,11 @@ BinaryIDMAP::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     return SerializeImpl(index_type_);
 }
 
 void
 BinaryIDMAP::Load(const BinarySet& index_binary) {
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary, index_type_);
 }
 
@@ -82,7 +80,6 @@ BinaryIDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) 
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset_ptr)
 
     index_->add(rows, (uint8_t*)p_data);

@@ -41,13 +41,11 @@ IDMAP::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     return SerializeImpl(index_type_);
 }
 
 void
 IDMAP::Load(const BinarySet& binary_set) {
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(binary_set, index_type_);
 }
 
@@ -65,7 +63,6 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset_ptr)
     index_->add(rows, (float*)p_data);
 }

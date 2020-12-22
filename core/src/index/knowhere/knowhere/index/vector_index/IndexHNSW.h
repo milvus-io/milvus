@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 
 #include "hnswlib/hnswlib.h"
 
@@ -54,7 +53,6 @@ class IndexHNSW : public VecIndex {
 
  private:
     bool normalize = false;
-    std::mutex mutex_;
     std::shared_ptr<hnswlib::HierarchicalNSW<float>> index_;
 };
 

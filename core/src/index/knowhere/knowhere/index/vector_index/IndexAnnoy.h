@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 
 #include "annoy/src/annoylib.h"
 #include "annoy/src/kissrandom.h"

@@ -100,8 +100,6 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
-
     GETTENSOR(dataset_ptr)
 
     index_->addPoint(p_data, 0);

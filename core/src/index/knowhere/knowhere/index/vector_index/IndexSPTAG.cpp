@@ -116,7 +116,7 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
 }
 
 void
-CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
+CPUSPTAGRNG::BuildAll(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
 
     DatasetPtr dataset = origin;
