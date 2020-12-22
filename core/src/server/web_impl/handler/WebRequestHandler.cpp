@@ -104,7 +104,7 @@ WebRequestHandler::IsBinaryCollection(const std::string& collection_name, bool& 
 Status
 WebRequestHandler::CopyRecordsFromJson(const nlohmann::json& json, engine::VectorsData& vectors, bool bin) {
     if (!json.is_array()) {
-        return Status(ILLEGAL_BODY, "field \"vectors\" must be a array");
+        return Status(ILLEGAL_BODY, "field \"vectors\" must be an array");
     }
 
     vectors.vector_count_ = json.size();
@@ -260,7 +260,17 @@ WebRequestHandler::PreLoadCollection(const nlohmann::json& json, std::string& re
 
     auto collection_name = json["collection_name"];
     std::vector<std::string> partition_tags;
-    // TODO: set partition_tags
+    if (json.contains("partition_tags")) {
+        auto tags = json["partition_tags"];
+        if (!tags.is_null() && !tags.is_array()) {
+            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be an array");
+        }
+
+        for (auto& tag : tags) {
+            partition_tags.emplace_back(tag.get<std::string>());
+        }
+    }
+
     auto status = request_handler_.PreloadCollection(context_ptr_, collection_name.get<std::string>(), partition_tags);
     if (status.ok()) {
         nlohmann::json result;
@@ -424,7 +434,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     if (json.contains("partition_tags")) {
         auto tags = json["partition_tags"];
         if (!tags.is_null() && !tags.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
+            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be an array");
         }
 
         for (auto& tag : tags) {
@@ -452,7 +462,7 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         if (json.contains("file_ids")) {
             auto ids = json["file_ids"];
             if (!ids.is_null() && !ids.is_array()) {
-                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be a array");
+                return Status(BODY_PARSE_FAIL, "Field \"file_ids\" must be an array");
             }
             for (auto& id : ids) {
                 file_id_vec.emplace_back(id.get<std::string>());
@@ -700,7 +710,7 @@ WebRequestHandler::HybridSearch(const std::string& collection_name, const nlohma
     if (json.contains("partition_tags")) {
         auto tags = json["partition_tags"];
         if (!tags.is_null() && !tags.is_array()) {
-            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be a array");
+            return Status(BODY_PARSE_FAIL, "Field \"partition_tags\" must be an array");
         }
 
         for (auto& tag : tags) {
@@ -1537,7 +1547,7 @@ WebRequestHandler::Insert(const OString& collection_name, const OString& body, V
     if (body_json.contains("ids")) {
         auto& ids_json = body_json["ids"];
         if (!ids_json.is_array()) {
-            RETURN_STATUS_DTO(ILLEGAL_BODY, "Field \"ids\" must be a array");
+            RETURN_STATUS_DTO(ILLEGAL_BODY, "Field \"ids\" must be an array");
         }
         auto& id_array = vectors.id_array_;
         id_array.clear();
