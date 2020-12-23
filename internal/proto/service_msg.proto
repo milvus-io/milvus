@@ -184,11 +184,19 @@ message QueryResult {
     repeated common.KeyValuePair extra_params = 3;
 }
 
+message DescribeIndexRequest {
+    string collection_name = 1;
+    string field_name = 2;
+}
+
+message DescribeIndexProgressRequest {
+    string collection_name = 1;
+    string field_name = 2;
+}
+
 message DescribeIndexResponse {
     common.Status status = 1;
     string collection_name = 2;
     string field_name = 3;
-    string index_name = 4;
-    repeated common.KeyValuePair extra_params = 5;
+    repeated common.KeyValuePair extra_params = 4;
 }
-

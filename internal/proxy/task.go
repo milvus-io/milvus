@@ -7,10 +7,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/golang/protobuf/proto"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -18,6 +15,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type task interface {

@@ -595,6 +595,7 @@ func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionNam
 }
 
 func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexParam) (*commonpb.Status, error) {
+	log.Println("create index for: ", indexParam.FieldName)
 	cit := &CreateIndexTask{
 		Condition: NewTaskCondition(ctx),
 		CreateIndexRequest: internalpb.CreateIndexRequest{
@@ -637,10 +638,104 @@ func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexPara
 	return cit.result, nil
 }
 
-func (p *Proxy) DescribeIndex(context.Context, *servicepb.IndexParam) (*servicepb.DescribeIndexResponse, error) {
-	return nil, nil
+func (p *Proxy) DescribeIndex(ctx context.Context, req *servicepb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
+	log.Println("Describe index for: ", req.FieldName)
+	dit := &DescribeIndexTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeIndexRequest: internalpb.DescribeIndexRequest{
+			MsgType:        internalpb.MsgType_kDescribeIndex,
+			CollectionName: req.CollectionName,
+			FieldName:      req.FieldName,
+		},
+		masterClient: p.masterClient,
+	}
+
+	var cancel func()
+	dit.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create index timeout")
+		default:
+			return p.sched.DdQueue.Enqueue(dit)
+		}
+	}
+	err := fn()
+	if err != nil {
+		return &servicepb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			CollectionName: req.CollectionName,
+			FieldName:      req.FieldName,
+			ExtraParams:    nil,
+		}, nil
+	}
+
+	err = dit.WaitToFinish()
+	if err != nil {
+		return &servicepb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			CollectionName: req.CollectionName,
+			FieldName:      req.FieldName,
+			ExtraParams:    nil,
+		}, nil
+	}
+
+	return dit.result, nil
 }
 
-func (p *Proxy) DescribeIndexProgress(context.Context, *servicepb.IndexParam) (*servicepb.BoolResponse, error) {
-	return nil, nil
+func (p *Proxy) DescribeIndexProgress(ctx context.Context, req *servicepb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
+	log.Println("Describe index progress for: ", req.FieldName)
+	dipt := &DescribeIndexProgressTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeIndexProgressRequest: internalpb.DescribeIndexProgressRequest{
+			MsgType:        internalpb.MsgType_kDescribeIndexProgress,
+			CollectionName: req.CollectionName,
+			FieldName:      req.FieldName,
+		},
+		masterClient: p.masterClient,
+	}
+
+	var cancel func()
+	dipt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create index timeout")
+		default:
+			return p.sched.DdQueue.Enqueue(dipt)
+		}
+	}
+	err := fn()
+	if err != nil {
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: false,
+		}, nil
+	}
+
+	err = dipt.WaitToFinish()
+	if err != nil {
+		return &servicepb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: false,
+		}, nil
+	}
+
+	return dipt.result, nil
 }

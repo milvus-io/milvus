@@ -122,7 +122,7 @@ service MilvusService {
      *
      * @return IndexParam
      */
-    rpc DescribeIndex(IndexParam) returns (DescribeIndexResponse) {}
+    rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
 
     /**
      * @brief This method is used to query index building progress
@@ -131,5 +131,5 @@ service MilvusService {
      *
      * @return IndexParam
      */
-    rpc DescribeIndexProgress(IndexParam) returns (BoolResponse) {}
+    rpc DescribeIndexProgress(DescribeIndexProgressRequest) returns (BoolResponse) {}
 }
