@@ -60,7 +60,7 @@ IDMAP::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     // so we let L2 be the default type
     constexpr faiss::MetricType metric_type = faiss::METRIC_L2;
 
-    int64_t dim = config[meta::DIM].get<int64_t>();
+    auto dim = config[meta::DIM].get<int64_t>();
     auto index = std::make_shared<faiss::IndexFlat>(dim, metric_type);
     index_ = index;
 }
@@ -72,7 +72,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     }
 
     GET_TENSOR_DATA(dataset_ptr)
-    index_->add(rows, (float*)p_data);
+    index_->add(rows, reinterpret_cast<const float*>(p_data));
 }
 
 DatasetPtr
