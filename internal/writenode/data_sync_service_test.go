@@ -57,7 +57,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	// Binary vector
-	var bvector = [2]byte{0, 255}
+	// Dimension of binary vector is 32
+	var bvector = [4]byte{255, 255, 255, 0}
 	for _, ele := range bvector {
 		bs := make([]byte, 4)
 		binary.LittleEndian.PutUint32(bs, uint32(ele))
@@ -66,7 +67,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// Bool
 	bb := make([]byte, 4)
-	var fieldBool = false
+	var fieldBool = true
 	var fieldBoolInt uint32
 	if fieldBool {
 		fieldBoolInt = 1
@@ -256,7 +257,7 @@ func newMeta() {
 				TypeParams: []*commonpb.KeyValuePair{
 					{
 						Key:   "dim",
-						Value: "8",
+						Value: "32",
 					},
 					{
 						Key:   "col1_f2_tk2",

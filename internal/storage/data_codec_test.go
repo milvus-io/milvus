@@ -10,112 +10,104 @@ import (
 )
 
 func TestInsertCodec(t *testing.T) {
-	base := Base{
-		Version:  1,
-		CommitID: 1,
-		TenantID: 1,
-		Schema: &etcdpb.CollectionMeta{
-			ID:            1,
-			CreateTime:    1,
-			SegmentIDs:    []int64{0, 1},
-			PartitionTags: []string{"partition_0", "partition_1"},
-			Schema: &schemapb.CollectionSchema{
-				Name:        "schema",
-				Description: "schema",
-				AutoID:      true,
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      0,
-						Name:         "row_id",
-						IsPrimaryKey: false,
-						Description:  "row_id",
-						DataType:     schemapb.DataType_INT64,
-					},
-					{
-						FieldID:      1,
-						Name:         "Ts",
-						IsPrimaryKey: false,
-						Description:  "Ts",
-						DataType:     schemapb.DataType_INT64,
-					},
-					{
-						FieldID:      100,
-						Name:         "field_bool",
-						IsPrimaryKey: false,
-						Description:  "description_2",
-						DataType:     schemapb.DataType_BOOL,
-					},
-					{
-						FieldID:      101,
-						Name:         "field_int8",
-						IsPrimaryKey: false,
-						Description:  "description_3",
-						DataType:     schemapb.DataType_INT8,
-					},
-					{
-						FieldID:      102,
-						Name:         "field_int16",
-						IsPrimaryKey: false,
-						Description:  "description_4",
-						DataType:     schemapb.DataType_INT16,
-					},
-					{
-						FieldID:      103,
-						Name:         "field_int32",
-						IsPrimaryKey: false,
-						Description:  "description_5",
-						DataType:     schemapb.DataType_INT32,
-					},
-					{
-						FieldID:      104,
-						Name:         "field_int64",
-						IsPrimaryKey: false,
-						Description:  "description_6",
-						DataType:     schemapb.DataType_INT64,
-					},
-					{
-						FieldID:      105,
-						Name:         "field_float",
-						IsPrimaryKey: false,
-						Description:  "description_7",
-						DataType:     schemapb.DataType_FLOAT,
-					},
-					{
-						FieldID:      106,
-						Name:         "field_double",
-						IsPrimaryKey: false,
-						Description:  "description_8",
-						DataType:     schemapb.DataType_DOUBLE,
-					},
-					{
-						FieldID:      107,
-						Name:         "field_string",
-						IsPrimaryKey: false,
-						Description:  "description_9",
-						DataType:     schemapb.DataType_STRING,
-					},
-					{
-						FieldID:      108,
-						Name:         "field_binary_vector",
-						IsPrimaryKey: false,
-						Description:  "description_10",
-						DataType:     schemapb.DataType_VECTOR_BINARY,
-					},
-					{
-						FieldID:      109,
-						Name:         "field_float_vector",
-						IsPrimaryKey: false,
-						Description:  "description_11",
-						DataType:     schemapb.DataType_VECTOR_FLOAT,
-					},
+	Schema := &etcdpb.CollectionMeta{
+		ID:            1,
+		CreateTime:    1,
+		SegmentIDs:    []int64{0, 1},
+		PartitionTags: []string{"partition_0", "partition_1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					Name:         "row_id",
+					IsPrimaryKey: false,
+					Description:  "row_id",
+					DataType:     schemapb.DataType_INT64,
+				},
+				{
+					FieldID:      1,
+					Name:         "Ts",
+					IsPrimaryKey: false,
+					Description:  "Ts",
+					DataType:     schemapb.DataType_INT64,
+				},
+				{
+					FieldID:      100,
+					Name:         "field_bool",
+					IsPrimaryKey: false,
+					Description:  "description_2",
+					DataType:     schemapb.DataType_BOOL,
+				},
+				{
+					FieldID:      101,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "description_3",
+					DataType:     schemapb.DataType_INT8,
+				},
+				{
+					FieldID:      102,
+					Name:         "field_int16",
+					IsPrimaryKey: false,
+					Description:  "description_4",
+					DataType:     schemapb.DataType_INT16,
+				},
+				{
+					FieldID:      103,
+					Name:         "field_int32",
+					IsPrimaryKey: false,
+					Description:  "description_5",
+					DataType:     schemapb.DataType_INT32,
+				},
+				{
+					FieldID:      104,
+					Name:         "field_int64",
+					IsPrimaryKey: false,
+					Description:  "description_6",
+					DataType:     schemapb.DataType_INT64,
+				},
+				{
+					FieldID:      105,
+					Name:         "field_float",
+					IsPrimaryKey: false,
+					Description:  "description_7",
+					DataType:     schemapb.DataType_FLOAT,
+				},
+				{
+					FieldID:      106,
+					Name:         "field_double",
+					IsPrimaryKey: false,
+					Description:  "description_8",
+					DataType:     schemapb.DataType_DOUBLE,
+				},
+				{
+					FieldID:      107,
+					Name:         "field_string",
+					IsPrimaryKey: false,
+					Description:  "description_9",
+					DataType:     schemapb.DataType_STRING,
+				},
+				{
+					FieldID:      108,
+					Name:         "field_binary_vector",
+					IsPrimaryKey: false,
+					Description:  "description_10",
+					DataType:     schemapb.DataType_VECTOR_BINARY,
+				},
+				{
+					FieldID:      109,
+					Name:         "field_float_vector",
+					IsPrimaryKey: false,
+					Description:  "description_11",
+					DataType:     schemapb.DataType_VECTOR_FLOAT,
 				},
 			},
 		},
 	}
-	insertCodec := &InsertCodec{
-		base,
-		make([]func() error, 0),
-	}
+	insertCodec := NewInsertCodec(Schema)
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
@@ -268,58 +260,7 @@ func TestInsertCodec(t *testing.T) {
 	assert.Nil(t, insertCodec.Close())
 }
 func TestDDCodec(t *testing.T) {
-	base := Base{
-		Version:  1,
-		CommitID: 1,
-		TenantID: 1,
-		Schema: &etcdpb.CollectionMeta{
-			ID:            1,
-			CreateTime:    1,
-			SegmentIDs:    []int64{0, 1},
-			PartitionTags: []string{"partition_0", "partition_1"},
-			Schema: &schemapb.CollectionSchema{
-				Name:        "schema",
-				Description: "schema",
-				AutoID:      true,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "field_1",
-						IsPrimaryKey: false,
-						Description:  "description_1",
-						DataType:     schemapb.DataType_INT32,
-					},
-					{
-						Name:         "field_2",
-						IsPrimaryKey: false,
-						Description:  "description_1",
-						DataType:     schemapb.DataType_INT64,
-					},
-					{
-						Name:         "field_3",
-						IsPrimaryKey: false,
-						Description:  "description_1",
-						DataType:     schemapb.DataType_STRING,
-					},
-					{
-						Name:         "field_3",
-						IsPrimaryKey: false,
-						Description:  "description_1",
-						DataType:     schemapb.DataType_STRING,
-					},
-					{
-						Name:         "field_3",
-						IsPrimaryKey: false,
-						Description:  "description_1",
-						DataType:     schemapb.DataType_STRING,
-					},
-				},
-			},
-		},
-	}
-	dataDefinitionCodec := &DataDefinitionCodec{
-		base,
-		make([]func() error, 0),
-	}
+	dataDefinitionCodec := NewDataDefinitionCodec(int64(1))
 	ts := []Timestamp{
 		1,
 		2,
@@ -351,9 +292,7 @@ func TestDDCodec(t *testing.T) {
 }
 
 func TestIndexCodec(t *testing.T) {
-	indexCodec := &IndexCodec{
-		Base{},
-	}
+	indexCodec := NewIndexCodec()
 	blobs := []*Blob{
 		{
 			"12345",

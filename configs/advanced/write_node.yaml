@@ -33,3 +33,8 @@ writeNode:
       #streamBufSize: 1024 # msgPack chan buffer size
       recvBufSize: 1024 # msgPack chan buffer size
       pulsarBufSize: 1024 # pulsar chan buffer size
+
+  flush:
+    # max buffer size to flush
+    insertBufSize: 20
+    ddBufSize: 20

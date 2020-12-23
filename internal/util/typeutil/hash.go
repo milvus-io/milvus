@@ -24,3 +24,12 @@ func Hash32Uint64(v uint64) (uint32, error) {
 func Hash32Int64(v int64) (uint32, error) {
 	return Hash32Uint64(uint64(v))
 }
+
+func Hash32String(s string) (int64, error) {
+	b := []byte(s)
+	v, err := Hash32Bytes(b)
+	if err != nil {
+		return 0, err
+	}
+	return int64(v), nil
+}

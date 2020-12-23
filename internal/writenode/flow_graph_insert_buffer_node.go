@@ -1,6 +1,7 @@
 package writenode
 
 import (
+	"context"
 	"encoding/binary"
 	"log"
 	"math"
@@ -9,10 +10,16 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -29,11 +36,14 @@ type (
 		BaseNode
 		kvClient     *etcdkv.EtcdKV
 		insertBuffer *insertBuffer
+		minIOKV      kv.Base
+		minioPrifex  string
+		idAllocator  *allocator.IDAllocator
 	}
 
 	insertBuffer struct {
 		insertData map[UniqueID]*InsertData // SegmentID to InsertData
-		maxSize    int                      // GOOSE TODO set from write_node.yaml
+		maxSize    int
 	}
 )
 
@@ -75,23 +85,23 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	log.Println("=========== insert buffer Node Operating")
 
 	if len(in) != 1 {
-		log.Println("Invalid operate message input in insertBuffertNode, input length = ", len(in))
+		log.Println("Error: Invalid operate message input in insertBuffertNode, input length = ", len(in))
 		// TODO: add error handling
 	}
 
 	iMsg, ok := (*in[0]).(*insertMsg)
 	if !ok {
-		log.Println("type assertion failed for insertMsg")
+		log.Println("Error: type assertion failed for insertMsg")
 		// TODO: add error handling
 	}
 	for _, task := range iMsg.insertMessages {
 		if len(task.RowIDs) != len(task.Timestamps) || len(task.RowIDs) != len(task.RowData) {
-			log.Println("Error, misaligned messages detected")
+			log.Println("Error: misaligned messages detected")
 			continue
 		}
 
 		// iMsg is insertMsg
-		// 1. iMsg -> binLogs -> buffer
+		// 1. iMsg -> buffer
 		for _, msg := range iMsg.insertMessages {
 			currentSegID := msg.GetSegmentID()
 
@@ -102,10 +112,21 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 			}
 
-			idata.Data[1] = msg.BeginTimestamp
+			// Timestamps
+			_, ok = idata.Data[1].(*storage.Int64FieldData)
+			if !ok {
+				idata.Data[1] = &storage.Int64FieldData{
+					Data:    []int64{},
+					NumRows: 0,
+				}
+			}
+			tsData := idata.Data[1].(*storage.Int64FieldData)
+			for _, ts := range msg.Timestamps {
+				tsData.Data = append(tsData.Data, int64(ts))
+			}
+			tsData.NumRows += len(msg.Timestamps)
 
 			// 1.1 Get CollectionMeta from etcd
-			//   GOOSE TODO get meta from metaTable
 			segMeta := etcdpb.SegmentMeta{}
 
 			key := path.Join(SegmentPrefix, strconv.FormatInt(currentSegID, 10))
@@ -145,23 +166,32 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 						// TODO: add error handling
 					}
 
-					data := make([]float32, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.FloatVectorFieldData{
+							NumRows: 0,
+							Data:    make([]float32, 0),
+							Dim:     dim,
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.FloatVectorFieldData)
+
 					for _, blob := range msg.RowData {
-						for j := pos; j < dim; j++ {
-							v := binary.LittleEndian.Uint32(blob.GetValue()[j*4:])
-							data = append(data, math.Float32frombits(v))
+						for j := 0; j < dim; j++ {
+							v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
+							fieldData.Data = append(fieldData.Data, math.Float32frombits(v))
 							pos++
 						}
 					}
-					idata.Data[field.FieldID] = storage.FloatVectorFieldData{
-						NumRows: len(msg.RowIDs),
-						Data:    data,
-						Dim:     dim,
-					}
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Float vector data:",
+						idata.Data[field.FieldID].(*storage.FloatVectorFieldData).Data,
+						"NumRows:",
+						idata.Data[field.FieldID].(*storage.FloatVectorFieldData).NumRows,
+						"Dim:",
+						idata.Data[field.FieldID].(*storage.FloatVectorFieldData).Dim)
 
-					log.Println("aaaaaaaa", idata)
 				case schemapb.DataType_VECTOR_BINARY:
-					// GOOSE TODO
 					var dim int
 					for _, t := range field.TypeParams {
 						if t.Key == "dim" {
@@ -177,101 +207,216 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 						// TODO: add error handling
 					}
 
-					data := make([]byte, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.BinaryVectorFieldData{
+							NumRows: 0,
+							Data:    make([]byte, 0),
+							Dim:     dim,
+						}
+					}
+					fieldData := idata.Data[field.FieldID].(*storage.BinaryVectorFieldData)
+
 					for _, blob := range msg.RowData {
-						for d := 0; d < dim/4; d++ {
+						for d := 0; d < dim/8; d++ {
 							v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-							data = append(data, byte(v))
+							fieldData.Data = append(fieldData.Data, byte(v))
 							pos++
 						}
 					}
-					idata.Data[field.FieldID] = storage.BinaryVectorFieldData{
-						NumRows: len(data) * 8 / dim,
-						Data:    data,
-						Dim:     dim,
-					}
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowData)
+					log.Println(
+						"Binary vector data:",
+						idata.Data[field.FieldID].(*storage.BinaryVectorFieldData).Data,
+						"NumRows:",
+						idata.Data[field.FieldID].(*storage.BinaryVectorFieldData).NumRows,
+						"Dim:",
+						idata.Data[field.FieldID].(*storage.BinaryVectorFieldData).Dim)
 				case schemapb.DataType_BOOL:
-					data := make([]bool, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.BoolFieldData{
+							NumRows: 0,
+							Data:    make([]bool, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.BoolFieldData)
 					for _, blob := range msg.RowData {
 						boolInt := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
 						if boolInt == 1 {
-							data = append(data, true)
+							fieldData.Data = append(fieldData.Data, true)
 						} else {
-							data = append(data, false)
+							fieldData.Data = append(fieldData.Data, false)
 						}
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Bool data:",
+						idata.Data[field.FieldID].(*storage.BoolFieldData).Data)
 				case schemapb.DataType_INT8:
-					data := make([]int8, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.Int8FieldData{
+							NumRows: 0,
+							Data:    make([]int8, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.Int8FieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-						data = append(data, int8(v))
+						fieldData.Data = append(fieldData.Data, int8(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Int8 data:",
+						idata.Data[field.FieldID].(*storage.Int8FieldData).Data)
+
 				case schemapb.DataType_INT16:
-					data := make([]int16, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.Int16FieldData{
+							NumRows: 0,
+							Data:    make([]int16, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.Int16FieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-						data = append(data, int16(v))
+						fieldData.Data = append(fieldData.Data, int16(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Int16 data:",
+						idata.Data[field.FieldID].(*storage.Int16FieldData).Data)
 				case schemapb.DataType_INT32:
-					data := make([]int32, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.Int32FieldData{
+							NumRows: 0,
+							Data:    make([]int32, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.Int32FieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-						data = append(data, int32(v))
+						fieldData.Data = append(fieldData.Data, int32(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Int32 data:",
+						idata.Data[field.FieldID].(*storage.Int32FieldData).Data)
+
 				case schemapb.DataType_INT64:
-					data := make([]int64, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.Int64FieldData{
+							NumRows: 0,
+							Data:    make([]int64, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.Int64FieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-						data = append(data, int64(v))
+						fieldData.Data = append(fieldData.Data, int64(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Int64 data:",
+						idata.Data[field.FieldID].(*storage.Int64FieldData).Data)
+
 				case schemapb.DataType_FLOAT:
-					data := make([]float32, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.FloatFieldData{
+							NumRows: 0,
+							Data:    make([]float32, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.FloatFieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint32(blob.GetValue()[pos*4:])
-						data = append(data, math.Float32frombits(v))
+						fieldData.Data = append(fieldData.Data, math.Float32frombits(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Float32 data:",
+						idata.Data[field.FieldID].(*storage.FloatFieldData).Data)
+
 				case schemapb.DataType_DOUBLE:
-					// GOOSE TODO pos
-					data := make([]float64, 0)
+					if _, ok := idata.Data[field.FieldID]; !ok {
+						idata.Data[field.FieldID] = &storage.DoubleFieldData{
+							NumRows: 0,
+							Data:    make([]float64, 0),
+						}
+					}
+
+					fieldData := idata.Data[field.FieldID].(*storage.DoubleFieldData)
 					for _, blob := range msg.RowData {
 						v := binary.LittleEndian.Uint64(blob.GetValue()[pos*4:])
-						data = append(data, math.Float64frombits(v))
+						fieldData.Data = append(fieldData.Data, math.Float64frombits(v))
 						pos++
 					}
-					idata.Data[field.FieldID] = data
-					log.Println("aaaaaaaa", idata)
+
+					fieldData.NumRows += len(msg.RowIDs)
+					log.Println("Float64 data:",
+						idata.Data[field.FieldID].(*storage.DoubleFieldData).Data)
 				}
 			}
 
 			// 1.3 store in buffer
 			ibNode.insertBuffer.insertData[currentSegID] = idata
-			// 1.4 Send hardTimeTick msg
+			// 1.4 Send hardTimeTick msg, GOOSE TODO
 
 			// 1.5 if full
 			//   1.5.1 generate binlogs
-			// GOOSE TODO partitionTag -> partitionID
-			//   1.5.2 binLogs -> minIO/S3
 			if ibNode.insertBuffer.full(currentSegID) {
-				continue
+				// partitionTag -> partitionID
+				partitionTag := msg.GetPartitionTag()
+				partitionID, err := typeutil.Hash32String(partitionTag)
+				if err != nil {
+					log.Println("partitionTag to partitionID Wrong")
+				}
+
+				inCodec := storage.NewInsertCodec(&collMeta)
+
+				// buffer data to binlogs
+				binLogs, err := inCodec.Serialize(partitionID,
+					currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+				for _, v := range binLogs {
+					log.Println("key ", v.Key, "- value ", v.Value)
+				}
+				if err != nil {
+					log.Println("generate binlog wrong")
+				}
+
+				// clear buffer
+				log.Println("=========", binLogs)
+				delete(ibNode.insertBuffer.insertData, currentSegID)
+
+				//   1.5.2 binLogs -> minIO/S3
+				collIDStr := strconv.FormatInt(segMeta.GetCollectionID(), 10)
+				partitionIDStr := strconv.FormatInt(partitionID, 10)
+				segIDStr := strconv.FormatInt(currentSegID, 10)
+				keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
+
+				for _, blob := range binLogs {
+					uid, err := ibNode.idAllocator.AllocOne()
+					if err != nil {
+						log.Println("Allocate Id failed")
+						// GOOSE TODO error handle
+					}
+
+					key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
+					err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
+					if err != nil {
+						log.Println("Save to MinIO failed")
+						// GOOSE TODO error handle
+					}
+				}
 			}
 		}
 
@@ -283,7 +428,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	return nil
 }
 
-func newInsertBufferNode() *insertBufferNode {
+func newInsertBufferNode(ctx context.Context) *insertBufferNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -292,8 +437,7 @@ func newInsertBufferNode() *insertBufferNode {
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	// GOOSE TODO maxSize read from yaml
-	maxSize := 10
+	maxSize := Params.FlushInsertBufSize
 	iBuffer := &insertBuffer{
 		insertData: make(map[UniqueID]*InsertData),
 		maxSize:    maxSize,
@@ -309,9 +453,28 @@ func newInsertBufferNode() *insertBufferNode {
 	})
 	kvClient := etcdkv.NewEtcdKV(cli, MetaRootPath)
 
+	// MinIO
+	minioendPoint := Params.MinioAddress
+	miniioAccessKeyID := Params.MinioAccessKeyID
+	miniioSecretAccessKey := Params.MinioSecretAccessKey
+	minioUseSSL := Params.MinioUseSSL
+	minioBucketName := Params.MinioBucketName
+
+	minioClient, _ := minio.New(minioendPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(miniioAccessKeyID, miniioSecretAccessKey, ""),
+		Secure: minioUseSSL,
+	})
+	minIOKV, _ := miniokv.NewMinIOKV(ctx, minioClient, minioBucketName)
+	minioPrefix := Params.InsertLogRootPath
+
+	idAllocator, _ := allocator.NewIDAllocator(ctx, Params.MasterAddress)
+
 	return &insertBufferNode{
 		BaseNode:     baseNode,
 		kvClient:     kvClient,
 		insertBuffer: iBuffer,
+		minIOKV:      minIOKV,
+		minioPrifex:  minioPrefix,
+		idAllocator:  idAllocator,
 	}
 }
