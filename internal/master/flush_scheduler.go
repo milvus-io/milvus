@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 )
 
@@ -77,7 +79,21 @@ func (scheduler *FlushScheduler) describe() error {
 							return err
 						}
 					}
-					//TODO: Save data to meta table
+					// Save data to meta table
+					segMeta, err := scheduler.metaTable.GetSegmentByID(singleSegmentID)
+					if err != nil {
+						return err
+					}
+					segMeta.BinlogFilePaths = make([]*etcdpb.FieldBinlogFiles, 0)
+					for k, v := range mapData {
+						segMeta.BinlogFilePaths = append(segMeta.BinlogFilePaths, &etcdpb.FieldBinlogFiles{
+							FieldID:     k,
+							BinlogFiles: v,
+						})
+					}
+					if err = scheduler.metaTable.UpdateSegment(segMeta); err != nil {
+						return err
+					}
 					log.Printf("flush segment %d finished", singleSegmentID)
 					break
 				}
