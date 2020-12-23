@@ -327,8 +327,7 @@ message CreateIndexRequest {
     int64 proxyID = 4;
     string collection_name = 5;
     string field_name = 6;
-    string index_name = 7;
-    repeated common.KeyValuePair extra_params = 8;
+    repeated common.KeyValuePair extra_params = 7;
 }
 
 message DescribeIndexRequest {
@@ -338,8 +337,7 @@ message DescribeIndexRequest {
     int64 proxyID = 4;
     string collection_name = 5;
     string field_name = 6;
-    string index_name = 7;
-    repeated common.KeyValuePair extra_params = 8;
+    repeated common.KeyValuePair extra_params = 7;
 }
 
 message DescribeIndexProgressRequest {
@@ -349,6 +347,5 @@ message DescribeIndexProgressRequest {
     int64 proxyID = 4;
     string collection_name = 5;
     string field_name = 6;
-    string index_name = 7;
-    repeated common.KeyValuePair extra_params = 8;
+    repeated common.KeyValuePair extra_params = 7;
 }

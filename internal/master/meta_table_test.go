@@ -431,7 +431,6 @@ func TestMetaTable_LoadIndexMetaFromKv(t *testing.T) {
 	meta := pb.FieldIndexMeta{
 		SegmentID:      1,
 		FieldID:        100,
-		IndexType:      "type1",
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
 		Status:         indexbuilderpb.IndexStatus_FINISHED,
@@ -443,7 +442,7 @@ func TestMetaTable_LoadIndexMetaFromKv(t *testing.T) {
 
 	metaTable, err := NewMetaTable(kv)
 	assert.Nil(t, err)
-	res, err := metaTable.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	res, err := metaTable.HasFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
 	assert.Nil(t, err)
 	assert.True(t, res)
 }
@@ -465,7 +464,6 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 	err = meta.AddFieldIndexMeta(&pb.FieldIndexMeta{
 		SegmentID:      1,
 		FieldID:        100,
-		IndexType:      "type1",
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
 		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
@@ -475,7 +473,6 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 	err = meta.AddFieldIndexMeta(&pb.FieldIndexMeta{
 		SegmentID:      1,
 		FieldID:        100,
-		IndexType:      "type1",
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
 		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
@@ -483,17 +480,16 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 	})
 	assert.NotNil(t, err)
 
-	res, err := meta.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	res, err := meta.HasFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
 	assert.Nil(t, err)
 	assert.True(t, res)
-	res, err = meta.HasFieldIndexMeta(1, 100, "type2", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	res, err = meta.HasFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v2"}})
 	assert.Nil(t, err)
 	assert.False(t, res)
 
 	err = meta.UpdateFieldIndexMeta(&pb.FieldIndexMeta{
 		SegmentID:      1,
 		FieldID:        100,
-		IndexType:      "type1",
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
 		Status:         indexbuilderpb.IndexStatus_FINISHED,
@@ -503,7 +499,7 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 	assert.EqualValues(t, indexbuilderpb.IndexStatus_FINISHED, meta.segID2IndexMetas[1][0].Status)
 	err = meta.DeleteFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
 	assert.Nil(t, err)
-	res, err = meta.HasFieldIndexMeta(1, 100, "type1", []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
+	res, err = meta.HasFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
 	assert.Nil(t, err)
 	assert.False(t, res)
 }

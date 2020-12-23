@@ -505,7 +505,7 @@ func (mt *metaTable) AddFieldIndexMeta(meta *pb.FieldIndexMeta) error {
 		mt.segID2IndexMetas[segID] = make([]pb.FieldIndexMeta, 0)
 	}
 	for _, v := range mt.segID2IndexMetas[segID] {
-		if v.FieldID == meta.FieldID && v.IndexType == meta.IndexType && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
+		if v.FieldID == meta.FieldID && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
 			return fmt.Errorf("segment %d field id %d's index meta already exist", segID, meta.FieldID)
 		}
 	}
@@ -533,7 +533,7 @@ func (mt *metaTable) DeleteFieldIndexMeta(segID UniqueID, fieldID UniqueID, inde
 	}
 
 	for i, v := range mt.segID2IndexMetas[segID] {
-		if v.FieldID == fieldID && v.IndexType == indexType && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
+		if v.FieldID == fieldID && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
 			mt.segID2IndexMetas[segID] = append(mt.segID2IndexMetas[segID][:i], mt.segID2IndexMetas[segID][i+1:]...)
 			err := mt.deleteFieldIndexMetaToEtcd(segID, fieldID, v.IndexID)
 			if err != nil {
@@ -552,7 +552,7 @@ func (mt *metaTable) deleteFieldIndexMetaToEtcd(segID UniqueID, fieldID UniqueID
 	return mt.client.Remove(key)
 }
 
-func (mt *metaTable) HasFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexType string, indexParams []*commonpb.KeyValuePair) (bool, error) {
+func (mt *metaTable) HasFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexParams []*commonpb.KeyValuePair) (bool, error) {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
@@ -561,7 +561,7 @@ func (mt *metaTable) HasFieldIndexMeta(segID UniqueID, fieldID UniqueID, indexTy
 	}
 
 	for _, v := range mt.segID2IndexMetas[segID] {
-		if v.FieldID == fieldID && v.IndexType == indexType && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
+		if v.FieldID == fieldID && typeutil.CompareIndexParams(v.IndexParams, indexParams) {
 			return true, nil
 		}
 	}
@@ -577,7 +577,7 @@ func (mt *metaTable) UpdateFieldIndexMeta(meta *pb.FieldIndexMeta) error {
 		mt.segID2IndexMetas[segID] = make([]pb.FieldIndexMeta, 0)
 	}
 	for i, v := range mt.segID2IndexMetas[segID] {
-		if v.FieldID == meta.FieldID && v.IndexType == meta.IndexType && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
+		if v.FieldID == meta.FieldID && typeutil.CompareIndexParams(v.IndexParams, meta.IndexParams) {
 			mt.segID2IndexMetas[segID][i] = *meta
 			err := mt.deleteFieldIndexMetaToEtcd(segID, v.FieldID, v.IndexID)
 			if err != nil {

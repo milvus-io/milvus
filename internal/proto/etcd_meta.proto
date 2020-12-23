@@ -50,9 +50,8 @@ message SegmentMeta {
 message FieldIndexMeta {
   int64 segmentID = 1;
   int64 fieldID = 2;
-  string index_type = 3;
-  int64 indexID = 4;
-  repeated common.KeyValuePair index_params = 5;
-  service.IndexStatus status = 6;
-  repeated string index_file_paths = 7;
+  int64 indexID = 3;
+  repeated common.KeyValuePair index_params = 4;
+  service.IndexStatus status = 5;
+  repeated string index_file_paths = 6;
 }

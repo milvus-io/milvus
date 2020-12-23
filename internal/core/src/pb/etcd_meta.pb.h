@@ -1075,15 +1075,14 @@ class FieldIndexMeta :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kIndexParamsFieldNumber = 5,
-    kIndexFilePathsFieldNumber = 7,
-    kIndexTypeFieldNumber = 3,
+    kIndexParamsFieldNumber = 4,
+    kIndexFilePathsFieldNumber = 6,
     kSegmentIDFieldNumber = 1,
     kFieldIDFieldNumber = 2,
-    kIndexIDFieldNumber = 4,
-    kStatusFieldNumber = 6,
+    kIndexIDFieldNumber = 3,
+    kStatusFieldNumber = 5,
   };
-  // repeated .milvus.proto.common.KeyValuePair index_params = 5;
+  // repeated .milvus.proto.common.KeyValuePair index_params = 4;
   int index_params_size() const;
   void clear_index_params();
   ::milvus::proto::common::KeyValuePair* mutable_index_params(int index);
@@ -1094,7 +1093,7 @@ class FieldIndexMeta :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
       index_params() const;
 
-  // repeated string index_file_paths = 7;
+  // repeated string index_file_paths = 6;
   int index_file_paths_size() const;
   void clear_index_file_paths();
   const std::string& index_file_paths(int index) const;
@@ -1111,17 +1110,6 @@ class FieldIndexMeta :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& index_file_paths() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_index_file_paths();
 
-  // string index_type = 3;
-  void clear_index_type();
-  const std::string& index_type() const;
-  void set_index_type(const std::string& value);
-  void set_index_type(std::string&& value);
-  void set_index_type(const char* value);
-  void set_index_type(const char* value, size_t size);
-  std::string* mutable_index_type();
-  std::string* release_index_type();
-  void set_allocated_index_type(std::string* index_type);
-
   // int64 segmentID = 1;
   void clear_segmentid();
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid() const;
@@ -1132,12 +1120,12 @@ class FieldIndexMeta :
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
   void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 indexID = 4;
+  // int64 indexID = 3;
   void clear_indexid();
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
   void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // .milvus.proto.service.IndexStatus status = 6;
+  // .milvus.proto.service.IndexStatus status = 5;
   void clear_status();
   ::milvus::proto::service::IndexStatus status() const;
   void set_status(::milvus::proto::service::IndexStatus value);
@@ -1149,7 +1137,6 @@ class FieldIndexMeta :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > index_params_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> index_file_paths_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_type_;
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid_;
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
@@ -1924,58 +1911,7 @@ inline void FieldIndexMeta::set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.fieldID)
 }
 
-// string index_type = 3;
-inline void FieldIndexMeta::clear_index_type() {
-  index_type_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline const std::string& FieldIndexMeta::index_type() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.FieldIndexMeta.index_type)
-  return index_type_.GetNoArena();
-}
-inline void FieldIndexMeta::set_index_type(const std::string& value) {
-  
-  index_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.index_type)
-}
-inline void FieldIndexMeta::set_index_type(std::string&& value) {
-  
-  index_type_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.etcd.FieldIndexMeta.index_type)
-}
-inline void FieldIndexMeta::set_index_type(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  
-  index_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.FieldIndexMeta.index_type)
-}
-inline void FieldIndexMeta::set_index_type(const char* value, size_t size) {
-  
-  index_type_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.FieldIndexMeta.index_type)
-}
-inline std::string* FieldIndexMeta::mutable_index_type() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.FieldIndexMeta.index_type)
-  return index_type_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline std::string* FieldIndexMeta::release_index_type() {
-  // @@protoc_insertion_point(field_release:milvus.proto.etcd.FieldIndexMeta.index_type)
-  
-  return index_type_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
-}
-inline void FieldIndexMeta::set_allocated_index_type(std::string* index_type) {
-  if (index_type != nullptr) {
-    
-  } else {
-    
-  }
-  index_type_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), index_type);
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.etcd.FieldIndexMeta.index_type)
-}
-
-// int64 indexID = 4;
+// int64 indexID = 3;
 inline void FieldIndexMeta::clear_indexid() {
   indexid_ = PROTOBUF_LONGLONG(0);
 }
@@ -1989,7 +1925,7 @@ inline void FieldIndexMeta::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value) {
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.indexID)
 }
 
-// repeated .milvus.proto.common.KeyValuePair index_params = 5;
+// repeated .milvus.proto.common.KeyValuePair index_params = 4;
 inline int FieldIndexMeta::index_params_size() const {
   return index_params_.size();
 }
@@ -2016,7 +1952,7 @@ FieldIndexMeta::index_params() const {
   return index_params_;
 }
 
-// .milvus.proto.service.IndexStatus status = 6;
+// .milvus.proto.service.IndexStatus status = 5;
 inline void FieldIndexMeta::clear_status() {
   status_ = 0;
 }
@@ -2030,7 +1966,7 @@ inline void FieldIndexMeta::set_status(::milvus::proto::service::IndexStatus val
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.FieldIndexMeta.status)
 }
 
-// repeated string index_file_paths = 7;
+// repeated string index_file_paths = 6;
 inline int FieldIndexMeta::index_file_paths_size() const {
   return index_file_paths_.size();
 }

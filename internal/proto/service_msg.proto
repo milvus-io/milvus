@@ -179,10 +179,9 @@ message QueryResult {
  *        extra_params["index_type"] = one of the values: SORTED
  */
  message IndexParam {
-    string collection_name = 2;
-    string field_name = 3;
-    string index_name = 4;
-    repeated common.KeyValuePair extra_params = 5;
+    string collection_name = 1;
+    string field_name = 2;
+    repeated common.KeyValuePair extra_params = 3;
 }
 
 message DescribeIndexResponse {
