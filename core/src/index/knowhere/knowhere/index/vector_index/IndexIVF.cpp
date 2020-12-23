@@ -104,6 +104,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_dist = (float*)malloc(p_dist_size);
 
         QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
@@ -311,8 +312,6 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
                         << ", data search cost: " << faiss::indexIVF_stats.search_time;
     faiss::indexIVF_stats.quantization_time = 0;
     faiss::indexIVF_stats.search_time = 0;
-
-    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 void

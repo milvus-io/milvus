@@ -105,8 +105,6 @@ GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, i
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
     index_->metric_type = default_type;
-
-    MapOffsetToUid(labels, static_cast<size_t>(n * k));
 }
 
 void
