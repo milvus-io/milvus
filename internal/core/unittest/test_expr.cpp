@@ -313,11 +313,11 @@ TEST(Expr, TestRange) {
         dsl_string.replace(loc, 4, clause);
         auto plan = CreatePlan(*schema, dsl_string);
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, DefaultElementPerChunk));
+        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / DefaultElementPerChunk;
-            auto offset = i % DefaultElementPerChunk;
+            auto vec_id = i / TestChunkSize;
+            auto offset = i % TestChunkSize;
             auto ans = final[vec_id][offset];
 
             auto val = age_col[i];
@@ -397,11 +397,11 @@ TEST(Expr, TestTerm) {
         dsl_string.replace(loc, 4, clause);
         auto plan = CreatePlan(*schema, dsl_string);
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, DefaultElementPerChunk));
+        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / DefaultElementPerChunk;
-            auto offset = i % DefaultElementPerChunk;
+            auto vec_id = i / TestChunkSize;
+            auto offset = i % TestChunkSize;
             auto ans = final[vec_id][offset];
 
             auto val = age_col[i];
@@ -499,11 +499,11 @@ TEST(Expr, TestSimpleDsl) {
         // std::cout << dsl.dump(2);
         auto plan = CreatePlan(*schema, dsl.dump());
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, DefaultElementPerChunk));
+        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / DefaultElementPerChunk;
-            auto offset = i % DefaultElementPerChunk;
+            auto vec_id = i / TestChunkSize;
+            auto offset = i % TestChunkSize;
             bool ans = final[vec_id][offset];
             auto val = age_col[i];
             auto ref = ref_func(val);

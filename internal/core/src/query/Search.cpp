@@ -19,7 +19,6 @@
 #include "query/BruteForceSearch.h"
 
 namespace milvus::query {
-using segcore::DefaultElementPerChunk;
 
 static faiss::ConcurrentBitsetPtr
 create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk_id) {
@@ -48,7 +47,6 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record, timestamp);
-    auto max_chunk = upper_div(ins_barrier, DefaultElementPerChunk);
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
 #if 0
@@ -89,29 +87,40 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
         for (int64_t i = 0; i < total_count; ++i) {
             auto& x = uids[i];
             if (x != -1) {
-                x += chunk_id * DefaultElementPerChunk;
+                x += chunk_id * indexing_entry.get_chunk_size();
             }
         }
         segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
     }
     using segcore::FloatVector;
     auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
+
     // step 4: brute force search where small indexing is unavailable
+    auto vec_chunk_size = vec_ptr->get_chunk_size();
+    Assert(vec_chunk_size == indexing_entry.get_chunk_size());
+    auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
+
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);
         std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
         faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
         auto& chunk = vec_ptr->get_chunk(chunk_id);
-        auto nsize =
-            chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
+
+        auto element_begin = chunk_id * vec_chunk_size;
+        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
+
+        auto nsize = element_end - element_begin;
+
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
         faiss::knn_L2sqr(query_data, chunk.data(), dim, num_queries, nsize, &buf, bitmap_view);
+
         Assert(buf_uids.size() == total_count);
+
         // convert chunk uid to segment uid
         for (auto& x : buf_uids) {
             if (x != -1) {
-                x += chunk_id * DefaultElementPerChunk;
+                x += chunk_id * vec_chunk_size;
             }
         }
         segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
@@ -148,7 +157,6 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
     auto ins_barrier = get_barrier(record, timestamp);
-    auto max_chunk = upper_div(ins_barrier, DefaultElementPerChunk);
     auto metric_type = GetMetricType(info.metric_type_);
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
@@ -181,13 +189,17 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
 
     auto max_indexed_id = 0;
     // step 4: brute force search where small indexing is unavailable
+
+    auto vec_chunk_size = vec_ptr->get_chunk_size();
+    auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);
         std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
         auto& chunk = vec_ptr->get_chunk(chunk_id);
-        auto nsize =
-            chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
+        auto element_begin = chunk_id * vec_chunk_size;
+        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
+        auto nsize = element_end - element_begin;
 
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
         BinarySearchBruteForce(query_dataset, chunk.data(), nsize, buf_dis.data(), buf_uids.data(), bitmap_view);
@@ -195,7 +207,7 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
         // convert chunk uid to segment uid
         for (auto& x : buf_uids) {
             if (x != -1) {
-                x += chunk_id * DefaultElementPerChunk;
+                x += chunk_id * vec_chunk_size;
             }
         }
 

@@ -132,23 +132,24 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_fu
 
     RetType results(vec.num_chunk());
     auto indexing_barrier = indexing_record.get_finished_ack();
+    auto chunk_size = vec.get_chunk_size();
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
         auto& result = results[chunk_id];
         auto indexing = entry.get_indexing(chunk_id);
         auto data = index_func(indexing);
         result = std::move(*data);
-        Assert(result.size() == segcore::DefaultElementPerChunk);
+        Assert(result.size() == chunk_size);
     }
 
     for (auto chunk_id = indexing_barrier; chunk_id < vec.num_chunk(); ++chunk_id) {
         auto& result = results[chunk_id];
-        result.resize(segcore::DefaultElementPerChunk);
+        result.resize(chunk_size);
         auto chunk = vec.get_chunk(chunk_id);
         const T* data = chunk.data();
-        for (int index = 0; index < segcore::DefaultElementPerChunk; ++index) {
+        for (int index = 0; index < chunk_size; ++index) {
             result[index] = element_func(data[index]);
         }
-        Assert(result.size() == segcore::DefaultElementPerChunk);
+        Assert(result.size() == chunk_size);
     }
     return results;
 }
@@ -290,13 +291,13 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     auto N = records.ack_responder_.GetAck();
 
     // small batch
+    auto chunk_size = vec.get_chunk_size();
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto& chunk = vec.get_chunk(chunk_id);
 
-        auto size = chunk_id == num_chunk - 1 ? N - chunk_id * segcore::DefaultElementPerChunk
-                                              : segcore::DefaultElementPerChunk;
+        auto size = chunk_id == num_chunk - 1 ? N - chunk_id * chunk_size : chunk_size;
 
-        boost::dynamic_bitset<> bitset(segcore::DefaultElementPerChunk);
+        boost::dynamic_bitset<> bitset(chunk_size);
         for (int i = 0; i < size; ++i) {
             auto value = chunk[i];
             bool is_in = std::binary_search(expr.terms_.begin(), expr.terms_.end(), value);

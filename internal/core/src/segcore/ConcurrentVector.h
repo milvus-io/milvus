@@ -20,6 +20,7 @@
 #include <vector>
 #include <utility>
 #include "utils/EasyAssert.h"
+#include "utils/tools.h"
 #include <boost/container/vector.hpp>
 
 namespace milvus::segcore {
@@ -53,7 +54,6 @@ namespace milvus::segcore {
 
 template <typename Type>
 using FixedVector = boost::container::vector<Type>;
-constexpr int64_t DefaultElementPerChunk = 32 * 1024;
 
 template <typename Type>
 class ThreadSafeVector {
@@ -98,7 +98,8 @@ class ThreadSafeVector {
 
 class VectorBase {
  public:
-    VectorBase() = default;
+    explicit VectorBase(int64_t chunk_size) : chunk_size_(chunk_size) {
+    }
     virtual ~VectorBase() = default;
 
     virtual void
@@ -106,9 +107,17 @@ class VectorBase {
 
     virtual void
     set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
+
+    int64_t
+    get_chunk_size() const {
+        return chunk_size_;
+    }
+
+ protected:
+    const int64_t chunk_size_;
 };
 
-template <typename Type, bool is_scalar = false, ssize_t ElementsPerChunk = DefaultElementPerChunk>
+template <typename Type, bool is_scalar = false>
 class ConcurrentVectorImpl : public VectorBase {
  public:
     // constants
@@ -122,14 +131,14 @@ class ConcurrentVectorImpl : public VectorBase {
     operator=(const ConcurrentVectorImpl&) = delete;
 
  public:
-    explicit ConcurrentVectorImpl(ssize_t dim = 1) : Dim(is_scalar ? 1 : dim), SizePerChunk(Dim * ElementsPerChunk) {
+    explicit ConcurrentVectorImpl(ssize_t dim, int64_t chunk_size) : VectorBase(chunk_size), Dim(is_scalar ? 1 : dim) {
         Assert(is_scalar ? dim == 1 : dim != 1);
     }
 
     void
     grow_to_at_least(int64_t element_count) override {
-        auto chunk_count = (element_count + ElementsPerChunk - 1) / ElementsPerChunk;
-        chunks_.emplace_to_at_least(chunk_count, SizePerChunk);
+        auto chunk_count = upper_div(element_count, chunk_size_);
+        chunks_.emplace_to_at_least(chunk_count, Dim * chunk_size_);
     }
 
     void
@@ -143,28 +152,28 @@ class ConcurrentVectorImpl : public VectorBase {
             return;
         }
         this->grow_to_at_least(element_offset + element_count);
-        auto chunk_id = element_offset / ElementsPerChunk;
-        auto chunk_offset = element_offset % ElementsPerChunk;
+        auto chunk_id = element_offset / chunk_size_;
+        auto chunk_offset = element_offset % chunk_size_;
         ssize_t source_offset = 0;
         // first partition:
-        if (chunk_offset + element_count <= ElementsPerChunk) {
+        if (chunk_offset + element_count <= chunk_size_) {
             // only first
             fill_chunk(chunk_id, chunk_offset, element_count, source, source_offset);
             return;
         }
 
-        auto first_size = ElementsPerChunk - chunk_offset;
+        auto first_size = chunk_size_ - chunk_offset;
         fill_chunk(chunk_id, chunk_offset, first_size, source, source_offset);
 
-        source_offset += ElementsPerChunk - chunk_offset;
+        source_offset += chunk_size_ - chunk_offset;
         element_count -= first_size;
         ++chunk_id;
 
         // the middle
-        while (element_count >= ElementsPerChunk) {
-            fill_chunk(chunk_id, 0, ElementsPerChunk, source, source_offset);
-            source_offset += ElementsPerChunk;
-            element_count -= ElementsPerChunk;
+        while (element_count >= chunk_size_) {
+            fill_chunk(chunk_id, 0, chunk_size_, source, source_offset);
+            source_offset += chunk_size_;
+            element_count -= chunk_size_;
             ++chunk_id;
         }
 
@@ -182,16 +191,16 @@ class ConcurrentVectorImpl : public VectorBase {
     // just for fun, don't use it directly
     const Type*
     get_element(ssize_t element_index) const {
-        auto chunk_id = element_index / ElementsPerChunk;
-        auto chunk_offset = element_index % ElementsPerChunk;
+        auto chunk_id = element_index / chunk_size_;
+        auto chunk_offset = element_index % chunk_size_;
         return get_chunk(chunk_id).data() + chunk_offset * Dim;
     }
 
     const Type&
     operator[](ssize_t element_index) const {
         Assert(Dim == 1);
-        auto chunk_id = element_index / ElementsPerChunk;
-        auto chunk_offset = element_index % ElementsPerChunk;
+        auto chunk_id = element_index / chunk_size_;
+        auto chunk_offset = element_index % chunk_size_;
         return get_chunk(chunk_id)[chunk_offset];
     }
 
@@ -215,7 +224,6 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     const ssize_t Dim;
-    const ssize_t SizePerChunk;
 
  private:
     ThreadSafeVector<Chunk> chunks_;
@@ -223,7 +231,10 @@ class ConcurrentVectorImpl : public VectorBase {
 
 template <typename Type>
 class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
-    using ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl;
+ public:
+    explicit ConcurrentVector(int64_t chunk_size)
+        : ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl(1, chunk_size) {
+    }
 };
 
 class VectorTrait {};
@@ -237,13 +248,17 @@ class BinaryVector : public VectorTrait {
 
 template <>
 class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> {
-    using ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl;
+ public:
+    ConcurrentVector(int64_t dim, int64_t chunk_size)
+        : ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl(dim, chunk_size) {
+    }
 };
 
 template <>
 class ConcurrentVector<BinaryVector> : public ConcurrentVectorImpl<uint8_t, false> {
  public:
-    explicit ConcurrentVector(int64_t dim) : binary_dim_(dim), ConcurrentVectorImpl(dim / 8) {
+    explicit ConcurrentVector(int64_t dim, int64_t chunk_size)
+        : binary_dim_(dim), ConcurrentVectorImpl(dim / 8, chunk_size) {
         Assert(dim % 8 == 0);
     }
 

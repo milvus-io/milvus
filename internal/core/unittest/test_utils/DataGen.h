@@ -15,6 +15,7 @@
 #include <memory>
 #include <cstring>
 #include "segcore/SegmentBase.h"
+#include "Constants.h"
 namespace milvus::segcore {
 
 struct GeneratedData {

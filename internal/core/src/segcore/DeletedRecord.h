@@ -29,8 +29,9 @@ struct DeletedRecord {
         std::shared_ptr<TmpBitmap>
         clone(int64_t capacity);
     };
-
-    DeletedRecord() : lru_(std::make_shared<TmpBitmap>()) {
+    static constexpr int64_t deprecated_chunk_size = 32 * 1024;
+    DeletedRecord()
+        : lru_(std::make_shared<TmpBitmap>()), timestamps_(deprecated_chunk_size), uids_(deprecated_chunk_size) {
         lru_->bitmap_ptr = std::make_shared<faiss::ConcurrentBitset>(0);
     }
 

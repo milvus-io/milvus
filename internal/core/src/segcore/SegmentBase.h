@@ -113,7 +113,7 @@ class SegmentBase {
 using SegmentBasePtr = std::unique_ptr<SegmentBase>;
 
 SegmentBasePtr
-CreateSegment(SchemaPtr schema);
+CreateSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
 
 }  // namespace segcore
 }  // namespace milvus

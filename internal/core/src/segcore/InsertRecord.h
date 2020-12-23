@@ -25,7 +25,7 @@ struct InsertRecord {
     ConcurrentVector<idx_t> uids_;
     std::vector<std::shared_ptr<VectorBase>> entity_vec_;
 
-    explicit InsertRecord(const Schema& schema);
+    explicit InsertRecord(const Schema& schema, int64_t chunk_size);
     template <typename Type>
     auto
     get_entity(int offset) const {

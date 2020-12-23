@@ -93,11 +93,11 @@ TEST(Indexing, SmartBruteForce) {
     vector<int64_t> final_uids(total_count, -1);
     vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
-    for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
+    for (int beg = 0; beg < N; beg += TestChunkSize) {
         vector<int64_t> buf_uids(total_count, -1);
         vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
         faiss::float_maxheap_array_t buf = {queries, TOPK, buf_uids.data(), buf_dis.data()};
-        auto end = beg + DefaultElementPerChunk;
+        auto end = beg + TestChunkSize;
         if (end > N) {
             end = N;
         }
@@ -152,8 +152,8 @@ TEST(Indexing, DISABLED_Naive) {
     std::vector<knowhere::DatasetPtr> datasets;
     std::vector<std::vector<float>> ftrashs;
     auto raw = raw_data.data();
-    for (int beg = 0; beg < N; beg += DefaultElementPerChunk) {
-        auto end = beg + DefaultElementPerChunk;
+    for (int beg = 0; beg < N; beg += TestChunkSize) {
+        auto end = beg + TestChunkSize;
         if (end > N) {
             end = N;
         }

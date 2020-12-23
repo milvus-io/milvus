@@ -292,61 +292,7 @@ SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestam
 
 Status
 SegmentNaive::QueryBruteForceImpl(query::QueryDeprecatedPtr query_info, Timestamp timestamp, QueryResult& results) {
-    auto ins_barrier = get_barrier(record_, timestamp);
-    auto del_barrier = get_barrier(deleted_record_, timestamp);
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    Assert(bitmap_holder);
-
-    auto& field = schema_->operator[](query_info->field_name);
-    Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
-    auto dim = field.get_dim();
-    auto bitmap = bitmap_holder->bitmap_ptr;
-    auto topK = query_info->topK;
-    auto num_queries = query_info->num_queries;
-    auto total_count = topK * num_queries;
-    // TODO: optimize
-
-    auto the_offset_opt = schema_->get_offset(query_info->field_name);
-    Assert(the_offset_opt.has_value());
-    Assert(the_offset_opt.value() < record_.entity_vec_.size());
-    auto vec_ptr =
-        std::static_pointer_cast<ConcurrentVector<FloatVector>>(record_.entity_vec_.at(the_offset_opt.value()));
-
-    std::vector<int64_t> final_uids(total_count);
-    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
-
-    auto max_chunk = (ins_barrier + DefaultElementPerChunk - 1) / DefaultElementPerChunk;
-    for (int chunk_id = 0; chunk_id < max_chunk; ++chunk_id) {
-        std::vector<int64_t> buf_uids(total_count, -1);
-        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
-
-        faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
-
-        auto src_data = vec_ptr->get_chunk(chunk_id).data();
-        auto nsize =
-            chunk_id != max_chunk - 1 ? DefaultElementPerChunk : ins_barrier - chunk_id * DefaultElementPerChunk;
-        auto offset = chunk_id * DefaultElementPerChunk;
-        faiss::BitsetView view(bitmap->data() + offset / 8, DefaultElementPerChunk);
-        faiss::knn_L2sqr(query_info->query_raw_data.data(), src_data, dim, num_queries, nsize, &buf, view);
-        if (chunk_id == 0) {
-            final_uids = buf_uids;
-            final_dis = buf_dis;
-        } else {
-            merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
-        }
-    }
-
-    for (auto& id : final_uids) {
-        id = record_.uids_[id];
-    }
-
-    results.result_ids_ = std::move(final_uids);
-    results.result_distances_ = std::move(final_dis);
-    results.topK_ = topK;
-    results.num_queries_ = num_queries;
-
-    //    throw std::runtime_error("unimplemented");
-    return Status::OK();
+    PanicInfo("deprecated");
 }
 
 Status
@@ -460,32 +406,7 @@ SegmentNaive::Close() {
 template <typename Type>
 knowhere::IndexPtr
 SegmentNaive::BuildVecIndexImpl(const IndexMeta::Entry& entry) {
-    auto offset_opt = schema_->get_offset(entry.field_name);
-    Assert(offset_opt.has_value());
-    auto offset = offset_opt.value();
-    auto field = (*schema_)[offset];
-    auto dim = field.get_dim();
-
-    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(entry.type, entry.mode);
-    auto chunk_size = record_.uids_.num_chunk();
-
-    auto& uids = record_.uids_;
-    auto entities = record_.get_entity<FloatVector>(offset);
-
-    std::vector<knowhere::DatasetPtr> datasets;
-    for (int chunk_id = 0; chunk_id < uids.num_chunk(); ++chunk_id) {
-        auto entities_chunk = entities->get_chunk(chunk_id).data();
-        int64_t count = chunk_id == uids.num_chunk() - 1 ? record_.reserved - chunk_id * DefaultElementPerChunk
-                                                         : DefaultElementPerChunk;
-        datasets.push_back(knowhere::GenDataset(count, dim, entities_chunk));
-    }
-    for (auto& ds : datasets) {
-        indexing->Train(ds, entry.config);
-    }
-    for (auto& ds : datasets) {
-        indexing->AddWithoutIds(ds, entry.config);
-    }
-    return indexing;
+    PanicInfo("deprecated");
 }
 
 Status
@@ -544,20 +465,7 @@ SegmentNaive::BuildIndex(IndexMetaPtr remote_index_meta) {
 
 int64_t
 SegmentNaive::GetMemoryUsageInBytes() {
-    int64_t total_bytes = 0;
-    if (index_ready_) {
-        auto& index_entries = index_meta_->get_entries();
-        for (auto [index_name, entry] : index_entries) {
-            Assert(schema_->operator[](entry.field_name).is_vector());
-            auto vec_ptr = std::static_pointer_cast<knowhere::VecIndex>(indexings_[index_name]);
-            total_bytes += vec_ptr->IndexSize();
-        }
-    }
-    int64_t ins_n = (record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
-    total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = (deleted_record_.reserved + DefaultElementPerChunk - 1) & ~(DefaultElementPerChunk - 1);
-    total_bytes += del_n * (16 * 2);
-    return total_bytes;
+    PanicInfo("Deprecated");
 }
 
 }  // namespace milvus::segcore

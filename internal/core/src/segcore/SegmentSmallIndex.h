@@ -131,10 +131,13 @@ class SegmentSmallIndex : public SegmentBase {
 
  public:
     friend std::unique_ptr<SegmentBase>
-    CreateSegment(SchemaPtr schema);
+    CreateSegment(SchemaPtr schema, int64_t chunk_size);
 
-    explicit SegmentSmallIndex(SchemaPtr schema)
-        : schema_(std::move(schema)), record_(*schema_), indexing_record_(*schema_) {
+    explicit SegmentSmallIndex(SchemaPtr schema, int64_t chunk_size)
+        : chunk_size_(chunk_size),
+          schema_(std::move(schema)),
+          record_(*schema_, chunk_size),
+          indexing_record_(*schema_, chunk_size) {
     }
 
  public:
@@ -149,6 +152,7 @@ class SegmentSmallIndex : public SegmentBase {
     FillTargetEntry(const query::Plan* Plan, QueryResult& results) override;
 
  private:
+    int64_t chunk_size_;
     SchemaPtr schema_;
     std::atomic<SegmentState> state_ = SegmentState::Open;
     IndexMetaPtr index_meta_;
@@ -157,8 +161,6 @@ class SegmentSmallIndex : public SegmentBase {
     DeletedRecord deleted_record_;
     IndexingRecord indexing_record_;
 
-    // std::atomic<bool> index_ready_ = false;
-    // std::unordered_map<std::string, knowhere::IndexPtr> indexings_;  // index_name => indexing
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
 

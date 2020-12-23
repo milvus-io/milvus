@@ -71,7 +71,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
                            float* result_distances,
                            idx_t* result_labels,
                            faiss::ConcurrentBitsetPtr bitset) {
-    const idx_t block_size = segcore::DefaultElementPerChunk;
+    const idx_t block_size = chunk_size;
     bool use_heap = true;
 
     if (metric_type == faiss::METRIC_Jaccard || metric_type == faiss::METRIC_Tanimoto) {
