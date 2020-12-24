@@ -159,6 +159,9 @@ DBImpl::Stop() {
         LOG_ENGINE_DEBUG_ << "DBImpl::Stop bg_index_thread_.join()";
         swn_metric_.Notify();
         bg_metric_thread_.join();
+    } else {
+        swn_metric_.Notify();
+        bg_metric_thread_.join();
     }
 
     // LOG_ENGINE_TRACE_ << "DB service stop";
