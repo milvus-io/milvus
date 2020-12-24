@@ -286,7 +286,7 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     }
 
     invalid_ssid_ = std::move(this_invalid_cids);
-    auto op2 = std::make_shared<GetCollectionIDsOperation>();
+    auto op2 = std::make_shared<GetCollectionIDsOperation>(false);
     status = (*op2)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetCollectionIDsOperation failed: " << status.message();
@@ -300,6 +300,24 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
                             std::inserter(stale_ids, stale_ids.begin()));
+
+        /* std::stringstream strs; */
+
+        /* strs << "("; */
+        /* for (auto id : alive_cids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") - ("; */
+        /* for (auto id : aids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") = ("; */
+        /* for (auto id : stale_ids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ")"; */
+
+        /* LOG_SERVER_DEBUG_ << strs.str(); */
     }
 
     for (auto& cid : stale_ids) {
