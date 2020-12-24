@@ -156,8 +156,7 @@ CreateCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& tabl
 Status
 GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
-    std::string file_path = parent_path + "/" + table_file.file_id_;
-
+    table_file.location_ = parent_path + "/" + table_file.file_id_;
     return Status::OK();
 }
 
