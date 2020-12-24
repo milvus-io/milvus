@@ -37,6 +37,11 @@ class GrpcArgsParser(object):
 
     @classmethod
     @error_status
+    def parse_proto_PreloadCollectionParam(cls, param):
+        return param.collection_name, list(param.partition_tag_array)
+
+    @classmethod
+    @error_status
     def parse_proto_FlushParam(cls, param):
         return list(param.collection_name_array)
 
