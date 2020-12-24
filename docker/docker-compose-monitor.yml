@@ -4,13 +4,19 @@ networks:
     monitor:
         driver: bridge
 
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+
 services:
     prometheus:
-        image: prom/prometheus:v2.11.1
+        image: prom/prometheus:v2.17.1
         container_name: prometheus
         hostname: prometheus
         restart: always
         volumes:
+            - ./prometheus:/etc/prometheus
+            - prometheus_data:/prometheus
             - ./prometheus.yml:/etc/prometheus/prometheus.yml
             - ./server_down.yml:/etc/prometheus/node_down.yml
         ports:
@@ -30,29 +36,54 @@ services:
         networks:
             - monitor
 
-    grafana:
-        image: grafana/grafana
-        container_name: grafana
-        hostname: grafana
-        restart: always
+    pushgateway:
+        image: prom/pushgateway
+        container_name: pushgateway
+        restart: unless-stopped
+        expose:
+        - 9091
         ports:
-            - "3000:3000"
+        - "9091:9091"
+        networks:
+        - monitor
+        labels:
+            org.label-schema.group: "monitoring"
+
+    nodeexporter:
+        image: prom/node-exporter:v0.18.1
+        container_name: nodeexporter
+        volumes:
+            - /proc:/host/proc:ro
+            - /sys:/host/sys:ro
+            - /:/rootfs:ro
+        command:
+            - '--path.procfs=/host/proc'
+            - '--path.rootfs=/rootfs'
+            - '--path.sysfs=/host/sys'
+            - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+        restart: unless-stopped
+        expose:
+            - 9100
         networks:
             - monitor
+        labels:
+            org.label-schema.group: "monitoring"
 
-    milvus_server:
-        runtime: nvidia
-        image: milvusdb/milvus:latest
-        restart: always
-        links:
-            - prometheus
-        environment:
-            WEB_APP: host.docker.internal
+    grafana:
+        image: grafana/grafana:6.7.2
+        container_name: grafana
         volumes:
-            - ../core/conf/server_config.yaml:/var/lib/milvus/conf/server_config.yaml
-            - ../core/conf/log_config.conf:/var/lib/milvus/conf/log_config.conf
+            - grafana_data:/var/lib/grafana
+            - ./grafana/provisioning:/etc/grafana/provisioning
+        environment:
+            - GF_SECURITY_ADMIN_USER=${ADMIN_USER}
+            - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+            - GF_USERS_ALLOW_SIGN_UP=false
+        restart: unless-stopped
+        expose:
+            - 3000
+        hostname: grafana
         ports:
-            - "8080:8080"
-            - "19530:19530"
+            - "3000:3000"
         networks:
             - monitor

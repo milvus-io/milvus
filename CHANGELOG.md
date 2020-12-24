@@ -8,6 +8,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4484 Milvus only search default partition if search parameter 'partition_tags' contains '_default'
 
 ## Feature
+-   \#4504 Add a metric to display the number of files opened by Milvus
 
 ## Improvement
 -   \#4454 Optimize the process of indexing and querying
