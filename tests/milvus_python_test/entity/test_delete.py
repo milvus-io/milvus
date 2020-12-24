@@ -238,15 +238,16 @@ class TestDeleteBase:
         delete_ids = [ids[0], ids[-1]]
         status = connect.delete_entity_by_id(collection, delete_ids)
         assert status
+        connect.flush([collection])
         query = copy.deepcopy(default_single_query)
         query["bool"]["must"][0]["vector"][field_name]["query"] =\
-            [default_entity[-1]["values"][0], default_entities[-1]["values"][0], default_entities[-1]["values"][-1]]
+            [default_entity[-1]["values"][0], default_entities[-1]["values"][1], default_entities[-1]["values"][-1]]
         res = connect.search(collection, query)
         logging.getLogger().debug(res)
         assert len(res) == len(query["bool"]["must"][0]["vector"][field_name]["query"])
         assert res[0]._distances[0] > epsilon
         assert res[1]._distances[0] < epsilon
-        assert res[2]._distances[0] < epsilon
+        assert res[2]._distances[0] > epsilon
 
     def test_create_index_after_delete(self, connect, collection, get_simple_index):
         '''
