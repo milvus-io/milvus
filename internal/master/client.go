@@ -27,7 +27,7 @@ func (m *MockWriteNodeClient) FlushSegment(segmentID UniqueID) error {
 
 func (m *MockWriteNodeClient) DescribeSegment(segmentID UniqueID) (*writerclient.SegmentDescription, error) {
 	now := time.Now()
-	if now.Sub(m.flushTime).Seconds() > 3 {
+	if now.Sub(m.flushTime).Seconds() > 2 {
 		return &writerclient.SegmentDescription{
 			SegmentID: segmentID,
 			IsClosed:  true,
@@ -67,7 +67,7 @@ func (m *MockBuildIndexClient) BuildIndexWithoutID(columnDataPaths []string, typ
 
 func (m *MockBuildIndexClient) DescribeIndex(indexID UniqueID) (*buildindexclient.IndexDescription, error) {
 	now := time.Now()
-	if now.Sub(m.buildTime).Seconds() > 3 {
+	if now.Sub(m.buildTime).Seconds() > 2 {
 		return &buildindexclient.IndexDescription{
 			ID:                1,
 			Status:            indexbuilderpb.IndexStatus_FINISHED,

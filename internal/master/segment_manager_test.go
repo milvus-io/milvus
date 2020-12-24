@@ -6,20 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
-	"google.golang.org/grpc"
 )
 
 func TestSegmentManager_AssignSegment(t *testing.T) {
@@ -159,144 +155,4 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 	segMeta, err := mt.GetSegmentByID(results[0].SegID)
 	assert.Nil(t, err)
 	assert.NotEqualValues(t, 0, segMeta.CloseTime)
-}
-func TestSegmentManager_RPC(t *testing.T) {
-	Init()
-	refreshMasterAddress()
-	etcdAddress := Params.EtcdAddress
-	rootPath := "/test/root"
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
-	assert.Nil(t, err)
-	_, err = cli.Delete(ctx, rootPath, clientv3.WithPrefix())
-	assert.Nil(t, err)
-	Params = ParamTable{
-		Address: Params.Address,
-		Port:    Params.Port,
-
-		EtcdAddress:   Params.EtcdAddress,
-		MetaRootPath:  "/test/root/meta",
-		KvRootPath:    "/test/root/kv",
-		PulsarAddress: Params.PulsarAddress,
-
-		ProxyIDList:     []typeutil.UniqueID{1, 2},
-		WriteNodeIDList: []typeutil.UniqueID{3, 4},
-
-		TopicNum:                    5,
-		QueryNodeNum:                3,
-		SoftTimeTickBarrierInterval: 300,
-
-		// segment
-		SegmentSize:           536870912 / 1024 / 1024,
-		SegmentSizeFactor:     0.75,
-		DefaultRecordSize:     1024,
-		MinSegIDAssignCnt:     1048576 / 1024,
-		MaxSegIDAssignCnt:     Params.MaxSegIDAssignCnt,
-		SegIDAssignExpiration: 2000,
-
-		// msgChannel
-		ProxyTimeTickChannelNames:     []string{"proxy1", "proxy2"},
-		WriteNodeTimeTickChannelNames: []string{"write3", "write4"},
-		InsertChannelNames:            []string{"dm0", "dm1"},
-		K2SChannelNames:               []string{"k2s0", "k2s1"},
-		QueryNodeStatsChannelName:     "statistic",
-		MsgChannelSubName:             Params.MsgChannelSubName,
-
-		MaxPartitionNum:     int64(4096),
-		DefaultPartitionTag: "_default",
-	}
-
-	collName := "test_coll"
-	partitionTag := "test_part"
-	master, err := CreateServer(ctx)
-	assert.Nil(t, err)
-	defer master.Close()
-	err = master.Run(int64(Params.Port))
-	assert.Nil(t, err)
-	dialContext, err := grpc.DialContext(ctx, Params.Address, grpc.WithInsecure(), grpc.WithBlock())
-	assert.Nil(t, err)
-	defer dialContext.Close()
-	client := masterpb.NewMasterClient(dialContext)
-	schema := &schemapb.CollectionSchema{
-		Name:        collName,
-		Description: "test coll",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_INT32},
-			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_VECTOR_FLOAT, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
-		},
-	}
-	schemaBytes, err := proto.Marshal(schema)
-	assert.Nil(t, err)
-	_, err = client.CreateCollection(ctx, &internalpb.CreateCollectionRequest{
-		MsgType:   internalpb.MsgType_kCreateCollection,
-		ReqID:     1,
-		Timestamp: 100,
-		ProxyID:   1,
-		Schema:    &commonpb.Blob{Value: schemaBytes},
-	})
-	assert.Nil(t, err)
-	_, err = client.CreatePartition(ctx, &internalpb.CreatePartitionRequest{
-		MsgType:   internalpb.MsgType_kCreatePartition,
-		ReqID:     2,
-		Timestamp: 101,
-		ProxyID:   1,
-		PartitionName: &servicepb.PartitionName{
-			CollectionName: collName,
-			Tag:            partitionTag,
-		},
-	})
-	assert.Nil(t, err)
-
-	resp, err := client.AssignSegmentID(ctx, &internalpb.AssignSegIDRequest{
-		PeerID: 1,
-		Role:   internalpb.PeerRole_Proxy,
-		PerChannelReq: []*internalpb.SegIDRequest{
-			{Count: 10000, ChannelID: 0, CollName: collName, PartitionTag: partitionTag},
-		},
-	})
-	assert.Nil(t, err)
-	assignments := resp.GetPerChannelAssignment()
-	assert.EqualValues(t, 1, len(assignments))
-	assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
-	assert.EqualValues(t, collName, assignments[0].CollName)
-	assert.EqualValues(t, partitionTag, assignments[0].PartitionTag)
-	assert.EqualValues(t, int32(0), assignments[0].ChannelID)
-	assert.EqualValues(t, uint32(10000), assignments[0].Count)
-
-	// test stats
-	segID := assignments[0].SegID
-	pulsarAddress := Params.PulsarAddress
-	ms := msgstream.NewPulsarMsgStream(ctx, 1024)
-	ms.SetPulsarClient(pulsarAddress)
-	ms.CreatePulsarProducers([]string{"statistic"})
-	ms.Start()
-	defer ms.Close()
-
-	err = ms.Produce(&msgstream.MsgPack{
-		BeginTs: 102,
-		EndTs:   104,
-		Msgs: []msgstream.TsMsg{
-			&msgstream.QueryNodeStatsMsg{
-				QueryNodeStats: internalpb.QueryNodeStats{
-					MsgType: internalpb.MsgType_kQueryNodeStats,
-					PeerID:  1,
-					SegStats: []*internalpb.SegmentStats{
-						{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},
-					},
-				},
-				BaseMsg: msgstream.BaseMsg{
-					HashValues: []uint32{0},
-				},
-			},
-		},
-	})
-	assert.Nil(t, err)
-
-	time.Sleep(500 * time.Millisecond)
-	segMeta, err := master.metaTable.GetSegmentByID(segID)
-	assert.Nil(t, err)
-	assert.EqualValues(t, 1000000, segMeta.GetNumRows())
-	assert.EqualValues(t, int64(600000000), segMeta.GetMemSize())
 }
