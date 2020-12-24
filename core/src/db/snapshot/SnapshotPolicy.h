@@ -27,6 +27,8 @@ class SnapshotPolicy {
     // Check if should eject any snapshot in ids
     virtual bool
     ShouldEject(const MapT& ids, bool alive = true) = 0;
+    virtual int
+    ShouldEject(const MapT& ids, IDS_TYPE& to_eject, bool alive = true) = 0;
 
     virtual ~SnapshotPolicy() {
     }
@@ -41,6 +43,8 @@ class SnapshotNumPolicy : public SnapshotPolicy {
 
     bool
     ShouldEject(const MapT& ids, bool alive = true) override;
+    int
+    ShouldEject(const MapT& ids, IDS_TYPE& to_eject, bool alive = true) override;
 
  protected:
     // Num of snapshots
@@ -54,6 +58,8 @@ class SnapshotDurationPolicy : public SnapshotPolicy {
 
     bool
     ShouldEject(const MapT& ids, bool alive = true) override;
+    int
+    ShouldEject(const MapT& ids, IDS_TYPE& to_eject, bool alive = true) override;
 
  protected:
     // Duration in us
