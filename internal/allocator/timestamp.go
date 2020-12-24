@@ -19,6 +19,7 @@ type TimestampAllocator struct {
 	Allocator
 	lastTsBegin Timestamp
 	lastTsEnd   Timestamp
+	PeerID      UniqueID
 }
 
 func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error) {
@@ -36,26 +37,36 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 	}
 	a.Allocator.syncFunc = a.syncTs
 	a.Allocator.processFunc = a.processFunc
-	a.Allocator.checkFunc = a.checkFunc
+	a.Allocator.checkSyncFunc = a.checkSyncFunc
+	a.Allocator.pickCanDoFunc = a.pickCanDoFunc
 	return a, nil
 }
 
-func (ta *TimestampAllocator) checkFunc(timeout bool) bool {
-	if timeout {
-		return true
-	}
-	need := uint32(0)
-	for _, req := range ta.toDoReqs {
-		iReq := req.(*tsoRequest)
-		need += iReq.count
-	}
-	return ta.lastTsBegin+Timestamp(need) >= ta.lastTsEnd
+func (ta *TimestampAllocator) checkSyncFunc(timeout bool) bool {
+	return timeout || len(ta.toDoReqs) > 0
 }
 
-func (ta *TimestampAllocator) syncTs() {
+func (ta *TimestampAllocator) pickCanDoFunc() {
+	total := uint32(ta.lastTsEnd - ta.lastTsBegin)
+	need := uint32(0)
+	idx := 0
+	for _, req := range ta.toDoReqs {
+		tReq := req.(*tsoRequest)
+		need += tReq.count
+		if need <= total {
+			ta.canDoReqs = append(ta.canDoReqs, req)
+			idx++
+		} else {
+			break
+		}
+	}
+	ta.toDoReqs = ta.toDoReqs[idx:]
+}
+
+func (ta *TimestampAllocator) syncTs() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &internalpb.TsoRequest{
-		PeerID: 1,
+		PeerID: ta.PeerID,
 		Role:   internalpb.PeerRole_Proxy,
 		Count:  ta.countPerRPC,
 	}
@@ -64,10 +75,11 @@ func (ta *TimestampAllocator) syncTs() {
 	cancel()
 	if err != nil {
 		log.Println("syncTimestamp Failed!!!!!")
-		return
+		return false
 	}
 	ta.lastTsBegin = resp.GetTimestamp()
 	ta.lastTsEnd = ta.lastTsBegin + uint64(resp.GetCount())
+	return true
 }
 
 func (ta *TimestampAllocator) processFunc(req request) error {

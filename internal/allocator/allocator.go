@@ -58,6 +58,7 @@ type segRequest struct {
 	partition string
 	segInfo   map[UniqueID]uint32
 	channelID int32
+	timestamp Timestamp
 }
 
 type syncRequest struct {
@@ -121,16 +122,18 @@ type Allocator struct {
 	masterClient  masterpb.MasterClient
 	countPerRPC   uint32
 
-	toDoReqs []request
-
-	syncReqs []request
+	toDoReqs  []request
+	canDoReqs []request
+	syncReqs  []request
 
 	tChan         tickerChan
 	forceSyncChan chan request
 
-	syncFunc    func()
+	syncFunc    func() bool
 	processFunc func(req request) error
-	checkFunc   func(timeout bool) bool
+
+	checkSyncFunc func(timeout bool) bool
+	pickCanDoFunc func()
 }
 
 func (ta *Allocator) Start() error {
@@ -145,7 +148,6 @@ func (ta *Allocator) Start() error {
 }
 
 func (ta *Allocator) connectMaster() error {
-	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
@@ -182,7 +184,13 @@ func (ta *Allocator) mainLoop() {
 			ta.finishSyncRequest()
 
 		case <-ta.tChan.Chan():
-			ta.sync(true)
+			ta.pickCanDo()
+			ta.finishRequest()
+			if ta.sync(true) {
+				ta.pickCanDo()
+				ta.finishRequest()
+			}
+			ta.failRemainRequest()
 
 		case first := <-ta.reqs:
 			ta.toDoReqs = append(ta.toDoReqs, first)
@@ -190,9 +198,13 @@ func (ta *Allocator) mainLoop() {
 			for i := 0; i < pending; i++ {
 				ta.toDoReqs = append(ta.toDoReqs, <-ta.reqs)
 			}
-			ta.sync(false)
-
+			ta.pickCanDo()
 			ta.finishRequest()
+			if ta.sync(false) {
+				ta.pickCanDo()
+				ta.finishRequest()
+			}
+			ta.failRemainRequest()
 
 		case <-loopCtx.Done():
 			return
@@ -201,19 +213,32 @@ func (ta *Allocator) mainLoop() {
 	}
 }
 
-func (ta *Allocator) sync(timeout bool) {
-	if ta.syncFunc == nil {
+func (ta *Allocator) pickCanDo() {
+	if ta.pickCanDoFunc == nil {
 		return
 	}
-	if ta.checkFunc == nil || !ta.checkFunc(timeout) {
-		return
+	ta.pickCanDoFunc()
+}
+
+func (ta *Allocator) sync(timeout bool) bool {
+	if ta.syncFunc == nil || ta.checkSyncFunc == nil {
+		ta.canDoReqs = ta.toDoReqs
+		ta.toDoReqs = ta.toDoReqs[0:0]
+		return true
+	}
+	if !timeout && len(ta.toDoReqs) == 0 {
+		return false
+	}
+	if !ta.checkSyncFunc(timeout) {
+		return false
 	}
 
-	ta.syncFunc()
+	ret := ta.syncFunc()
 
 	if !timeout {
 		ta.tChan.Reset()
 	}
+	return ret
 }
 
 func (ta *Allocator) finishSyncRequest() {
@@ -225,14 +250,23 @@ func (ta *Allocator) finishSyncRequest() {
 	ta.syncReqs = ta.syncReqs[0:0]
 }
 
-func (ta *Allocator) finishRequest() {
+func (ta *Allocator) failRemainRequest() {
 	for _, req := range ta.toDoReqs {
+		if req != nil {
+			req.Notify(errors.New("failed: unexpected error"))
+		}
+	}
+	ta.toDoReqs = []request{}
+}
+
+func (ta *Allocator) finishRequest() {
+	for _, req := range ta.canDoReqs {
 		if req != nil {
 			err := ta.processFunc(req)
 			req.Notify(err)
 		}
 	}
-	ta.toDoReqs = ta.toDoReqs[0:0]
+	ta.canDoReqs = []request{}
 }
 
 func (ta *Allocator) revokeRequest(err error) {
