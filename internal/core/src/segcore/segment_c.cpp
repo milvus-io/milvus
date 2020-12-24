@@ -19,7 +19,6 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <cstdint>
 #include <boost/concept_check.hpp>
-#include "common/LoadIndex.h"
 
 CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id) {
@@ -172,22 +171,6 @@ FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
         status.error_msg = strdup(e.what());
     }
     return status;
-}
-
-CStatus
-UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info) {
-    auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-    try {
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedException;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
 }
 
 //////////////////////////////////////////////////////////////////

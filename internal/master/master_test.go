@@ -2,10 +2,8 @@ package master
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +21,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -61,6 +60,7 @@ func refreshChannelNames() {
 	Params.InsertChannelNames = makeNewChannalNames(Params.InsertChannelNames, suffix)
 	Params.K2SChannelNames = makeNewChannalNames(Params.K2SChannelNames, suffix)
 	Params.ProxyTimeTickChannelNames = makeNewChannalNames(Params.ProxyTimeTickChannelNames, suffix)
+	Params.MetaRootPath = "/test" + strconv.FormatInt(rand.Int63n(100), 10) + "/root/kv"
 }
 
 func receiveTimeTickMsg(stream *ms.MsgStream) bool {
@@ -80,20 +80,18 @@ func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
 	return &msgPack
 }
 
-func TestMain(m *testing.M) {
+func TestMaster(t *testing.T) {
 	Init()
 	refreshMasterAddress()
 	refreshChannelNames()
 	etcdAddr := Params.EtcdAddress
-	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "tso"))
-	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, "/test/root/kv", "gid"))
-	exitCode := m.Run()
-	os.Exit(exitCode)
-}
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	assert.Nil(t, err)
+	_, err = etcdCli.Delete(context.Background(), Params.MetaRootPath, clientv3.WithPrefix())
+	assert.Nil(t, err)
 
-func TestMaster(t *testing.T) {
-	Init()
-	refreshMasterAddress()
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, Params.MetaRootPath, "tso"))
+	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddr}, Params.MetaRootPath, "gid"))
 	pulsarAddr := Params.PulsarAddress
 	Params.ProxyIDList = []UniqueID{0}
 	//Param
@@ -198,7 +196,6 @@ func TestMaster(t *testing.T) {
 	})
 
 	t.Run("TestCollectionTask", func(t *testing.T) {
-		fmt.Println("point 3")
 		sch := schemapb.CollectionSchema{
 			Name:        "col1",
 			Description: "test collection",

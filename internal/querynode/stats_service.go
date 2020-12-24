@@ -12,23 +12,17 @@ import (
 )
 
 type statsService struct {
-	ctx context.Context
-
-	replica collectionReplica
-
-	fieldStatsChan chan []*internalpb.FieldStats
-	statsStream    msgstream.MsgStream
+	ctx         context.Context
+	statsStream msgstream.MsgStream
+	replica     collectionReplica
 }
 
-func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsChan chan []*internalpb.FieldStats) *statsService {
+func newStatsService(ctx context.Context, replica collectionReplica) *statsService {
 
 	return &statsService{
-		ctx: ctx,
-
-		replica: replica,
-
-		fieldStatsChan: fieldStatsChan,
-		statsStream:    nil,
+		ctx:         ctx,
+		statsStream: nil,
+		replica:     replica,
 	}
 }
 
@@ -56,9 +50,7 @@ func (sService *statsService) start() {
 		case <-sService.ctx.Done():
 			return
 		case <-time.After(time.Duration(sleepTimeInterval) * time.Millisecond):
-			sService.publicStatistic(nil)
-		case fieldStats := <-sService.fieldStatsChan:
-			sService.publicStatistic(fieldStats)
+			sService.sendSegmentStatistic()
 		}
 	}
 }
@@ -69,21 +61,20 @@ func (sService *statsService) close() {
 	}
 }
 
-func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStats) {
-	segStats := sService.replica.getSegmentStatistics()
+func (sService *statsService) sendSegmentStatistic() {
+	statisticData := sService.replica.getSegmentStatistics()
 
-	queryNodeStats := internalpb.QueryNodeStats{
-		MsgType:    internalpb.MsgType_kQueryNodeStats,
-		PeerID:     Params.QueryNodeID,
-		SegStats:   segStats,
-		FieldStats: fieldStats,
-	}
+	// fmt.Println("Publish segment statistic")
+	// fmt.Println(statisticData)
+	sService.publicStatistic(statisticData)
+}
 
+func (sService *statsService) publicStatistic(statistic *internalpb.QueryNodeStats) {
 	var msg msgstream.TsMsg = &msgstream.QueryNodeStatsMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		QueryNodeStats: queryNodeStats,
+		QueryNodeStats: *statistic,
 	}
 
 	var msgPack = msgstream.MsgPack{

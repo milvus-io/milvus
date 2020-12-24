@@ -13,17 +13,11 @@
 #include <string>
 #include <random>
 #include <gtest/gtest.h>
-#include <chrono>
 
 #include "pb/service_msg.pb.h"
 #include "segcore/reduce_c.h"
 
-#include <index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <index/knowhere/knowhere/index/vector_index/VecIndexFactory.h>
-#include <index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h>
-#include <common/LoadIndex.h>
-
+#include <chrono>
 namespace chrono = std::chrono;
 
 TEST(CApiTest, CollectionTest) {
@@ -344,7 +338,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 namespace {
 auto
 generate_data(int N) {
-    std::vector<float> raw_data;
+    std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
     std::vector<int64_t> uids;
     std::default_random_engine er(42);
@@ -358,7 +352,7 @@ generate_data(int N) {
         for (auto& x : vec) {
             x = distribution(er);
         }
-        raw_data.insert(raw_data.end(), std::begin(vec), std::end(vec));
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
         int age = ei() % 100;
         raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
@@ -683,54 +677,4 @@ TEST(CApiTest, Reduce) {
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
-}
-
-TEST(CApiTest, LoadIndex_Search) {
-    // generator index
-    constexpr auto DIM = 16;
-    constexpr auto K = 10;
-
-    auto N = 1024 * 1024 * 10;
-    auto num_query = 100;
-    auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 4},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
-
-    auto database = milvus::knowhere::GenDataset(N, DIM, raw_data.data());
-    indexing->Train(database, conf);
-    indexing->AddWithoutIds(database, conf);
-
-    EXPECT_EQ(indexing->Count(), N);
-    EXPECT_EQ(indexing->Dim(), DIM);
-
-    // serializ index to binarySet
-    auto binary_set = indexing->Serialize(conf);
-
-    // fill loadIndexInfo
-    LoadIndexInfo load_index_info;
-    auto& index_params = load_index_info.index_params;
-    index_params["index_type"] = "IVF_PQ";
-    index_params["index_mode"] = "CPU";
-    auto mode = milvus::knowhere::IndexMode::MODE_CPU;
-    load_index_info.index =
-        milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
-    load_index_info.index->Load(binary_set);
-
-    // search
-    auto query_dataset = milvus::knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
-
-    auto result = indexing->Query(query_dataset, conf, nullptr);
-
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    for (int i = 0; i < std::min(num_query * K, 100); ++i) {
-        std::cout << ids[i] << "->" << dis[i] << std::endl;
-    }
 }

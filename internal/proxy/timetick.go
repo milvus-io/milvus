@@ -104,10 +104,6 @@ func (tt *timeTick) tickLoop() {
 	}
 }
 
-func (tt *timeTick) LastTick() Timestamp {
-	return tt.lastTick
-}
-
 func (tt *timeTick) Start() error {
 	tt.lastTick = 0
 	ts, err := tt.tsoAllocator.AllocOne()

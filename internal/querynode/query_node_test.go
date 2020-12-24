@@ -26,7 +26,6 @@ func setup() {
 
 func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb.CollectionMeta {
 	fieldVec := schemapb.FieldSchema{
-		FieldID:      UniqueID(0),
 		Name:         "vec",
 		IsPrimaryKey: false,
 		DataType:     schemapb.DataType_VECTOR_FLOAT,
@@ -45,7 +44,6 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		FieldID:      UniqueID(1),
 		Name:         "age",
 		IsPrimaryKey: false,
 		DataType:     schemapb.DataType_INT32,
@@ -121,13 +119,12 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func refreshChannelNames() {
-	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(1000000), 10)
+	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
 	Params.SearchChannelNames = makeNewChannelNames(Params.SearchChannelNames, suffix)
 	Params.SearchResultChannelNames = makeNewChannelNames(Params.SearchResultChannelNames, suffix)
 	Params.StatsChannelName = Params.StatsChannelName + suffix
-	Params.LoadIndexChannelNames = makeNewChannelNames(Params.LoadIndexChannelNames, suffix)
 }
 
 func TestMain(m *testing.M) {
