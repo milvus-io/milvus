@@ -870,18 +870,19 @@ class TestCollection:
         status, ids = connect.insert(collection, vectors)
         assert status.OK()
         status = connect.create_partition(collection, partition_name)
-        status = connect.load_collection(collection_name, partition_tags=[partition_name])
+        status = connect.load_collection(collection, partition_tags=[partition_name])
         assert status.OK()
 
     @pytest.mark.level(1)
     def test_load_collection_partitions(self, connect, collection):
+        partition_names = []
         for i in range(2):
             name = gen_unique_str()
             partition_names.append(name)
             status = connect.create_partition(collection, name)
             assert status.OK()
         status, ids = connect.insert(collection, vectors)
-        status = connect.load_collection(collection_name, partition_tags=partition_names)
+        status = connect.load_collection(collection, partition_tags=partition_names)
         assert status.OK()
 
     @pytest.mark.level(1)
@@ -889,7 +890,7 @@ class TestCollection:
         partition_name = gen_unique_str()
         status, ids = connect.insert(collection, vectors)
         assert status.OK()
-        status = connect.load_collection(collection_name, partition_tags=[partition_name])
+        status = connect.load_collection(collection, partition_tags=[partition_name])
         assert not status.OK()
 
     @pytest.mark.level(1)
@@ -897,12 +898,12 @@ class TestCollection:
         partition_name = "invalid string"
         status, ids = connect.insert(collection, vectors)
         assert status.OK()
-        status = connect.load_collection(collection_name, partition_tags=[partition_name])
+        status = connect.load_collection(collection, partition_tags=[partition_name])
         assert not status.OK()
 
     @pytest.mark.level(1)
     def test_load_collection_partition_None(self, connect, collection):
-        status = connect.load_collection(collection_name, partition_tags=None)
+        status = connect.load_collection(collection, partition_tags=None)
         assert status.OK()
 
     @pytest.mark.level(2)
