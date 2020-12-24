@@ -38,6 +38,7 @@ services:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
     networks:
       - milvus
 
