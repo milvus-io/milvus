@@ -21,6 +21,12 @@ type ParamTable struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 
+	// minio
+	MinioEndPoint        string
+	MinioAccessKeyID     string
+	MinioSecretAccessKey string
+	MinioUseSSLStr       bool
+
 	// dm
 	InsertChannelNames   []string
 	InsertChannelRange   []int
@@ -44,6 +50,11 @@ type ParamTable struct {
 	StatsChannelName     string
 	StatsReceiveBufSize  int64
 
+	// load index
+	LoadIndexChannelNames   []string
+	LoadIndexReceiveBufSize int64
+	LoadIndexPulsarBufSize  int64
+
 	GracefulTime        int64
 	MsgChannelSubName   string
 	DefaultPartitionTag string
@@ -55,6 +66,11 @@ var Params ParamTable
 func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 	err := p.LoadYaml("advanced/query_node.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	err = p.LoadYaml("milvus.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -77,6 +93,11 @@ func (p *ParamTable) Init() {
 	if err != nil {
 		panic(err)
 	}
+
+	p.initMinioEndPoint()
+	p.initMinioAccessKeyID()
+	p.initMinioSecretAccessKey()
+	p.initMinioUseSSLStr()
 
 	p.initPulsarAddress()
 	p.initETCDAddress()
@@ -111,6 +132,46 @@ func (p *ParamTable) Init() {
 	p.initStatsPublishInterval()
 	p.initStatsChannelName()
 	p.initStatsReceiveBufSize()
+
+	p.initLoadIndexChannelNames()
+	p.initLoadIndexReceiveBufSize()
+	p.initLoadIndexPulsarBufSize()
+}
+
+func (p *ParamTable) initMinioEndPoint() {
+	url, err := p.Load("_MinioAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioEndPoint = url
+}
+
+func (p *ParamTable) initMinioAccessKeyID() {
+	id, err := p.Load("minio.accessKeyID")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioAccessKeyID = id
+}
+
+func (p *ParamTable) initMinioSecretAccessKey() {
+	key, err := p.Load("minio.secretAccessKey")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioSecretAccessKey = key
+}
+
+func (p *ParamTable) initMinioUseSSLStr() {
+	ssl, err := p.Load("minio.useSSL")
+	if err != nil {
+		panic(err)
+	}
+	sslBoolean, err := strconv.ParseBool(ssl)
+	if err != nil {
+		panic(err)
+	}
+	p.MinioUseSSLStr = sslBoolean
 }
 
 func (p *ParamTable) initPulsarAddress() {
@@ -357,4 +418,20 @@ func (p *ParamTable) initSliceIndex() {
 
 func (p *ParamTable) initQueryNodeNum() {
 	p.QueryNodeNum = len(p.QueryNodeIDList())
+}
+
+func (p *ParamTable) initLoadIndexChannelNames() {
+	loadIndexChannelName, err := p.Load("msgChannel.chanNamePrefix.cmd")
+	if err != nil {
+		panic(err)
+	}
+	p.LoadIndexChannelNames = []string{loadIndexChannelName}
+}
+
+func (p *ParamTable) initLoadIndexReceiveBufSize() {
+	p.LoadIndexReceiveBufSize = p.ParseInt64("queryNode.msgStream.loadIndex.recvBufSize")
+}
+
+func (p *ParamTable) initLoadIndexPulsarBufSize() {
+	p.LoadIndexPulsarBufSize = p.ParseInt64("queryNode.msgStream.loadIndex.pulsarBufSize")
 }

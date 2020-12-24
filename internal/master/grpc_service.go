@@ -443,39 +443,8 @@ func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.Assign
 	}, nil
 }
 
-func (s *Master) CreateIndex(ctx context.Context, req *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
-	task := &createIndexTask{
-		baseTask: baseTask{
-			sch: s.scheduler,
-			mt:  s.metaTable,
-			cv:  make(chan error),
-		},
-		req:                 req,
-		indexBuildScheduler: s.indexBuildSch,
-		indexLoadScheduler:  s.indexLoadSch,
-		segManager:          s.segmentManager,
-	}
-
-	err := s.scheduler.Enqueue(task)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Enqueue failed: " + err.Error(),
-		}, nil
-	}
-
-	err = task.WaitToFinish(ctx)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Create Index error: " + err.Error(),
-		}, nil
-	}
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-		Reason:    "",
-	}, nil
+func (s *Master) CreateIndex(context.Context, *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return nil, nil
 }
 
 func (s *Master) DescribeIndex(context.Context, *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
