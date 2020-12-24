@@ -10,8 +10,6 @@ import (
 
 	"github.com/cznic/mathutil"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
@@ -174,10 +172,10 @@ func (sa *SegIDAssigner) syncSegments() {
 	fmt.Println("OOOOO", req.PerChannelReq)
 	resp, err := sa.masterClient.AssignSegmentID(ctx, req)
 
-	if resp.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
-		log.Println("GRPC AssignSegmentID Failed", resp, err)
-		return
-	}
+	//if resp.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
+	//	log.Println("GRPC AssignSegmentID Failed", resp, err)
+	//	return
+	//}
 
 	now := time.Now()
 	expiredTime := now.Add(time.Millisecond * time.Duration(1000))

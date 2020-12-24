@@ -3,7 +3,10 @@ package master
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
@@ -58,6 +61,11 @@ func (manager *SegmentManager) AssignSegment(segIDReq []*internalpb.SegIDRequest
 	res := make([]*internalpb.SegIDAssignment, 0)
 
 	for _, req := range segIDReq {
+		result := &internalpb.SegIDAssignment{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			},
+		}
 		collName := req.CollName
 		partitionTag := req.PartitionTag
 		count := req.Count
@@ -65,22 +73,27 @@ func (manager *SegmentManager) AssignSegment(segIDReq []*internalpb.SegIDRequest
 
 		collMeta, err := manager.metaTable.GetCollectionByName(collName)
 		if err != nil {
-			return nil, err
+			result.Status.Reason = err.Error()
+			res = append(res, result)
+			continue
 		}
 
 		collID := collMeta.GetID()
 		if !manager.metaTable.HasPartition(collID, partitionTag) {
-			return nil, errors.Errorf("partition tag %s can not find in coll %d", partitionTag, collID)
+			result.Status.Reason = "partition tag " + partitionTag + " can not find in coll " + strconv.FormatInt(collID, 10)
+			res = append(res, result)
+			continue
 		}
 
 		assignInfo, err := manager.assignSegment(collName, collID, partitionTag, count, channelID)
 		if err != nil {
-			return nil, err
+			result.Status.Reason = err.Error()
+			res = append(res, result)
+			continue
 		}
 
 		res = append(res, assignInfo)
 	}
-
 	return res, nil
 }
 
@@ -125,6 +138,10 @@ func (manager *SegmentManager) assignSegment(
 			CollName:     collName,
 			PartitionTag: partitionTag,
 			ExpireTime:   result.expireTime,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_SUCCESS,
+				Reason:    "",
+			},
 		}, nil
 
 	}
@@ -156,6 +173,10 @@ func (manager *SegmentManager) assignSegment(
 		CollName:     collName,
 		PartitionTag: partitionTag,
 		ExpireTime:   result.expireTime,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
 	}, nil
 }
 
