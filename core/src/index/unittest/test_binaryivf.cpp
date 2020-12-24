@@ -64,7 +64,6 @@ TEST_P(BinaryIVFTest, binaryivf_basic) {
     {
         ASSERT_ANY_THROW(index_->Serialize(conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
-        ASSERT_ANY_THROW(index_->Add(nullptr, conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
     }
 

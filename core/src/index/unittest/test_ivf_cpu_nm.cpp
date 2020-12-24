@@ -79,7 +79,6 @@ TEST_P(IVFNMCPUTest, ivf_basic_cpu) {
     }
 
     // null faiss index
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->Train(base_dataset, conf_);
@@ -137,7 +136,6 @@ TEST_P(IVFNMCPUTest, ivf_slice) {
     }
 
     // null faiss index
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->Train(base_dataset, conf_);

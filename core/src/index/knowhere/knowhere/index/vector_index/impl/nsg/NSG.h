@@ -80,7 +80,7 @@ class NsgIndex {
     SetKnnGraph(Graph& knng);
 
     void
-    Build_with_ids(size_t nb, float* data, const int64_t* ids, const BuildParams& parameters);
+    Build(size_t nb, float* data, const int64_t* ids, const BuildParams& parameters);
 
     void
     Search(const float* query, float* data, const unsigned& nq, const unsigned& dim, const unsigned& k, float* dist,

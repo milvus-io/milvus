@@ -171,23 +171,14 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<idx_t>> uids, int64_t nq, int64_t k,
-                 float* distances, int64_t* labels) {
-    auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+CopyResult(const knowhere::DatasetPtr& dataset, int64_t result_len, float* distances, int64_t* labels) {
     auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
-
-    int64_t num = nq * k;
-
-    memcpy(distances, res_dist, sizeof(float) * num);
-
-    /* map offsets to ids */
-    for (int64_t i = 0; i < num; ++i) {
-        int64_t offset = res_ids[i];
-        labels[i] = (offset == -1) ? -1 : (*uids)[offset];
-    }
-
-    free(res_ids);
+    memcpy(distances, res_dist, sizeof(float) * result_len);
     free(res_dist);
+
+    auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    memcpy(labels, res_ids, sizeof(int64_t) * result_len);
+    free(res_ids);
 }
 
 Status
@@ -230,8 +221,8 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     }
 
     auto result = vec_index->Query(dataset, conf, bitset);
-    MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
-                     context.query_result_->result_ids_.data());
+    CopyResult(result, nq * topk, context.query_result_->result_distances_.data(),
+               context.query_result_->result_ids_.data());
 
     if (hybrid) {
         //        HybridUnset();
@@ -770,12 +761,10 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     std::shared_ptr<std::vector<idx_t>> uids;
     knowhere::DatasetPtr dataset;
     if (from_index) {
-        dataset =
-            knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
+        dataset = knowhere::GenDataset(row_count, dimension, from_index->GetRawVectors());
         uids = from_index->GetUids();
     } else if (bin_from_index) {
-        dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
-                                              bin_from_index->GetRawIds());
+        dataset = knowhere::GenDataset(row_count, dimension, bin_from_index->GetRawVectors());
         uids = bin_from_index->GetUids();
     }
 

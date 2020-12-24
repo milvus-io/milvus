@@ -52,7 +52,6 @@ IVF_NM::Serialize(const Config& config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     auto ret = SerializeImpl(index_type_);
     if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, ret);
@@ -63,7 +62,6 @@ IVF_NM::Serialize(const Config& config) {
 void
 IVF_NM::Load(const BinarySet& binary_set) {
     Assemble(const_cast<BinarySet&>(binary_set));
-    std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(binary_set, index_type_);
 
     // Construct arranged data from original data
@@ -130,23 +128,11 @@ IVF_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 void
-IVF_NM::Add(const DatasetPtr& dataset_ptr, const Config& config) {
-    if (!index_ || !index_->is_trained) {
-        KNOWHERE_THROW_MSG("index not initialize or trained");
-    }
-
-    std::lock_guard<std::mutex> lk(mutex_);
-    GET_TENSOR_DATA_ID(dataset_ptr)
-    index_->add_with_ids_without_codes(rows, reinterpret_cast<const float*>(p_data), p_ids);
-}
-
-void
 IVF_NM::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
     GET_TENSOR_DATA(dataset_ptr)
     index_->add_without_codes(rows, reinterpret_cast<const float*>(p_data));
 }
@@ -171,6 +157,7 @@ IVF_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
         auto p_dist = static_cast<float*>(malloc(p_dist_size));
 
         QueryImpl(rows, reinterpret_cast<const float*>(p_data), k, p_dist, p_id, config, bitset);
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
