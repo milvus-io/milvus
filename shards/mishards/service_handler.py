@@ -566,19 +566,18 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             error_code=_status.code, reason=_status.message),
             collection_names=_results)
 
-    def _preload_collection(self, collection_name):
-        return self.router.connection().load_collection(collection_name)
+    def _preload_collection(self, collection_name, partition_tags):
+        return self.router.connection().load_collection(collection_name, partition_tags)
 
     @mark_grpc_method
     def PreloadCollection(self, request, context):
-        _status, _collection_name = Parser.parse_proto_CollectionName(request)
+        _collection_name, _partition_tags = Parser.parse_proto_PreloadCollectionParam(request)
 
-        if not _status.OK():
-            return status_pb2.Status(error_code=_status.code,
-                                     reason=_status.message)
-
-        logger.info('PreloadCollection {}'.format(_collection_name))
-        _status = self._preload_collection(_collection_name)
+        # if not _status.OK():
+        #     return status_pb2.Status(error_code=_status.code,
+        #                              reason=_status.message)
+        logger.info('PreloadCollection {} | {}'.format(_collection_name, _partition_tags))
+        _status = self._preload_collection(_collection_name, _partition_tags)
         return status_pb2.Status(error_code=_status.code,
                                  reason=_status.message)
 
