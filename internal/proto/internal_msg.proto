@@ -291,8 +291,10 @@ message Key2SegMsg {
 message LoadIndex {
     MsgType msg_type = 1;
     int64 segmentID = 2;
-    int64 fieldID = 3;
-    repeated string index_paths = 4;
+    string fieldName = 3;
+    int64 fieldID = 4;
+    repeated string index_paths = 5;
+    repeated common.KeyValuePair index_params = 6;
 }
 
 message IndexStats {

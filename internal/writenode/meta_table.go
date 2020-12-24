@@ -14,7 +14,8 @@ import (
 
 type metaTable struct {
 	client          kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
-	segID2FlushMeta map[UniqueID]pb.SegmentFlushMeta // index id to index meta
+	segID2FlushMeta map[UniqueID]pb.SegmentFlushMeta // segment id to flush meta
+	collID2DdlMeta  map[UniqueID]*pb.DDLFlushMeta
 
 	lock sync.RWMutex
 }
@@ -24,14 +25,107 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
 		client: kv,
 		lock:   sync.RWMutex{},
 	}
-	err := mt.reloadFromKV()
+	err := mt.reloadSegMetaFromKV()
+	if err != nil {
+		return nil, err
+	}
+
+	err = mt.reloadDdlMetaFromKV()
 	if err != nil {
 		return nil, err
 	}
 	return mt, nil
 }
 
-func (mt *metaTable) reloadFromKV() error {
+func (mt *metaTable) AppendDDLBinlogPaths(collID UniqueID, paths []string) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	_, ok := mt.collID2DdlMeta[collID]
+	if !ok {
+		mt.collID2DdlMeta[collID] = &pb.DDLFlushMeta{
+			CollectionID: collID,
+			BinlogPaths:  make([]string, 0),
+		}
+	}
+
+	meta := mt.collID2DdlMeta[collID]
+	meta.BinlogPaths = append(meta.BinlogPaths, paths...)
+
+	return mt.saveDDLFlushMeta(meta)
+}
+
+func (mt *metaTable) AppendSegBinlogPaths(timestamp Timestamp, segmentID UniqueID, fieldID int32, dataPaths []string) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	_, ok := mt.segID2FlushMeta[segmentID]
+	if !ok {
+		err := mt.addSegmentFlush(segmentID, timestamp)
+		if err != nil {
+			return err
+		}
+	}
+
+	meta := mt.segID2FlushMeta[segmentID]
+
+	found := false
+	for _, field := range meta.Fields {
+		if field.FieldID == fieldID {
+			field.BinlogPaths = append(field.BinlogPaths, dataPaths...)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		newField := &pb.FieldFlushMeta{
+			FieldID:     fieldID,
+			BinlogPaths: dataPaths,
+		}
+		meta.Fields = append(meta.Fields, newField)
+	}
+
+	return mt.saveSegFlushMeta(&meta)
+}
+
+// metaTable.lock.Lock() before call this function
+func (mt *metaTable) saveDDLFlushMeta(meta *pb.DDLFlushMeta) error {
+	value := proto.MarshalTextString(meta)
+
+	mt.collID2DdlMeta[meta.CollectionID] = meta
+
+	return mt.client.Save("/writer/ddl/"+strconv.FormatInt(meta.CollectionID, 10), value)
+}
+
+func (mt *metaTable) reloadDdlMetaFromKV() error {
+	mt.collID2DdlMeta = make(map[UniqueID]*pb.DDLFlushMeta)
+	_, values, err := mt.client.LoadWithPrefix("writer/ddl")
+	if err != nil {
+		return err
+	}
+
+	for _, value := range values {
+		ddlMeta := &pb.DDLFlushMeta{}
+		err = proto.UnmarshalText(value, ddlMeta)
+		if err != nil {
+			return err
+		}
+		mt.collID2DdlMeta[ddlMeta.CollectionID] = ddlMeta
+	}
+	return nil
+}
+
+// metaTable.lock.Lock() before call this function
+func (mt *metaTable) saveSegFlushMeta(meta *pb.SegmentFlushMeta) error {
+	value := proto.MarshalTextString(meta)
+
+	mt.segID2FlushMeta[meta.SegmentID] = *meta
+
+	return mt.client.Save("/writer/segment/"+strconv.FormatInt(meta.SegmentID, 10), value)
+}
+
+func (mt *metaTable) reloadSegMetaFromKV() error {
 	mt.segID2FlushMeta = make(map[UniqueID]pb.SegmentFlushMeta)
 
 	_, values, err := mt.client.LoadWithPrefix("writer/segment")
@@ -47,19 +141,11 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 		mt.segID2FlushMeta[flushMeta.SegmentID] = flushMeta
 	}
+
 	return nil
 }
 
-// metaTable.lock.Lock() before call this function
-func (mt *metaTable) saveFlushMeta(meta *pb.SegmentFlushMeta) error {
-	value := proto.MarshalTextString(meta)
-
-	mt.segID2FlushMeta[meta.SegmentID] = *meta
-
-	return mt.client.Save("/writer/segment/"+strconv.FormatInt(meta.SegmentID, 10), value)
-}
-
-func (mt *metaTable) AddSegmentFlush(segmentID UniqueID) error {
+func (mt *metaTable) addSegmentFlush(segmentID UniqueID, timestamp Timestamp) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	_, ok := mt.segID2FlushMeta[segmentID]
@@ -69,8 +155,9 @@ func (mt *metaTable) AddSegmentFlush(segmentID UniqueID) error {
 	meta := pb.SegmentFlushMeta{
 		IsClosed:  false,
 		SegmentID: segmentID,
+		OpenTime:  timestamp,
 	}
-	return mt.saveFlushMeta(&meta)
+	return mt.saveSegFlushMeta(&meta)
 }
 
 func (mt *metaTable) getFlushCloseTime(segmentID UniqueID) (Timestamp, error) {
@@ -83,28 +170,6 @@ func (mt *metaTable) getFlushCloseTime(segmentID UniqueID) (Timestamp, error) {
 	return meta.CloseTime, nil
 }
 
-func (mt *metaTable) SetFlushCloseTime(segmentID UniqueID, t Timestamp) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-	meta, ok := mt.segID2FlushMeta[segmentID]
-	if !ok {
-		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-	}
-	meta.CloseTime = t
-	return mt.saveFlushMeta(&meta)
-}
-
-func (mt *metaTable) SetFlushOpenTime(segmentID UniqueID, t Timestamp) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-	meta, ok := mt.segID2FlushMeta[segmentID]
-	if !ok {
-		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-	}
-	meta.OpenTime = t
-	return mt.saveFlushMeta(&meta)
-}
-
 func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
@@ -115,7 +180,7 @@ func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
 	return meta.OpenTime, nil
 }
 
-func (mt *metaTable) CompleteFlush(segmentID UniqueID) error {
+func (mt *metaTable) CompleteFlush(segmentID UniqueID, timestamp Timestamp) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.segID2FlushMeta[segmentID]
@@ -123,7 +188,9 @@ func (mt *metaTable) CompleteFlush(segmentID UniqueID) error {
 		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
 	}
 	meta.IsClosed = true
-	return mt.saveFlushMeta(&meta)
+	meta.CloseTime = timestamp
+
+	return mt.saveSegFlushMeta(&meta)
 }
 
 func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
@@ -136,34 +203,7 @@ func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
 	return meta.IsClosed, nil
 }
 
-func (mt *metaTable) AppendBinlogPaths(segmentID UniqueID, fieldID int32, dataPaths []string) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	meta, ok := mt.segID2FlushMeta[segmentID]
-	if !ok {
-		return errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-	}
-	found := false
-	for _, field := range meta.Fields {
-		if field.FieldID == fieldID {
-			field.BinlogPaths = append(field.BinlogPaths, dataPaths...)
-			found = true
-			break
-		}
-	}
-	if !found {
-		newField := &pb.FieldFlushMeta{
-			FieldID:     fieldID,
-			BinlogPaths: dataPaths,
-		}
-		meta.Fields = append(meta.Fields, newField)
-	}
-
-	return mt.saveFlushMeta(&meta)
-}
-
-func (mt *metaTable) getBinlogPaths(segmentID UniqueID) (map[int32][]string, error) {
+func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int32][]string, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
@@ -175,5 +215,18 @@ func (mt *metaTable) getBinlogPaths(segmentID UniqueID) (map[int32][]string, err
 	for _, field := range meta.Fields {
 		ret[field.FieldID] = field.BinlogPaths
 	}
+	return ret, nil
+}
+
+func (mt *metaTable) getDDLBinlogPaths(collID UniqueID) (map[UniqueID][]string, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	meta, ok := mt.collID2DdlMeta[collID]
+	if !ok {
+		return nil, errors.Errorf("collection not exists with ID = " + strconv.FormatInt(collID, 10))
+	}
+	ret := make(map[UniqueID][]string)
+	ret[meta.CollectionID] = meta.BinlogPaths
 	return ret, nil
 }

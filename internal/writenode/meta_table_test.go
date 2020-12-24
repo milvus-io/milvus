@@ -5,108 +5,121 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"go.etcd.io/etcd/clientv3"
 )
 
-func createMetaTable(t *testing.T) *metaTable {
+func TestMetaTable_all(t *testing.T) {
+
 	etcdAddr := Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root/writer")
 
 	_, err = cli.Delete(context.TODO(), "/etcd/test/root/writer", clientv3.WithPrefix())
-	assert.Nil(t, err)
+	require.NoError(t, err)
 
 	meta, err := NewMetaTable(etcdKV)
-	assert.Nil(t, err)
-	return meta
-}
-
-func TestMetaTable_AddSegmentFlush(t *testing.T) {
-	meta := createMetaTable(t)
-	defer meta.client.Close()
-	err := meta.AddSegmentFlush(1)
-	assert.Nil(t, err)
-
-	err = meta.AddSegmentFlush(2)
-	assert.Nil(t, err)
-
-	err = meta.AddSegmentFlush(2)
-	assert.NotNil(t, err)
-
-	err = meta.reloadFromKV()
-	assert.Nil(t, err)
-
-}
-
-func TestMetaTable_SetFlushTime(t *testing.T) {
-	meta := createMetaTable(t)
+	assert.NoError(t, err)
 	defer meta.client.Close()
 
-	var segmentID UniqueID = 1
+	t.Run("TestMetaTable_addSegmentFlush_and_OpenTime", func(t *testing.T) {
+		tsOpen := Timestamp(100)
+		err := meta.addSegmentFlush(101, tsOpen)
+		assert.NoError(t, err)
+		exp, err := meta.getFlushOpenTime(101)
+		assert.NoError(t, err)
+		assert.Equal(t, tsOpen, exp)
 
-	err := meta.AddSegmentFlush(segmentID)
-	assert.Nil(t, err)
+		tsOpen = Timestamp(200)
+		err = meta.addSegmentFlush(102, tsOpen)
+		assert.NoError(t, err)
+		exp, err = meta.getFlushOpenTime(102)
+		assert.NoError(t, err)
+		assert.Equal(t, tsOpen, exp)
 
-	tsOpen := Timestamp(1000)
-	err = meta.SetFlushOpenTime(segmentID, tsOpen)
-	assert.Nil(t, err)
+		tsOpen = Timestamp(200)
+		err = meta.addSegmentFlush(103, tsOpen)
+		assert.NoError(t, err)
+		exp, err = meta.getFlushOpenTime(103)
+		assert.NoError(t, err)
+		assert.Equal(t, tsOpen, exp)
 
-	exp, err := meta.getFlushOpenTime(segmentID)
-	assert.Nil(t, err)
-	assert.Equal(t, tsOpen, exp)
+		err = meta.reloadSegMetaFromKV()
+		assert.NoError(t, err)
+	})
 
-	tsClose := Timestamp(10001)
-	err = meta.SetFlushCloseTime(segmentID, tsClose)
-	assert.Nil(t, err)
+	t.Run("TestMetaTable_AppendSegBinlogPaths", func(t *testing.T) {
+		segmentID := UniqueID(201)
+		tsOpen := Timestamp(1000)
+		err := meta.addSegmentFlush(segmentID, tsOpen)
+		assert.Nil(t, err)
 
-	exp, err = meta.getFlushCloseTime(segmentID)
-	assert.Nil(t, err)
-	assert.Equal(t, tsClose, exp)
-}
-
-func TestMetaTable_AppendBinlogPaths(t *testing.T) {
-	meta := createMetaTable(t)
-	defer meta.client.Close()
-	var segmentID UniqueID = 1
-	err := meta.AddSegmentFlush(segmentID)
-	assert.Nil(t, err)
-
-	exp := map[int32][]string{
-		1: {"a", "b", "c"},
-		2: {"b", "a", "c"},
-	}
-	for fieldID, dataPaths := range exp {
-		for _, dp := range dataPaths {
-			err = meta.AppendBinlogPaths(segmentID, fieldID, []string{dp})
-			assert.Nil(t, err)
+		exp := map[int32][]string{
+			1: {"a", "b", "c"},
+			2: {"b", "a", "c"},
 		}
-	}
+		for fieldID, dataPaths := range exp {
+			for _, dp := range dataPaths {
+				err = meta.AppendSegBinlogPaths(tsOpen, segmentID, fieldID, []string{dp})
+				assert.Nil(t, err)
+				err = meta.AppendSegBinlogPaths(tsOpen, segmentID, fieldID, []string{dp})
+				assert.Nil(t, err)
+			}
+		}
 
-	ret, err := meta.getBinlogPaths(segmentID)
-	assert.Nil(t, err)
-	assert.Equal(t, exp, ret)
+		ret, err := meta.getSegBinlogPaths(segmentID)
+		assert.Nil(t, err)
+		assert.Equal(t,
+			map[int32][]string{
+				1: {"a", "a", "b", "b", "c", "c"},
+				2: {"b", "b", "a", "a", "c", "c"}},
+			ret)
+	})
 
-}
+	t.Run("TestMetaTable_AppendDDLBinlogPaths", func(t *testing.T) {
 
-func TestMetaTable_CompleteFlush(t *testing.T) {
-	meta := createMetaTable(t)
-	defer meta.client.Close()
+		collID2Paths := map[UniqueID][]string{
+			301: {"a", "b", "c"},
+			302: {"c", "b", "a"},
+		}
 
-	var segmentID UniqueID = 1
+		for collID, dataPaths := range collID2Paths {
+			for _, dp := range dataPaths {
+				err = meta.AppendDDLBinlogPaths(collID, []string{dp})
+				assert.Nil(t, err)
+			}
+		}
 
-	err := meta.AddSegmentFlush(segmentID)
-	assert.Nil(t, err)
+		for k, v := range collID2Paths {
+			ret, err := meta.getDDLBinlogPaths(k)
+			assert.Nil(t, err)
+			assert.Equal(t, map[UniqueID][]string{k: v}, ret)
+		}
+	})
 
-	ret, err := meta.checkFlushComplete(segmentID)
-	assert.Nil(t, err)
-	assert.Equal(t, false, ret)
+	t.Run("TestMetaTable_CompleteFlush_and_CloseTime", func(t *testing.T) {
 
-	meta.CompleteFlush(segmentID)
+		var segmentID UniqueID = 401
+		openTime := Timestamp(1000)
+		closeTime := Timestamp(10000)
 
-	ret, err = meta.checkFlushComplete(segmentID)
-	assert.Nil(t, err)
-	assert.Equal(t, true, ret)
+		err := meta.addSegmentFlush(segmentID, openTime)
+		assert.NoError(t, err)
+
+		ret, err := meta.checkFlushComplete(segmentID)
+		assert.NoError(t, err)
+		assert.Equal(t, false, ret)
+
+		meta.CompleteFlush(segmentID, closeTime)
+
+		ret, err = meta.checkFlushComplete(segmentID)
+		assert.NoError(t, err)
+		assert.Equal(t, true, ret)
+		ts, err := meta.getFlushCloseTime(segmentID)
+		assert.NoError(t, err)
+		assert.Equal(t, closeTime, ts)
+	})
 
 }

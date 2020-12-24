@@ -17,3 +17,8 @@ message SegmentFlushMeta{
     uint64 close_time = 4;
     repeated FieldFlushMeta fields = 5;
 }
+
+message DDLFlushMeta {
+    int64 collectionID = 1;
+    repeated string binlog_paths = 2;
+}
