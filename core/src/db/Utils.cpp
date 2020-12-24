@@ -158,36 +158,7 @@ GetCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_f
     std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
 
-    // bool s3_enable = false;
-    // server::Config& config = server::Config::GetInstance();
-    // config.GetStorageConfigS3Enable(s3_enable);
-    // fiu_do_on("GetCollectionFilePath.enable_s3", s3_enable = true);
-    // if (s3_enable) {
-    //     /* need not check file existence */
-    //     table_file.location_ = file_path;
-    //     return Status::OK();
-    // }
-
-    if (boost::filesystem::exists(parent_path)) {
-        table_file.location_ = file_path;
-        return Status::OK();
-    }
-
-    for (auto& path : options.slave_paths_) {
-        parent_path = ConstructParentFolder(path, table_file);
-        file_path = parent_path + "/" + table_file.file_id_;
-        if (boost::filesystem::exists(parent_path)) {
-            table_file.location_ = file_path;
-            return Status::OK();
-        }
-    }
-
-    std::string msg = "Collection file doesn't exist: " + file_path;
-    if (table_file.file_size_ > 0) {  // no need to pop error for empty file
-        LOG_ENGINE_ERROR_ << msg << " in path: " << options.path_ << " for collection: " << table_file.collection_id_;
-    }
-
-    return Status(DB_ERROR, msg);
+    return Status::OK();
 }
 
 Status

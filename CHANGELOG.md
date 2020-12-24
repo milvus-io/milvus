@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4307 Specify partition to load for load_collection()
 -   \#4378 Multi-threads to call load_collection() and search() cause Milvus hang
 -   \#4484 Milvus only search default partition if search parameter 'partition_tags' contains '_default'
+-   \#4492 while share file system servcie became abnormal, the milvus can not supply query service
 
 ## Feature
 
