@@ -67,14 +67,11 @@ IndexRHNSWFlat::Load(const BinarySet& index_binary) {
         Assemble(const_cast<BinarySet&>(index_binary));
         IndexRHNSW::Load(index_binary);
         auto real_idx = dynamic_cast<faiss::IndexRHNSWFlat*>(index_.get());
-        auto read_meta = [&](const std::string& key, int64_t& value) {
-            auto meta_data = index_binary.GetByName(key);
-            memcpy(&value, meta_data->data.get(), meta_data->size);
-        };
+
         int64_t meta_info[3];  // = {metric_type, dim, ntotal}
         auto meta_data = index_binary.GetByName("META");
         memcpy(meta_info, meta_data->data.get(), meta_data->size);
-        switch ((faiss::MetricType)meta_info[0]) {
+        switch (static_cast<faiss::MetricType>(meta_info[0])) {
             case faiss::MetricType::METRIC_L2:
                 real_idx->storage = new faiss::IndexFlatL2();
                 break;
@@ -86,8 +83,8 @@ IndexRHNSWFlat::Load(const BinarySet& index_binary) {
                 break;
         }
         real_idx->storage->ntotal = meta_info[2];
-        real_idx->storage->d = (int)meta_info[1];
-        real_idx->storage->metric_type = (faiss::MetricType)meta_info[0];
+        real_idx->storage->d = static_cast<int>(meta_info[1]);
+        real_idx->storage->metric_type = static_cast<faiss::MetricType>(meta_info[0]);
         auto binary_data = index_binary.GetByName(RAW_DATA);
         real_idx->storage->add(meta_info[2], reinterpret_cast<const float*>(binary_data->data.get()));
         real_idx->init_hnsw();
