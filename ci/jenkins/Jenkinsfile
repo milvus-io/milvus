@@ -177,13 +177,7 @@ pipeline {
                                     container('milvus-test-env') {
                                         script {
                                             sh "mkdir -p ${env.DEV_TEST_ARTIFACTS}"
-                                            boolean isNightlyTest = isTimeTriggeredBuild()
-                                            if (isNightlyTest) {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevNightlyTest.groovy"
-                                                load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
-                                            } else {
-                                                load "${env.WORKSPACE}/ci/jenkins/step/singleDevTest.groovy"
-                                            }
+                                            load "${env.WORKSPACE}/ci/jenkins/step/shardsDevNightlyTest.groovy"
                                         }
                                     }
                                 }
@@ -195,11 +189,7 @@ pipeline {
                                 container('milvus-test-env') {
                                     script {
                                         archiveArtifacts artifacts: "${env.DEV_TEST_ARTIFACTS}/**", allowEmptyArchive: true
-                                        load "${env.WORKSPACE}/ci/jenkins/step/cleanupSingleDev.groovy"
-                                        boolean isNightlyTest = isTimeTriggeredBuild()
-                                        if (isNightlyTest) {
-                                            load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
-                                        }
+                                        load "${env.WORKSPACE}/ci/jenkins/step/cleanupShardsDev.groovy"
                                     }
                                 }
                             }
