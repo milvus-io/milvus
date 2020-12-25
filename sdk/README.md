@@ -20,7 +20,7 @@ You must build the C++ SDK before using it:
 
 ### Try C++ example
 
-You must have a running Milvus server to try the C++ example. Refer to [Milvus Documentation](https://milvus.io/docs/guides/get_started/install_milvus/install_milvus.md) to learn how to install and run a Milvus server.
+You must have a running Milvus server to try the C++ example. Refer to [Milvus Documentation](https://milvus.io/docs/install_milvus.md) to learn how to install and run a Milvus server.
 
 Run C++ example:
 
