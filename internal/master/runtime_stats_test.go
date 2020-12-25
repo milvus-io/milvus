@@ -41,3 +41,33 @@ func TestRuntimeStats_UpdateFieldStats(t *testing.T) {
 		assert.EqualValues(t, 1, found)
 	}
 }
+
+func TestRuntimeStats_GetTotalNumOfRelatedSegments(t *testing.T) {
+	runtimeStats := NewRuntimeStats()
+	runtimeStats.collStats = make(map[UniqueID]*CollRuntimeStats)
+
+	runtimeStats.collStats[1] = &CollRuntimeStats{
+		fieldIndexStats: map[UniqueID][]*FieldIndexRuntimeStats{
+			100: {
+				{1, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}}, 10},
+				{3, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}}, 20},
+				{2, []*commonpb.KeyValuePair{{Key: "k2", Value: "v2"}}, 20},
+			},
+			200: {
+				{1, []*commonpb.KeyValuePair{}, 20},
+			},
+		},
+	}
+
+	runtimeStats.collStats[2] = &CollRuntimeStats{
+		fieldIndexStats: map[UniqueID][]*FieldIndexRuntimeStats{
+			100: {
+				{1, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}}, 10},
+			},
+		},
+	}
+	assert.EqualValues(t, 30, runtimeStats.GetTotalNumOfRelatedSegments(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}}))
+	assert.EqualValues(t, 20, runtimeStats.GetTotalNumOfRelatedSegments(1, 100, []*commonpb.KeyValuePair{{Key: "k2", Value: "v2"}}))
+	assert.EqualValues(t, 20, runtimeStats.GetTotalNumOfRelatedSegments(1, 200, []*commonpb.KeyValuePair{}))
+	assert.EqualValues(t, 10, runtimeStats.GetTotalNumOfRelatedSegments(2, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}}))
+}
