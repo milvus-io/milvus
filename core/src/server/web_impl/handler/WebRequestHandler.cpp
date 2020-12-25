@@ -1656,6 +1656,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     // construct chunk data by json object
+    InsertParam insert_param;
     ChunkDataMap chunk_data;
     int64_t row_num = entities_json.size();
     int64_t offset = 0;
@@ -1665,9 +1666,11 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
             if (field_name == NAME_ID) {
                 // special handle id field
                 CopyRowStructuredData<int64_t>(entity.value(), engine::FIELD_UID, offset, row_num, chunk_data);
+                insert_param.fields_type_.insert(std::make_pair(engine::FIELD_UID, engine::DataType::INT64));
                 continue;
             }
 
+            insert_param.fields_type_.insert(std::make_pair(field_name, field_types.at(field_name)));
             switch (field_types.at(field_name)) {
                 case engine::DataType::INT32: {
                     CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
@@ -1698,7 +1701,6 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     // conver to InsertParam, no memory copy, just record the data address and pass to InsertReq
-    InsertParam insert_param;
     ConvertToParam(chunk_data, row_num, insert_param);
 
     // do insert
