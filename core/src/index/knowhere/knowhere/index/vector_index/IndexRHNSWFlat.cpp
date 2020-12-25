@@ -46,16 +46,12 @@ IndexRHNSWFlat::Serialize(const Config& config) {
             KNOWHERE_THROW_MSG("index is not a faiss::IndexRHNSWFlat");
         }
 
-        auto write_meta = [&](const std::string& key, const int64_t& value) {
-            auto space = reinterpret_cast<uint8_t*>(malloc(sizeof(int64_t)));
-            memcpy(space, &value, sizeof(int64_t));
-            std::shared_ptr<uint8_t[]> space_sp(space, std::default_delete<uint8_t[]>());
-            res_set.Append(key, space_sp, sizeof(int64_t));
-        };
+        auto meta_space = reinterpret_cast<uint8_t*>(malloc(sizeof(int64_t) * 3));
+        int64_t meta_info[3] = {real_idx->storage->metric_type, real_idx->storage->d, real_idx->storage->ntotal};
+        memcpy(meta_space, meta_info, sizeof(int64_t) * 3);
+        std::shared_ptr<uint8_t[]> space_sp(meta_space, std::default_delete<uint8_t[]>());
+        res_set.Append("META", space_sp, sizeof(int64_t) * 3);
 
-        write_meta("metric_type", (int64_t)(real_idx->storage->metric_type));
-        write_meta("dimension", (int64_t)(real_idx->storage->d));
-        write_meta("ntotal", (int64_t)(real_idx->storage->ntotal));
         if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
             Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
         }
@@ -75,11 +71,10 @@ IndexRHNSWFlat::Load(const BinarySet& index_binary) {
             auto meta_data = index_binary.GetByName(key);
             memcpy(&value, meta_data->data.get(), meta_data->size);
         };
-        int64_t metric_type, dim, ntotal;
-        read_meta("metric_type", metric_type);
-        read_meta("dimension", dim);
-        read_meta("ntotal", ntotal);
-        switch ((faiss::MetricType)metric_type) {
+        int64_t meta_info[3];  // = {metric_type, dim, ntotal}
+        auto meta_data = index_binary.GetByName("META");
+        memcpy(meta_info, meta_data->data.get(), meta_data->size);
+        switch ((faiss::MetricType)meta_info[0]) {
             case faiss::MetricType::METRIC_L2:
                 real_idx->storage = new faiss::IndexFlatL2();
                 break;
@@ -90,11 +85,11 @@ IndexRHNSWFlat::Load(const BinarySet& index_binary) {
                 real_idx->storage = new faiss::IndexFlat();
                 break;
         }
-        real_idx->storage->ntotal = ntotal;
-        real_idx->storage->d = (int)dim;
-        real_idx->storage->metric_type = (faiss::MetricType)metric_type;
+        real_idx->storage->ntotal = meta_info[2];
+        real_idx->storage->d = (int)meta_info[1];
+        real_idx->storage->metric_type = (faiss::MetricType)meta_info[0];
         auto binary_data = index_binary.GetByName(RAW_DATA);
-        real_idx->storage->add(ntotal, reinterpret_cast<const float*>(binary_data->data.get()));
+        real_idx->storage->add(meta_info[2], reinterpret_cast<const float*>(binary_data->data.get()));
         real_idx->init_hnsw();
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
