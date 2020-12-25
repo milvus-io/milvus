@@ -46,7 +46,7 @@ IndexRHNSWFlat::Serialize(const Config& config) {
             KNOWHERE_THROW_MSG("index is not a faiss::IndexRHNSWFlat");
         }
 
-        auto meta_space = reinterpret_cast<uint8_t*>(malloc(sizeof(int64_t) * 3));
+        auto meta_space = new uint8_t[(sizeof(int64_t) * 3)];
         int64_t meta_info[3] = {real_idx->storage->metric_type, real_idx->storage->d, real_idx->storage->ntotal};
         memcpy(meta_space, meta_info, sizeof(int64_t) * 3);
         std::shared_ptr<uint8_t[]> space_sp(meta_space, std::default_delete<uint8_t[]>());
