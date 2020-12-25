@@ -78,6 +78,27 @@ InsertReq::Create(const ContextPtr& context, const std::string& collection_name,
 }
 
 Status
+InsertReq::ValidateFieldType(const InsertParam& insert_param) {
+    engine::snapshot::CollectionPtr collection;
+    engine::snapshot::FieldElementMappings field_mappings;
+    STATUS_CHECK(DBWrapper::DB()->GetCollectionInfo(collection_name_, collection, field_mappings));
+
+    for (auto& field_kv : field_mappings) {
+        auto field = field_kv.first;
+        auto field_name = field->GetName();
+        auto field_type = field->GetFtype();
+        auto iter = insert_param.fields_type_.find(field_name);
+        if (iter != insert_param.fields_type_.end()) {
+            if (iter->second != field_type) {
+                return Status{SERVER_INVALID_ARGUMENT, "Field type is incorrect"};
+            }
+        }
+    }
+
+    return Status::OK();
+}
+
+Status
 InsertReq::OnExecute() {
     try {
         std::string hdr = "InsertReq(collection=" + collection_name_ + ", partition=" + partition_name_ + ")";
@@ -102,6 +123,12 @@ InsertReq::OnExecute() {
         auto status = ValidateInsertDataSize(insert_param_);
         if (!status.ok()) {
             LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid vector data: %s", "insert", 0, status.message().c_str());
+            return status;
+        }
+
+        status = ValidateFieldType(insert_param_);
+        if (!status.ok()) {
+            LOG_SERVER_ERROR_ << LogOut("[%s][%d] Invalid field type: %s", "insert", 0, status.message().c_str());
             return status;
         }
 
