@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -444,6 +445,9 @@ func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.Assign
 }
 
 func (s *Master) CreateIndex(ctx context.Context, req *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+	}
 	task := &createIndexTask{
 		baseTask: baseTask{
 			sch: s.scheduler,
@@ -458,30 +462,78 @@ func (s *Master) CreateIndex(ctx context.Context, req *internalpb.CreateIndexReq
 
 	err := s.scheduler.Enqueue(task)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Enqueue failed: " + err.Error(),
-		}, nil
+		ret.Reason = "Enqueue failed: " + err.Error()
+		return ret, nil
 	}
 
 	err = task.WaitToFinish(ctx)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Create Index error: " + err.Error(),
-		}, nil
+		ret.Reason = "Create Index error: " + err.Error()
+		return ret, nil
 	}
 
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-		Reason:    "",
-	}, nil
+	ret.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return ret, nil
 }
 
-func (s *Master) DescribeIndex(context.Context, *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
-	return nil, nil
+func (s *Master) DescribeIndex(ctx context.Context, req *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
+	resp := &servicepb.DescribeIndexResponse{
+		Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		CollectionName: req.CollectionName,
+		FieldName:      req.FieldName,
+	}
+	task := &describeIndexTask{
+		baseTask: baseTask{
+			sch: s.scheduler,
+			mt:  s.metaTable,
+			cv:  make(chan error),
+		},
+		req:  req,
+		resp: resp,
+	}
+
+	if err := s.scheduler.Enqueue(task); err != nil {
+		resp.Status.Reason = fmt.Sprintf("Enqueue failed: %s", err.Error())
+		return resp, nil
+	}
+
+	if err := task.WaitToFinish(ctx); err != nil {
+		resp.Status.Reason = fmt.Sprintf("Describe Index failed: %s", err.Error())
+		return resp, nil
+	}
+
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return resp, nil
+
 }
 
-func (s *Master) DescribeIndexProgress(context.Context, *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
-	return nil, nil
+func (s *Master) DescribeIndexProgress(ctx context.Context, req *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
+	resp := &servicepb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+		Value: false,
+	}
+	task := &describeIndexProgressTask{
+		baseTask: baseTask{
+			sch: s.scheduler,
+			mt:  s.metaTable,
+			cv:  make(chan error),
+		},
+		req:  req,
+		resp: resp,
+	}
+
+	if err := s.scheduler.Enqueue(task); err != nil {
+		resp.Status.Reason = "Enqueue failed :" + err.Error()
+		return resp, nil
+	}
+
+	if err := task.WaitToFinish(ctx); err != nil {
+		resp.Status.Reason = "Describe index progress failed:" + err.Error()
+		return resp, nil
+	}
+
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return resp, nil
 }

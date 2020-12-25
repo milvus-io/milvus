@@ -8,7 +8,7 @@ import (
 
 type StatsProcessor struct {
 	metaTable    *metaTable
-	runTimeStats *RuntimeStats
+	runtimeStats *RuntimeStats
 
 	segmentThreshold       float64
 	segmentThresholdFactor float64
@@ -61,13 +61,13 @@ func (processor *StatsProcessor) processFieldStat(peerID int64, fieldStats *inte
 	fieldID := fieldStats.FieldID
 
 	for _, stat := range fieldStats.IndexStats {
-		fieldStats := &FieldRuntimeStats{
+		fieldStats := &FieldIndexRuntimeStats{
 			peerID:               peerID,
 			indexParams:          stat.IndexParams,
 			numOfRelatedSegments: stat.NumRelatedSegments,
 		}
 
-		if err := processor.runTimeStats.UpdateFieldStat(collID, fieldID, fieldStats); err != nil {
+		if err := processor.runtimeStats.UpdateFieldStat(collID, fieldID, fieldStats); err != nil {
 			return err
 		}
 	}
@@ -77,7 +77,7 @@ func (processor *StatsProcessor) processFieldStat(peerID int64, fieldStats *inte
 func NewStatsProcessor(mt *metaTable, runTimeStats *RuntimeStats, globalTSOAllocator func() (Timestamp, error)) *StatsProcessor {
 	return &StatsProcessor{
 		metaTable:              mt,
-		runTimeStats:           runTimeStats,
+		runtimeStats:           runTimeStats,
 		segmentThreshold:       Params.SegmentSize * 1024 * 1024,
 		segmentThresholdFactor: Params.SegmentSizeFactor,
 		globalTSOAllocator:     globalTSOAllocator,

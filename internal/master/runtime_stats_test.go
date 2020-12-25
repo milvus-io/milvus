@@ -22,13 +22,13 @@ func TestRuntimeStats_UpdateFieldStats(t *testing.T) {
 		{1, 1, 2, 100},
 	}
 	for _, testcase := range cases {
-		err := runtimeStats.UpdateFieldStat(testcase.collID, testcase.fieldID, &FieldRuntimeStats{
+		err := runtimeStats.UpdateFieldStat(testcase.collID, testcase.fieldID, &FieldIndexRuntimeStats{
 			peerID:               testcase.peerID,
 			indexParams:          []*commonpb.KeyValuePair{},
 			numOfRelatedSegments: testcase.nums,
 		})
 		assert.Nil(t, err)
-		statsArray := runtimeStats.collStats[testcase.collID].fieldStats[testcase.fieldID]
+		statsArray := runtimeStats.collStats[testcase.collID].fieldIndexStats[testcase.fieldID]
 		assert.NotEmpty(t, statsArray)
 
 		found := 0
