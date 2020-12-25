@@ -66,6 +66,8 @@ type Master struct {
 	idAllocator *GlobalIDAllocator
 	//tso allocator
 	tsoAllocator *GlobalTSOAllocator
+
+	runtimeStats *RuntimeStats
 }
 
 func newKVBase(kvRoot string, etcdAddr []string) *etcdkv.EtcdKV {
@@ -203,8 +205,8 @@ func CreateServer(ctx context.Context) (*Master, error) {
 		return nil, err
 	}
 
-	runtimeStats := NewRuntimeStats()
-	m.statProcessor = NewStatsProcessor(metakv, runtimeStats,
+	m.runtimeStats = NewRuntimeStats()
+	m.statProcessor = NewStatsProcessor(metakv, m.runtimeStats,
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },
 	)
 

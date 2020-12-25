@@ -520,8 +520,9 @@ func (s *Master) DescribeIndexProgress(ctx context.Context, req *internalpb.Desc
 			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
-		req:  req,
-		resp: resp,
+		req:          req,
+		resp:         resp,
+		runtimeStats: s.runtimeStats,
 	}
 
 	if err := s.scheduler.Enqueue(task); err != nil {
