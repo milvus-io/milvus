@@ -62,7 +62,7 @@ RecordDataAddr(const std::string& field_name, int32_t num, const T* data, Insert
 void
 RecordVectorDataAddr(const std::string& field_name,
                      const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
-                     InsertParam& insert_param) {
+                     InsertParam& insert_param, bool& is_binary) {
     // calculate data size
     int64_t float_data_size = 0, binary_data_size = 0;
     for (auto& record : grpc_records) {
@@ -71,10 +71,12 @@ RecordVectorDataAddr(const std::string& field_name,
     }
 
     if (float_data_size > 0) {
+        is_binary = false;
         for (auto& record : grpc_records) {
             RecordDataAddr<float>(field_name, record.float_data_size(), record.float_data().data(), insert_param);
         }
     } else if (binary_data_size > 0) {
+        is_binary = true;
         for (auto& record : grpc_records) {
             RecordDataAddr<char>(field_name, record.binary_data().size(), record.binary_data().data(), insert_param);
         }
@@ -1113,28 +1115,36 @@ GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grp
             }
             RecordDataAddr<int32_t>(field_name, grpc_int32_size, field.attr_record().int32_value().data(),
                                     insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::INT32));
         } else if (grpc_int64_size > 0) {
             if (!valid_row_count(row_num, grpc_int64_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<int64_t>(field_name, grpc_int64_size, field.attr_record().int64_value().data(),
                                     insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::INT64));
         } else if (grpc_float_size > 0) {
             if (!valid_row_count(row_num, grpc_float_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<float>(field_name, grpc_float_size, field.attr_record().float_value().data(), insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::FLOAT));
         } else if (grpc_double_size > 0) {
             if (!valid_row_count(row_num, grpc_double_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<double>(field_name, grpc_double_size, field.attr_record().double_value().data(),
                                    insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::DOUBLE));
         } else {
             if (!valid_row_count(row_num, field.vector_record().records_size())) {
                 return ::grpc::Status::OK;
             }
-            RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param);
+
+            bool is_binary = false;
+            RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param, is_binary);
+            engine::DataType dt = is_binary ? engine::DataType::VECTOR_BINARY : engine::DataType::VECTOR_FLOAT;
+            insert_param.fields_type_.insert(std::make_pair(field_name, dt));
         }
     }
     insert_param.row_count_ = row_num;
@@ -1143,6 +1153,7 @@ GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grp
     if (request->entity_id_array_size() > 0) {
         RecordDataAddr<int64_t>(engine::FIELD_UID, request->entity_id_array_size(), request->entity_id_array().data(),
                                 insert_param);
+        insert_param.fields_type_.insert(std::make_pair(engine::FIELD_UID, engine::DataType::INT64));
     }
 
     std::string collection_name = request->collection_name();
