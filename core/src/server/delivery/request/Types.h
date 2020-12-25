@@ -89,10 +89,12 @@ struct InsertParam {
     using DataSegment = std::pair<const char*, int64_t>;
     using DataSegments = std::vector<DataSegment>;
     using FieldDataMap = std::unordered_map<std::string, DataSegments>;
+    using FieldTypeMap = std::unordered_map<std::string, engine::DataType>;
 
     // for the purpose to avoid data copy
     // the fields_data_ only pass data address, makesure all data address are keep alive
     FieldDataMap fields_data_;
+    FieldTypeMap fields_type_;
     int64_t row_count_ = 0;
 
     // to return entities id
