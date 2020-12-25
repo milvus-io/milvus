@@ -9,6 +9,9 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <map>
+#include <exception>
+
 #include "pb/index_cgo_msg.pb.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -24,11 +27,14 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
 
     parse();
 
-    auto index_type = index_config_["index_type"].get<std::string>();
-    auto index_mode = index_config_["index_mode"].get<std::string>();
-    auto mode = index_mode == "CPU" ? knowhere::IndexMode::MODE_CPU : knowhere::IndexMode::MODE_GPU;
+    std::map<std::string, knowhere::IndexMode> mode_map = {{"CPU", knowhere::IndexMode::MODE_CPU},
+                                                           {"GPU", knowhere::IndexMode::MODE_GPU}};
+    auto type = get_config_by_name<std::string>("index_type");
+    auto mode = get_config_by_name<std::string>("index_mode");
+    auto index_type = type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+    auto index_mode = mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
 
-    index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, mode);
+    index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, index_mode);
 }
 
 void
@@ -36,38 +42,90 @@ IndexWrapper::parse() {
     namespace indexcgo = milvus::proto::indexcgo;
     bool serialized_success;
 
-    indexcgo::BinarySet type_config;
+    indexcgo::TypeParams type_config;
     serialized_success = type_config.ParseFromString(type_params_);
     Assert(serialized_success);
 
-    indexcgo::BinarySet index_config;
+    indexcgo::IndexParams index_config;
     serialized_success = index_config.ParseFromString(index_params_);
     Assert(serialized_success);
 
-    for (auto i = 0; i < type_config.datas_size(); ++i) {
-        auto binary = type_config.datas(i);
-        type_config_[binary.key()] = binary.value();
+    for (auto i = 0; i < type_config.params_size(); ++i) {
+        auto type_param = type_config.params(i);
+        auto key = type_param.key();
+        auto value = type_param.value();
+        type_config_[key] = value;
+        config_[key] = value;
     }
 
-    for (auto i = 0; i < index_config.datas_size(); ++i) {
-        auto binary = index_config.datas(i);
-        index_config_[binary.key()] = binary.value();
+    for (auto i = 0; i < index_config.params_size(); ++i) {
+        auto index_param = index_config.params(i);
+        auto key = index_param.key();
+        auto value = index_param.value();
+        index_config_[key] = value;
+        config_[key] = value;
     }
 
-    // TODO: parse from type_params & index_params
-    auto dim = 128;
-    config_ = knowhere::Config{
-        {knowhere::meta::DIM, dim},         {knowhere::IndexParams::nlist, 100},
-        {knowhere::IndexParams::nprobe, 4}, {knowhere::IndexParams::m, 4},
-        {knowhere::IndexParams::nbits, 8},  {knowhere::Metric::TYPE, knowhere::Metric::L2},
-        {knowhere::meta::DEVICEID, 0},
-    };
+    if (!config_.contains(milvus::knowhere::meta::DIM)) {
+        // should raise exception here?
+        throw "dim must be specific in type params or index params!";
+    } else {
+        auto dim = config_[milvus::knowhere::meta::DIM].get<std::string>();
+        config_[milvus::knowhere::meta::DIM] = std::stoi(dim);
+    }
+
+    if (!config_.contains(milvus::knowhere::meta::TOPK)) {
+    } else {
+        auto topk = config_[milvus::knowhere::meta::TOPK].get<std::string>();
+        config_[milvus::knowhere::meta::TOPK] = std::stoi(topk);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::nlist)) {
+    } else {
+        auto nlist = config_[milvus::knowhere::IndexParams::nlist].get<std::string>();
+        config_[milvus::knowhere::IndexParams::nlist] = std::stoi(nlist);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::nprobe)) {
+    } else {
+        auto nprobe = config_[milvus::knowhere::IndexParams::nprobe].get<std::string>();
+        config_[milvus::knowhere::IndexParams::nprobe] = std::stoi(nprobe);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::nbits)) {
+    } else {
+        auto nbits = config_[milvus::knowhere::IndexParams::nbits].get<std::string>();
+        config_[milvus::knowhere::IndexParams::nbits] = std::stoi(nbits);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::m)) {
+    } else {
+        auto m = config_[milvus::knowhere::IndexParams::m].get<std::string>();
+        config_[milvus::knowhere::IndexParams::m] = std::stoi(m);
+    }
+
+    if (!config_.contains(milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE] = 4;
+    } else {
+        auto slice_size = config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<std::string>();
+        config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE] = std::stoi(slice_size);
+    }
+}
+
+template <typename T>
+std::optional<T>
+IndexWrapper::get_config_by_name(std::string name) {
+    if (config_.contains(name)) {
+        return {config_[name].get<T>()};
+    }
+    return std::nullopt;
 }
 
 int64_t
 IndexWrapper::dim() {
-    // TODO: get from config
-    return 128;
+    auto dimension = get_config_by_name<int64_t>(milvus::knowhere::meta::DIM);
+    Assert(dimension.has_value());
+    return (dimension.value());
 }
 
 void
@@ -88,24 +146,23 @@ IndexWrapper::Serialize() {
     for (auto [key, value] : binarySet.binary_map_) {
         auto binary = ret.add_datas();
         binary->set_key(key);
-        binary->set_value(reinterpret_cast<char*>(value->data.get()));
+        binary->set_value(value->data.get(), value->size);
     }
 
     std::string serialized_data;
     auto ok = ret.SerializeToString(&serialized_data);
     Assert(ok);
 
-    auto data = new char[serialized_data.length() + 1];
+    auto data = new char[serialized_data.length()];
     memcpy(data, serialized_data.c_str(), serialized_data.length());
-    data[serialized_data.length()] = 0;
 
-    return {data, static_cast<int32_t>(serialized_data.length() + 1)};
+    return {data, static_cast<int32_t>(serialized_data.length())};
 }
 
 void
-IndexWrapper::Load(const char* serialized_sliced_blob_buffer) {
+IndexWrapper::Load(const char* serialized_sliced_blob_buffer, int32_t size) {
     namespace indexcgo = milvus::proto::indexcgo;
-    auto data = std::string(serialized_sliced_blob_buffer);
+    auto data = std::string(serialized_sliced_blob_buffer, size);
     indexcgo::BinarySet blob_buffer;
 
     auto ok = blob_buffer.ParseFromString(data);

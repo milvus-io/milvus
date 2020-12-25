@@ -198,13 +198,7 @@ func (it *IndexBuildTask) Execute() error {
 		}, nil
 	}
 	getStorageBlobs := func(blobs []*Blob) []*storage.Blob {
-		// when storage.Blob.Key & storage.Blob.Value is visible,
-		// use `return blobs`
-		ret := make([]*storage.Blob, 0)
-		for _, blob := range blobs {
-			ret = append(ret, storage.NewBlob(blob.Key, blob.Value))
-		}
-		return ret
+		return blobs
 	}
 
 	toLoadDataPaths := it.indexMeta.Req.GetDataPaths()
@@ -259,7 +253,7 @@ func (it *IndexBuildTask) Execute() error {
 
 		it.savePaths = make([]string, 0)
 		for _, blob := range serializedIndexBlobs {
-			key, value := blob.GetKey(), blob.GetValue()
+			key, value := blob.Key, blob.Value
 			savePath := getSavePathByKey(key)
 			err := saveBlob(savePath, value)
 			if err != nil {

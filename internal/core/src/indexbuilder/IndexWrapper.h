@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
+#include <optional>
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -34,11 +35,15 @@ class IndexWrapper {
     Serialize();
 
     void
-    Load(const char* serialized_sliced_blob_buffer);
+    Load(const char* serialized_sliced_blob_buffer, int32_t size);
 
  private:
     void
     parse();
+
+    template <typename T>
+    std::optional<T>
+    get_config_by_name(std::string name);
 
  private:
     knowhere::VecIndexPtr index_ = nullptr;

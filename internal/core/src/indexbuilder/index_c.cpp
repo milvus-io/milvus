@@ -18,7 +18,7 @@ CIndex
 CreateIndex(const char* serialized_type_params, const char* serialized_index_params) {
     auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(serialized_type_params, serialized_index_params);
 
-    return (void*)(index.release());
+    return index.release();
 }
 
 void
@@ -45,7 +45,7 @@ SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size) {
 }
 
 void
-LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer) {
+LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-    cIndex->Load(serialized_sliced_blob_buffer);
+    cIndex->Load(serialized_sliced_blob_buffer, size);
 }
