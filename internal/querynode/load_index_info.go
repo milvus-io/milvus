@@ -18,7 +18,7 @@ type LoadIndexInfo struct {
 	cLoadIndexInfo C.CLoadIndexInfo
 }
 
-func NewLoadIndexInfo() (*LoadIndexInfo, error) {
+func newLoadIndexInfo() (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
 	errorCode := status.error_code
@@ -31,7 +31,11 @@ func NewLoadIndexInfo() (*LoadIndexInfo, error) {
 	return &LoadIndexInfo{cLoadIndexInfo: cLoadIndexInfo}, nil
 }
 
-func (li *LoadIndexInfo) AppendIndexParam(indexKey string, indexValue string) error {
+func deleteLoadIndexInfo(info *LoadIndexInfo) {
+	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
+}
+
+func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) error {
 	cIndexKey := C.CString(indexKey)
 	cIndexValue := C.CString(indexValue)
 	status := C.AppendIndexParam(li.cLoadIndexInfo, cIndexKey, cIndexValue)
@@ -45,7 +49,7 @@ func (li *LoadIndexInfo) AppendIndexParam(indexKey string, indexValue string) er
 	return nil
 }
 
-func (li *LoadIndexInfo) AppendFieldInfo(fieldName string, fieldID int64) error {
+func (li *LoadIndexInfo) appendFieldInfo(fieldName string, fieldID int64) error {
 	cFieldName := C.CString(fieldName)
 	cFieldID := C.long(fieldID)
 	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldName, cFieldID)
@@ -59,7 +63,7 @@ func (li *LoadIndexInfo) AppendFieldInfo(fieldName string, fieldID int64) error 
 	return nil
 }
 
-func (li *LoadIndexInfo) AppendIndex(bytesIndex [][]byte, indexKeys []string) error {
+func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) error {
 	var cBinarySet C.CBinarySet
 	status := C.NewBinarySet(&cBinarySet)
 

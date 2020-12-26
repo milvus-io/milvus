@@ -685,6 +685,49 @@ TEST(CApiTest, Reduce) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, LoadIndexInfo) {
+    // generator index
+    constexpr auto DIM = 16;
+    constexpr auto K = 10;
+
+    auto N = 1024 * 10;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
+    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
+                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::IndexParams::nlist, 100},
+                                         {milvus::knowhere::IndexParams::nprobe, 4},
+                                         {milvus::knowhere::IndexParams::m, 4},
+                                         {milvus::knowhere::IndexParams::nbits, 8},
+                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                         {milvus::knowhere::meta::DEVICEID, 0}};
+
+    auto database = milvus::knowhere::GenDataset(N, DIM, raw_data.data());
+    indexing->Train(database, conf);
+    indexing->AddWithoutIds(database, conf);
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(indexing->Dim(), DIM);
+    auto binary_set = indexing->Serialize(conf);
+    CBinarySet c_binary_set = (CBinarySet)&binary_set;
+
+    void* c_load_index_info = nullptr;
+    auto status = NewLoadIndexInfo(&c_load_index_info);
+    assert(status.error_code == Success);
+    std::string index_param_key1 = "index_type";
+    std::string index_param_value1 = "IVF_PQ";
+    status = AppendIndexParam(c_load_index_info, index_param_key1.data(), index_param_value1.data());
+    std::string index_param_key2 = "index_mode";
+    std::string index_param_value2 = "cpu";
+    status = AppendIndexParam(c_load_index_info, index_param_key2.data(), index_param_value2.data());
+    assert(status.error_code == Success);
+    std::string field_name = "field0";
+    status = AppendFieldInfo(c_load_index_info, field_name.data(), 0);
+    assert(status.error_code == Success);
+    status = AppendIndex(c_load_index_info, c_binary_set);
+    assert(status.error_code == Success);
+    DeleteLoadIndexInfo(c_load_index_info);
+}
+
 TEST(CApiTest, LoadIndex_Search) {
     // generator index
     constexpr auto DIM = 16;

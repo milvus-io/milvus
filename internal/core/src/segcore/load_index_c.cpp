@@ -32,6 +32,12 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
     }
 }
 
+void
+DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
+    auto info = (LoadIndexInfo*)c_load_index_info;
+    delete info;
+}
+
 CStatus
 AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* c_index_key, const char* c_index_value) {
     try {

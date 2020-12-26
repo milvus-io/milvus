@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"sort"
@@ -11,7 +12,25 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 )
+
+func TestLoadIndexClient_LoadIndex(t *testing.T) {
+	pulsarURL := Params.PulsarAddress
+	loadIndexChannels := Params.LoadIndexChannelNames
+	loadIndexClient := client.NewLoadIndexClient(context.Background(), pulsarURL, loadIndexChannels)
+
+	loadIndexPath := "collection0-segment0-field0"
+	loadIndexPaths := make([]string, 0)
+	loadIndexPaths = append(loadIndexPaths, loadIndexPath)
+
+	indexParams := make(map[string]string)
+	indexParams["index_type"] = "IVF_PQ"
+	indexParams["index_mode"] = "cpu"
+
+	loadIndexClient.LoadIndex(loadIndexPaths, 0, 0, "field0", indexParams)
+	loadIndexClient.Close()
+}
 
 func TestLoadIndexService_PulsarAddress(t *testing.T) {
 	node := newQueryNode()
@@ -125,24 +144,38 @@ func TestLoadIndexService_PulsarAddress(t *testing.T) {
 	statsMs.CreatePulsarConsumers([]string{Params.StatsChannelName}, Params.MsgChannelSubName, msgstream.NewUnmarshalDispatcher(), Params.StatsReceiveBufSize)
 	statsMs.Start()
 
-	receiveMsg := msgstream.MsgStream(statsMs).Consume()
-	assert.NotNil(t, receiveMsg)
-	assert.NotEqual(t, len(receiveMsg.Msgs), 0)
-	statsMsg, ok := receiveMsg.Msgs[0].(*msgstream.QueryNodeStatsMsg)
-	assert.Equal(t, ok, true)
-	assert.Equal(t, len(statsMsg.FieldStats), 1)
-	fieldStats0 := statsMsg.FieldStats[0]
-	assert.Equal(t, fieldStats0.FieldID, fieldID)
-	assert.Equal(t, fieldStats0.CollectionID, collectionID)
-	assert.Equal(t, len(fieldStats0.IndexStats), 1)
-	indexStats0 := fieldStats0.IndexStats[0]
+	findFiledStats := false
+	for {
+		receiveMsg := msgstream.MsgStream(statsMs).Consume()
+		assert.NotNil(t, receiveMsg)
+		assert.NotEqual(t, len(receiveMsg.Msgs), 0)
 
-	params := indexStats0.IndexParams
-	// sort index params by key
-	sort.Slice(indexParams, func(i, j int) bool { return indexParams[i].Key < indexParams[j].Key })
-	indexEqual := node.loadIndexService.indexParamsEqual(params, indexParams)
-	assert.Equal(t, indexEqual, true)
+		for _, msg := range receiveMsg.Msgs {
+			statsMsg, ok := msg.(*msgstream.QueryNodeStatsMsg)
+			if statsMsg.FieldStats == nil || len(statsMsg.FieldStats) == 0 {
+				continue
+			}
+			findFiledStats = true
+			assert.Equal(t, ok, true)
+			assert.Equal(t, len(statsMsg.FieldStats), 1)
+			fieldStats0 := statsMsg.FieldStats[0]
+			assert.Equal(t, fieldStats0.FieldID, fieldID)
+			assert.Equal(t, fieldStats0.CollectionID, collectionID)
+			assert.Equal(t, len(fieldStats0.IndexStats), 1)
+			indexStats0 := fieldStats0.IndexStats[0]
+			params := indexStats0.IndexParams
+			// sort index params by key
+			sort.Slice(indexParams, func(i, j int) bool { return indexParams[i].Key < indexParams[j].Key })
+			indexEqual := node.loadIndexService.indexParamsEqual(params, indexParams)
+			assert.Equal(t, indexEqual, true)
+		}
 
+		if findFiledStats {
+			break
+		}
+	}
+
+	defer assert.Equal(t, findFiledStats, true)
 	<-node.queryNodeLoopCtx.Done()
 	node.Close()
 }
