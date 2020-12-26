@@ -25,7 +25,7 @@
 
 namespace milvus::engine::snapshot {
 
-static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 60 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 100 * 1000;
 static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
@@ -246,11 +246,18 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 
 void
 Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
+    std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
         // TODO: Should be monitored
+        auto exe_time =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+                .count();
+        if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+            LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " ms";
+        }
         return;
     }
     auto ids = op->GetIDs();
@@ -286,7 +293,7 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     }
 
     invalid_ssid_ = std::move(this_invalid_cids);
-    auto op2 = std::make_shared<GetCollectionIDsOperation>();
+    auto op2 = std::make_shared<GetCollectionIDsOperation>(false);
     status = (*op2)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetCollectionIDsOperation failed: " << status.message();
@@ -300,6 +307,24 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
                             std::inserter(stale_ids, stale_ids.begin()));
+
+        /* std::stringstream strs; */
+
+        /* strs << "("; */
+        /* for (auto id : alive_cids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") - ("; */
+        /* for (auto id : aids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") = ("; */
+        /* for (auto id : stale_ids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ")"; */
+
+        /* LOG_SERVER_DEBUG_ << strs.str(); */
     }
 
     for (auto& cid : stale_ids) {
@@ -318,6 +343,12 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
             ids.erase(ss->GetID());
         }
         holders_.erase(cid);
+    }
+    auto exe_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+            .count();
+    if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " us";
     }
 }
 

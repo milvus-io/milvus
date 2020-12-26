@@ -126,24 +126,36 @@ SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
 Status
 SnapshotHolder::ApplyEject() {
     Status status;
-    Snapshot::Ptr oldest_ss;
+    /* Snapshot::Ptr oldest_ss; */
+    std::vector<Snapshot::Ptr> stale_sss;
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (active_.size() == 0) {
             return Status(SS_EMPTY_HOLDER,
                           "SnapshotHolder::ApplyEject: Empty holder found for " + std::to_string(collection_id_));
         }
-        if (!policy_->ShouldEject(active_, false)) {
+        IDS_TYPE to_eject;
+        if (policy_->ShouldEject(active_, to_eject, false) == 0) {
             return status;
         }
-        auto oldest_it = active_.find(min_id_);
-        oldest_ss = oldest_it->second;
-        active_.erase(oldest_it);
+        /* if (!policy_->ShouldEject(active_, false)) { */
+        /*     return status; */
+        /* } */
+        /* auto oldest_it = active_.find(min_id_); */
+        /* oldest_ss = oldest_it->second; */
+        /* active_.erase(oldest_it); */
+        for (auto& id : to_eject) {
+            stale_sss.push_back(active_[id]);
+            active_.erase(id);
+        }
         if (active_.size() > 0) {
             min_id_ = active_.begin()->first;
+            max_id_ = active_.rbegin()->first;
         }
     }
-    ReadyForRelease(oldest_ss);
+    for (auto& ss : stale_sss) {
+        ReadyForRelease(ss);
+    }
     return status;
 }
 
@@ -165,7 +177,7 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             return Status(SS_DUPLICATED_ERROR, emsg.str());
         }
     }
-    Snapshot::Ptr oldest_ss;
+    std::vector<Snapshot::Ptr> stale_sss;
     {
         auto ss = std::make_shared<Snapshot>(store, id);
         if (!ss->IsValid()) {
@@ -191,20 +203,26 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             max_id_ = id;
         }
 
+        LOG_SERVER_DEBUG_ << "SSLoad CCID=" << id << " for CID=" << ss->GetCollectionId() << " CNAME=" << ss->GetName();
         active_[id] = ss;
-        /* if (active_.size() <= num_versions_) { */
-        /*     return status; */
-        /* } */
-        if (!policy_->ShouldEject(active_)) {
+        IDS_TYPE to_eject;
+        if (policy_->ShouldEject(active_, to_eject, true) == 0) {
             return status;
         }
-
-        auto oldest_it = active_.find(min_id_);
-        oldest_ss = oldest_it->second;
-        active_.erase(oldest_it);
-        min_id_ = active_.begin()->first;
+        for (auto& id : to_eject) {
+            stale_sss.push_back(active_[id]);
+            LOG_SERVER_DEBUG_ << "SSEject CCID=" << id << " for CID=" << active_[id]->GetCollectionId()
+                              << " CNAME=" << active_[id]->GetName();
+            active_.erase(id);
+        }
+        if (active_.size() > 0) {
+            min_id_ = active_.begin()->first;
+            max_id_ = active_.rbegin()->first;
+        }
     }
-    ReadyForRelease(oldest_ss);
+    for (auto& ss : stale_sss) {
+        ReadyForRelease(ss);
+    }
     return status;
 }
 
