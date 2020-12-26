@@ -25,7 +25,7 @@
 
 namespace milvus::engine::snapshot {
 
-static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 60 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 100 * 1000;
 static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
@@ -345,10 +345,10 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         holders_.erase(cid);
     }
     auto exe_time =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
             .count();
     if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
-        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " ms";
+        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " us";
     }
 }
 

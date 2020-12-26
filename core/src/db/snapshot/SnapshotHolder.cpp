@@ -206,7 +206,7 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
         LOG_SERVER_DEBUG_ << "SSLoad CCID=" << id << " for CID=" << ss->GetCollectionId() << " CNAME=" << ss->GetName();
         active_[id] = ss;
         IDS_TYPE to_eject;
-        if (policy_->ShouldEject(active_, to_eject, false) == 0) {
+        if (policy_->ShouldEject(active_, to_eject, true) == 0) {
             return status;
         }
         for (auto& id : to_eject) {
