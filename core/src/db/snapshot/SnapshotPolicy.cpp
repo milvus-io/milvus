@@ -56,7 +56,7 @@ SnapshotDurationPolicy::ShouldEject(const MapT& ids, IDS_TYPE& to_eject, bool al
     auto now_us = GetMicroSecTimeStamp();
     auto max_id = ids.rbegin()->first;
     for (auto& [id, ss] : ids) {
-        if ((now_us - ss->GetCollectionCommit()->GetCreatedTime() > us_) && (!alive || (alive && (id != max_id)))) {
+        if ((now_us - ss->GetCollectionCommit()->GetCreatedTime() > us_) && (!alive || id != max_id)) {
             to_eject.push_back(id);
         }
     }
