@@ -203,6 +203,7 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             max_id_ = id;
         }
 
+        LOG_SERVER_DEBUG_ << "SSLoad CCID=" << id << " for CID=" << ss->GetCollectionId() << " CNAME=" << ss->GetName();
         active_[id] = ss;
         IDS_TYPE to_eject;
         if (policy_->ShouldEject(active_, to_eject, false) == 0) {
@@ -210,6 +211,8 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
         }
         for (auto& id : to_eject) {
             stale_sss.push_back(active_[id]);
+            LOG_SERVER_DEBUG_ << "SSEject CCID=" << id << " for CID=" << active_[id]->GetCollectionId()
+                              << " CNAME=" << active_[id]->GetName();
             active_.erase(id);
         }
         if (active_.size() > 0) {
