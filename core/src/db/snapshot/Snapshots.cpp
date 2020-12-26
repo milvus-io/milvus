@@ -246,11 +246,18 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 
 void
 Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
+    std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
         // TODO: Should be monitored
+        auto exe_time =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+                .count();
+        if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+            LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " ms";
+        }
         return;
     }
     auto ids = op->GetIDs();
@@ -336,6 +343,12 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
             ids.erase(ss->GetID());
         }
         holders_.erase(cid);
+    }
+    auto exe_time =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+            .count();
+    if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " ms";
     }
 }
 
