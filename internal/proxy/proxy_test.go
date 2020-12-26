@@ -190,10 +190,6 @@ func createIndex(t *testing.T, collectionName, fieldName string) {
 		FieldName:      fieldName,
 		ExtraParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "nlist",
-				Value: "1024",
-			},
-			{
 				Key:   "metric_type",
 				Value: "L2",
 			},
@@ -478,21 +474,86 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 	dropCollection(t, collName)
 }
 
-// func TestProxy_CreateIndex(t *testing.T) {
-// 	var wg sync.WaitGroup
-// 	for i := 0; i < testNum; i++ {
-// 		i := i
-// 		collectionName := "Collection" + strconv.FormatInt(int64(i), 10)
-// 		fieldName := "Field" + strconv.FormatInt(int64(i), 10)
-// 		wg.Add(1)
-// 		go func(group *sync.WaitGroup) {
-// 			defer group.Done()
-// 			createIndex(t, collectionName, fieldName)
-// 			// dropIndex(t, collectionName, fieldName, indexName)
-// 		}(&wg)
-// 	}
-// 	wg.Wait()
-// }
+func TestProxy_CreateIndex(t *testing.T) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < testNum; i++ {
+		i := i
+		collName := "collName" + strconv.FormatInt(int64(i), 10)
+		fieldName := "Field1"
+		if i%2 == 0 {
+			fieldName = "vec"
+		}
+		wg.Add(1)
+		go func(group *sync.WaitGroup) {
+			defer group.Done()
+			createCollection(t, collName)
+			createIndex(t, collName, fieldName)
+			dropCollection(t, collName)
+			// dropIndex(t, collectionName, fieldName, indexName)
+		}(&wg)
+	}
+	wg.Wait()
+}
+
+func TestProxy_DescribeIndex(t *testing.T) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < testNum; i++ {
+		i := i
+		collName := "collName" + strconv.FormatInt(int64(i), 10)
+		fieldName := "Field1"
+		if i%2 == 0 {
+			fieldName = "vec"
+		}
+		wg.Add(1)
+		go func(group *sync.WaitGroup) {
+			defer group.Done()
+			createCollection(t, collName)
+			createIndex(t, collName, fieldName)
+			req := &servicepb.DescribeIndexRequest{
+				CollectionName: collName,
+				FieldName:      fieldName,
+			}
+			resp, err := proxyClient.DescribeIndex(ctx, req)
+			assert.Nil(t, err)
+			msg := "Describe Index for " + fieldName + "should successed!"
+			assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
+			dropCollection(t, collName)
+		}(&wg)
+	}
+	wg.Wait()
+}
+
+func TestProxy_DescribeIndexProgress(t *testing.T) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < testNum; i++ {
+		i := i
+		collName := "collName" + strconv.FormatInt(int64(i), 10)
+		fieldName := "Field1"
+		if i%2 == 0 {
+			fieldName = "vec"
+		}
+		wg.Add(1)
+		go func(group *sync.WaitGroup) {
+			defer group.Done()
+			createCollection(t, collName)
+			createIndex(t, collName, fieldName)
+			req := &servicepb.DescribeIndexProgressRequest{
+				CollectionName: collName,
+				FieldName:      fieldName,
+			}
+			resp, err := proxyClient.DescribeIndexProgress(ctx, req)
+			assert.Nil(t, err)
+			msg := "Describe Index Progress for " + fieldName + "should succeed!"
+			assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
+			assert.True(t, resp.Value)
+			dropCollection(t, collName)
+		}(&wg)
+	}
+	wg.Wait()
+}
 
 func TestMain(m *testing.M) {
 	setup()
