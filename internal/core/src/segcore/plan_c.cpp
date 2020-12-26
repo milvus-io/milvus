@@ -75,12 +75,6 @@ GetTopK(CPlan plan) {
     return res;
 }
 
-const char*
-GetMetricType(CPlan plan) {
-    auto query_plan = static_cast<milvus::query::Plan*>(plan);
-    return strdup(query_plan->plan_node_->query_info_.metric_type_.c_str());
-}
-
 void
 DeletePlan(CPlan cPlan) {
     auto plan = (milvus::query::Plan*)cPlan;

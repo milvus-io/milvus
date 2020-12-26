@@ -26,10 +26,9 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		ctx = context.Background()
 	}
 
-	startMaster(ctx)
 	Params.FlushDdBufSize = 4
 
-	ddNode := newDDNode(ctx)
+	ddNode := newDDNode(ctx, nil)
 
 	colID := UniqueID(0)
 	colName := "col-test-0"

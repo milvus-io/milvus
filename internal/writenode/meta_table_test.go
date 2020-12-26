@@ -112,7 +112,7 @@ func TestMetaTable_all(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, false, ret)
 
-		meta.CompleteFlush(segmentID, closeTime)
+		meta.CompleteFlush(closeTime, segmentID)
 
 		ret, err = meta.checkFlushComplete(segmentID)
 		assert.NoError(t, err)

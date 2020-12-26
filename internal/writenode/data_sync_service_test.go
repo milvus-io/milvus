@@ -39,8 +39,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// init write node
 	pulsarURL := Params.PulsarAddress
-	node, err := NewWriteNode(ctx, 0)
-	assert.Nil(t, err)
+	node := NewWriteNode(ctx, 0)
 
 	// test data generate
 	// GOOSE TODO orgnize
@@ -190,7 +189,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Produce(&msgPack)
+	err := insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
 	err = insertMsgStream.Broadcast(&timeTickMsgPack)
@@ -199,7 +198,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.ctx)
+	node.dataSyncService = newDataSyncService(node.ctx, nil, nil)
 	go node.dataSyncService.start()
 
 	node.Close()
