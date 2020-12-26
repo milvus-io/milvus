@@ -86,6 +86,11 @@ set_milvus_definition( MILVUS_WITH_PROMETHEUS   "MILVUS_WITH_PROMETHEUS" )
 set_milvus_definition( ENABLE_CPU_PROFILING     "ENABLE_CPU_PROFILING" )
 set_milvus_definition( MILVUS_WITH_FIU          "FIU_ENABLE" )
 
+# if no build build type is specified, default to release builds
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif (NOT CMAKE_BUILD_TYPE)
+
 if ( CMAKE_BUILD_TYPE STREQUAL "Release" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-O3" )
     append_flags( CUDA_NVCC_FLAGS FLAGS "-O3" )
