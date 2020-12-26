@@ -259,6 +259,7 @@ message SearchResult {
     uint64 timestamp = 6;
     int64 result_channelID = 7;
     repeated bytes hits = 8;
+    string metric_type = 9;
 }
 
 message TimeTickMsg {
