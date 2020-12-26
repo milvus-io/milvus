@@ -16,7 +16,9 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -34,12 +36,13 @@ type (
 
 	insertBufferNode struct {
 		BaseNode
-		kvClient     *etcdkv.EtcdKV
-		insertBuffer *insertBuffer
-		minIOKV      kv.Base
-		minioPrifex  string
-		idAllocator  *allocator.IDAllocator
-		outCh        chan *insertFlushSyncMsg
+		kvClient                      *etcdkv.EtcdKV
+		insertBuffer                  *insertBuffer
+		minIOKV                       kv.Base
+		minioPrifex                   string
+		idAllocator                   *allocator.IDAllocator
+		outCh                         chan *insertFlushSyncMsg
+		pulsarWriteNodeTimeTickStream *msgstream.PulsarMsgStream
 	}
 
 	insertBuffer struct {
@@ -426,11 +429,33 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		// Return
 
 	}
+
+	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
+		log.Printf("Error: send hard time tick into pulsar channel failed, %s\n", err.Error())
+	}
+
 	return nil
 }
 
-func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *insertBufferNode {
+func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
+	msgPack := msgstream.MsgPack{}
+	timeTickMsg := msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+			HashValues:     []uint32{0},
+		},
+		TimeTickMsg: internalpb.TimeTickMsg{
+			MsgType:   internalpb.MsgType_kTimeTick,
+			PeerID:    Params.WriteNodeID,
+			Timestamp: ts,
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+	return ibNode.pulsarWriteNodeTimeTickStream.Produce(&msgPack)
+}
 
+func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -482,13 +507,18 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *i
 		panic(err)
 	}
 
+	wTt := msgstream.NewPulsarMsgStream(ctx, 1024) //input stream, write node time tick
+	wTt.SetPulsarClient(Params.PulsarAddress)
+	wTt.CreatePulsarProducers([]string{Params.WriteNodeTimeTickChannelName})
+
 	return &insertBufferNode{
-		BaseNode:     baseNode,
-		kvClient:     kvClient,
-		insertBuffer: iBuffer,
-		minIOKV:      minIOKV,
-		minioPrifex:  minioPrefix,
-		idAllocator:  idAllocator,
-		outCh:        outCh,
+		BaseNode:                      baseNode,
+		kvClient:                      kvClient,
+		insertBuffer:                  iBuffer,
+		minIOKV:                       minIOKV,
+		minioPrifex:                   minioPrefix,
+		idAllocator:                   idAllocator,
+		outCh:                         outCh,
+		pulsarWriteNodeTimeTickStream: wTt,
 	}
 }
