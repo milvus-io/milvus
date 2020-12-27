@@ -336,6 +336,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			Timestamp:       searchTimestamp,
 			ResultChannelID: searchMsg.ResultChannelID,
 			Hits:            hits,
+			MetricType:      plan.getMetricType(),
 		}
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},

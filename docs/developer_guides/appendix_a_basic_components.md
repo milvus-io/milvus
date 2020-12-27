@@ -98,7 +98,7 @@ type TsMsg interface {
 type MsgPack struct {
   BeginTs Timestamp
   EndTs Timestamp
-  Msgs []*TsMsg
+  Msgs []TsMsg
 }
 
 
