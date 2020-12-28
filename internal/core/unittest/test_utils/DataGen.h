@@ -111,8 +111,16 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
             }
             case engine::DataType::INT64: {
                 vector<int64_t> data(N);
-                for (auto& x : data) {
-                    x = er();
+                int64_t index = 0;
+                // begin with counter
+                if (field.get_name().rfind("counter", 0) == 0) {
+                    for (auto& x : data) {
+                        x = index++;
+                    }
+                } else {
+                    for (auto& x : data) {
+                        x = er() % (2 * N);
+                    }
                 }
                 insert_cols(data);
                 break;
@@ -163,6 +171,26 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
             vec.push_back(dis(e));
+        }
+        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    return raw_group;
+}
+
+inline auto
+CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
+    namespace ser = milvus::proto::service;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::VECTOR_FLOAT);
+    int64_t src_index = 0;
+
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(src[src_index++]);
         }
         // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
         value->add_values(vec.data(), vec.size() * sizeof(float));

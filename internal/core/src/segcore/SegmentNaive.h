@@ -85,6 +85,11 @@ class SegmentNaive : public SegmentBase {
     BuildIndex(IndexMetaPtr index_meta) override;
 
     Status
+    LoadIndexing(const LoadIndexInfo& info) override {
+        PanicInfo("unimplemented");
+    }
+
+    Status
     FillTargetEntry(const query::Plan* Plan, QueryResult& results) override {
         PanicInfo("unimplemented");
     }
