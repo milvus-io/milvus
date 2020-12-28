@@ -21,6 +21,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4272 Program exit abnormally
 -   \#4302 Setting DSL fields is invalid in restful api, fields are not returned
 -   \#4329 C++ sdk sdk_binary needs to update
+-   \#4418 Fix search when there are multiple vector fields
+-   \#4488 get_entity_by_id() performance is poor in 0.11.0
+-   \#4511 Insert should be failed if field type not matched
 
 ## Feature
 -   \#4163 Update C++ sdk search interface

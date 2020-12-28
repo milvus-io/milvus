@@ -277,8 +277,7 @@ SplitChunk(const DataChunkPtr& chunk, int64_t segment_row_limit, std::vector<Dat
 
 bool
 RequireRawFile(const std::string& index_type) {
-    return index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG ||
-           index_type == knowhere::IndexEnum::INDEX_HNSW;
+    return index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT || index_type == knowhere::IndexEnum::INDEX_NSG;
 }
 
 bool
