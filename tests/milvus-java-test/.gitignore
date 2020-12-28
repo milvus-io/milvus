@@ -2,4 +2,3 @@ target/
 .idea/
 test-output/
 lib/*
-*.iml
