@@ -380,12 +380,36 @@ Snapshots::RegisterTimers(TimerManager* mgr) {
     auto role = config.cluster.role();
     if (is_cluster && (role == ClusterRole::RO)) {
         TimerContext::Context ctx;
-        ctx.interval_us = DEFAULT_READER_TIMER_INTERVAL_US;
+        if (const char* env_interval_us = std::getenv("READER_TIMER_INTERVAL_US")) {
+            LOG_SERVER_INFO_ << "Environment READER_TIMER_INTERVAL_US=" << env_interval_us;
+            ctx.interval_us = atoi(env_interval_us);
+        } else {
+            ctx.interval_us = DEFAULT_READER_TIMER_INTERVAL_US;
+        }
+        auto low_limit = DEFAULT_READER_TIMER_INTERVAL_US * 0.6;
+        if (ctx.interval_us < low_limit) {
+            LOG_SERVER_WARNING_ << "Environment READER_TIMER_INTERVAL_US is too small, set it to: " << low_limit;
+            ctx.interval_us = low_limit;
+        }
+        LOG_SERVER_INFO_ << "OnReaderTimer INTERVAL: " << ctx.interval_us << " US";
         ctx.handler = std::bind(&Snapshots::OnReaderTimer, this, std::placeholders::_1);
         mgr->AddTimer(ctx);
     } else {
         TimerContext::Context ctx;
-        ctx.interval_us = DEFAULT_WRITER_TIMER_INTERVAL_US;
+
+        if (const char* env_interval_us = std::getenv("WRITER_TIMER_INTERVAL_US")) {
+            LOG_SERVER_INFO_ << "Environment WRITER_TIMER_INTERVAL_US=" << env_interval_us;
+            ctx.interval_us = atoi(env_interval_us);
+        } else {
+            ctx.interval_us = DEFAULT_WRITER_TIMER_INTERVAL_US;
+        }
+        auto low_limit = DEFAULT_WRITER_TIMER_INTERVAL_US * 0.4;
+        if (ctx.interval_us < low_limit) {
+            LOG_SERVER_WARNING_ << "Environment WRITER_TIMER_INTERVAL_US is too small, set it to: " << low_limit;
+            ctx.interval_us = low_limit;
+        }
+        LOG_SERVER_INFO_ << "OnWriterTimer INTERVAL: " << ctx.interval_us << " US";
+
         ctx.handler = std::bind(&Snapshots::OnWriterTimer, this, std::placeholders::_1);
         mgr->AddTimer(ctx);
     }
