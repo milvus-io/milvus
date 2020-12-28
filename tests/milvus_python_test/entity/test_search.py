@@ -19,7 +19,7 @@ add_interval_time = 2
 vectors = gen_vectors(6000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
-top_k = 11
+top_k = 1
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
