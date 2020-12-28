@@ -231,11 +231,11 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
 
     def test_search_with_multi_partitions(self, connect, collection):
-        """
+        '''
         target: test search with multi partition which contains default tag and other tags
         method: insert vectors into e partition and search with partitions [_default, tag]
         expected: search result is correct
-        """
+        '''
         connect.create_partition(collection, tag)
         vectors, ids = self.init_data(connect, collection, nb=10, partition_tags=tag)
         query_vec = [vectors[0]]
