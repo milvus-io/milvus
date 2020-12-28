@@ -13,8 +13,8 @@ import java.util.stream.Stream;
 
 public class TestPS {
     private static int dimension = 512;
-    private static String host = "192.168.1.112";
-    private static String port = "19532";
+    private static String host = "localhost";
+    private static String port = "19530";
 
     public static void setHost(String host) {
         TestPS.host = host;
@@ -59,12 +59,11 @@ public class TestPS {
             System.err.println("Parsing failed.  Reason: " + exp.getMessage() );
         }
 
-        MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(host)
                 .withPort(Integer.parseInt(port))
                 .build();
-        client.connect(connectParam);
+        MilvusClient client = new MilvusGrpcClient(connectParam);
 
 //        String collectionName = RandomStringUtils.randomAlphabetic(10);
 //        TableSchema tableSchema = new TableSchema.Builder(collectionName, dimension)

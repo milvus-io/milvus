@@ -1,6 +1,9 @@
 package com;
 
 import io.milvus.client.*;
+import io.milvus.client.exception.InitializationException;
+import java.net.ConnectException;
+import java.util.concurrent.TimeUnit;
 import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -18,7 +21,6 @@ public class TestConnect {
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
     public void test_connect_repeat(String host, int port) {
-        Response res = null;
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(host)
                 .withPort(port)
@@ -27,18 +29,14 @@ public class TestConnect {
         MilvusClient client_1 = new MilvusGrpcClient(connectParam);
     }
 
-    @Test(dataProvider="InvalidConnectArgs")
+    @Test(dataProvider="InvalidConnectArgs", expectedExceptions = {InitializationException.class, IllegalArgumentException.class})
     public void test_connect_invalid_connect_args(String ip, int port) {
-        Response res = null;
-        try {
-            ConnectParam connectParam = new ConnectParam.Builder()
-                    .withHost(ip)
-                    .withPort(port)
-                    .build();
-            MilvusClient client = new MilvusGrpcClient(connectParam);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        ConnectParam connectParam = new ConnectParam.Builder()
+                .withHost(ip)
+                .withPort(port)
+                .withIdleTimeout(30, TimeUnit.SECONDS)
+                .build();
+        MilvusClient client = new MilvusGrpcClient(connectParam);
     }
 
     @DataProvider(name="InvalidConnectArgs")
@@ -62,7 +60,6 @@ public class TestConnect {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_disconnect_repeatably(MilvusClient client, String collectionName){
-        Response res = null;
         client.close();
     }
 }

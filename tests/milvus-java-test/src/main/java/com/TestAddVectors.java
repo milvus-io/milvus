@@ -173,4 +173,26 @@ public class TestAddVectors {
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
+
+    // test load collection
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_partition(MilvusClient client, String collectionName) {
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        Response createpResponse = client.createPartition(collectionName, tag);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+        InsertResponse res = client.insert(insertParam);
+        List<String> tags = new ArrayList<>();
+        tags.add(tag);
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert load_res.ok();
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_partition_with_not_existed_tag(MilvusClient client, String collectionName) {
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        List<String> tags = new ArrayList<>();
+        tags.add(tag);
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert !load_res.ok();
+    }
 }

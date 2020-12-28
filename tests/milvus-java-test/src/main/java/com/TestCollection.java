@@ -2,9 +2,11 @@ package com;
 
 
 import io.milvus.client.*;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class TestCollection {
@@ -137,6 +139,5 @@ public class TestCollection {
         assert(res.getResponse().ok());
         Assert.assertTrue(res.hasCollection());
     }
-
 
 }
