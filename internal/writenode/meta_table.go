@@ -55,8 +55,7 @@ func (mt *metaTable) AppendDDLBinlogPaths(collID UniqueID, paths []string) error
 	return mt.saveDDLFlushMeta(meta)
 }
 
-func (mt *metaTable) AppendSegBinlogPaths(tsOpen Timestamp, segmentID UniqueID, fieldID int32, dataPaths []string) error {
-
+func (mt *metaTable) AppendSegBinlogPaths(tsOpen Timestamp, segmentID UniqueID, fieldID int64, dataPaths []string) error {
 	_, ok := mt.segID2FlushMeta[segmentID]
 	if !ok {
 		err := mt.addSegmentFlush(segmentID, tsOpen)
@@ -201,7 +200,7 @@ func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
 	return meta.IsClosed, nil
 }
 
-func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int32][]string, error) {
+func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int64][]string, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
@@ -209,7 +208,7 @@ func (mt *metaTable) getSegBinlogPaths(segmentID UniqueID) (map[int32][]string, 
 	if !ok {
 		return nil, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
 	}
-	ret := make(map[int32][]string)
+	ret := make(map[int64][]string)
 	for _, field := range meta.Fields {
 		ret[field.FieldID] = field.BinlogPaths
 	}

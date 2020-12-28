@@ -19,7 +19,7 @@ type (
 	insertBinlogPathMsg struct {
 		ts      Timestamp
 		segID   UniqueID
-		fieldID int32 // TODO GOOSE may need to change
+		fieldID int64 // TODO GOOSE may need to change
 		paths   []string
 	}
 
