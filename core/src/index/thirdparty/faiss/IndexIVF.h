@@ -14,6 +14,9 @@
 #include <vector>
 #include <unordered_map>
 #include <stdint.h>
+#include <algorithm>
+#include <numeric>
+#include <mutex>
 
 #include <faiss/Index.h>
 #include <faiss/InvertedLists.h>
@@ -21,6 +24,7 @@
 #include <faiss/Clustering.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
+#include <faiss/common.h>
 
 namespace faiss {
 
@@ -72,6 +76,18 @@ struct IVFSearchParameters {
     virtual ~IVFSearchParameters () {}
 };
 
+struct IndexIVFStats {
+    size_t nq;       // nb of queries run
+    size_t nlist;    // nb of inverted lists scanned
+    size_t ndis;     // nb of distancs computed
+    size_t nheap_updates; // nb of times the heap was updated
+    double quantization_time; // time spent quantizing vectors (in ms)
+    double search_time;       // time spent searching lists (in ms)
+
+
+    IndexIVFStats () {reset (); }
+    void reset ();
+};
 
 
 struct InvertedListScanner;
@@ -121,6 +137,8 @@ struct IndexIVF: Index, Level1Quantizer {
     /** optional map that maps back ids to invlist entries. This
      *  enables reconstruct() */
     DirectMap direct_map;
+    mutable std::vector<size_t> nprobe_statistics;
+    mutable IndexIVFStats index_ivf_stats;
 
     /** The Inverted file takes a quantizer (an Index) on input,
      * which implements the function mapping a vector to a list
@@ -209,6 +227,7 @@ struct IndexIVF: Index, Level1Quantizer {
     void search (idx_t n, const float *x, idx_t k,
                  float *distances, idx_t *labels,
                  const BitsetView& bitset = nullptr) const override;
+
 
     /** Similar to search, but does not store codes **/
     void search_without_codes (idx_t n, const float *x, 
@@ -335,6 +354,19 @@ struct IndexIVF: Index, Level1Quantizer {
     /// replace the inverted lists, old one is deallocated if own_invlists
     void replace_invlists (InvertedLists *il, bool own=false);
 
+
+    /// clear nprobe statistics
+    void clear_nprobe_statistics() {
+        if(!STATISTICS_LEVEL)
+            return ;
+        nprobe_statistics.clear();
+    }
+
+//    virtual std::unique_lock<std::mutex>
+//    Lock() const {
+//        return std::unique_lock<std::mutex>(nprobe_stat_lock);
+//    }
+
     /* The standalone codec interface (except sa_decode that is specific) */
     size_t sa_code_size () const override;
 
@@ -399,20 +431,6 @@ struct InvertedListScanner {
 };
 
 
-struct IndexIVFStats {
-    size_t nq;       // nb of queries run
-    size_t nlist;    // nb of inverted lists scanned
-    size_t ndis;     // nb of distancs computed
-    size_t nheap_updates; // nb of times the heap was updated
-    double quantization_time; // time spent quantizing vectors (in ms)
-    double search_time;       // time spent searching lists (in ms)
-
-    IndexIVFStats () {reset (); }
-    void reset ();
-};
-
-// global var that collects them all
-extern IndexIVFStats indexIVF_stats;
 
 
 } // namespace faiss

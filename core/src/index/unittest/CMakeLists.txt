@@ -33,6 +33,7 @@ set(util_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/FaissIO.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/IndexParameter.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/Statistics.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/IndexType.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
@@ -271,6 +272,19 @@ install(TARGETS test_structured_index_sort DESTINATION unittest)
 #add_subdirectory(faiss_benchmark)
 #add_subdirectory(metric_alg_benchmark)
 ################################################################################
+
+#<STRUCTURED-INDEX-FLAT-TEST>
+set(structured_index_flat_srcs
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/structured_index/StructuredIndexFlat-inl.h
+        )
+if (NOT TARGET test_structured_index_flat)
+    add_executable(test_structured_index_flat test_structured_index_flat.cpp ${structured_index_flat_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_structured_index_flat ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_structured_index_flat DESTINATION unittest)
+
+################################################################################
+
 #<NGTPANNG-TEST>
 set(ngtpanng_srcs
 	${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNGTPANNG.cpp

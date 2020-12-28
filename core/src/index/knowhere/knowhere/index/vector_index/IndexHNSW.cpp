@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -20,6 +21,7 @@
 
 #include "faiss/BuilderSuspend.h"
 #include "hnswlib/hnswalg.h"
+#include "hnswlib/hnswlib.h"
 #include "hnswlib/space_ip.h"
 #include "hnswlib/space_l2.h"
 #include "knowhere/common/Exception.h"
@@ -72,7 +74,15 @@ IndexHNSW::Load(const BinarySet& index_binary) {
 
         hnswlib::SpaceInterface<float>* space = nullptr;
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space);
+        index_->stats_enable = (STATISTICS_LEVEL >= 3);
         index_->loadIndex(reader);
+        auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
+        if (STATISTICS_LEVEL >= 3) {
+            auto lock = hnsw_stats->Lock();
+            hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
+        }
+        //         LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Load finished, show statistics:";
+        //         LOG_KNOWHERE_DEBUG_ << hnsw_stats->ToString();
 
         normalize = index_->metric_type_ == 1;  // 1 == InnerProduct
     } catch (std::exception& e) {
@@ -98,45 +108,33 @@ IndexHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         }
         index_ = std::make_shared<hnswlib::HierarchicalNSW<float>>(space, rows, config[IndexParams::M].get<int64_t>(),
                                                                    config[IndexParams::efConstruction].get<int64_t>());
+        index_->stats_enable = (STATISTICS_LEVEL >= 3);
     } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
 void
-IndexHNSW::Add(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    std::lock_guard<std::mutex> lk(mutex_);
+    GET_TENSOR_DATA(dataset_ptr)
 
-    GET_TENSOR_DATA_ID(dataset_ptr)
-
-    //     if (normalize) {
-    //         std::vector<float> ep_norm_vector(Dim());
-    //         normalize_vector((float*)(p_data), ep_norm_vector.data(), Dim());
-    //         index_->addPoint((void*)(ep_norm_vector.data()), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             std::vector<float> norm_vector(Dim());
-    //             normalize_vector((float*)(p_data + Dim() * i), norm_vector.data(), Dim());
-    //             index_->addPoint((void*)(norm_vector.data()), p_ids[i]);
-    //         }
-    //     } else {
-    //         index_->addPoint((void*)(p_data), p_ids[0]);
-    // #pragma omp parallel for
-    //         for (int i = 1; i < rows; ++i) {
-    //             index_->addPoint((void*)(p_data + Dim() * i), p_ids[i]);
-    //         }
-    //     }
-
-    index_->addPoint(p_data, p_ids[0]);
+    index_->addPoint(p_data, 0);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
         faiss::BuilderSuspend::check_wait();
-        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), p_ids[i]);
+        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), i);
     }
+    if (STATISTICS_LEVEL >= 3) {
+        auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
+        auto lock = hnsw_stats->Lock();
+        hnsw_stats->update_level_distribution(index_->maxlevel_, index_->level_stats_);
+    }
+    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Train finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 }
 
 DatasetPtr
@@ -151,25 +149,34 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
     size_t dist_size = sizeof(float) * k;
     auto p_id = static_cast<int64_t*>(malloc(id_size * rows));
     auto p_dist = static_cast<float*>(malloc(dist_size * rows));
+    std::vector<hnswlib::StatisticsInfo> query_stats;
+    auto hnsw_stats = std::dynamic_pointer_cast<LibHNSWStatistics>(stats);
+    if (STATISTICS_LEVEL >= 3) {
+        query_stats.resize(rows);
+        for (auto i = 0; i < rows; ++i) {
+            query_stats[i].target_level = hnsw_stats->target_level;
+        }
+    }
 
-    index_->setEf(config[IndexParams::ef]);
+    index_->setEf(config[IndexParams::ef].get<int64_t>());
 
     using P = std::pair<float, int64_t>;
     auto compare = [](const P& v1, const P& v2) { return v1.first < v2.first; };
+
+    std::chrono::high_resolution_clock::time_point query_start, query_end;
+    query_start = std::chrono::high_resolution_clock::now();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {
         std::vector<P> ret;
         const float* single_query = reinterpret_cast<const float*>(p_data) + i * Dim();
 
-        // if (normalize) {
-        //     std::vector<float> norm_vector(Dim());
-        //     normalize_vector((float*)(single_query), norm_vector.data(), Dim());
-        //     ret = index_->searchKnn((float*)(norm_vector.data()), config[meta::TOPK].get<int64_t>(), compare);
-        // } else {
-        //     ret = index_->searchKnn((float*)single_query, config[meta::TOPK].get<int64_t>(), compare);
-        // }
-        ret = index_->searchKnn(single_query, k, compare, bitset);
+        if (STATISTICS_LEVEL >= 3) {
+            ret = index_->searchKnn(single_query, k, compare, bitset, query_stats[i]);
+        } else {
+            auto dummy_stat = hnswlib::StatisticsInfo();
+            ret = index_->searchKnn(single_query, k, compare, bitset, dummy_stat);
+        }
 
         while (ret.size() < k) {
             ret.emplace_back(std::make_pair(-1, -1));
@@ -187,9 +194,37 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, const fais
         std::transform(ret.begin(), ret.end(), std::back_inserter(ids),
                        [](const std::pair<float, int64_t>& e) { return e.second; });
 
+        MapOffsetToUid(ids.data(), ids.size());
         memcpy(p_dist + i * k, dist.data(), dist_size);
         memcpy(p_id + i * k, ids.data(), id_size);
     }
+    query_end = std::chrono::high_resolution_clock::now();
+
+    if (STATISTICS_LEVEL) {
+        auto lock = hnsw_stats->Lock();
+        if (STATISTICS_LEVEL >= 1) {
+            hnsw_stats->update_nq(rows);
+            hnsw_stats->update_ef_sum(index_->ef_ * rows);
+            hnsw_stats->update_total_query_time(
+                std::chrono::duration_cast<std::chrono::milliseconds>(query_end - query_start).count());
+        }
+        if (STATISTICS_LEVEL >= 2) {
+            hnsw_stats->update_filter_percentage(bitset);
+        }
+        if (STATISTICS_LEVEL >= 3) {
+            for (auto i = 0; i < rows; ++i) {
+                for (auto j = 0; j < query_stats[i].accessed_points.size(); ++j) {
+                    auto tgt = hnsw_stats->access_cnt_map.find(query_stats[i].accessed_points[j]);
+                    if (tgt == hnsw_stats->access_cnt_map.end())
+                        hnsw_stats->access_cnt_map[query_stats[i].accessed_points[j]] = 1;
+                    else
+                        tgt->second += 1;
+                }
+            }
+        }
+    }
+    //     LOG_KNOWHERE_DEBUG_ << "IndexHNSW::Query finished, show statistics:";
+    //     LOG_KNOWHERE_DEBUG_ << GetStatistics()->ToString();
 
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, p_id);
@@ -219,6 +254,15 @@ IndexHNSW::UpdateIndexSize() {
         KNOWHERE_THROW_MSG("index not initialize");
     }
     index_size_ = index_->cal_size();
+}
+
+void
+IndexHNSW::ClearStatistics() {
+    if (!STATISTICS_LEVEL)
+        return;
+    auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);
+    auto lock = hnsw_stats->Lock();
+    hnsw_stats->clear();
 }
 
 }  // namespace knowhere

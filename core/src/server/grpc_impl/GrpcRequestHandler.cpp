@@ -35,49 +35,6 @@ namespace grpc {
 const char* EXTRA_PARAM_KEY = "params";
 const size_t MAXIMUM_FIELD_NUM = 64;
 
-::milvus::grpc::ErrorCode
-ErrorMap(ErrorCode code) {
-    static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
-        {SERVER_UNEXPECTED_ERROR, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
-        {SERVER_UNSUPPORTED_ERROR, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
-        {SERVER_NULL_POINTER, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
-        {SERVER_INVALID_ARGUMENT, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-        {SERVER_FILE_NOT_FOUND, ::milvus::grpc::ErrorCode::FILE_NOT_FOUND},
-        {SERVER_NOT_IMPLEMENT, ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
-        {SERVER_CANNOT_CREATE_FOLDER, ::milvus::grpc::ErrorCode::CANNOT_CREATE_FOLDER},
-        {SERVER_CANNOT_CREATE_FILE, ::milvus::grpc::ErrorCode::CANNOT_CREATE_FILE},
-        {SERVER_CANNOT_DELETE_FOLDER, ::milvus::grpc::ErrorCode::CANNOT_DELETE_FOLDER},
-        {SERVER_CANNOT_DELETE_FILE, ::milvus::grpc::ErrorCode::CANNOT_DELETE_FILE},
-        {SERVER_COLLECTION_NOT_EXIST, ::milvus::grpc::ErrorCode::COLLECTION_NOT_EXISTS},
-        {SERVER_INVALID_COLLECTION_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_COLLECTION_NAME},
-        {SERVER_INVALID_COLLECTION_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
-        {SERVER_INVALID_VECTOR_DIMENSION, ::milvus::grpc::ErrorCode::ILLEGAL_DIMENSION},
-        {SERVER_INVALID_FIELD_NAME, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-        {SERVER_INVALID_FIELD_NUM, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-
-        {SERVER_INVALID_INDEX_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_INDEX_TYPE},
-        {SERVER_INVALID_ROWRECORD, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
-        {SERVER_INVALID_ROWRECORD_ARRAY, ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
-        {SERVER_INVALID_TOPK, ::milvus::grpc::ErrorCode::ILLEGAL_TOPK},
-        {SERVER_INVALID_NPROBE, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-        {SERVER_INVALID_INDEX_NLIST, ::milvus::grpc::ErrorCode::ILLEGAL_NLIST},
-        {SERVER_INVALID_INDEX_METRIC_TYPE, ::milvus::grpc::ErrorCode::ILLEGAL_METRIC_TYPE},
-        {SERVER_INVALID_SEGMENT_ROW_COUNT, ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-        {SERVER_ILLEGAL_VECTOR_ID, ::milvus::grpc::ErrorCode::ILLEGAL_VECTOR_ID},
-        {SERVER_ILLEGAL_SEARCH_RESULT, ::milvus::grpc::ErrorCode::ILLEGAL_SEARCH_RESULT},
-        {SERVER_CACHE_FULL, ::milvus::grpc::ErrorCode::CACHE_FAILED},
-        {DB_META_TRANSACTION_FAILED, ::milvus::grpc::ErrorCode::META_FAILED},
-        {SERVER_BUILD_INDEX_ERROR, ::milvus::grpc::ErrorCode::BUILD_INDEX_ERROR},
-        {SERVER_OUT_OF_MEMORY, ::milvus::grpc::ErrorCode::OUT_OF_MEMORY},
-    };
-
-    if (code_map.find(code) != code_map.end()) {
-        return code_map.at(code);
-    } else {
-        return ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR;
-    }
-}
-
 std::string
 RequestMap(ReqType req_type) {
     static const std::unordered_map<ReqType, std::string> req_map = {
@@ -105,7 +62,7 @@ RecordDataAddr(const std::string& field_name, int32_t num, const T* data, Insert
 void
 RecordVectorDataAddr(const std::string& field_name,
                      const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorRowRecord>& grpc_records,
-                     InsertParam& insert_param) {
+                     InsertParam& insert_param, bool& is_binary) {
     // calculate data size
     int64_t float_data_size = 0, binary_data_size = 0;
     for (auto& record : grpc_records) {
@@ -114,10 +71,12 @@ RecordVectorDataAddr(const std::string& field_name,
     }
 
     if (float_data_size > 0) {
+        is_binary = false;
         for (auto& record : grpc_records) {
             RecordDataAddr<float>(field_name, record.float_data_size(), record.float_data().data(), insert_param);
         }
     } else if (binary_data_size > 0) {
+        is_binary = true;
         for (auto& record : grpc_records) {
             RecordDataAddr<char>(field_name, record.binary_data().size(), record.binary_data().data(), insert_param);
         }
@@ -349,177 +308,6 @@ CopyDataChunkToEntity(const engine::DataChunkPtr& data_chunk,
                     auto offset = i * single_size;
                     memcpy(&float_value, data->data_.data() + offset, single_size);
                     attr_record->add_float_value(float_value);
-                }
-            }
-        }
-    }
-}
-
-void
-ConstructEntityResults(const std::vector<engine::AttrsData>& attrs, const std::vector<engine::VectorsData>& vectors,
-                       std::vector<std::string>& field_names, ::milvus::grpc::Entities* response) {
-    if (!response) {
-        return;
-    }
-
-    auto id_size = vectors.size();
-    std::vector<int64_t> id_array(id_size);
-    for (int64_t i = 0; i < id_size; i++) {
-        id_array[i] = vectors[i].id_array_[0];
-    }
-    response->mutable_ids()->Resize(static_cast<int>(id_size), 0);
-    memcpy(response->mutable_ids()->mutable_data(), id_array.data(), id_size * sizeof(int64_t));
-
-    std::string vector_field_name;
-    bool set_valid_row = false;
-    for (const auto& field_name : field_names) {
-        if (!attrs.empty()) {
-            if (attrs[0].attr_type_.find(field_name) != attrs[0].attr_type_.end()) {
-                auto grpc_field = response->add_fields();
-                grpc_field->set_field_name(field_name);
-                grpc_field->set_type(static_cast<::milvus::grpc::DataType>(attrs[0].attr_type_.at(field_name)));
-                auto grpc_attr_data = grpc_field->mutable_attr_record();
-
-                std::vector<int32_t> int32_data;
-                std::vector<int64_t> int64_data;
-                std::vector<float> float_data;
-                std::vector<double> double_data;
-                for (auto& attr : attrs) {
-                    if (not set_valid_row) {
-                        if (!attr.id_array_.empty()) {
-                            response->add_valid_row(true);
-                        } else {
-                            response->add_valid_row(false);
-                            continue;
-                        }
-                    }
-
-                    if (attr.attr_data_.find(field_name) == attr.attr_data_.end()) {
-                        continue;
-                    }
-                    auto attr_data = attr.attr_data_.at(field_name);
-                    int32_t grpc_int32_data;
-                    int64_t grpc_int64_data;
-                    float grpc_float_data;
-                    double grpc_double_data;
-                    switch (attr.attr_type_.at(field_name)) {
-                        case engine::DataType::INT8: {
-                            if (attr_data.size() == sizeof(int8_t)) {
-                                grpc_int32_data = attr_data[0];
-                                int32_data.emplace_back(grpc_int32_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        case engine::DataType::INT16: {
-                            if (attr_data.size() == sizeof(int16_t)) {
-                                int16_t value;
-                                memcpy(&value, attr_data.data(), sizeof(int16_t));
-                                grpc_int32_data = value;
-                                int32_data.emplace_back(grpc_int32_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        case engine::DataType::INT32: {
-                            if (attr_data.size() == sizeof(int32_t)) {
-                                memcpy(&grpc_int32_data, attr_data.data(), sizeof(int32_t));
-                                int32_data.emplace_back(grpc_int32_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        case engine::DataType::INT64: {
-                            if (attr_data.size() == sizeof(int64_t)) {
-                                memcpy(&grpc_int64_data, attr_data.data(), sizeof(int64_t));
-                                int64_data.emplace_back(grpc_int64_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        case engine::DataType::FLOAT: {
-                            if (attr_data.size() == sizeof(float)) {
-                                float value;
-                                memcpy(&value, attr_data.data(), sizeof(float));
-                                grpc_float_data = value;
-                                float_data.emplace_back(grpc_float_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        case engine::DataType::DOUBLE: {
-                            if (attr_data.size() == sizeof(double)) {
-                                memcpy(&grpc_double_data, attr_data.data(), sizeof(double));
-                                double_data.emplace_back(grpc_double_data);
-                            } else {
-                                response->mutable_status()->set_error_code(::milvus::grpc::ErrorCode::UNEXPECTED_ERROR);
-                                return;
-                            }
-                            break;
-                        }
-                        default: { break; }
-                    }
-                }
-                if (!int32_data.empty()) {
-                    grpc_attr_data->mutable_int32_value()->Resize(static_cast<int>(int32_data.size()), 0);
-                    memcpy(grpc_attr_data->mutable_int32_value()->mutable_data(), int32_data.data(),
-                           int32_data.size() * sizeof(int32_t));
-                } else if (!int64_data.empty()) {
-                    grpc_attr_data->mutable_int64_value()->Resize(static_cast<int>(int64_data.size()), 0);
-                    memcpy(grpc_attr_data->mutable_int64_value()->mutable_data(), int64_data.data(),
-                           int64_data.size() * sizeof(int64_t));
-                } else if (!float_data.empty()) {
-                    grpc_attr_data->mutable_float_value()->Resize(static_cast<int>(float_data.size()), 0.0);
-                    memcpy(grpc_attr_data->mutable_float_value()->mutable_data(), float_data.data(),
-                           float_data.size() * sizeof(float));
-                } else if (!double_data.empty()) {
-                    grpc_attr_data->mutable_double_value()->Resize(static_cast<int>(double_data.size()), 0.0);
-                    memcpy(grpc_attr_data->mutable_double_value()->mutable_data(), double_data.data(),
-                           double_data.size() * sizeof(double));
-                }
-                set_valid_row = true;
-            } else {
-                vector_field_name = field_name;
-            }
-        }
-    }
-
-    // TODO(yukun): valid_row not used in vector records serialize
-    if (!vector_field_name.empty()) {
-        auto grpc_field = response->add_fields();
-        grpc_field->set_field_name(vector_field_name);
-        ::milvus::grpc::VectorRecord* grpc_vector_data = grpc_field->mutable_vector_record();
-        for (auto& vector : vectors) {
-            auto grpc_data = grpc_vector_data->add_records();
-            if (!vector.float_data_.empty()) {
-                if (not set_valid_row) {
-                    response->add_valid_row(true);
-                }
-                grpc_field->set_type(::milvus::grpc::DataType::VECTOR_FLOAT);
-                grpc_data->mutable_float_data()->Resize(vector.float_data_.size(), 0);
-                memcpy(grpc_data->mutable_float_data()->mutable_data(), vector.float_data_.data(),
-                       vector.float_data_.size() * sizeof(float));
-            } else if (!vector.binary_data_.empty()) {
-                if (not set_valid_row) {
-                    response->add_valid_row(true);
-                }
-                grpc_field->set_type(::milvus::grpc::DataType::VECTOR_BINARY);
-                grpc_data->mutable_binary_data()->resize(vector.binary_data_.size());
-                memcpy(grpc_data->mutable_binary_data()->data(), vector.binary_data_.data(),
-                       vector.binary_data_.size() * sizeof(uint8_t));
-            } else {
-                if (not set_valid_row) {
-                    response->add_valid_row(false);
                 }
             }
         }
@@ -1327,28 +1115,36 @@ GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grp
             }
             RecordDataAddr<int32_t>(field_name, grpc_int32_size, field.attr_record().int32_value().data(),
                                     insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::INT32));
         } else if (grpc_int64_size > 0) {
             if (!valid_row_count(row_num, grpc_int64_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<int64_t>(field_name, grpc_int64_size, field.attr_record().int64_value().data(),
                                     insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::INT64));
         } else if (grpc_float_size > 0) {
             if (!valid_row_count(row_num, grpc_float_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<float>(field_name, grpc_float_size, field.attr_record().float_value().data(), insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::FLOAT));
         } else if (grpc_double_size > 0) {
             if (!valid_row_count(row_num, grpc_double_size)) {
                 return ::grpc::Status::OK;
             }
             RecordDataAddr<double>(field_name, grpc_double_size, field.attr_record().double_value().data(),
                                    insert_param);
+            insert_param.fields_type_.insert(std::make_pair(field_name, engine::DataType::DOUBLE));
         } else {
             if (!valid_row_count(row_num, field.vector_record().records_size())) {
                 return ::grpc::Status::OK;
             }
-            RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param);
+
+            bool is_binary = false;
+            RecordVectorDataAddr(field_name, field.vector_record().records(), insert_param, is_binary);
+            engine::DataType dt = is_binary ? engine::DataType::VECTOR_BINARY : engine::DataType::VECTOR_FLOAT;
+            insert_param.fields_type_.insert(std::make_pair(field_name, dt));
         }
     }
     insert_param.row_count_ = row_num;
@@ -1357,6 +1153,7 @@ GrpcRequestHandler::OnInsert(::grpc::ServerContext* context, const ::milvus::grp
     if (request->entity_id_array_size() > 0) {
         RecordDataAddr<int64_t>(engine::FIELD_UID, request->entity_id_array_size(), request->entity_id_array().data(),
                                 insert_param);
+        insert_param.fields_type_.insert(std::make_pair(engine::FIELD_UID, engine::DataType::INT64));
     }
 
     std::string collection_name = request->collection_name();

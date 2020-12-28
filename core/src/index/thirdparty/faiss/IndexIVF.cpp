@@ -182,14 +182,16 @@ IndexIVF::IndexIVF (Index * quantizer, size_t d,
     if (metric_type == METRIC_INNER_PRODUCT) {
         cp.spherical = true;
     }
-
+    if(STATISTICS_LEVEL >= 3) {
+        nprobe_statistics.resize(nlist, 0);
+    }
 }
 
 IndexIVF::IndexIVF ():
     invlists (nullptr), own_invlists (false),
     code_size (0),
-    nprobe (1), max_codes (0), parallel_mode (0)
-{}
+    nprobe (1), max_codes (0), parallel_mode (0) {
+}
 
 void IndexIVF::add (idx_t n, const float * x)
 {
@@ -323,66 +325,52 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    indexIVF_stats.quantization_time += getmillisecs() - t0;
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
+
+    if (STATISTICS_LEVEL >= 3) {
+        int64_t size = n * nprobe;
+        for (int64_t i = 0; i < size; i++) {
+            nprobe_statistics[idx[i]]++;
+        }
+    }
 
     t0 = getmillisecs();
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false, nullptr, bitset);
-    indexIVF_stats.search_time += getmillisecs() - t0;
+    index_ivf_stats.search_time += getmillisecs() - t0;
 
-    // nprobe logging
-    if (LOG_DEBUG_) {
-        auto ids = idx.get();
-        for (size_t i = 0; i < n; i++) {
-            std::stringstream ss;
-            ss << "Query #" << i << ", nprobe list: ";
-            for (size_t j = 0; j < nprobe; j++) {
-                if (j != 0) {
-                    ss << ",";
-                }
-                ss << ids[i * nprobe + j];
-            }
-            (*LOG_DEBUG_)(ss.str());
-        }
-    }
 }
 
 void IndexIVF::search_without_codes (idx_t n, const float *x, 
                                      const uint8_t *arranged_codes, std::vector<size_t> prefix_sum, 
                                      bool is_sq8, idx_t k, float *distances, idx_t *labels,
-                                     const BitsetView& bitset) 
+                                     const BitsetView& bitset)
 {
+
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<float[]> coarse_dis(new float[n * nprobe]);
 
     double t0 = getmillisecs();
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
-    indexIVF_stats.quantization_time += getmillisecs() - t0;
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
+
+    if (STATISTICS_LEVEL >= 3) {
+        if (STATISTICS_LEVEL >= 3) {
+            int64_t size = n * nprobe;
+            for (int64_t i = 0; i < size; i++) {
+                nprobe_statistics[idx[i]]++;
+            }
+        }
+    }
 
     t0 = getmillisecs();
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned_without_codes (n, x, arranged_codes, prefix_sum, is_sq8, k, idx.get(), coarse_dis.get(),
                                       distances, labels, false, nullptr, bitset);
-    indexIVF_stats.search_time += getmillisecs() - t0;
-
-    // nprobe loggingss
-    if (LOG_DEBUG_) {
-        auto ids = idx.get();
-        for (size_t i = 0; i < n; i++) {
-            std::stringstream ss;
-            ss << "Query #" << i << ", nprobe list: ";
-            for (size_t j = 0; j < nprobe; j++) {
-                if (j != 0) {
-                    ss << ",";
-                }
-                ss << ids[i * nprobe + j];
-            }
-            (*LOG_DEBUG_)(ss.str());
-        }
-    }
+    index_ivf_stats.search_time += getmillisecs() - t0;
 }
 
 #if 0
@@ -535,7 +523,6 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
 
                 // loop over probes
                 for (size_t ik = 0; ik < nprobe; ik++) {
-
                     nscan += scan_one_list (
                          keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
@@ -606,11 +593,13 @@ void IndexIVF::search_preassigned (idx_t n, const float *x, idx_t k,
         FAISS_THROW_MSG ("computation interrupted");
     }
 
-    indexIVF_stats.nq += n;
-    indexIVF_stats.nlist += nlistv;
-    indexIVF_stats.ndis += ndis;
-    indexIVF_stats.nheap_updates += nheap;
-
+    if(STATISTICS_LEVEL >= 1)
+    {
+        index_ivf_stats.nq += n;
+        index_ivf_stats.nlist += nlistv;
+        index_ivf_stats.ndis += ndis;
+        index_ivf_stats.nheap_updates += nheap;
+    }
 }
 
 
@@ -741,7 +730,6 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
 
                 // loop over probes
                 for (size_t ik = 0; ik < nprobe; ik++) {
-
                     nscan += scan_one_list (
                          keys [i * nprobe + ik],
                          coarse_dis[i * nprobe + ik],
@@ -814,11 +802,12 @@ void IndexIVF::search_preassigned_without_codes (idx_t n, const float *x,
         FAISS_THROW_MSG ("computation interrupted");
     }
 
-    indexIVF_stats.nq += n;
-    indexIVF_stats.nlist += nlistv;
-    indexIVF_stats.ndis += ndis;
-    indexIVF_stats.nheap_updates += nheap;
-
+    if(STATISTICS_LEVEL >= 1) {
+        index_ivf_stats.nq += n;
+        index_ivf_stats.nlist += nlistv;
+        index_ivf_stats.ndis += ndis;
+        index_ivf_stats.nheap_updates += nheap;
+    }
 }
 
 void IndexIVF::range_search (idx_t nx, const float *x, float radius,
@@ -830,15 +819,15 @@ void IndexIVF::range_search (idx_t nx, const float *x, float radius,
 
     double t0 = getmillisecs();
     quantizer->search (nx, x, nprobe, coarse_dis.get (), keys.get ());
-    indexIVF_stats.quantization_time += getmillisecs() - t0;
+    index_ivf_stats.quantization_time += getmillisecs() - t0;
 
     t0 = getmillisecs();
     invlists->prefetch_lists (keys.get(), nx * nprobe);
 
     range_search_preassigned (nx, x, radius, keys.get (), coarse_dis.get (),
                               result, bitset);
+    index_ivf_stats.search_time += getmillisecs() - t0;
 
-    indexIVF_stats.search_time += getmillisecs() - t0;
 }
 
 void IndexIVF::range_search_preassigned (
@@ -939,9 +928,12 @@ void IndexIVF::range_search_preassigned (
 
         }
     }
-    indexIVF_stats.nq += nx;
-    indexIVF_stats.nlist += nlistv;
-    indexIVF_stats.ndis += ndis;
+
+    if(STATISTICS_LEVEL >= 1) {
+        index_ivf_stats.nq += nx;
+        index_ivf_stats.nlist += nlistv;
+        index_ivf_stats.ndis += ndis;
+    }
 }
 
 
@@ -1252,8 +1244,6 @@ void IndexIVFStats::reset()
     memset ((void*)this, 0, sizeof (*this));
 }
 
-
-IndexIVFStats indexIVF_stats;
 
 void InvertedListScanner::scan_codes_range (size_t ,
                        const uint8_t *,

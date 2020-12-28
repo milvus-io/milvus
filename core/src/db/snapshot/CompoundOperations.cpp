@@ -49,16 +49,26 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
     std::map<ID_TYPE, SegmentCommit::VecT> new_segment_commits;
     for (auto& iter : new_segments_) {
         for (auto& new_segment : iter.second) {
+            size_t row_count = new_segment_counts_[new_segment->GetID()];
             OperationContext context;
             context.new_segment = new_segment;
             // TODO(yhz): Why here get adjusted ss
             context.new_segment_files = context_.new_segment_file_map[new_segment->GetID()];
+            // Set segment file row count.
+            for (auto& file : context.new_segment_files) {
+                if (file->GetFEtype() == engine::FieldElementType::FET_RAW) {
+                    file->SetRowCount(row_count);
+                    auto sf_ctx_p =
+                        ResourceContextBuilder<SegmentFile>(meta::oUpdate).AddAttr(RowCountField::Name).CreatePtr();
+                    AddStepWithLsn(*file, context.lsn, sf_ctx_p);
+                }
+            }
             auto sc_op = SegmentCommitOperation(context, GetAdjustedSS());
             STATUS_CHECK(sc_op(store));
             SegmentCommit::Ptr sc;
             STATUS_CHECK(sc_op.GetResource(sc));
 
-            sc->SetRowCount(new_segment_counts_[new_segment->GetID()]);
+            sc->SetRowCount(row_count);
 
             if (new_segment_commits.find(new_segment->GetPartitionId()) == new_segment_commits.end()) {
                 new_segment_commits[new_segment->GetPartitionId()] = SegmentCommit::VecT();

@@ -25,7 +25,7 @@
 
 namespace milvus::engine::snapshot {
 
-static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 60 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 100 * 1000;
 static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
@@ -55,7 +55,12 @@ Snapshots::DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn) {
     {
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         alive_cids_.erase(context.collection->GetID());
-        name_id_map_.erase(context.collection->GetName());
+        auto& ids = name_id_map_[context.collection->GetName()];
+        if (ids.size() == 1) {
+            name_id_map_.erase(context.collection->GetName());
+        } else {
+            ids.erase(context.collection->GetID());
+        }
         /* holders_.erase(context.collection->GetID()); */
         auto h = holders_.find(context.collection->GetID());
         if (h != holders_.end()) {
@@ -133,8 +138,8 @@ Snapshots::GetCollectionIds(IDS_TYPE& ids) const {
 Status
 Snapshots::GetCollectionNames(std::vector<std::string>& names) const {
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
-    for (auto& kv : name_id_map_) {
-        names.push_back(kv.first);
+    for (auto& [name, _] : name_id_map_) {
+        names.push_back(name);
     }
     return Status::OK();
 }
@@ -180,8 +185,9 @@ Snapshots::GetHolder(const std::string& name, SnapshotHolderPtr& holder) const {
     std::shared_lock<std::shared_timed_mutex> lock(mutex_);
     auto kv = name_id_map_.find(name);
     if (kv != name_id_map_.end()) {
+        auto id = *(kv->second.rbegin());
         lock.unlock();
-        return GetHolder(kv->second, holder);
+        return GetHolder(id, holder);
     }
     std::stringstream emsg;
     emsg << "Snapshots::GetHolderNoLock: Specified snapshot holder for collection ";
@@ -215,7 +221,12 @@ Snapshots::LoadHolder(StorePtr store, const ID_TYPE& collection_id, SnapshotHold
     holders_[collection_id] = holder;
     ScopedSnapshotT ss;
     STATUS_CHECK(holder->Load(store, ss));
-    name_id_map_[ss->GetName()] = collection_id;
+    auto it = name_id_map_.find(ss->GetName());
+    if (it == name_id_map_.end()) {
+        name_id_map_[ss->GetName()] = {collection_id};
+    } else {
+        name_id_map_[ss->GetName()].insert(collection_id);
+    }
     alive_cids_.insert(collection_id);
     return Status::OK();
 }
@@ -235,11 +246,18 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 
 void
 Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
+    std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
     auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
     auto status = (*op)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
         // TODO: Should be monitored
+        auto exe_time =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start)
+                .count();
+        if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+            LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " ms";
+        }
         return;
     }
     auto ids = op->GetIDs();
@@ -275,7 +293,7 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     }
 
     invalid_ssid_ = std::move(this_invalid_cids);
-    auto op2 = std::make_shared<GetCollectionIDsOperation>();
+    auto op2 = std::make_shared<GetCollectionIDsOperation>(false);
     status = (*op2)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetCollectionIDsOperation failed: " << status.message();
@@ -284,10 +302,32 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     }
     auto aids = op2->GetIDs();
 
-    std::set<ID_TYPE> diff;
-    std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
-                        std::inserter(diff, diff.begin()));
-    for (auto& cid : diff) {
+    std::set<ID_TYPE> stale_ids;
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_);
+        std::set_difference(alive_cids_.begin(), alive_cids_.end(), aids.begin(), aids.end(),
+                            std::inserter(stale_ids, stale_ids.begin()));
+
+        /* std::stringstream strs; */
+
+        /* strs << "("; */
+        /* for (auto id : alive_cids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") - ("; */
+        /* for (auto id : aids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ") = ("; */
+        /* for (auto id : stale_ids) { */
+        /*     strs << id << ","; */
+        /* } */
+        /* strs << ")"; */
+
+        /* LOG_SERVER_DEBUG_ << strs.str(); */
+    }
+
+    for (auto& cid : stale_ids) {
         ScopedSnapshotT ss;
         status = GetSnapshot(ss, cid);
         if (!status.ok()) {
@@ -296,8 +336,19 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         }
         std::unique_lock<std::shared_timed_mutex> lock(mutex_);
         alive_cids_.erase(cid);
-        name_id_map_.erase(ss->GetName());
+        auto& ids = name_id_map_[ss->GetName()];
+        if (ids.size() == 1) {
+            name_id_map_.erase(ss->GetName());
+        } else {
+            ids.erase(ss->GetID());
+        }
         holders_.erase(cid);
+    }
+    auto exe_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
+            .count();
+    if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
+        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " us";
     }
 }
 

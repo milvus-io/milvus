@@ -12,6 +12,8 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#3920 Allow an optional parameter `nbits` when creating IVF_PQ index
 -   \#4363 Put starting process of prometheus and grafana into docker-compose
 -   \#4376 Add an optional parameter naming `client_tag` on client constructor in c++ sdk
+-   \#4398 Change status proto to remove enum ErrorCode and replace it as int type & Remove ErrorMap in Server
+-   \#4447 Add flat structured index
 
 ## Improvement
 
@@ -37,6 +39,9 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4272 Program exit abnormally
 -   \#4302 Setting DSL fields is invalid in restful api, fields are not returned
 -   \#4329 C++ sdk sdk_binary needs to update
+-   \#4418 Fix search when there are multiple vector fields
+-   \#4488 get_entity_by_id() performance is poor in 0.11.0
+-   \#4511 Insert should be failed if field type not matched
 
 ## Feature
 -   \#4163 Update C++ sdk search interface

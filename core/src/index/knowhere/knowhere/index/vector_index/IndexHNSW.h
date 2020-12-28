@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 
 #include "hnswlib/hnswlib.h"
 
@@ -26,6 +25,7 @@ class IndexHNSW : public VecIndex {
  public:
     IndexHNSW() {
         index_type_ = IndexEnum::INDEX_HNSW;
+        stats = std::make_shared<milvus::knowhere::LibHNSWStatistics>(index_type_);
     }
 
     BinarySet
@@ -38,12 +38,7 @@ class IndexHNSW : public VecIndex {
     Train(const DatasetPtr& dataset_ptr, const Config& config) override;
 
     void
-    Add(const DatasetPtr& dataset_ptr, const Config& config) override;
-
-    void
-    AddWithoutIds(const DatasetPtr&, const Config&) override {
-        KNOWHERE_THROW_MSG("Incremental index is not supported");
-    }
+    AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
     Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
@@ -57,9 +52,11 @@ class IndexHNSW : public VecIndex {
     void
     UpdateIndexSize() override;
 
+    void
+    ClearStatistics() override;
+
  private:
     bool normalize = false;
-    std::mutex mutex_;
     std::shared_ptr<hnswlib::HierarchicalNSW<float>> index_;
 };
 

@@ -360,7 +360,7 @@ void IndexIVFFlatDedup::search_preassigned (
            !store_pairs, "store_pairs not supported in IVFDedup");
 
     IndexIVFFlat::search_preassigned (n, x, k, assign, centroid_dis,
-                                      distances, labels, false,
+                                      distances, labels,false,
                                       params);
 
     std::vector <idx_t> labels2 (k);

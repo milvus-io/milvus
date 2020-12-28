@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -29,10 +28,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
  public:
     IVF() : FaissBaseIndex(nullptr) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
+        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
@@ -43,9 +44,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     Train(const DatasetPtr&, const Config&) override;
-
-    void
-    Add(const DatasetPtr&, const Config&) override;
 
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
@@ -66,6 +64,12 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     UpdateIndexSize() override;
+
+    StatisticsPtr
+    GetStatistics() override;
+
+    void
+    ClearStatistics() override;
 
 #if 0
     DatasetPtr
@@ -90,9 +94,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     SealImpl() override;
-
- protected:
-    std::mutex mutex_;
 };
 
 using IVFPtr = std::shared_ptr<IVF>;

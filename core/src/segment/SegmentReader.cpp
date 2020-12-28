@@ -26,6 +26,7 @@
 #include "db/Types.h"
 #include "db/Utils.h"
 #include "db/snapshot/ResourceHelper.h"
+#include "knowhere/index/structured_index/StructuredIndexFlat.h"
 #include "knowhere/index/structured_index/StructuredIndexSort.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
@@ -43,35 +44,41 @@ namespace segment {
 namespace {
 template <typename T>
 knowhere::IndexPtr
-CreateSortedIndex(engine::BinaryDataPtr& raw_data) {
+GenStructuredIndex(engine::BinaryDataPtr& raw_data, bool flat) {
     if (raw_data == nullptr) {
         return nullptr;
     }
 
     auto count = raw_data->data_.size() / sizeof(T);
-    auto index_ptr =
-        std::make_shared<knowhere::StructuredIndexSort<T>>(count, reinterpret_cast<const T*>(raw_data->data_.data()));
-    return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    if (flat) {
+        auto index_ptr = std::make_shared<knowhere::StructuredIndexFlat<T>>(
+            count, reinterpret_cast<const T*>(raw_data->data_.data()));
+        return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    } else {
+        auto index_ptr = std::make_shared<knowhere::StructuredIndexSort<T>>(
+            count, reinterpret_cast<const T*>(raw_data->data_.data()));
+        return std::static_pointer_cast<knowhere::Index>(index_ptr);
+    }
 }
 
 Status
-CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data,
-                      knowhere::IndexPtr& index_ptr) {
+CreateStructuredIndex(const engine::DataType field_type, engine::BinaryDataPtr& raw_data, knowhere::IndexPtr& index_ptr,
+                      bool flat = false) {
     switch (field_type) {
         case engine::DataType::INT32: {
-            index_ptr = CreateSortedIndex<int32_t>(raw_data);
+            index_ptr = GenStructuredIndex<int32_t>(raw_data, flat);
             break;
         }
         case engine::DataType::INT64: {
-            index_ptr = CreateSortedIndex<int64_t>(raw_data);
+            index_ptr = GenStructuredIndex<int64_t>(raw_data, flat);
             break;
         }
         case engine::DataType::FLOAT: {
-            index_ptr = CreateSortedIndex<float>(raw_data);
+            index_ptr = GenStructuredIndex<float>(raw_data, flat);
             break;
         }
         case engine::DataType::DOUBLE: {
-            index_ptr = CreateSortedIndex<double>(raw_data);
+            index_ptr = GenStructuredIndex<double>(raw_data, flat);
             break;
         }
         default: { return Status(DB_ERROR, "Field is not structured type"); }
@@ -512,7 +519,7 @@ SegmentReader::LoadVectorIndex(const std::string& field_name, knowhere::VecIndex
 }
 
 Status
-SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr) {
+SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr, bool flat) {
     try {
         TimeRecorder recorder("SegmentReader::LoadStructuredIndex: " + field_name);
 
@@ -564,7 +571,7 @@ SegmentReader::LoadStructuredIndex(const std::string& field_name, knowhere::Inde
 
                 engine::BinaryDataPtr raw_data;
                 LoadField(field_name, raw_data, false);
-                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr));
+                STATUS_CHECK(CreateStructuredIndex(field_type, raw_data, index_ptr, flat));
 
                 cache::CpuCacheMgr::GetInstance().InsertItem(temp_index_path, index_ptr);  // put into cache
 
@@ -668,12 +675,8 @@ SegmentReader::LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr) {
         if (data_obj == nullptr) {
             auto& ss_codec = codec::Codec::instance();
             STATUS_CHECK(ss_codec.GetDeletedDocsFormat()->Read(fs_ptr_, file_path, deleted_docs_ptr));
-            auto id = segment_visitor_->GetSegment()->GetID();
-            auto sc = segment_visitor_->GetSnapshot()->GetSegmentCommitBySegmentId(id);
-            // The black list size must be equal to total entity count containing deleted count
-            // and segment row count.
-            if (sc != nullptr && deleted_docs_ptr != nullptr) {
-                deleted_docs_ptr->GenBlacklist(sc->GetRowCount() + deleted_docs_ptr->GetCount());
+            if (deleted_docs_ptr != nullptr) {
+                deleted_docs_ptr->GenBlacklist(GetEntireRowCount());
             }
             cache::CpuCacheMgr::GetInstance().InsertItem(file_path, deleted_docs_ptr);  // put into cache
         } else {
@@ -782,6 +785,30 @@ SegmentReader::GetRowCount() {
 
     int64_t count = raw->data_.size() / sizeof(engine::idx_t);
     return count;
+}
+
+int64_t
+SegmentReader::GetEntireRowCount() const {
+    if (segment_visitor_ == nullptr) {
+        return 0;
+    }
+
+    auto uid_field_visitor = segment_visitor_->GetFieldVisitor(engine::FIELD_UID);
+    if (uid_field_visitor == nullptr) {
+        return 0;
+    }
+
+    auto uid_element_visitor = uid_field_visitor->GetElementVisitor(engine::FieldElementType::FET_RAW);
+    if (uid_element_visitor == nullptr) {
+        return 0;
+    }
+
+    auto uid_file = uid_element_visitor->GetFile();
+    if (uid_file == nullptr) {
+        return 0;
+    }
+
+    return uid_file->GetRowCount();
 }
 
 Status

@@ -34,6 +34,9 @@ class InsertReq : public BaseReq {
     Status
     OnExecute() override;
 
+    Status
+    ValidateFieldType(const InsertParam& insert_param);
+
  private:
     std::string collection_name_;
     std::string partition_name_;

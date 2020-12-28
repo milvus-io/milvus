@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-import "status.proto";
-
 package milvus.grpc;
 
 /**
@@ -23,6 +21,15 @@ enum DataType {
     VECTOR_BINARY = 100;
     VECTOR_FLOAT = 101;
 }
+
+/**
+ * @brief Status
+ */
+message Status {
+    int64 error_code = 1;
+    string reason = 2;
+}
+
 
 /**
  * @brief General usage

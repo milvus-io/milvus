@@ -63,7 +63,7 @@ class SegmentReader {
     LoadVectorIndex(const std::string& field_name, knowhere::VecIndexPtr& index_ptr, bool flat = false);
 
     Status
-    LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr);
+    LoadStructuredIndex(const std::string& field_name, knowhere::IndexPtr& index_ptr, bool flat = false);
 
     Status
     LoadIndice();
@@ -103,6 +103,10 @@ class SegmentReader {
 
     int64_t
     GetRowCount();
+
+    // get the entire row count, which value is equal to count of uid.
+    int64_t
+    GetEntireRowCount() const;
 
     // clear cache from cache manager, use this method for segment merge/compact and collection/partition drop
     Status

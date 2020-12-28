@@ -14,6 +14,7 @@ namespace hnswlib {
 typedef unsigned int tableint;
 typedef unsigned int linklistsizeint;
 
+
 template<typename dist_t>
 class HierarchicalNSW : public AlgorithmInterface<dist_t> {
  public:
@@ -76,6 +77,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
         mult_ = 1 / log(1.0 * M_);
         revSize_ = 1.0 / mult_;
+        level_stats_.resize(10);
+        stats_enable = false;
     }
 
     struct CompareByFirst {
@@ -131,6 +134,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     char *data_level0_memory_;
     char **linkLists_;
     std::vector<int> element_levels_;
+    std::vector<int> level_stats_;
+    bool stats_enable = false;
 
     size_t data_size_;
 
@@ -252,7 +257,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <bool has_deletions>
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView& bitset) const {
+    searchBaseLayerST(tableint ep_id, const void *data_point, size_t ef, const faiss::BitsetView& bitset, StatisticsInfo &stats) const {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -319,8 +324,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #endif
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
-                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id))))
+                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
                             top_candidates.emplace(dist, candidate_id);
+                        }
+                        else {
+                        }
 
                         if (top_candidates.size() > ef)
                             top_candidates.pop();
@@ -709,6 +717,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
+        if (stats_enable)
+            level_stats_ = std::vector<int>(maxlevel_ + 1, 0);
         revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
@@ -717,10 +727,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
                 element_levels_[i] = 0;
+                if (stats_enable)
+                    level_stats_[0] ++;
 
                 linkLists_[i] = nullptr;
             } else {
                 element_levels_[i] = linkListSize / size_links_per_element_;
+                if (stats_enable)
+                    level_stats_[element_levels_[i]] ++;
                 linkLists_[i] = (char *) malloc(linkListSize);
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
@@ -980,6 +994,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         element_levels_[cur_c] = curlevel;
 
         std::unique_lock <std::mutex> templock(global);
+        if (stats_enable) {
+            if (curlevel >= level_stats_.size()) {
+                level_stats_.resize(curlevel + 1, 0);
+            }
+            level_stats_[curlevel] ++;
+        }
         int maxlevelcopy = maxlevel_;
         if (curlevel <= maxlevelcopy)
             templock.unlock();
@@ -1060,7 +1080,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     };
 
     std::priority_queue<std::pair<dist_t, labeltype >>
-    searchKnn(const void *query_data, size_t k, const faiss::BitsetView& bitset) const {
+    searchKnn(const void *query_data, size_t k, const faiss::BitsetView& bitset, StatisticsInfo &stats) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
         if (cur_element_count == 0) return result;
 
@@ -1080,6 +1100,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     tableint cand = datal[i];
                     if (cand < 0 || cand > max_elements_)
                         throw std::runtime_error("cand error");
+                    if (stats_enable && level == stats.target_level) {
+                        stats.accessed_points.push_back(cand);
+                    }
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 
                     if (d < curdist) {
@@ -1094,12 +1117,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
         if (!bitset.empty()) {
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-                top_candidates1 = searchBaseLayerST<true>(currObj, query_data, std::max(ef_, k), bitset);
+                top_candidates1 = searchBaseLayerST<true>(currObj, query_data, std::max(ef_, k), bitset, stats);
             top_candidates.swap(top_candidates1);
         }
         else{
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
-                top_candidates1 = searchBaseLayerST<false>(currObj, query_data, std::max(ef_, k), bitset);
+                top_candidates1 = searchBaseLayerST<false>(currObj, query_data, std::max(ef_, k), bitset, stats);
             top_candidates.swap(top_candidates1);
         }
         while (top_candidates.size() > k) {
@@ -1115,11 +1138,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     template <typename Comp>
     std::vector<std::pair<dist_t, labeltype>>
-    searchKnn(const void* query_data, size_t k, Comp comp, const faiss::BitsetView& bitset) {
+    searchKnn(const void* query_data, size_t k, Comp comp, const faiss::BitsetView& bitset, StatisticsInfo &stats) {
         std::vector<std::pair<dist_t, labeltype>> result;
         if (cur_element_count == 0) return result;
 
-        auto ret = searchKnn(query_data, k, bitset);
+        auto ret = searchKnn(query_data, k, bitset, stats);
 
         while (!ret.empty()) {
             result.push_back(ret.top());

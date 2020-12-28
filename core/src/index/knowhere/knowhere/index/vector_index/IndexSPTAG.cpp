@@ -120,7 +120,7 @@ CPUSPTAGRNG::Load(const BinarySet& binary_set) {
 }
 
 void
-CPUSPTAGRNG::Train(const DatasetPtr& origin, const Config& train_config) {
+CPUSPTAGRNG::BuildAll(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
 
     DatasetPtr dataset = origin;
@@ -199,7 +199,7 @@ CPUSPTAGRNG::Query(const DatasetPtr& dataset_ptr, const Config& config, const fa
         index_ptr_->SearchIndex(query_results[i]);
     }
 
-    return ConvertToDataset(query_results);
+    return ConvertToDataset(query_results, uids_);
 }
 
 int64_t

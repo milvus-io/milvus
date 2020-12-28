@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -42,9 +41,6 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     Train(const DatasetPtr&, const Config&) override;
 
     void
-    Add(const DatasetPtr&, const Config&) override;
-
-    void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
@@ -64,16 +60,10 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     virtual const uint8_t*
     GetRawVectors();
 
-    virtual const int64_t*
-    GetRawIds();
-
  protected:
     virtual void
     QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config,
               const faiss::BitsetView& bitset);
-
- protected:
-    std::mutex mutex_;
 };
 
 using BinaryIDMAPPtr = std::shared_ptr<BinaryIDMAP>;

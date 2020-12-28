@@ -68,15 +68,10 @@ Status
 ExecutionEngineImpl::Load(ExecutionEngineContext& context) {
     if (context.query_ptr_ != nullptr) {
         context_ = context;
-        return LoadForSearch(context.query_ptr_);
+        return Load(context.query_ptr_->index_fields);
     } else {
         return Load(context.target_fields_);
     }
-}
-
-Status
-ExecutionEngineImpl::LoadForSearch(const query::QueryPtr& query_ptr) {
-    return Load(query_ptr->index_fields);
 }
 
 Status
@@ -129,7 +124,7 @@ ExecutionEngineImpl::Load(const TargetFields& field_names) {
             }
         } else {
             knowhere::IndexPtr index_ptr;
-            STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr));
+            STATUS_CHECK(segment_reader_->LoadStructuredIndex(name, index_ptr, context_.query_ptr_ ? true : false));
             index_exist = (index_ptr != nullptr);
             if (!index_exist) {
                 LOG_ENGINE_ERROR_ << "Structure index doesn't exist";
@@ -176,23 +171,14 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 void
-MapAndCopyResult(const knowhere::DatasetPtr& dataset, std::shared_ptr<std::vector<idx_t>> uids, int64_t nq, int64_t k,
-                 float* distances, int64_t* labels) {
-    auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+CopyResult(const knowhere::DatasetPtr& dataset, int64_t result_len, float* distances, int64_t* labels) {
     auto res_dist = dataset->Get<float*>(knowhere::meta::DISTANCE);
-
-    int64_t num = nq * k;
-
-    memcpy(distances, res_dist, sizeof(float) * num);
-
-    /* map offsets to ids */
-    for (int64_t i = 0; i < num; ++i) {
-        int64_t offset = res_ids[i];
-        labels[i] = (offset == -1) ? -1 : (*uids)[offset];
-    }
-
-    free(res_ids);
+    memcpy(distances, res_dist, sizeof(float) * result_len);
     free(res_dist);
+
+    auto res_ids = dataset->Get<int64_t*>(knowhere::meta::IDS);
+    memcpy(labels, res_ids, sizeof(int64_t) * result_len);
+    free(res_ids);
 }
 
 Status
@@ -222,7 +208,6 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Illegal search params", "search", 0);
         throw Exception(DB_ERROR, "Illegal search params");
     }
-
     if (hybrid) {
         //        HybridLoad();
     }
@@ -236,8 +221,9 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
     }
 
     auto result = vec_index->Query(dataset, conf, bitset);
-    MapAndCopyResult(result, vec_index->GetUids(), nq, topk, context.query_result_->result_distances_.data(),
-                     context.query_result_->result_ids_.data());
+    CopyResult(result, nq * topk, context.query_result_->result_distances_.data(),
+               context.query_result_->result_ids_.data());
+
     if (hybrid) {
         //        HybridUnset();
     }
@@ -392,7 +378,7 @@ template <typename T>
 Status
 ProcessIndexedTermQuery(ConCurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr, milvus::json& term_values_json) {
     try {
-        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndex<T>>(index_ptr);
         if (not T_index) {
             return Status{SERVER_INVALID_ARGUMENT, "Attribute's type is wrong"};
         }
@@ -481,7 +467,7 @@ template <typename T>
 Status
 ProcessIndexedRangeQuery(ConCurrentBitsetPtr& bitset, knowhere::IndexPtr& index_ptr, milvus::json& range_values_json) {
     try {
-        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndexSort<T>>(index_ptr);
+        auto T_index = std::dynamic_pointer_cast<knowhere::StructuredIndex<T>>(index_ptr);
 
         bool flag = false;
         for (auto& range_value_it : range_values_json.items()) {
@@ -775,12 +761,10 @@ ExecutionEngineImpl::BuildKnowhereIndex(const std::string& field_name, const Col
     std::shared_ptr<std::vector<idx_t>> uids;
     knowhere::DatasetPtr dataset;
     if (from_index) {
-        dataset =
-            knowhere::GenDatasetWithIds(row_count, dimension, from_index->GetRawVectors(), from_index->GetRawIds());
+        dataset = knowhere::GenDataset(row_count, dimension, from_index->GetRawVectors());
         uids = from_index->GetUids();
     } else if (bin_from_index) {
-        dataset = knowhere::GenDatasetWithIds(row_count, dimension, bin_from_index->GetRawVectors(),
-                                              bin_from_index->GetRawIds());
+        dataset = knowhere::GenDataset(row_count, dimension, bin_from_index->GetRawVectors());
         uids = bin_from_index->GetUids();
     }
 
