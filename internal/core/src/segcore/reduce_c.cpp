@@ -118,17 +118,21 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
 
         std::vector<float> result_distances;
         std::vector<int64_t> internal_seg_offsets;
+        std::vector<int64_t> result_ids;
 
         for (int j = 0; j < search_records[i].size(); j++) {
             auto& offset = search_records[i][j];
             auto distance = search_result->result_distances_[offset];
             auto internal_seg_offset = search_result->internal_seg_offsets_[offset];
+            auto id = search_result->result_ids_[offset];
             result_distances.push_back(distance);
             internal_seg_offsets.push_back(internal_seg_offset);
+            result_ids.push_back(id);
         }
 
         search_result->result_distances_ = result_distances;
         search_result->internal_seg_offsets_ = internal_seg_offsets;
+        search_result->result_ids_ = result_ids;
     }
 }
 

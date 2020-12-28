@@ -17,7 +17,6 @@
 #include "segcore/SegmentSmallIndex.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "query/Search.h"
-#include "query/SearchOnSealed.h"
 
 namespace milvus::query {
 
@@ -64,24 +63,13 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     auto& ph = placeholder_group_.at(0);
     auto src_data = ph.get_blob<float>();
     auto num_queries = ph.num_of_queries_;
-
-    ExecExprVisitor::RetType bitmap_holder;
-    std::optional<const ExecExprVisitor::RetType*> bitset_pack;
-
     if (node.predicate_.has_value()) {
-        bitmap_holder = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
-        bitset_pack = &bitmap_holder;
-    }
-
-    auto& sealed_indexing = segment->get_sealed_indexing_record();
-
-    if (sealed_indexing.test_readiness(node.query_info_.field_offset_)) {
-        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
-                       bitset_pack, ret);
+        auto bitmap = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
+        auto ptr = &bitmap;
+        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, ptr, ret);
     } else {
-        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
+        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, std::nullopt, ret);
     }
-
     ret_ = ret;
 }
 
@@ -95,16 +83,13 @@ ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     auto& ph = placeholder_group_.at(0);
     auto src_data = ph.get_blob<uint8_t>();
     auto num_queries = ph.num_of_queries_;
-
-    ExecExprVisitor::RetType bitmap_holder;
-    std::optional<const ExecExprVisitor::RetType*> bitset_pack;
-
     if (node.predicate_.has_value()) {
-        bitmap_holder = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
-        bitset_pack = &bitmap_holder;
+        auto bitmap = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
+        auto ptr = &bitmap;
+        BinaryQueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, ptr, ret);
+    } else {
+        BinaryQueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, std::nullopt, ret);
     }
-
-    BinaryQueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
     ret_ = ret;
 }
 

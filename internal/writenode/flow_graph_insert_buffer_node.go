@@ -85,7 +85,7 @@ func (ibNode *insertBufferNode) Name() string {
 }
 
 func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
-	log.Println("=========== insert buffer Node Operating")
+	// log.Println("=========== insert buffer Node Operating")
 
 	if len(in) != 1 {
 		log.Println("Error: Invalid operate message input in insertBuffertNode, input length = ", len(in))
