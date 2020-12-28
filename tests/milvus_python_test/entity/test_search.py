@@ -19,7 +19,7 @@ add_interval_time = 2
 vectors = gen_vectors(6000, dim)
 vectors = sklearn.preprocessing.normalize(vectors, axis=1, norm='l2')
 vectors = vectors.tolist()
-top_k = 1
+top_k = 11
 nprobe = 1
 epsilon = 0.001
 tag = "1970-01-01"
@@ -226,6 +226,23 @@ class TestSearchBase:
         status, result = connect.search(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
         assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance <= epsilon
+
+    def test_search_with_multi_partitions(self, connect, collection):
+        """
+        target: test search with multi partition which contains default tag and other tags
+        method: insert vectors into e partition and search with partitions [_default, tag]
+        expected: search result is correct
+        """
+        connect.create_partition(collection, tag)
+        vectors, ids = self.init_data(connect, collection, nb=10, partition_tags=tag)
+        query_vec = [vectors[0]]
+        search_param = get_search_param(IndexType.FLAT)
+        status, result = connect.search(collection, top_k, query_vec, partition_tags=["_default", tag], params=search_param)
+        assert status.OK()
+        logging.getLogger().info(result)
         assert len(result[0]) == min(len(vectors), top_k)
         assert check_result(result[0], ids[0])
         assert result[0][0].distance <= epsilon
