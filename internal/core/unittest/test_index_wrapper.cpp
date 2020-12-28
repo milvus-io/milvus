@@ -36,7 +36,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
     if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
+            // {milvus::knowhere::meta::TOPK, K},
             {milvus::knowhere::IndexParams::nlist, 100},
             // {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::IndexParams::m, 4},
@@ -47,7 +47,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
     } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
+            // {milvus::knowhere::meta::TOPK, K},
             {milvus::knowhere::IndexParams::nlist, 100},
             // {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::IndexParams::m, 4},
@@ -58,7 +58,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
     } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
+            // {milvus::knowhere::meta::TOPK, K},
             {milvus::knowhere::Metric::TYPE, metric_type},
         };
     }
@@ -86,14 +86,14 @@ generate_params(const milvus::knowhere::IndexType& index_type, const milvus::kno
 }
 
 auto
-GenDataset(int64_t N, milvus::knowhere::MetricType metric_type, bool is_binary) {
+GenDataset(int64_t N, milvus::knowhere::MetricType metric_type, bool is_binary, int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
     auto faiss_metric_type = milvus::knowhere::GetMetricType(metric_type);
     if (!is_binary) {
-        schema->AddField("fakevec", milvus::engine::DataType::VECTOR_FLOAT, DIM, faiss_metric_type);
+        schema->AddField("fakevec", milvus::engine::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
         return milvus::segcore::DataGen(schema, N);
     } else {
-        schema->AddField("fakebinvec", milvus::engine::DataType::VECTOR_BINARY, DIM, faiss_metric_type);
+        schema->AddField("fakebinvec", milvus::engine::DataType::VECTOR_BINARY, dim, faiss_metric_type);
         return milvus::segcore::DataGen(schema, N);
     }
 }
@@ -205,9 +205,37 @@ TEST(PQWrapper, Build) {
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
     auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
+}
+
+TEST(PQCGO, Params) {
+    std::vector<char> type_params;
+    std::vector<char> index_params{10,  10,  10,  5,   110, 98,  105, 116, 115, 18,  1,   56, 10, 17,  10, 11, 109,
+                                   101, 116, 114, 105, 99,  95,  116, 121, 112, 101, 18,  2,  76, 50,  10, 20, 10,
+                                   10,  105, 110, 100, 101, 120, 95,  116, 121, 112, 101, 18, 6,  73,  86, 70, 95,
+                                   80,  81,  10,  8,   10,  3,   100, 105, 109, 18,  1,   56, 10, 12,  10, 5,  110,
+                                   108, 105, 115, 116, 18,  3,   49,  48,  48,  10,  6,   10, 1,  109, 18, 1,  52};
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params.data(), type_params.size(),
+                                                                      index_params.data(), index_params.size());
+
+    auto dim = index->dim();
+    auto dataset = GenDataset(NB, METRIC_TYPE, false, dim);
+    auto xb_data = dataset.get_col<float>(0);
+    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
+}
+
+TEST(PQCGOWrapper, Params) {
+    std::vector<char> type_params;
+    std::vector<char> index_params{10,  10,  10,  5,   110, 98,  105, 116, 115, 18,  1,   56, 10, 17,  10, 11, 109,
+                                   101, 116, 114, 105, 99,  95,  116, 121, 112, 101, 18,  2,  76, 50,  10, 20, 10,
+                                   10,  105, 110, 100, 101, 120, 95,  116, 121, 112, 101, 18, 6,  73,  86, 70, 95,
+                                   80,  81,  10,  8,   10,  3,   100, 105, 109, 18,  1,   56, 10, 12,  10, 5,  110,
+                                   108, 105, 115, 116, 18,  3,   49,  48,  48,  10,  6,   10, 1,  109, 18, 1,  52};
+    auto index = CreateIndex(type_params.data(), type_params.size(), index_params.data(), index_params.size());
+    DeleteIndex(index);
 }
 
 TEST(BinFlatWrapper, Build) {
@@ -227,8 +255,8 @@ TEST(BinFlatWrapper, Build) {
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
     ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
     ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
@@ -250,8 +278,8 @@ TEST(BinIdMapWrapper, Build) {
     std::vector<milvus::knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = milvus::knowhere::GenDatasetWithIds(NB, DIM, xb_data.data(), ids.data());
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
     ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
@@ -266,20 +294,20 @@ INSTANTIATE_TEST_CASE_P(IndexTypeParameters,
                                                     milvus::knowhere::Metric::JACCARD)));
 
 TEST_P(IndexWrapperTest, Constructor) {
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
 }
 
 TEST_P(IndexWrapperTest, Dim) {
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
 
     ASSERT_EQ(index->dim(), DIM);
 }
 
 TEST_P(IndexWrapperTest, BuildWithoutIds) {
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
 
     if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
@@ -289,8 +317,8 @@ TEST_P(IndexWrapperTest, BuildWithoutIds) {
 }
 
 TEST_P(IndexWrapperTest, Codec) {
-    auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
 
     if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         ASSERT_ANY_THROW(index->BuildWithoutIds(xb_dataset));
@@ -300,8 +328,8 @@ TEST_P(IndexWrapperTest, Codec) {
     }
 
     auto binary = index->Serialize();
-    auto copy_index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+    auto copy_index = std::make_unique<milvus::indexbuilder::IndexWrapper>(
+        type_params_str.c_str(), type_params_str.size(), index_params_str.c_str(), index_params_str.size());
     ASSERT_NO_THROW(copy_index->Load(binary.data, binary.size));
     ASSERT_EQ(copy_index->dim(), copy_index->dim());
     auto copy_binary = copy_index->Serialize();

@@ -35,7 +35,10 @@ typedef void* CIndex;
 // Solution: using protobuf instead of json, this way significantly increase programming efficiency
 
 CIndex
-CreateIndex(const char* serialized_type_params, const char* serialized_index_params);
+CreateIndex(const char* serialized_type_params,
+            int64_t type_params_size,
+            const char* serialized_index_params,
+            int64_t index_params_size);
 
 void
 DeleteIndex(CIndex index);

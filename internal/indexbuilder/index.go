@@ -129,11 +129,43 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 		return nil, err
 	}
 
+	//print := func(param []byte) {
+	//	for i, c := range param {
+	//		fmt.Print(c)
+	//		fmt.Print(", ")
+	//		if i % 25 == 0 {
+	//			fmt.Println()
+	//		}
+	//	}
+	//	fmt.Println()
+	//}
+	//print(typeParamsStr)
+	//fmt.Println("len(typeParamsStr): ", len(typeParamsStr))
+	//print(indexParamsStr)
+	//fmt.Println("len(indexParamsStr): ", len(indexParamsStr))
+
+	var typeParamsPointer unsafe.Pointer
+	var indexParamsPointer unsafe.Pointer
+
+	if len(typeParamsStr) > 0 {
+		typeParamsPointer = unsafe.Pointer(&typeParamsStr[0])
+	} else {
+		typeParamsPointer = nil
+	}
+	if len(indexParamsStr) > 0 {
+		indexParamsPointer = unsafe.Pointer(&indexParamsStr[0])
+	} else {
+		indexParamsPointer = nil
+	}
+
 	/*
 		CIndex
-		CreateIndex(const char* serialized_type_params, const char* serialized_index_params);
+		CreateIndex(const char* serialized_type_params,
+					int64_t type_params_size,
+					const char* serialized_index_params
+					int64_t index_params_size);
 	*/
 	return &CIndex{
-		indexPtr: C.CreateIndex((*C.char)(unsafe.Pointer(&typeParamsStr[0])), (*C.char)(unsafe.Pointer(&indexParamsStr[0]))),
+		indexPtr: C.CreateIndex((*C.char)(typeParamsPointer), (C.int64_t)(len(typeParamsStr)), (*C.char)(indexParamsPointer), (C.int64_t)(len(indexParamsStr))),
 	}, nil
 }
