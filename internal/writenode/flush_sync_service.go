@@ -12,10 +12,10 @@ type (
 	flushSyncService struct {
 		ctx           context.Context
 		metaTable     *metaTable
-		ddChan        chan *ddlFlushSyncMsg    // TODO GOOSE Init Size??
-		insertChan    chan *insertFlushSyncMsg // TODO GOOSE Init Size??
-		ddFlushed     map[UniqueID]bool        // Segment ID
-		insertFlushed map[UniqueID]bool        // Segment ID
+		ddChan        chan *ddlFlushSyncMsg
+		insertChan    chan *insertFlushSyncMsg
+		ddFlushed     map[UniqueID]bool // Segment ID
+		insertFlushed map[UniqueID]bool // Segment ID
 	}
 )
 

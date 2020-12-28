@@ -3,7 +3,6 @@ package writenode
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -343,8 +342,6 @@ func newMeta() {
 
 	collBytes := proto.MarshalTextString(&collection)
 	kvClient.Save("/collection/"+strconv.FormatInt(collection.ID, 10), collBytes)
-	value, _ := kvClient.Load("/collection/1")
-	fmt.Println("========value: ", value)
 
 	segSch := etcdpb.SegmentMeta{
 		SegmentID:    UniqueID(1),

@@ -62,13 +62,13 @@ func (ib *insertBuffer) size(segmentID UniqueID) int {
 
 	maxSize := 0
 	for _, data := range idata.Data {
-		fdata, ok := data.(storage.FloatVectorFieldData)
-		if ok && len(fdata.Data) > maxSize {
+		fdata, ok := data.(*storage.FloatVectorFieldData)
+		if ok && fdata.NumRows > maxSize {
 			maxSize = len(fdata.Data)
 		}
 
-		bdata, ok := data.(storage.BinaryVectorFieldData)
-		if ok && len(bdata.Data) > maxSize {
+		bdata, ok := data.(*storage.BinaryVectorFieldData)
+		if ok && bdata.NumRows > maxSize {
 			maxSize = len(bdata.Data)
 		}
 
@@ -77,7 +77,6 @@ func (ib *insertBuffer) size(segmentID UniqueID) int {
 }
 
 func (ib *insertBuffer) full(segmentID UniqueID) bool {
-	// GOOSE TODO
 	return ib.size(segmentID) >= ib.maxSize
 }
 
@@ -131,23 +130,10 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			tsData.NumRows += len(msg.Timestamps)
 
 			// 1.1 Get CollectionMeta from etcd
-			segMeta := etcdpb.SegmentMeta{}
-
-			key := path.Join(SegmentPrefix, strconv.FormatInt(currentSegID, 10))
-			value, _ := ibNode.kvClient.Load(key)
-			err := proto.UnmarshalText(value, &segMeta)
+			segMeta, collMeta, err := ibNode.getMeta(currentSegID)
 			if err != nil {
-				log.Println("Load segMeta error")
-				// TODO: add error handling
-			}
-
-			collMeta := etcdpb.CollectionMeta{}
-			key = path.Join(CollectionPrefix, strconv.FormatInt(segMeta.GetCollectionID(), 10))
-			value, _ = ibNode.kvClient.Load(key)
-			err = proto.UnmarshalText(value, &collMeta)
-			if err != nil {
-				log.Println("Load collMeta error")
-				// TODO: add error handling
+				// GOOSE TODO add error handler
+				log.Println("Get meta wrong")
 			}
 
 			// 1.2 Get Fields
@@ -378,6 +364,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			// 1.5 if full
 			//   1.5.1 generate binlogs
 			if ibNode.insertBuffer.full(currentSegID) {
+				log.Println("Insert Buffer full, auto flushing ...")
 				// partitionTag -> partitionID
 				partitionTag := msg.GetPartitionTag()
 				partitionID, err := typeutil.Hash32String(partitionTag)
@@ -385,20 +372,17 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 					log.Println("partitionTag to partitionID Wrong")
 				}
 
-				inCodec := storage.NewInsertCodec(&collMeta)
+				inCodec := storage.NewInsertCodec(collMeta)
 
 				// buffer data to binlogs
 				binLogs, err := inCodec.Serialize(partitionID,
 					currentSegID, ibNode.insertBuffer.insertData[currentSegID])
-				for _, v := range binLogs {
-					log.Println("key ", v.Key, "- value ", v.Value)
-				}
+
 				if err != nil {
 					log.Println("generate binlog wrong")
 				}
 
 				// clear buffer
-				log.Println("=========", binLogs)
 				delete(ibNode.insertBuffer.insertData, currentSegID)
 
 				//   1.5.2 binLogs -> minIO/S3
@@ -420,14 +404,117 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 						log.Println("Save to MinIO failed")
 						// GOOSE TODO error handle
 					}
+					log.Println(".. Saving binlogs to MinIO ...")
+
+					fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
+					if err != nil {
+						log.Println("string to fieldID wrong")
+						// GOOSE TODO error handle
+					}
+
+					inBinlogMsg := &insertFlushSyncMsg{
+						flushCompleted: false,
+						insertBinlogPathMsg: insertBinlogPathMsg{
+							ts:      iMsg.timeRange.timestampMax,
+							segID:   currentSegID,
+							fieldID: int32(fieldID),
+							paths:   []string{key},
+						},
+					}
+
+					log.Println(".. Appending binlog paths ...")
+					ibNode.outCh <- inBinlogMsg
 				}
+
 			}
 		}
-
 		// iMsg is Flush() msg from master
 		//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
-		// Return
+		for _, msg := range iMsg.flushMessages {
+			currentSegID := msg.GetSegmentID()
+			flushTs := msg.GetTimestamp()
 
+			log.Printf(". Receiving flush message segID(%v)...", currentSegID)
+
+			if ibNode.insertBuffer.size(currentSegID) > 0 {
+				log.Println(".. Buffer not empty, flushing ...")
+				segMeta, collMeta, err := ibNode.getMeta(currentSegID)
+				if err != nil {
+					// GOOSE TODO add error handler
+					log.Println("Get meta wrong")
+				}
+				inCodec := storage.NewInsertCodec(collMeta)
+
+				// partitionTag -> partitionID
+				partitionTag := segMeta.GetPartitionTag()
+				partitionID, err := typeutil.Hash32String(partitionTag)
+				if err != nil {
+					// GOOSE TODO add error handler
+					log.Println("partitionTag to partitionID Wrong")
+				}
+
+				// buffer data to binlogs
+				binLogs, err := inCodec.Serialize(partitionID,
+					currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+				if err != nil {
+					log.Println("generate binlog wrong")
+				}
+
+				// clear buffer
+				delete(ibNode.insertBuffer.insertData, currentSegID)
+
+				//   binLogs -> minIO/S3
+				collIDStr := strconv.FormatInt(segMeta.GetCollectionID(), 10)
+				partitionIDStr := strconv.FormatInt(partitionID, 10)
+				segIDStr := strconv.FormatInt(currentSegID, 10)
+				keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
+
+				for _, blob := range binLogs {
+					uid, err := ibNode.idAllocator.AllocOne()
+					if err != nil {
+						log.Println("Allocate Id failed")
+						// GOOSE TODO error handler
+					}
+
+					key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
+					err = ibNode.minIOKV.Save(key, string(blob.Value[:]))
+					if err != nil {
+						log.Println("Save to MinIO failed")
+						// GOOSE TODO error handler
+					}
+
+					fieldID, err := strconv.ParseInt(blob.Key, 10, 32)
+					if err != nil {
+						log.Println("string to fieldID wrong")
+						// GOOSE TODO error handler
+					}
+
+					// Append binlogs
+					inBinlogMsg := &insertFlushSyncMsg{
+						flushCompleted: false,
+						insertBinlogPathMsg: insertBinlogPathMsg{
+							ts:      flushTs,
+							segID:   currentSegID,
+							fieldID: int32(fieldID),
+							paths:   []string{key},
+						},
+					}
+					ibNode.outCh <- inBinlogMsg
+				}
+			}
+
+			// Flushed
+			log.Println(".. Flush finished ...")
+			inBinlogMsg := &insertFlushSyncMsg{
+				flushCompleted: true,
+				insertBinlogPathMsg: insertBinlogPathMsg{
+					ts:    flushTs,
+					segID: currentSegID,
+				},
+			}
+
+			ibNode.outCh <- inBinlogMsg
+		}
 	}
 
 	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
@@ -435,6 +522,27 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	}
 
 	return nil
+}
+
+func (ibNode *insertBufferNode) getMeta(segID UniqueID) (*etcdpb.SegmentMeta, *etcdpb.CollectionMeta, error) {
+
+	segMeta := &etcdpb.SegmentMeta{}
+
+	key := path.Join(SegmentPrefix, strconv.FormatInt(segID, 10))
+	value, _ := ibNode.kvClient.Load(key)
+	err := proto.UnmarshalText(value, segMeta)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	collMeta := &etcdpb.CollectionMeta{}
+	key = path.Join(CollectionPrefix, strconv.FormatInt(segMeta.GetCollectionID(), 10))
+	value, _ = ibNode.kvClient.Load(key)
+	err = proto.UnmarshalText(value, collMeta)
+	if err != nil {
+		return nil, nil, err
+	}
+	return segMeta, collMeta, nil
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -503,6 +611,10 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *i
 	minioPrefix := Params.InsertLogRootPath
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, Params.MasterAddress)
+	if err != nil {
+		panic(err)
+	}
+	err = idAllocator.Start()
 	if err != nil {
 		panic(err)
 	}

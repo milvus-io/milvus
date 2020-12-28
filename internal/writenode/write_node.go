@@ -25,8 +25,10 @@ func NewWriteNode(ctx context.Context, writeNodeID uint64) *WriteNode {
 
 func (node *WriteNode) Start() {
 
-	ddChan := make(chan *ddlFlushSyncMsg, 5)
-	insertChan := make(chan *insertFlushSyncMsg, 5)
+	// TODO GOOSE Init Size??
+	chanSize := 100
+	ddChan := make(chan *ddlFlushSyncMsg, chanSize)
+	insertChan := make(chan *insertFlushSyncMsg, chanSize)
 	node.flushSyncService = newFlushSyncService(node.ctx, ddChan, insertChan)
 
 	node.dataSyncService = newDataSyncService(node.ctx, ddChan, insertChan)
