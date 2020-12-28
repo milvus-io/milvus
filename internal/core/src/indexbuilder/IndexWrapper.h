@@ -45,6 +45,10 @@ class IndexWrapper {
     std::optional<T>
     get_config_by_name(std::string name);
 
+ public:
+    void
+    BuildWithIds(const knowhere::DatasetPtr& dataset);
+
  private:
     knowhere::VecIndexPtr index_ = nullptr;
     std::string type_params_;

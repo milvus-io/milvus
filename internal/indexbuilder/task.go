@@ -227,7 +227,7 @@ func (it *IndexBuildTask) Execute() error {
 			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
 		}
 
-		err = it.index.BuildFloatVecIndex(floatVectorFieldData.Data)
+		err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
 		if err != nil {
 			return err
 		}
