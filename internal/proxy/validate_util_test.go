@@ -107,7 +107,7 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 	field1.DataType = schemapb.DataType_VECTOR_FLOAT
 	assert.NotNil(t, ValidateVectorFieldMetricType(field1))
 	field1.IndexParams = []*commonpb.KeyValuePair{
-		&commonpb.KeyValuePair{
+		{
 			Key:   "abcdefg",
 			Value: "",
 		},
