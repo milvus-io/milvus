@@ -178,9 +178,9 @@ public class TestAddVectors {
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
     public void test_load_partition(MilvusClient client, String collectionName) {
         String tag = RandomStringUtils.randomAlphabetic(10);
-        Response createpResponse = client.createPartition(collectionName, tag);
+        client.createPartition(collectionName, tag);
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
-        InsertResponse res = client.insert(insertParam);
+        client.insert(insertParam);
         List<String> tags = new ArrayList<>();
         tags.add(tag);
         Response load_res = client.loadCollection(collectionName, tags);
@@ -200,7 +200,7 @@ public class TestAddVectors {
     public void test_load_empty_partitions(MilvusClient client, String collectionName) {
         List<String> tags = new ArrayList<>();
         Response load_res = client.loadCollection(collectionName, tags);
-        assert !load_res.ok();
+        assert load_res.ok();
     }
 
     @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
@@ -210,7 +210,7 @@ public class TestAddVectors {
         tags.add(tag);
         client.createPartition(collectionName, tag);
         InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
-        InsertResponse res = client.insert(insertParam);
+        client.insert(insertParam);
         Response load_res = client.loadCollection(collectionName, tags);
         assert load_res.ok();
     }

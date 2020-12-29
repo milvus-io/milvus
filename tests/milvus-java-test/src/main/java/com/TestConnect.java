@@ -2,9 +2,7 @@ package com;
 
 import io.milvus.client.*;
 import io.milvus.client.exception.InitializationException;
-import java.net.ConnectException;
 import java.util.concurrent.TimeUnit;
-import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -16,7 +14,7 @@ public class TestConnect {
             .withHost(host)
             .withPort(port)
             .build();
-        MilvusClient client = new MilvusGrpcClient(connectParam);
+        new MilvusGrpcClient(connectParam);
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
@@ -60,6 +58,7 @@ public class TestConnect {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_disconnect_repeatably(MilvusClient client, String collectionName){
+        client.close();
         client.close();
     }
 }

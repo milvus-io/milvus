@@ -27,7 +27,7 @@ public class TestPS {
 
 
 
-    public static void main(String[] args) throws ConnectFailedException, ExecutionException, InterruptedException {
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
         int nb = 10000;
         int nq = 1;
         int top_k = 2;
@@ -71,7 +71,7 @@ public class TestPS {
             .withIndexFileSize(index_file_size)
             .withMetricType(MetricType.L2)
             .build();
-        Response res = client.createCollection(tableSchema);
+        client.createCollection(tableSchema);
         List<Long> vectorIds;
         vectorIds = Stream.iterate(0L, n -> n)
             .limit(nb)
