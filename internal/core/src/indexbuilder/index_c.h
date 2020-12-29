@@ -28,26 +28,27 @@ extern "C" {
 
 #include <stdint.h>
 #include "segcore/collection_c.h"
+#include "common/status_c.h"
 
 typedef void* CIndex;
 
 // TODO: how could we pass map between go and c++ more efficiently?
 // Solution: using protobuf instead of json, this way significantly increase programming efficiency
 
-CIndex
-CreateIndex(const char* serialized_type_params, const char* serialized_index_params);
+CStatus
+CreateIndex(const char* serialized_type_params, const char* serialized_index_params, CIndex* res_index);
 
 void
 DeleteIndex(CIndex index);
 
-void
+CStatus
 BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 
-void
+CStatus
 BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
 
-char*
-SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size);
+CStatus
+SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
 
 void
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);

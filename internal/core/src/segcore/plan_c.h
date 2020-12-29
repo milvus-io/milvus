@@ -16,6 +16,7 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 #include "segcore/collection_c.h"
+#include "common/status_c.h"
 
 typedef void* CPlan;
 typedef void* CPlaceholderGroup;

@@ -18,6 +18,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "segcore/collection_c.h"
+#include "common/status_c.h"
 
 typedef void* CLoadIndexInfo;
 typedef void* CBinarySet;

@@ -214,3 +214,9 @@ install(
 
 install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
         DESTINATION lib)
+
+install(
+        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
+        DESTINATION include/common/
+        FILES_MATCHING PATTERN "*_c.h"
+)

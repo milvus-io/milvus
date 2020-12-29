@@ -13,6 +13,8 @@ package indexbuilder
 */
 import "C"
 import (
+	"errors"
+	"strconv"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -38,11 +40,20 @@ type CIndex struct {
 
 func (index *CIndex) Serialize() ([]*Blob, error) {
 	/*
-		char*
-		SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size);
+		CStatus
+		SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
 	*/
+
+	var cDumpedSlicedBuffer *C.char
 	var bufferSize int32
-	var cDumpedSlicedBuffer *C.char = C.SerializeToSlicedBuffer(index.indexPtr, (*C.int32_t)(unsafe.Pointer(&bufferSize)))
+	status := C.SerializeToSlicedBuffer(index.indexPtr, (*C.int32_t)(unsafe.Pointer(&bufferSize)), &cDumpedSlicedBuffer)
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New("SerializeToSlicedBuffer failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
 	defer C.free(unsafe.Pointer(cDumpedSlicedBuffer))
 
 	dumpedSlicedBuffer := C.GoBytes(unsafe.Pointer(cDumpedSlicedBuffer), (C.int32_t)(bufferSize))
@@ -81,19 +92,31 @@ func (index *CIndex) Load(blobs []*Blob) error {
 
 func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 	/*
-		void
+		CStatus
 		BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 	*/
-	C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	status := C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
 	return nil
 }
 
 func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
 	/*
-		void
+		CStatus
 		BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors);
 	*/
-	C.BuildBinaryVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	status := C.BuildBinaryVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return errors.New(" failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
 	return nil
 }
 
@@ -127,11 +150,21 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	indexParamsPointer := C.CString(indexParamsStr)
 
 	/*
-		CIndex
+		CStatus
 		CreateIndex(const char* serialized_type_params,
-					const char* serialized_index_params);
+					const char* serialized_index_params,
+					CIndex* res_index);
 	*/
+	var indexPtr C.CIndex
+	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
+	errorCode := status.error_code
+	if errorCode != 0 {
+		errorMsg := C.GoString(status.error_msg)
+		defer C.free(unsafe.Pointer(status.error_msg))
+		return nil, errors.New(" failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+	}
+
 	return &CIndex{
-		indexPtr: C.CreateIndex(typeParamsPointer, indexParamsPointer),
+		indexPtr: indexPtr,
 	}, nil
 }
