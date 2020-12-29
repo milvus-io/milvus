@@ -12,7 +12,9 @@ set(SEGCORE_FILES
         Reduce.cpp
         plan_c.cpp
         reduce_c.cpp
-        load_index_c.cpp)
+        load_index_c.cpp
+        SealedIndexingRecord.cpp
+        )
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )

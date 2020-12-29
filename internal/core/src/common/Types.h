@@ -23,8 +23,10 @@ using engine::FieldElementType;
 using engine::QueryResult;
 using MetricType = faiss::MetricType;
 
-faiss::MetricType
+MetricType
 GetMetricType(const std::string& type);
+std::string
+MetricTypeToName(MetricType metric_type);
 
 // NOTE: dependent type
 // used at meta-template programming

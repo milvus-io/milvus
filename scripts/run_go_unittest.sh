@@ -13,5 +13,8 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 # ignore Minio,S3 unittes
 MILVUS_DIR="${SCRIPTS_DIR}/../internal/"
 echo $MILVUS_DIR
-go test -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage" "${MILVUS_DIR}/proxy/..." "${MILVUS_DIR}/writenode/..." "${MILVUS_DIR}/util/..." -failfast
+go test -cover "${MILVUS_DIR}/kv/..." -failfast
+go test -cover "${MILVUS_DIR}/proxy/..." -failfast
+go test -cover "${MILVUS_DIR}/writenode/..." -failfast
+go test -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
 #go test -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." -failfast

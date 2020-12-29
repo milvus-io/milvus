@@ -20,9 +20,9 @@
 #include <query/PlanNode.h>
 
 #include "AckResponder.h"
+#include "SealedIndexingRecord.h"
 #include "ConcurrentVector.h"
 #include "segcore/SegmentBase.h"
-// #include "knowhere/index/structured_index/StructuredIndex.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
 #include "segcore/DeletedRecord.h"
@@ -79,14 +79,12 @@ class SegmentSmallIndex : public SegmentBase {
 
     Status
     DropRawData(std::string_view field_name) override {
-        // TODO: NO-OP
-        return Status::OK();
+        PanicInfo("unimplemented");
     }
 
     Status
     LoadRawData(std::string_view field_name, const char* blob, int64_t blob_size) override {
-        // TODO: NO-OP
-        return Status::OK();
+        PanicInfo("unimplemented");
     }
 
     int64_t
@@ -106,6 +104,11 @@ class SegmentSmallIndex : public SegmentBase {
     const DeletedRecord&
     get_deleted_record() const {
         return deleted_record_;
+    }
+
+    const SealedIndexingRecord&
+    get_sealed_indexing_record() const {
+        return sealed_indexing_record_;
     }
 
     const Schema&
@@ -128,6 +131,9 @@ class SegmentSmallIndex : public SegmentBase {
     get_deleted_count() const override {
         return 0;
     }
+
+    Status
+    LoadIndexing(const LoadIndexInfo& info) override;
 
  public:
     friend std::unique_ptr<SegmentBase>
@@ -160,6 +166,7 @@ class SegmentSmallIndex : public SegmentBase {
     InsertRecord record_;
     DeletedRecord deleted_record_;
     IndexingRecord indexing_record_;
+    SealedIndexingRecord sealed_indexing_record_;
 
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
 };
