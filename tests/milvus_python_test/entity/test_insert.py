@@ -298,9 +298,9 @@ class TestInsertBinary:
         assert len(ids) == default_nb
         assert connect.has_partition(binary_collection, default_tag)
 
-    # TODO
+    # TODO: disable
     @pytest.mark.level(2)
-    def test_insert_binary_multi_times(self, connect, binary_collection):
+    def _test_insert_binary_multi_times(self, connect, binary_collection):
         '''
         target: test insert entities multi times and final flush
         method: create collection and insert binary entity multi and final flush

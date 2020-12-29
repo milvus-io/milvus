@@ -293,14 +293,14 @@ class TestDeleteBase:
         res_get = connect.get_entity_by_id(collection, delete_ids)
         assert res_get[0] is None
 
+    # TODO: disable
     @pytest.mark.level(2)
-    def test_index_insert_single_delete_get(self, connect, id_collection, get_simple_index):
+    def _test_index_insert_single_delete_get(self, connect, id_collection):
         '''
-        method: create index, insert entities, and delete
+        method: insert entities, and delete
         expected: entities deleted
         '''
         ids = [i for i in range(default_nb)]
-        connect.create_index(id_collection, field_name, get_simple_index)
         for i in range(default_nb):
             connect.bulk_insert(id_collection, default_entity, [ids[i]])
         connect.flush([id_collection])
