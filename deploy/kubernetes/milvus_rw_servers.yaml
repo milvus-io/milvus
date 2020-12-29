@@ -1,0 +1,84 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: milvus-rw-servers
+  namespace: milvus-demo
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: milvus
+    tier: rw-servers
+  ports:
+    - protocol: TCP
+      port: 19530
+      targetPort: 19530
+      name: engine
+    - protocol: TCP
+      port: 19121
+      targetPort: 19121
+      name: web
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-rw-servers
+  namespace: milvus-demo
+spec:
+  selector:
+    matchLabels:
+      app: milvus
+      tier: rw-servers
+  strategy:
+    type: Recreate
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: rw-servers
+    spec:
+      containers:
+      - image: docker.ke.com:80/vsearch/milvus/milvus:0.11.0-cpu-d101620-4c44c0
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          tcpSocket:
+            port: 19530
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        name: milvus-rw-server
+        ports:
+          - containerPort: 19530
+            name: engine
+            protocol: TCP
+          - containerPort: 19121
+            name: web
+            protocol: TCP
+        readinessProbe:
+          tcpSocket:
+            port: 19530
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: milvus-db-disk
+          mountPath: /var/milvus/data
+          subPath: data
+        - name: milvus-db-disk
+          mountPath: /var/milvus/logs
+          subPath: logs
+        - name: milvus-rw-configmap
+          mountPath: /var/lib/milvus/conf/milvus.yaml
+          subPath: config.yml
+      volumes:
+      - name: milvus-rw-configmap
+        configMap:
+            name: milvus-rw-configmap
+      - name: milvus-db-disk
+        persistentVolumeClaim:
+            claimName: milvus-db-disk
