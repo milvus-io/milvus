@@ -36,5 +36,5 @@ writeNode:
 
   flush:
     # max buffer size to flush
-    insertBufSize: 20
+    insertBufSize: 500
     ddBufSize: 20

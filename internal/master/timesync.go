@@ -163,7 +163,6 @@ func (ttBarrier *hardTimeTickBarrier) Start() error {
 						// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
 						// that `ttmsg.Timestamp > oldT`
 						ttmsg := timetickmsg.(*ms.TimeTickMsg)
-						log.Printf("[hardTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
 						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerID]
 						if !ok {

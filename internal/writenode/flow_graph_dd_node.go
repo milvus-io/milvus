@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"path"
 	"sort"
 	"strconv"
 
@@ -148,14 +149,14 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 				// Blob key example:
 				// ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
 				// ${tenant}/data_definition_log/${collection_id}/ddl/${log_idx}
-				keyCommon := Params.DdLogRootPath + strconv.FormatInt(collectionID, 10) + "/"
+				keyCommon := path.Join(Params.DdLogRootPath, strconv.FormatInt(collectionID, 10))
 
 				// save ts binlog
 				timestampLogIdx, err := ddNode.idAllocator.AllocOne()
 				if err != nil {
 					log.Println(err)
 				}
-				timestampKey := keyCommon + binLogs[0].GetKey() + "/" + strconv.FormatInt(timestampLogIdx, 10)
+				timestampKey := path.Join(keyCommon, binLogs[0].GetKey(), strconv.FormatInt(timestampLogIdx, 10))
 				err = ddNode.kv.Save(timestampKey, string(binLogs[0].GetValue()))
 				if err != nil {
 					log.Println(err)
@@ -167,7 +168,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 				if err != nil {
 					log.Println(err)
 				}
-				ddKey := keyCommon + binLogs[1].GetKey() + "/" + strconv.FormatInt(ddLogIdx, 10)
+				ddKey := path.Join(keyCommon, binLogs[1].GetKey(), strconv.FormatInt(ddLogIdx, 10))
 				err = ddNode.kv.Save(ddKey, string(binLogs[1].GetValue()))
 				if err != nil {
 					log.Println(err)
