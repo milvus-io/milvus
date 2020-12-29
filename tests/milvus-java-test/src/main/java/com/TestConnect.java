@@ -34,7 +34,7 @@ public class TestConnect {
             .withPort(port)
             .withIdleTimeout(30, TimeUnit.SECONDS)
             .build();
-        MilvusClient client = new MilvusGrpcClient(connectParam);
+        new MilvusGrpcClient(connectParam);
     }
 
     @DataProvider(name="InvalidConnectArgs")
