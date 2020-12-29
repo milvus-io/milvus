@@ -11,6 +11,7 @@
 
 #include <map>
 #include <exception>
+#include <google/protobuf/text_format.h>
 
 #include "pb/index_cgo_msg.pb.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
@@ -21,12 +22,9 @@
 namespace milvus {
 namespace indexbuilder {
 
-IndexWrapper::IndexWrapper(const char* serialized_type_params,
-                           int64_t type_params_size,
-                           const char* serialized_index_params,
-                           int64_t index_params_size) {
-    type_params_ = std::string(serialized_type_params, type_params_size);
-    index_params_ = std::string(serialized_index_params, index_params_size);
+IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* serialized_index_params) {
+    type_params_ = std::string(serialized_type_params);
+    index_params_ = std::string(serialized_index_params);
     //    std::cout << "type_params_.size(): " << type_params_.size() << std::endl;
     //    std::cout << "index_params_.size(): " << index_params_.size() << std::endl;
 
@@ -49,11 +47,11 @@ IndexWrapper::parse() {
     bool deserialized_success;
 
     indexcgo::TypeParams type_config;
-    deserialized_success = type_config.ParseFromString(type_params_);
+    deserialized_success = google::protobuf::TextFormat::ParseFromString(type_params_, &type_config);
     Assert(deserialized_success);
 
     indexcgo::IndexParams index_config;
-    deserialized_success = index_config.ParseFromString(index_params_);
+    deserialized_success = google::protobuf::TextFormat::ParseFromString(index_params_, &index_config);
     Assert(deserialized_success);
 
     for (auto i = 0; i < type_config.params_size(); ++i) {

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -29,8 +30,6 @@ type loadIndexService struct {
 	fieldIndexes   map[string][]*internalPb.IndexStats
 	fieldStatsChan chan []*internalPb.FieldStats
 
-	msgBuffer          chan msgstream.TsMsg
-	unsolvedMsg        []msgstream.TsMsg
 	loadIndexMsgStream msgstream.MsgStream
 
 	queryNodeID UniqueID
@@ -80,8 +79,6 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 		fieldIndexes:   make(map[string][]*internalPb.IndexStats),
 		fieldStatsChan: make(chan []*internalPb.FieldStats, 1),
 
-		msgBuffer:          make(chan msgstream.TsMsg, 1),
-		unsolvedMsg:        make([]msgstream.TsMsg, 0),
 		loadIndexMsgStream: stream,
 
 		queryNodeID: Params.QueryNodeID,
@@ -107,29 +104,29 @@ func (lis *loadIndexService) start() {
 					log.Println("type assertion failed for LoadIndexMsg")
 					continue
 				}
-				//// 1. use msg's index paths to get index bytes
-				//var indexBuffer [][]byte
-				//var err error
-				//fn := func() error {
-				//	indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
-				//	if err != nil {
-				//		return err
-				//	}
-				//	return nil
-				//}
-				//err = msgstream.Retry(5, time.Millisecond*200, fn)
-				//if err != nil {
-				//	log.Println(err)
-				//	continue
-				//}
-				//// 2. use index bytes and index path to update segment
-				//err = lis.updateSegmentIndex(indexBuffer, indexMsg)
-				//if err != nil {
-				//	log.Println(err)
-				//	continue
-				//}
+				// 1. use msg's index paths to get index bytes
+				var indexBuffer [][]byte
+				var err error
+				fn := func() error {
+					indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+				err = msgstream.Retry(5, time.Millisecond*200, fn)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				// 2. use index bytes and index path to update segment
+				err = lis.updateSegmentIndex(indexBuffer, indexMsg)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
 				//3. update segment index stats
-				err := lis.updateSegmentIndexStats(indexMsg)
+				err = lis.updateSegmentIndexStats(indexMsg)
 				if err != nil {
 					log.Println(err)
 					continue

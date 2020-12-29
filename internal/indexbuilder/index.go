@@ -113,10 +113,7 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	for key, value := range typeParams {
 		protoTypeParams.Params = append(protoTypeParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	typeParamsStr, err := proto.Marshal(protoTypeParams)
-	if err != nil {
-		return nil, err
-	}
+	typeParamsStr := proto.MarshalTextString(protoTypeParams)
 
 	protoIndexParams := &indexcgopb.IndexParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
@@ -124,10 +121,7 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	for key, value := range indexParams {
 		protoIndexParams.Params = append(protoIndexParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	indexParamsStr, err := proto.Marshal(protoIndexParams)
-	if err != nil {
-		return nil, err
-	}
+	indexParamsStr := proto.MarshalTextString(protoIndexParams)
 
 	//print := func(param []byte) {
 	//	for i, c := range param {
@@ -144,19 +138,8 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	//print(indexParamsStr)
 	//fmt.Println("len(indexParamsStr): ", len(indexParamsStr))
 
-	var typeParamsPointer unsafe.Pointer
-	var indexParamsPointer unsafe.Pointer
-
-	if len(typeParamsStr) > 0 {
-		typeParamsPointer = unsafe.Pointer(&typeParamsStr[0])
-	} else {
-		typeParamsPointer = nil
-	}
-	if len(indexParamsStr) > 0 {
-		indexParamsPointer = unsafe.Pointer(&indexParamsStr[0])
-	} else {
-		indexParamsPointer = nil
-	}
+	typeParamsPointer := C.CString(typeParamsStr)
+	indexParamsPointer := C.CString(indexParamsStr)
 
 	/*
 		CIndex
@@ -166,6 +149,6 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 					int64_t index_params_size);
 	*/
 	return &CIndex{
-		indexPtr: C.CreateIndex((*C.char)(typeParamsPointer), (C.int64_t)(len(typeParamsStr)), (*C.char)(indexParamsPointer), (C.int64_t)(len(indexParamsStr))),
+		indexPtr: C.CreateIndex(typeParamsPointer, indexParamsPointer),
 	}, nil
 }
