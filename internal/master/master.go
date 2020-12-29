@@ -113,9 +113,6 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
 	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, Params.ProxyIDList, Params.SoftTimeTickBarrierInterval)
-	if err := proxyTimeTickBarrier.Start(); err != nil {
-		return nil, err
-	}
 	tsMsgProducer.SetProxyTtBarrier(proxyTimeTickBarrier)
 
 	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
@@ -124,9 +121,6 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
 	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, Params.WriteNodeIDList)
-	if err := writeTimeTickBarrier.Start(); err != nil {
-		return nil, err
-	}
 	tsMsgProducer.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
 	pulsarDDStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
