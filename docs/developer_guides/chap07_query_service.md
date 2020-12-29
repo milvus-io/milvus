@@ -10,48 +10,23 @@
 
 #### 8.2 API
 
-
-
-
-
 ```go
 type Client interface {
-  CreateQueryNodeGroup(nodeInstanceType string, numInstances int) (groupID UniqueID, error)
-  DestoryQueryNodeGroup(groupID UniqueID) error
-  DescribeQueryNodeGroup(groupID UniqueID) (QueryNodeGroupDescription, error)
-  DescribeParition(groupID UniqueID, dbID UniqueID, collID UniqueID, partitionIDs []UniqueID) ([]PartitionDescription, error)
-  CreateQueryChannel(groupID UniqueID) (QueryChannelInfo, error)
-  LoadPartitions(groupID UniqueID, dbID UniqueID, collID UniqueID, partitionIDs []UniqueID) error
-  ReleasePartitions(groupID UniqueID, dbID UniqueID, collID UniqueID, PartitionIDs []UniqueID) error
-}
-```
-
-#### 
-
-```go
-// examples of node instance type (nodeInstanceType)
-defaultInstanceType = "default"
-userDefinedInstanceType = "custom.instance.type"
-ec2StandardInstanceType = "c4.2xlarge"
-```
-
-
-
-```go
-type QueryChannelInfo struct {
-  RequestChannel string
-  ResultChannel string
+  DescribeService() (ServiceDescription, error)
+  DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
+  LoadPartitions(req LoadPartitonRequest) error
+  ReleasePartitions(req ReleasePartitionRequest) error
+  CreateQueryChannel() (QueryChannels, error)
+  GetTimeTickChannel() (string, error)
+  GetStatsChannel() (string, error)
 }
 ```
 
 
 
-```go
-type ResourceCost struct {
-  MemUsage int64
-  CpuUsage float32
-}
+* *DescribeService*
 
+```go
 type QueryNodeDescription struct {
   ResourceCost ResourceCost 
 }
@@ -64,7 +39,7 @@ type DbDescription struct {
   CollectionDescriptions []CollectionDescription
 }
 
-type QueryNodeGroupDescription struct {
+type ServiceDescription struct {
   DbDescriptions map[UniqueID]DbDescription
   NodeDescriptions map[UniqueID]QueryNodeDescription
 }
@@ -72,7 +47,15 @@ type QueryNodeGroupDescription struct {
 
 
 
+* *DescribeParition*
+
 ```go
+type DescribeParitionRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  partitionIDs []UniqueID
+}
+
 type PartitionState = int
 
 const (
@@ -84,10 +67,54 @@ const (
   IN_GPU PartitionState = 5
 )
 
+type ResourceCost struct {
+  MemUsage int64
+  CpuUsage float32
+}
+
 type PartitionDescription struct {
   ID UniqueID
   State PartitionState
   ResourceCost ResourceCost
+}
+
+type PartitionDescriptions struct {
+  PartitionDescriptions []PartitionDescription
+}
+```
+
+
+
+* *CreateQueryChannel*
+
+```go
+type QueryChannels struct {
+  RequestChannel string
+  ResultChannel string
+}
+```
+
+
+
+* *LoadPartitions*
+
+```go
+type LoadPartitonRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionIDs []UniqueID
+}
+```
+
+
+
+* *ReleasePartitions*
+
+```go
+type ReleasePartitionRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionIDs []UniqueID
 }
 ```
 

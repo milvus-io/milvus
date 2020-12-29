@@ -10,18 +10,42 @@
 
 #### 8.2 API
 
-```protobuf
+```go
+type Client interface {
+  BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
+	DescribeIndex(indexID UniqueID) (IndexDescription, error)
+	GetIndexFilePaths(indexID UniqueID) (IndexFilePaths, error)
+}
+```
+
+
+
+* *BuildIndex*
+
+```go
+type BuildIndexRequest struct {
+  DataPaths []string
+  TypeParams map[string]string
+  IndexParams map[string]string
+}
+
+type BuildIndexResponse struct {
+  IndexID UniqueID
+}
+```
+
+
+
+* *DescribeIndex*
+
+```go
 enum IndexStatus {
     NONE = 0;
     UNISSUED = 1;
     INPROGRESS = 2;
     FINISHED = 3;
 }
-```
 
-
-
-```go
 type IndexDescription struct {
 	ID                UniqueID
 	Status            IndexStatus
@@ -29,12 +53,15 @@ type IndexDescription struct {
 	ScheduleTime      time.Time
 	BuildCompleteTime time.Time
 }
+```
 
 
-type Client interface {
-  BuildIndex(dataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
-	DescribeIndex(indexID UniqueID) (*IndexDescription, error)
-	GetIndexFilePaths(indexID UniqueID) ([]string, error)
+
+* *GetIndexFilePaths*
+
+```go
+type IndexFilePaths struct {
+  FilePaths []string
 }
 ```
 

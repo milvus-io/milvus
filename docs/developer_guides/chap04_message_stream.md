@@ -10,7 +10,17 @@
 
 #### 8.2 API
 
+```go
+type Client interface {
+  CreateChannels(req CreateChannelRequest) (ChannelID []string, error)
+  DestoryChannels(channelID []string) error
+  DescribeChannels(channelID []string) (ChannelDescriptions, error)
+}
+```
 
+
+
+* *CreateChannels*
 
 ```go
 type OwnerDescription struct {
@@ -20,14 +30,23 @@ type OwnerDescription struct {
   DescriptionText string
 }
 
+type CreateChannelRequest struct {
+  OwnerDescription OwnerDescription
+  numChannels int
+}
+```
+
+
+
+* *DescribeChannels*
+
+```go
 type ChannelDescription struct {
   Owner OwnerDescription
 }
 
-type Client interface {
-  CreateChannels(ownerDescription OwnerDescription, numChannels int) (ChannelID []string, error)
-  DestoryChannels(channelID []string) error
-  DescribeChannels(channelID []string) ([]ChannelDescription, error)
+type ChannelDescriptions struct {
+  Descriptions []ChannelDescription
 }
 ```
 

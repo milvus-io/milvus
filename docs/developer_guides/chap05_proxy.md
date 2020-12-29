@@ -4,20 +4,25 @@
 
 #### 6.0 Proxy Service API
 
-```protobuf
-message Credential {
-	string address
-	//TODO: we should add keys/tokens here
+```go
+type Client interface {
+  GetTimeTickChannel() (string, error)
+  GetStatsChannel() (string, error)
+}
+```
+
+
+
+#### 6.1 Gateway API
+
+```go
+type ProxyInfo struct {
+  Address string
+  Port int32
 }
 
-message ProxyInfo {
-	common.Status
-	string address
-	int32 port
-}
-
-service ProxyService {
-	rpc RegisterLink(Credential) returns (ProxyInfo){}	//TODO: call IAM
+type Client interface {
+  RegisterLink() (ProxyInfo, error)
 }
 ```
 
