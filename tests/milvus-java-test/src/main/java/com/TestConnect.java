@@ -23,8 +23,8 @@ public class TestConnect {
             .withHost(host)
             .withPort(port)
             .build();
-        MilvusClient client = new MilvusGrpcClient(connectParam);
-        MilvusClient client_1 = new MilvusGrpcClient(connectParam);
+        new MilvusGrpcClient(connectParam);
+        new MilvusGrpcClient(connectParam);
     }
 
     @Test(dataProvider="InvalidConnectArgs", expectedExceptions = {InitializationException.class, IllegalArgumentException.class})

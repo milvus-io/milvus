@@ -27,7 +27,7 @@ public class TestPS {
 
 
 
-    public static void main(String[] args) throws ExecutionException, InterruptedException {
+    public static void main(String[] args) throws ExecutionException {
         int nb = 10000;
         int nq = 1;
         int top_k = 2;
