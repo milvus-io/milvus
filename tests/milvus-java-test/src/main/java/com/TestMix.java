@@ -60,22 +60,12 @@ public class TestMix {
         for (int i = 0; i < thread_num; i++) {
             executor.execute(
                     () -> {
-                        MilvusClient client = new MilvusGrpcClient();
                         ConnectParam connectParam = new ConnectParam.Builder()
                                 .withHost(host)
                                 .withPort(port)
                                 .build();
-                        try {
-                            client.connect(connectParam);
-                        } catch (ConnectFailedException e) {
-                            e.printStackTrace();
-                        }
-                        assert(client.isConnected());
-                        try {
-                            client.disconnect();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
+                        MilvusClient client = new MilvusGrpcClient(connectParam);
+                        client.close();
                     });
         }
         executor.awaitQuiescence(100, TimeUnit.SECONDS);
@@ -193,17 +183,11 @@ public class TestMix {
         for (int i = 0; i < thread_num; i++) {
             executor.execute(
                     () -> {
-                        MilvusClient client = new MilvusGrpcClient();
                         ConnectParam connectParam = new ConnectParam.Builder()
                                 .withHost(host)
                                 .withPort(port)
                                 .build();
-                        try {
-                            client.connect(connectParam);
-                        } catch (ConnectFailedException e) {
-                            e.printStackTrace();
-                        }
-                        assert(client.isConnected());
+                        MilvusClient client = new MilvusGrpcClient(connectParam);
                         String collectionName = RandomStringUtils.randomAlphabetic(10);
                         CollectionMapping tableSchema = new CollectionMapping.Builder(collectionName, dimension)
                                                                  .withIndexFileSize(index_file_size)
@@ -214,11 +198,7 @@ public class TestMix {
                         client.insert(insertParam);
                         Response response = client.dropCollection(collectionName);
                         Assert.assertTrue(response.ok());
-                        try {
-                            client.disconnect();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
+                        client.close();
                     });
         }
         executor.awaitQuiescence(100, TimeUnit.SECONDS);
