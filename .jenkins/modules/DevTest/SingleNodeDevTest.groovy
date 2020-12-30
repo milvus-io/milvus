@@ -56,7 +56,7 @@ timeout(time: 150, unit: 'MINUTES') {
                                --alluredir=\"test_out/dev/single/mysql\" \
                                --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                                --service ${env.HELM_RELEASE_NAME} >> \
-                               ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_dev_test.log"
+                               ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_mysql_single_dev_test.log"
         sh "${pytestCMD_mysql}"
     }
 
@@ -83,7 +83,7 @@ timeout(time: 150, unit: 'MINUTES') {
                                     --alluredir=\"test_out/dev/single/sqlite\" \
                                     --ip ${env.HELM_RELEASE_NAME}.milvus.svc.cluster.local \
                                     --service ${env.HELM_RELEASE_NAME} >> \
-                                    ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_sqlite_dev_test.log"
+                                    ${WORKSPACE}/${env.DEV_TEST_ARTIFACTS}/milvus_${BINARY_VERSION}_sqlite_single_dev_test.log"
             sh "${pytestCMD_sqlite}"
         }
     }

@@ -369,6 +369,7 @@ class TestCompactBase:
             connect.delete_entity_by_id(collection_list[i], ids[:nb//2])
             status = connect.compact(collection_list[i])
             assert status.OK()
+            connect.drop_collection(collection_list[i])
 
     @pytest.mark.timeout(COMPACT_TIMEOUT)
     def test_add_entity_after_compact(self, connect, collection):
