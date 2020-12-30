@@ -20,6 +20,7 @@
 #include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/TimerContext.h"
+#include "utils/TimeRecorder.h"
 
 #include <utility>
 
@@ -247,7 +248,9 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 void
 Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
-    auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
+    RangeContext ctx;
+    ctx.low_bound_ = latest_updated_;
+    auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>(ctx);
     auto status = (*op)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
@@ -260,11 +263,15 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         }
         return;
     }
+
+    latest_updated_ = std::max(op->GetLatestUpdatedTime(), latest_updated_.load());
+
     auto ids = op->GetIDs();
     ScopedSnapshotT ss;
     std::set<ID_TYPE> alive_cids;
     std::set<ID_TYPE> this_invalid_cids;
     bool diff_found = false;
+
     for (auto& [cid, ccid] : ids) {
         status = LoadSnapshot(store_, ss, cid, ccid);
         if (status.code() == SS_NOT_ACTIVE_ERROR) {

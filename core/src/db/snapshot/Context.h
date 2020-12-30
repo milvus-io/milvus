@@ -25,6 +25,11 @@ namespace milvus {
 namespace engine {
 namespace snapshot {
 
+struct RangeContext {
+    TS_TYPE upper_bound_ = std::numeric_limits<TS_TYPE>::max();
+    TS_TYPE low_bound_ = std::numeric_limits<TS_TYPE>::min();
+};
+
 struct PartitionContext {
     std::string name;
     ID_TYPE id = 0;

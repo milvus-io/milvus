@@ -104,6 +104,7 @@ class Snapshots {
     mutable std::shared_timed_mutex inactive_mtx_;
     std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
     std::set<ID_TYPE> invalid_ssid_;
+    std::atomic<TS_TYPE> latest_updated_ = std::numeric_limits<TS_TYPE>::min();
     StorePtr store_;
 };
 

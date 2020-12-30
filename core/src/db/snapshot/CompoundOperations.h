@@ -331,15 +331,22 @@ class GetAllActiveSnapshotIDsOperation : public Operations {
  public:
     using BaseT = Operations;
 
-    GetAllActiveSnapshotIDsOperation();
+    GetAllActiveSnapshotIDsOperation(const RangeContext& context);
 
     Status DoExecute(StorePtr) override;
 
     const std::map<ID_TYPE, ID_TYPE>&
     GetIDs() const;
 
+    TS_TYPE
+    GetLatestUpdatedTime() const {
+        return latest_update_;
+    }
+
  protected:
     std::map<ID_TYPE, ID_TYPE> cid_ccid_;
+    RangeContext updated_time_range_;
+    TS_TYPE latest_update_ = std::numeric_limits<TS_TYPE>::min();
 };
 
 class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOperation> {
