@@ -1,14 +1,14 @@
-# What's this for
+# A solution to achive low latency and high throughput
 We can get from [Mishards](../shards/README.md) milvus can be deployed with Mishards  as cluster to support massive-scale(10 billion, 100 billion or even larger datasets). However, when it comes to case that datasets is limited(say, millions or tens million) and low latency、high throughput is required, Mishards cannot handle it.
-Here, we give a proposal to solve the problem above in production environment.
+Here, we give a proposal to solve the problem above in production environment based on envoy.
 
-# How to
+## How to
 > Under kubernetes, we can use [kubectl](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#apply) to handle resources
 
-## Step 1: Docker and Kubernetes environment
+### Step 1: Docker and Kubernetes environment
 If no Docker and Kubernetes environment available, you can build one with [docker](https://v1-17.docs.kubernetes.io/docs/setup/production-environment/container-runtimes/#docker) and [Highly Available Kubernetes clusters](https://v1-17.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/) as reference.
 
-## Step 2: Distributed file system
+### Step 2: Distributed file system
 Milvus cluster relys on [Distributed file system](https://en.wikipedia.org/wiki/Clustered_file_system) to hold data. We can know from [Storge Classes](https://kubernetes.io/docs/concepts/storage/storage-classes/), kubernetes support plenty of plugins to communicate with specific storage engine(such as CephFs、AWS EBS、Azure Disk、GCE PD、Glusterfs ...)
 
 If one Distributed file system is already available, this step can be skipped, otherwise, [GlusterFs](https://www.gluster.org/) can be a option, and we can deploy it following [gluster-kubernetes
@@ -19,33 +19,33 @@ After we deployed glusterfs, we can create [StorageClass](https://kubernetes.io/
 kubectl apply -f storage/storageclass.yaml
 ```
 
-## Step 3: Namespace
+### Step 3: Namespace
 We can create a [Namespace](https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/) for isolation, and all the resource created will be within this namespace(if we need more Milvus cluster, we can create more namespace).
 ```sh
 kubectl apply -f kubernetes/milvus_namespace.yaml
 ```
 What is important to keep in mind is that `StorageClass` created in step 2 can be used across namespaces.
 
-## Step 4: PVC
+### Step 4: PVC
 Based on StorageClass from step 2, we can create [PVC](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) from [milvus_pvc.yaml](kubernetes/milvus_pvc.yaml). Pvcs will be mounted to mysql、envoy、milvus in the following steps.
 
 ```sh
 kubectl apply -f kubernetes/milvus_pvc.yaml
 ```
-## Step 5. Configmap
+### Step 5. Configmap
 [Configmap](https://kubernetes.io/docs/concepts/configuration/configmap/) can be used to store all the configurations to be used in the following steps.
 ```sh
 kubectl apply -f kubernetes/configmap/*
 ```
-## Step 6: Mysql
+### Step 6: Mysql
 Milvus use mysql to support cluster deployment.
 From [Deploying MySQL Server with Docker](https://dev.mysql.com/doc/refman/5.7/en/docker-mysql-more-topics.html) we known, mysql server can deploy with docker and we can create mysql service from [milvus_mysql.yaml](kubernetes/milvus_mysql.yaml).
 ```sh
 kubectl apply -f kubernetes/milvus_mysql.yaml
 ```
-## Step 7: Milvus rw/ro
+### Step 7: Milvus rw/ro
 Following [milvus_rw_servers.yaml](kubernetes/milvus_rw_servers.yaml) and [milvus_ro_servers.yaml](kubernetes/milvus_ro_servers.yaml), we can create milvus rw、ro services.
-## Step 8: envoy
+### Step 8: envoy
 **The last but the most.**
 
 [Envoy](https://www.envoyproxy.io/) is an open source edge and service proxy, designed for cloud-native application, we can use envoy to distinguish milvus read/write and get scalability when high throughput is required.
@@ -142,24 +142,21 @@ spec:
     app: milvus
     tier: proxy
 ```
-
-
-# Extra
-## Speed up image pulling
+## Extra
+### Speed up image pulling
 To speed up image pulling, a [private registry](https://goharbor.io/) can be deployed, and we can add extra configuration([specifying-imagepullsecrets-on-a-pod](https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod)) to use it. 
 
-## Resource assign
+### Resource assign
 [Managing Resources for Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) can tells us how memory and cpu usage can be controlled.
 
-## Pod schedule
+### Pod schedule
 As described in [assign-pod-node](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node), we can use [NodeSelector](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector) and [Affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) to control where Milvus pod can be located
 
-## Probes
+### Probes
 [Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) can be used to detect when Milvus pod is ready, when Milvus pod need to be restarted.
 
-## DaemonSet vs Deployment
+### DaemonSet vs Deployment
 [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/) and [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) are two optional ways to deploy `envoy` and `milvus ro` pod.
 
-## helm
+### helm
 [helm](https://helm.sh/) can be used to put all in one just as [milvus-helm](https://github.com/milvus-io/milvus-helm)
-
