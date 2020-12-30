@@ -11,6 +11,7 @@
 
 #include "db/snapshot/CompoundOperations.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -48,16 +49,26 @@ MultiSegmentsOperation::DoExecute(StorePtr store) {
     std::map<ID_TYPE, SegmentCommit::VecT> new_segment_commits;
     for (auto& iter : new_segments_) {
         for (auto& new_segment : iter.second) {
+            size_t row_count = new_segment_counts_[new_segment->GetID()];
             OperationContext context;
             context.new_segment = new_segment;
             // TODO(yhz): Why here get adjusted ss
             context.new_segment_files = context_.new_segment_file_map[new_segment->GetID()];
+            // Set segment file row count.
+            for (auto& file : context.new_segment_files) {
+                if (file->GetFEtype() == engine::FieldElementType::FET_RAW) {
+                    file->SetRowCount(row_count);
+                    auto sf_ctx_p =
+                        ResourceContextBuilder<SegmentFile>(meta::oUpdate).AddAttr(RowCountField::Name).CreatePtr();
+                    AddStepWithLsn(*file, context.lsn, sf_ctx_p);
+                }
+            }
             auto sc_op = SegmentCommitOperation(context, GetAdjustedSS());
             STATUS_CHECK(sc_op(store));
             SegmentCommit::Ptr sc;
             STATUS_CHECK(sc_op.GetResource(sc));
 
-            sc->SetRowCount(new_segment_counts_[new_segment->GetID()]);
+            sc->SetRowCount(row_count);
 
             if (new_segment_commits.find(new_segment->GetPartitionId()) == new_segment_commits.end()) {
                 new_segment_commits[new_segment->GetPartitionId()] = SegmentCommit::VecT();
@@ -922,6 +933,31 @@ GetSnapshotIDsOperation::DoExecute(StorePtr store) {
 const IDS_TYPE&
 GetSnapshotIDsOperation::GetIDs() const {
     return ids_;
+}
+
+GetAllActiveSnapshotIDsOperation::GetAllActiveSnapshotIDsOperation()
+    : BaseT(OperationContext(), ScopedSnapshotT(), OperationsType::O_Compound) {
+}
+
+Status
+GetAllActiveSnapshotIDsOperation::DoExecute(StorePtr store) {
+    std::vector<CollectionCommitPtr> ccs;
+    STATUS_CHECK(store->GetActiveResources<CollectionCommit>(ccs));
+    for (auto& cc : ccs) {
+        auto cid = cc->GetCollectionId();
+        auto it = cid_ccid_.find(cid);
+        if (it == cid_ccid_.end()) {
+            cid_ccid_[cid] = cc->GetID();
+        } else {
+            cid_ccid_[cid] = std::max(it->second, cc->GetID());
+        }
+    }
+    return Status::OK();
+}
+
+const std::map<ID_TYPE, ID_TYPE>&
+GetAllActiveSnapshotIDsOperation::GetIDs() const {
+    return cid_ccid_;
 }
 
 GetCollectionIDsOperation::GetCollectionIDsOperation(bool reversed)

@@ -776,13 +776,13 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
         field_type_.insert({field.first, field.second.field_type_});
     }
 
+    auto query_json = json["query"];
     milvus::json extra_params;
-    if (json.contains("fields")) {
-        if (json["fields"].is_array()) {
-            extra_params["fields"] = json["fields"];
+    if (query_json.contains("fields")) {
+        if (query_json["fields"].is_array()) {
+            extra_params["fields"] = query_json["fields"];
         }
     }
-    auto query_json = json["query"];
 
     std::vector<std::string> partition_tags;
     if (query_json.contains("partition_tags")) {
@@ -1491,16 +1491,8 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
 }
 
 StatusDtoT
-WebRequestHandler::DropPartition(const OString& collection_name, const OString& body) {
-    std::string tag;
-    try {
-        auto json = milvus::json::parse(body->std_str());
-        tag = json["partition_tag"].get<std::string>();
-    } catch (nlohmann::detail::parse_error& e) {
-        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
-    } catch (nlohmann::detail::type_error& e) {
-        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
-    }
+WebRequestHandler::DropPartition(const OString& collection_name, const OString& partition_tag) {
+    std::string tag = partition_tag->std_str();
     auto status = req_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
 
     ASSIGN_RETURN_STATUS_DTO(status)
@@ -1656,6 +1648,7 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     // construct chunk data by json object
+    InsertParam insert_param;
     ChunkDataMap chunk_data;
     int64_t row_num = entities_json.size();
     int64_t offset = 0;
@@ -1665,9 +1658,11 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
             if (field_name == NAME_ID) {
                 // special handle id field
                 CopyRowStructuredData<int64_t>(entity.value(), engine::FIELD_UID, offset, row_num, chunk_data);
+                insert_param.fields_type_.insert(std::make_pair(engine::FIELD_UID, engine::DataType::INT64));
                 continue;
             }
 
+            insert_param.fields_type_.insert(std::make_pair(field_name, field_types.at(field_name)));
             switch (field_types.at(field_name)) {
                 case engine::DataType::INT32: {
                     CopyRowStructuredData<int32_t>(entity.value(), field_name, offset, row_num, chunk_data);
@@ -1698,7 +1693,6 @@ WebRequestHandler::InsertEntity(const OString& collection_name, const milvus::se
     }
 
     // conver to InsertParam, no memory copy, just record the data address and pass to InsertReq
-    InsertParam insert_param;
     ConvertToParam(chunk_data, row_num, insert_param);
 
     // do insert

@@ -1,6 +1,5 @@
 import logging
 import pytest
-import requests
 from utils import *
 from constants import *
 
@@ -135,13 +134,34 @@ class TestSearchBase:
         expected: return field value
         """
         entities, ids = init_data(client, collection)
-        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
-        data = client.search(collection, query, fields=[default_int_field_name])
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, fields=[default_int_field_name])
+        client.search(collection, query)
+        data = client.search(collection, query)
         res = data['result']
         assert data['nq'] == default_nq
         assert len(res) == default_nq
         assert len(res[0]) == default_top_k
         assert default_int_field_name in res[0][0]['entity'].keys()
+
+    def test_search_with_not_exist_field(self, client, collection):
+        """
+        target: test search with not existed field
+        method: call search with exist field and not exist field
+        expected: not ok
+        """
+        entities, ids = init_data(client, collection)
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, fields=[default_int_field_name, "default_int_field_name"])
+        assert not client.search(collection, query)
+
+    def test_search_with_none_field(self, client, collection):
+        """
+        target: test search with not existed field
+        method: call search with exist field and not exist field
+        expected: not ok
+        """
+        entities, ids = init_data(client, collection)
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, fields=[None])
+        assert not client.search(collection, query)
 
     # TODO
     def test_search_invalid_n_probe(self, client, collection, ):
@@ -238,12 +258,12 @@ class TestSearchBase:
         """
         entities, ids = init_data(client, collection)
         client.create_partition(collection, default_tag)
-        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq)
-        data = client.search(collection, query, partition_tags=default_tag)
+        query, query_vectors = gen_query_vectors(field_name, entities, default_top_k, default_nq, partition_tags=[default_tag])
+        data = client.search(collection, query)
         res = data['result']
         assert data['nq'] == default_nq
         assert len(res) == default_nq
-        assert len(res[0]) == 0
+        assert res[0] is None
 
     def test_search_binary_flat(self, client, binary_collection):
         """
@@ -252,7 +272,8 @@ class TestSearchBase:
         expected:
         """
         raw_vectors, binary_entities, ids = init_binary_data(client, binary_collection)
-        query, query_vectors = gen_query_vectors(default_binary_vec_field_name, binary_entities, default_top_k,default_nq, metric_type='JACCARD')
+        query, query_vectors = gen_query_vectors(default_binary_vec_field_name, binary_entities, default_top_k,
+                                                 default_nq, metric_type='JACCARD')
         data = client.search(binary_collection, query)
         res = data['result']
         assert data['nq'] == default_nq

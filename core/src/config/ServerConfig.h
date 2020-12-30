@@ -89,6 +89,8 @@ struct ServerConfig {
     struct General {
         String timezone{"unknown"};
         String meta_uri{"unknown"};
+        Integer stale_snapshots_count{0};
+        Integer stale_snapshots_duration{0};
     } general;
 
     struct Network {

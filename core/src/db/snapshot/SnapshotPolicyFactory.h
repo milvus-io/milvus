@@ -11,19 +11,23 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include "config/ServerConfig.h"
+#include "db/snapshot/SnapshotPolicy.h"
 
 namespace milvus {
-namespace cache {
+namespace engine {
+namespace snapshot {
 
-class DataObj {
+// A class that takes server config, then generates snapshot policy
+class SnapshotPolicyFactory {
  public:
-    virtual int64_t
-    Size() = 0;
-    virtual ~DataObj() = default;
+    // Return a SnapshotPolicy
+    static SnapshotPolicyPtr
+    Build(ServerConfig& server_config);
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
-
-}  // namespace cache
+}  // namespace snapshot
+}  // namespace engine
 }  // namespace milvus

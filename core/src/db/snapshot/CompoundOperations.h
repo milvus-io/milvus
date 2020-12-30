@@ -323,8 +323,23 @@ class GetCollectionIDsOperation : public Operations {
     GetIDs() const;
 
  protected:
-    bool reversed_;
+    bool reversed_ = true;
     IDS_TYPE ids_;
+};
+
+class GetAllActiveSnapshotIDsOperation : public Operations {
+ public:
+    using BaseT = Operations;
+
+    GetAllActiveSnapshotIDsOperation();
+
+    Status DoExecute(StorePtr) override;
+
+    const std::map<ID_TYPE, ID_TYPE>&
+    GetIDs() const;
+
+ protected:
+    std::map<ID_TYPE, ID_TYPE> cid_ccid_;
 };
 
 class DropCollectionOperation : public CompoundBaseOperation<DropCollectionOperation> {

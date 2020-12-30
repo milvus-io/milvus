@@ -13,19 +13,24 @@
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHolders.h"
 
+#include <string>
+
 namespace milvus {
 namespace engine {
 namespace snapshot {
 
-SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions)
-    : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) {
+/* SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, GCHandler gc_handler, size_t num_versions) */
+/*     : collection_id_(collection_id), num_versions_(num_versions), gc_handler_(gc_handler) { */
+/* } */
+SnapshotHolder::SnapshotHolder(ID_TYPE collection_id, SnapshotPolicyPtr policy, GCHandler gc_handler)
+    : collection_id_(collection_id), policy_(policy), gc_handler_(gc_handler) {
 }
 
 SnapshotHolder::~SnapshotHolder() {
     bool release = false;
-    for (auto& ss_kv : active_) {
-        if (!ss_kv.second->GetCollection()->IsActive()) {
-            ReadyForRelease(ss_kv.second);
+    for (auto& [_, ss] : active_) {
+        if (!ss->GetCollection()->IsActive()) {
+            ReadyForRelease(ss);
             release = true;
         }
     }
@@ -106,10 +111,52 @@ SnapshotHolder::Get(ScopedSnapshotT& ss, ID_TYPE id, bool scoped) const {
     return status;
 }
 
+int
+SnapshotHolder::NumOfSnapshot() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return active_.size();
+}
+
 bool
 SnapshotHolder::IsActive(Snapshot::Ptr& ss) {
     auto collection = ss->GetCollection();
     return collection && collection->IsActive();
+}
+
+Status
+SnapshotHolder::ApplyEject() {
+    Status status;
+    /* Snapshot::Ptr oldest_ss; */
+    std::vector<Snapshot::Ptr> stale_sss;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (active_.size() == 0) {
+            return Status(SS_EMPTY_HOLDER,
+                          "SnapshotHolder::ApplyEject: Empty holder found for " + std::to_string(collection_id_));
+        }
+        IDS_TYPE to_eject;
+        if (policy_->ShouldEject(active_, to_eject, false) == 0) {
+            return status;
+        }
+        /* if (!policy_->ShouldEject(active_, false)) { */
+        /*     return status; */
+        /* } */
+        /* auto oldest_it = active_.find(min_id_); */
+        /* oldest_ss = oldest_it->second; */
+        /* active_.erase(oldest_it); */
+        for (auto& id : to_eject) {
+            stale_sss.push_back(active_[id]);
+            active_.erase(id);
+        }
+        if (active_.size() > 0) {
+            min_id_ = active_.begin()->first;
+            max_id_ = active_.rbegin()->first;
+        }
+    }
+    for (auto& ss : stale_sss) {
+        ReadyForRelease(ss);
+    }
+    return status;
 }
 
 Status
@@ -130,9 +177,13 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             return Status(SS_DUPLICATED_ERROR, emsg.str());
         }
     }
-    Snapshot::Ptr oldest_ss;
+    std::vector<Snapshot::Ptr> stale_sss;
     {
         auto ss = std::make_shared<Snapshot>(store, id);
+        if (!ss->IsValid()) {
+            std::string emsg = "SnapshotHolder::Add: Invalid SS " + std::to_string(id);
+            return Status(SS_NOT_ACTIVE_ERROR, emsg);
+        }
 
         std::unique_lock<std::mutex> lock(mutex_);
         if (!IsActive(ss)) {
@@ -152,17 +203,26 @@ SnapshotHolder::Add(StorePtr store, ID_TYPE id) {
             max_id_ = id;
         }
 
+        LOG_SERVER_DEBUG_ << "SSLoad CCID=" << id << " for CID=" << ss->GetCollectionId() << " CNAME=" << ss->GetName();
         active_[id] = ss;
-        if (active_.size() <= num_versions_) {
+        IDS_TYPE to_eject;
+        if (policy_->ShouldEject(active_, to_eject, true) == 0) {
             return status;
         }
-
-        auto oldest_it = active_.find(min_id_);
-        oldest_ss = oldest_it->second;
-        active_.erase(oldest_it);
-        min_id_ = active_.begin()->first;
+        for (auto& id : to_eject) {
+            stale_sss.push_back(active_[id]);
+            LOG_SERVER_DEBUG_ << "SSEject CCID=" << id << " for CID=" << active_[id]->GetCollectionId()
+                              << " CNAME=" << active_[id]->GetName();
+            active_.erase(id);
+        }
+        if (active_.size() > 0) {
+            min_id_ = active_.begin()->first;
+            max_id_ = active_.rbegin()->first;
+        }
     }
-    ReadyForRelease(oldest_ss);
+    for (auto& ss : stale_sss) {
+        ReadyForRelease(ss);
+    }
     return status;
 }
 

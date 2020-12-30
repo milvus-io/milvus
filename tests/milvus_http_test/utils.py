@@ -311,7 +311,7 @@ def assert_equal_entity(a, b):
 
 
 def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 10}, rand_vector=False,
-                      metric_type="L2", replace_vecs=None):
+                      metric_type="L2", fields=None, partition_tags=None, replace_vecs=None):
     if rand_vector is True:
         dimension = len(entities[0][field_name][0])
         query_vectors = gen_vectors(nq, dimension)
@@ -326,6 +326,10 @@ def gen_query_vectors(field_name, entities, top_k, nq, search_params={"nprobe": 
             "must": [must_param]
         }
     }
+    if fields:
+        query.update({"fields": fields})
+    if partition_tags:
+        query.update({"partition_tags": partition_tags})
     # logging.getLogger().info(len(query_vectors[0]))
     return query, query_vectors
 

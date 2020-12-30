@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "config/ServerConfig.h"
 #include "db/snapshot/MetaEvent.h"
 #include "db/snapshot/Operations.h"
 #include "db/snapshot/ResourceHelper.h"
@@ -31,6 +32,9 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
     using Ptr = std::shared_ptr<InActiveResourcesGCEvent>;
 
     InActiveResourcesGCEvent() : Operations(OperationContext(), ScopedSnapshotT(), OperationsType::O_Leaf) {
+        auto is_cluster = config.cluster.enable();
+        auto role = config.cluster.role();
+        read_only_ = is_cluster && (role == ClusterRole::RO);
     }
 
     ~InActiveResourcesGCEvent() = default;
@@ -43,6 +47,9 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
     Status
     OnExecute(StorePtr store) override {
         LOG_ENGINE_INFO_ << "Executing InActiveResourcesGCEvent";
+        if (read_only_) {
+            return Status::OK();
+        }
 
         STATUS_CHECK(ClearInActiveResources<Collection>(store));
         STATUS_CHECK(ClearInActiveResources<CollectionCommit>(store));
@@ -89,6 +96,8 @@ class InActiveResourcesGCEvent : public GCEvent, public Operations {
 
         return Status::OK();
     }
+
+    bool read_only_ = false;
 };
 
 }  // namespace snapshot

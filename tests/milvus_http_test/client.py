@@ -18,6 +18,7 @@ class Request(object):
     def _check_status(self, result):
         # logging.getLogger().info(result.text)
         if result.status_code not in [200, 201, 204]:
+            logging.getLogger().error(result.text)
             return False
         if not result.text or "code" not in json.loads(result.text):
             return True
@@ -283,17 +284,16 @@ class MilvusClient(object):
             if field["field_name"] == field_name:
                 return field["index_params"]
 
-    def search(self, collection_name, query_expr, fields=None, partition_tags=None):
+    def search(self, collection_name, query_expr):
         url = self._url+url_collections+'/'+str(collection_name)+'/entities'
         r = Request(url)
         search_params = {
-            "query": query_expr,
-            "fields": fields,
-            "partition_tags": partition_tags
+            "query": query_expr
         }
         # logging.getLogger().info(search_params)
         try:
             status, data = r.get_with_body(search_params)
+            logging.getLogger().info(status)
             if status:
                 return data
             else:

@@ -123,7 +123,7 @@ class ResourceHolder {
             return false;
         }
         id_map_[resource->GetID()] = resource;
-        resource->RegisterOnNoRefCB(std::bind(&Derived::OnNoRefCallBack, this, resource));
+        resource->RegisterOnNoRefCB(std::bind(&Derived::OnNoRefCallBack, this, std::placeholders::_1));
         return true;
     }
 
@@ -138,10 +138,14 @@ class ResourceHolder {
     }
 
     virtual void
-    OnNoRefCallBack(ResourcePtr resource) {
-        resource->Deactivate();
-        Release(resource->GetID());
-        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(resource);
+    OnNoRefCallBack(ReferenceProxy::Ptr resource) {
+        auto res = std::dynamic_pointer_cast<ResourceT>(resource);
+        if (!res) {
+            return;
+        }
+        res->Deactivate();
+        Release(res->GetID());
+        auto evt_ptr = std::make_shared<ResourceGCEvent<ResourceT>>(res);
         EventExecutor::GetInstance().Submit(evt_ptr);
     }
 
