@@ -22,8 +22,10 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/db/transcript    DB_TRANSCRIPT_FILES 
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta          DB_META_MAIN_FILES )
 aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/backend  DB_META_BACKEND_FILES )
+aux_source_directory( ${MILVUS_ENGINE_SRC}/db/meta/condition  DB_META_CONDITION_FILES )
 set( DB_META_FILES  ${DB_META_MAIN_FILES}
                     ${DB_META_BACKEND_FILES}
+                    ${DB_META_CONDITION_FILES}
                     )
 
 aux_source_directory( ${MILVUS_ENGINE_SRC}/index/archive    WRAPPER_FILES )
