@@ -8,16 +8,24 @@ import (
 )
 
 const (
-	IvfPq     = "IVF_PQ"
-	IvfFlatNM = "IVF_FLAT"
-	BinFlat   = "BIN_FLAT"
+	// index type
+	IvfPq      = "IVF_PQ"
+	IvfFlatNM  = "IVF_FLAT"
+	BinIvfFlat = "BIN_IVF_FLAT"
+	BinFlat    = "BIN_FLAT"
+
+	// metric type
+	L2      = "L2"
+	IP      = "IP"
+	hamming = "HAMMING"
+	Jaccard = "JACCARD"
+
 	dim       = 8
 	nlist     = 100
 	m         = 4
 	nbits     = 8
-	L2        = "L2"
-	Jaccard   = "JACCARD"
 	nb        = 8 * 10000
+	sliceSize = 4
 )
 
 type testCase struct {
@@ -29,13 +37,18 @@ type testCase struct {
 func generateFloatVectorTestCases() []testCase {
 	return []testCase{
 		{IvfPq, L2, false},
+		{IvfPq, IP, false},
 		{IvfFlatNM, L2, false},
+		{IvfFlatNM, IP, false},
 	}
 }
 
 func generateBinaryVectorTestCases() []testCase {
 	return []testCase{
+		//{BinIvfFlat, Jaccard, true},
+		//{BinIvfFlat, hamming, true},
 		{BinFlat, Jaccard, true},
+		{BinFlat, hamming, true},
 	}
 }
 
@@ -53,11 +66,20 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
+	} else if indexType == BinIvfFlat {
+		indexParams["dim"] = strconv.Itoa(dim)
+		indexParams["nlist"] = strconv.Itoa(nlist)
+		indexParams["m"] = strconv.Itoa(m)
+		indexParams["nbits"] = strconv.Itoa(nbits)
+		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IvfFlatNM {
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 	} else if indexType == BinFlat {
 		indexParams["dim"] = strconv.Itoa(dim)
+	} else {
+		panic("")
 	}
 
 	return typeParams, indexParams
