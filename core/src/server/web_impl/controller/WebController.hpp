@@ -529,8 +529,8 @@ class WebController : public oatpp::web::server::api::ApiController {
 
     ADD_DEFAULT_CORS(DropPartition)
 
-    ENDPOINT("DELETE", "/collections/{collection_name}/partitions", DropPartition, PATH(String, collection_name),
-             BODY_STRING(String, body)) {
+    ENDPOINT("DELETE", "/collections/{collection_name}/partitions/{partition_tag}", DropPartition,
+             PATH(String, collection_name), PATH(String, partition_tag)) {
         TimeRecorder tr(std::string(WEB_LOG_PREFIX) + "DELETE \'/collections/" + collection_name->std_str() +
                         "/partitions\'");
         tr.RecordSection("Received request.");
@@ -538,7 +538,7 @@ class WebController : public oatpp::web::server::api::ApiController {
         auto handler = WebRequestHandler();
 
         std::shared_ptr<OutgoingResponse> response;
-        auto status_dto = handler.DropPartition(collection_name, body);
+        auto status_dto = handler.DropPartition(collection_name, partition_tag);
         switch (*(status_dto->code)) {
             case StatusCode::SUCCESS:
                 response = createDtoResponse(Status::CODE_204, status_dto);

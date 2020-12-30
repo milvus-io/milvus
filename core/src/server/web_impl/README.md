@@ -18,7 +18,7 @@
   - [`/collections/{collection_name}/partitions` (GET)](#collectionscollection_namepartitions-get)
   - [`/collections/{collection_name}/partitions` (POST)](#collectionscollection_namepartitions-post)
   - [`/collections/{collection_name}/partitions` (OPTIONS)](#collectionscollection_namepartitions-options)
-  - [`/collections/{collection_name}/partitions` (DELETE)](#collectionscollection_namepartitions-delete)
+  - [`/collections/{collection_name}/partitions/{partition_tag}` (DELETE)](#collectionscollection_namepartitions-delete)
   - [`/collections/{collection_name}/segments/{segment_name}/ids` (GET)](#collectionscollection_namesegmentssegment_nameids-get)
   - [`/collections/{collection_name}/entities` (POST)](#collectionscollection_nameentities-post)
   - [`/collections/{collection_name}/entities` (DELETE)](#collectionscollection_nameentities-delete)
@@ -644,7 +644,7 @@ Use this API for Cross-Origin Resource Sharing (CORS).
 $ curl -X OPTIONS "http://127.0.0.1:19121/collections/test_collection/partitions"
 ```
 
-### `/collections/{collection_name}/partitions` (DELETE)
+### `/collections/{collection_name}/partitions/{partition_tag}` (DELETE)
 
 Deletes a partition by tag.
 
@@ -652,13 +652,8 @@ Deletes a partition by tag.
 
 <table>
 <tr><th>Request Component</th><th>Value</th></tr>
-<tr><td> Name</td><td><pre><code>/collections/{collection_name}/partitions</code></pre></td></tr>
+<tr><td> Name</td><td><pre><code>/collections/{collection_name}/partitions/{partition_tag}</code></pre></td></tr>
 <tr><td>Header </td><td><pre><code>accept: application/json</code></pre> </td></tr>
-<tr><td>Body</td><td><pre><code>
-{
-  "partition_tag": string
-}
-</code></pre> </td></tr>
 <tr><td>Method</td><td>POST</td></tr>
 
 </table>
@@ -683,7 +678,7 @@ Deletes a partition by tag.
 ##### Request
 
 ```shell
-$ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/partitions" -H "accept: application/json" -d "{\"partition_tag\": \"tags_01\"}"
+$ curl -X DELETE "http://127.0.0.1:19121/collections/test_collection/partitions/test_partition" -H "accept: application/json"
 ```
 
 The deletion is successful if no information is returned.
