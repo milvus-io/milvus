@@ -62,7 +62,6 @@ IVF::Serialize(const Config& config) {
 void
 IVF::Load(const BinarySet& binary_set) {
     Assemble(const_cast<BinarySet&>(binary_set));
-    index_type_ = IndexEnum::INDEX_FAISS_IVFFLAT;
     LoadImpl(binary_set, index_type_);
 
     if (IndexMode() == IndexMode::MODE_CPU && STATISTICS_LEVEL >= 3) {
