@@ -82,7 +82,6 @@ TEST_F(NSGInterfaceTest, basic_test) {
     {
         ASSERT_ANY_THROW(index_->Serialize(search_conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf, nullptr));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 
@@ -149,7 +148,7 @@ TEST_F(NSGInterfaceTest, delete_test) {
     assert(!xb.empty());
 
     train_conf[milvus::knowhere::meta::DEVICEID] = DEVICE_GPU0;
-    index_->Train(base_dataset, train_conf);
+    index_->BuildAll(base_dataset, train_conf);
 
     // Serialize and Load before Query
     milvus::knowhere::BinarySet bs = index_->Serialize(search_conf);
@@ -206,7 +205,6 @@ TEST_F(NSGInterfaceTest, slice_test) {
     {
         ASSERT_ANY_THROW(index_->Serialize(search_conf));
         ASSERT_ANY_THROW(index_->Query(query_dataset, search_conf, nullptr));
-        ASSERT_ANY_THROW(index_->Add(base_dataset, search_conf));
         ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, search_conf));
     }
 

@@ -38,7 +38,6 @@ NSG_NM::Serialize(const Config& config) {
 
     try {
         fiu_do_on("NSG_NM.Serialize.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         impl::NsgIndex* index = index_.get();
 
         MemoryIOWriter writer;
@@ -61,7 +60,6 @@ NSG_NM::Load(const BinarySet& index_binary) {
     try {
         Assemble(const_cast<BinarySet&>(index_binary));
         fiu_do_on("NSG_NM.Load.throw_exception", throw std::exception());
-        std::lock_guard<std::mutex> lk(mutex_);
         auto binary = index_binary.GetByName("NSG_NM");
 
         MemoryIOReader reader;
@@ -96,12 +94,9 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
         impl::SearchParams s_params;
         s_params.search_length = config[IndexParams::search_length];
         s_params.k = config[meta::TOPK];
-        {
-            std::lock_guard<std::mutex> lk(mutex_);
-            // index_->ori_data_ = (float*) data_.get();
-            index_->Search(reinterpret_cast<const float*>(p_data), reinterpret_cast<float*>(data_.get()), rows, dim,
-                           topK, p_dist, p_id, s_params, bitset);
-        }
+        index_->Search(reinterpret_cast<const float*>(p_data), reinterpret_cast<float*>(data_.get()), rows, dim, topK,
+                       p_dist, p_id, s_params, bitset);
+        MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
         ret_ds->Set(meta::IDS, p_id);
@@ -113,7 +108,7 @@ NSG_NM::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::
 }
 
 void
-NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG_NM::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     auto idmap = std::make_shared<IDMAP>();
     idmap->Train(dataset_ptr, config);
     idmap->AddWithoutIds(dataset_ptr, config);
@@ -144,8 +139,6 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     b_params.out_degree = config[IndexParams::out_degree];
     b_params.search_length = config[IndexParams::search_length];
 
-    auto p_ids = dataset_ptr->Get<const int64_t*>(meta::IDS);
-
     GET_TENSOR_DATA_DIM(dataset_ptr)
     impl::NsgIndex::Metric_Type metric_type_nsg;
     if (config[Metric::TYPE].get<std::string>() == "IP") {
@@ -157,8 +150,7 @@ NSG_NM::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     }
     index_ = std::make_shared<impl::NsgIndex>(dim, rows, metric_type_nsg);
     index_->SetKnnGraph(knng);
-    index_->Build_with_ids(rows, reinterpret_cast<float*>(const_cast<void*>(p_data)),
-                           reinterpret_cast<const int64_t*>(p_ids), b_params);
+    index_->Build(rows, reinterpret_cast<float*>(const_cast<void*>(p_data)), nullptr, b_params);
 }
 
 int64_t

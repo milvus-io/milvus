@@ -97,7 +97,6 @@ TEST_P(IVFTest, ivf_basic_cpu) {
     }
 
     // null faiss index
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->Train(base_dataset, conf_);
@@ -156,7 +155,6 @@ TEST_P(IVFTest, ivf_basic_gpu) {
     }
 
     // null faiss index
-    ASSERT_ANY_THROW(index_->Add(base_dataset, conf_));
     ASSERT_ANY_THROW(index_->AddWithoutIds(base_dataset, conf_));
 
     index_->BuildAll(base_dataset, conf_);
@@ -194,7 +192,7 @@ TEST_P(IVFTest, ivf_serialize) {
     {
         // serialize index
         index_->Train(base_dataset, conf_);
-        index_->Add(base_dataset, conf_);
+        index_->AddWithoutIds(base_dataset, conf_);
         auto binaryset = index_->Serialize(conf_);
         auto bin = binaryset.GetByName("IVF");
 
@@ -219,7 +217,7 @@ TEST_P(IVFTest, ivf_slice) {
     {
         // serialize index
         index_->Train(base_dataset, conf_);
-        index_->Add(base_dataset, conf_);
+        index_->AddWithoutIds(base_dataset, conf_);
         auto binaryset = index_->Serialize(conf_);
 
         index_->Load(binaryset);
@@ -236,7 +234,7 @@ TEST_P(IVFTest, clone_test) {
     assert(!xb.empty());
 
     index_->Train(base_dataset, conf_);
-    index_->Add(base_dataset, conf_);
+    index_->AddWithoutIds(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
@@ -303,7 +301,7 @@ TEST_P(IVFTest, gpu_seal_test) {
     ASSERT_ANY_THROW(index_->Seal());
 
     index_->Train(base_dataset, conf_);
-    index_->Add(base_dataset, conf_);
+    index_->AddWithoutIds(base_dataset, conf_);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 

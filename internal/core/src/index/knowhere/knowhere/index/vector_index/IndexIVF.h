@@ -12,7 +12,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -45,9 +44,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     Train(const DatasetPtr&, const Config&) override;
-
-    void
-    Add(const DatasetPtr&, const Config&) override;
 
     void
     AddWithoutIds(const DatasetPtr&, const Config&) override;
@@ -98,9 +94,6 @@ class IVF : public VecIndex, public FaissBaseIndex {
 
     void
     SealImpl() override;
-
- protected:
-    std::mutex mutex_;
 };
 
 using IVFPtr = std::shared_ptr<IVF>;

@@ -14,7 +14,6 @@
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/gpu/GpuCloner.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
-#include <faiss/index_factory.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
@@ -48,8 +47,6 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
 
 VecIndexPtr
 GPUIVFPQ::CopyGpuToCpu(const Config& config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
     faiss::Index* device_index = index_.get();
     faiss::Index* host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
