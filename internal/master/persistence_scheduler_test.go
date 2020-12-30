@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
@@ -43,7 +45,7 @@ func TestPersistenceScheduler(t *testing.T) {
 			Name: "testcoll",
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 1},
-				{FieldID: 100},
+				{FieldID: 100, DataType: schemapb.DataType_VECTOR_FLOAT, IndexParams: []*commonpb.KeyValuePair{{Key: "k", Value: "v"}}},
 			},
 		},
 	})
