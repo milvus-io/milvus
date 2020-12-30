@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db/meta/MetaAdapter.h"
+#include "db/meta/MetaResourceAttrs.h"
 #include "db/snapshot/IterateHandler.h"
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/ResourceContext.h"
@@ -942,7 +943,8 @@ GetAllActiveSnapshotIDsOperation::GetAllActiveSnapshotIDsOperation()
 Status
 GetAllActiveSnapshotIDsOperation::DoExecute(StorePtr store) {
     std::vector<CollectionCommitPtr> ccs;
-    STATUS_CHECK(store->GetActiveResources<CollectionCommit>(ccs));
+    STATUS_CHECK(store->GetActiveResourcesByAttrs<CollectionCommit>(ccs, {meta::F_ID, meta::F_COLLECTON_ID}));
+    /* STATUS_CHECK(store->GetActiveResources<CollectionCommit>(ccs)); */
     for (auto& cc : ccs) {
         auto cid = cc->GetCollectionId();
         auto it = cid_ccid_.find(cid);

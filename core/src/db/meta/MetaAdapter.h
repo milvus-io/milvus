@@ -56,6 +56,14 @@ class MetaAdapter {
 
     template <typename ResourceT, typename U>
     Status
+    SelectByAttrs(const std::string& field, const std::vector<U>& values, const std::vector<std::string>& target_attrs,
+                  std::vector<typename ResourceT::Ptr>& resources) {
+        auto session = CreateSession();
+        return session->Select<ResourceT, U>(field, values, target_attrs, resources);
+    }
+
+    template <typename ResourceT, typename U>
+    Status
     SelectResourceIDs(std::vector<int64_t>& ids, const std::string& filter_field, const std::vector<U>& filter_values) {
         std::vector<typename ResourceT::Ptr> resources;
         auto session = CreateSession();

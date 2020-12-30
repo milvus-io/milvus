@@ -180,6 +180,14 @@ class Store : public std::enable_shared_from_this<Store> {
 
     template <typename ResourceT>
     Status
+    GetActiveResourcesByAttrs(std::vector<typename ResourceT::Ptr>& return_vs,
+                              const std::vector<std::string>& target_attrs) {
+        std::vector<State> filter_states = {State::ACTIVE};
+        return adapter_->SelectByAttrs<ResourceT>(StateField::Name, filter_states, target_attrs, return_vs);
+    }
+
+    template <typename ResourceT>
+    Status
     GetActiveResources(std::vector<typename ResourceT::Ptr>& return_vs) {
         std::vector<State> filter_states = {State::ACTIVE};
         return adapter_->SelectBy<ResourceT>(StateField::Name, filter_states, return_vs);
