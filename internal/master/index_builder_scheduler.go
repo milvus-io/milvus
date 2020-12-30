@@ -153,6 +153,7 @@ func (scheduler *IndexBuildScheduler) describe() error {
 						return err
 					}
 					log.Printf("build index for segment %d field %d finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
+					break
 				} else {
 					// save status to meta table
 					err = scheduler.metaTable.UpdateFieldIndexMeta(&etcdpb.FieldIndexMeta{

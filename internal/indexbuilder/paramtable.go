@@ -34,6 +34,10 @@ func (pt *ParamTable) Init() {
 	pt.initEtcdAddress()
 	pt.initMasterAddress()
 	pt.initMetaRootPath()
+	pt.initMinIOAddress()
+	pt.initMinIOAccessKeyID()
+	pt.initMinIOSecretAccessKey()
+	pt.initMinIOUseSSL()
 }
 
 func (pt *ParamTable) initAddress() {
