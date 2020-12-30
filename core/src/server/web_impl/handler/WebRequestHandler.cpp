@@ -1491,16 +1491,8 @@ WebRequestHandler::ShowPartitions(const OString& collection_name, const OQueryPa
 }
 
 StatusDtoT
-WebRequestHandler::DropPartition(const OString& collection_name, const OString& body) {
-    std::string tag;
-    try {
-        auto json = milvus::json::parse(body->std_str());
-        tag = json["partition_tag"].get<std::string>();
-    } catch (nlohmann::detail::parse_error& e) {
-        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
-    } catch (nlohmann::detail::type_error& e) {
-        RETURN_STATUS_DTO(BODY_PARSE_FAIL, e.what())
-    }
+WebRequestHandler::DropPartition(const OString& collection_name, const OString& partition_tag) {
+    std::string tag = partition_tag->std_str();
     auto status = req_handler_.DropPartition(context_ptr_, collection_name->std_str(), tag);
 
     ASSIGN_RETURN_STATUS_DTO(status)
