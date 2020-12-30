@@ -11,6 +11,8 @@
 
 #include "db/meta/MetaNames.h"
 #include "db/meta/backend/MetaContext.h"
+#include "db/meta/condition/MetaFilter.h"
+#include "db/meta/condition/MetaRelation.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/utils.h"
 #include "utils/Json.h"
@@ -24,6 +26,18 @@ using FType = milvus::engine::DataType;
 using FEType = milvus::engine::FieldElementType;
 using Op = milvus::engine::meta::MetaContextOp;
 using State = milvus::engine::snapshot::State;
+
+template <typename R, typename F, typename T>
+using RangeFilter = milvus::engine::meta::MetaRangeFilter<R, F, T>;
+using Range = milvus::engine::meta::Range;
+using milvus::engine::meta::AND_;
+using milvus::engine::meta::OR_;
+using milvus::engine::meta::ONE_;
+
+using milvus::engine::meta::Range_;
+using milvus::engine::meta::Between_;
+using milvus::engine::meta::In_;
+
 
 TEST_F(MetaTest, ApplyTest) {
     ID_TYPE result_id;
@@ -301,5 +315,77 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
 
     for (auto& t : cc_threads) {
         t.join();
+    }
+}
+
+TEST_F(MetaTest, FilterTest) {
+    ID_TYPE result_id;
+
+    std::vector<ID_TYPE> ids;
+    std::vector<CollectionPtr> collections;
+    for (size_t i = 0; i < 10; i++) {
+        auto collection = std::make_shared<Collection>("meta_test_filter_c" + std::to_string(i));
+        ASSERT_TRUE(collection->Activate());
+        auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
+        auto status = meta_->Execute<Collection>(c_ctx, result_id);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_GT(result_id, 0);
+        collection->SetID(result_id);
+        ids.emplace_back(result_id);
+        collections.push_back(collection);
+    }
+
+    for (size_t i = 0; i < 10; i++) {
+        auto collection = std::make_shared<Collection>("meta_test_filter_c" + std::to_string(10 + i));
+        collection->Deactivate();
+        auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
+        auto status = meta_->Execute<Collection>(c_ctx, result_id);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_GT(result_id, 0);
+        collection->SetID(result_id);
+        ids.emplace_back(result_id);
+        collections.push_back(collection);
+    }
+
+    std::vector<Collection::Ptr> result_collections;
+
+//    {
+//        result_collections.clear();
+//        auto relation = AND_(Range_<Collection, CreatedOnField>(Range::GT, collections[2]->GetCreatedTime()),
+//                             Range_<Collection, CreatedOnField>(Range::));
+//    }
+
+    {
+        result_collections.clear();
+        auto one_relation = ONE_(Range_<Collection, IdField>(Range::EQ, ids[0]));
+        auto status = meta_->Query<Collection>(one_relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 1);
+        ASSERT_EQ(result_collections[0]->GetID(), ids[0]);
+    }
+
+    {
+        result_collections.clear();
+        auto relation = AND_(In_<Collection, StateField>({State::ACTIVE}),
+                             Between_<Collection, IdField>(ids[4], ids[14]));
+        auto status = meta_->Query<Collection>(relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 6);
+        for (auto& c : result_collections) {
+            ASSERT_TRUE(c->IsActive());
+        }
+    }
+
+    {
+        result_collections.clear();
+        auto relation = OR_(In_<Collection, StateField>({State::ACTIVE}),
+                            Between_<Collection, IdField>(ids[4], ids[14]));
+        auto status = meta_->Query<Collection>(relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 14);
+        for (auto& c : result_collections) {
+            ASSERT_TRUE((c->IsActive()) ||
+                        (c->GetID() >= ids[4] && c->GetID() <= ids[14]));
+        }
     }
 }

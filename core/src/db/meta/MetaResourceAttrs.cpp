@@ -11,6 +11,8 @@
 
 #include "db/meta/MetaResourceAttrs.h"
 
+#include <tuple>
+
 #include "db/meta/MetaNames.h"
 #include "utils/Status.h"
 

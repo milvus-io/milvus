@@ -11,26 +11,18 @@
 
 #pragma once
 
-#include <string>
-
-#include "db/meta/backend/MetaContext.h"
-#include "utils/Status.h"
+#include "db/meta/condition/MetaBaseCombination.h"
+#include "db/meta/condition/MetaBaseFilter.h"
 
 namespace milvus::engine::meta {
 
-class MetaHelper {
- private:
-    MetaHelper() = default;
+MetaCombinationPtr
+AND_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
 
- public:
-    static Status
-    MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
+MetaCombinationPtr
+OR_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond);
 
-    static Status
-    MetaFilterContextToSql(const MetaFilterContext& context, std::string& sql);
-
-    static Status
-    MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
-};
+MetaCombinationPtr
+ONE_(const MetaFilterPtr& filter);
 
 }  // namespace milvus::engine::meta

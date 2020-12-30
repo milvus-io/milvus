@@ -220,14 +220,34 @@ SqliteEngine::Query(const MetaQueryContext& context, AttrsMapList& attrs) {
     std::lock_guard<std::mutex> lock(meta_mutex_);
 
     QueryData = &attrs;
+    auto status = Status::OK();
     if (SQLITE_OK != sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr)) {
         std::string err = "Query fail:" + ErrorMsg(db_);
-        return Status(DB_META_QUERY_FAILED, err);
+        status = Status(DB_META_QUERY_FAILED, err);
     }
 
     QueryData = nullptr;
 
-    return Status::OK();
+    return status;
+}
+
+Status
+SqliteEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
+    std::string sql;
+
+    STATUS_CHECK(MetaHelper::MetaFilterContextToSql(context, sql));
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+
+    QueryData = &attrs;
+    auto status = Status::OK();
+    if (SQLITE_OK != sqlite3_exec(db_, sql.c_str(), QueryCallback, nullptr, nullptr)) {
+        std::string err = "Query fail:" + ErrorMsg(db_);
+        status = Status(DB_META_QUERY_FAILED, err);
+    }
+
+    QueryData = nullptr;
+
+    return status;
 }
 
 Status

@@ -13,33 +13,38 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "db/meta/backend/MetaContext.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "utils/Status.h"
+#include "db/meta/condition/MetaBaseCondition.h"
+#include "db/meta/condition/MetaFinder.h"
 
 namespace milvus::engine::meta {
 
-using AttrsMap = std::unordered_map<std::string, std::string>;
-using AttrsMapList = std::vector<AttrsMap>;
+enum Comb { and_, or_, one_ };
 
-class MetaEngine {
+class MetaBaseCombination : public MetaBaseCondition, public FieldsFinder {
  public:
-    virtual Status
-    Query(const MetaQueryContext& context, AttrsMapList& attrs) = 0;
+    explicit MetaBaseCombination(Comb cond) : cond_(cond) {
+    }
 
-    virtual Status
-    Filter(const MetaFilterContext& context, AttrsMapList& attrs) = 0;
+    ~MetaBaseCombination() override = default;
 
-    virtual Status
-    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
+ protected:
+    std::string
+    Relation() const {
+        switch (cond_) {
+            case and_:
+                return "AND";
+            case or_:
+                return "OR";
+            default:
+                return "";
+        }
+    }
 
-    virtual Status
-    TruncateAll() = 0;
+ protected:
+    Comb cond_;
 };
 
-using MetaEnginePtr = std::shared_ptr<MetaEngine>;
+using MetaCombinationPtr = std::shared_ptr<MetaBaseCombination>;
 
 }  // namespace milvus::engine::meta
