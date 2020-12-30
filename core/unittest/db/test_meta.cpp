@@ -321,25 +321,71 @@ TEST_F(MetaTest, MultiThreadRequestTest) {
 TEST_F(MetaTest, FilterTest) {
     ID_TYPE result_id;
 
-    auto collection = std::make_shared<Collection>("meta_test_filter_c1");
-    ASSERT_TRUE(collection->Activate());
-    auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
-    auto status = meta_->Execute<Collection>(c_ctx, result_id);
-    ASSERT_TRUE(status.ok()) << status.ToString();
-    ASSERT_GT(result_id, 0);
-    collection->SetID(result_id);
+    std::vector<ID_TYPE> ids;
+    std::vector<CollectionPtr> collections;
+    for (size_t i = 0; i < 10; i++) {
+        auto collection = std::make_shared<Collection>("meta_test_filter_c" + std::to_string(i));
+        ASSERT_TRUE(collection->Activate());
+        auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
+        auto status = meta_->Execute<Collection>(c_ctx, result_id);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_GT(result_id, 0);
+        collection->SetID(result_id);
+        ids.emplace_back(result_id);
+        collections.push_back(collection);
+    }
 
-//    auto relation = ONE_(std::make_shared<RangeFilter<Collection, IdField, ID_TYPE>>(Range::EQ, result_id));
-//    auto range_relation = ONE_(Range_<Collection, IdField>(Range::EQ, result_id));
-//    auto between_relation = ONE_(Between_<Collection, IdField>(0, 10));
-//    std::vector<ID_TYPE> ids = {result_id};
-//    auto in_relation = ONE_(In_<Collection, IdField>(ids));
-    auto relation = AND_(Range_<Collection, IdField>(Range::EQ, result_id),
-                         Between_<Collection, IdField>(result_id - 1, result_id + 1));
-    auto session = meta_->CreateSession();
-    std::vector<Collection::Ptr> collections;
-    status = session->Query<Collection>(relation, collections);
-    ASSERT_TRUE(status.ok()) << status.ToString();
-    ASSERT_EQ(collections.size(), 1);
-    ASSERT_EQ(collections[0]->GetID(), result_id);
+    for (size_t i = 0; i < 10; i++) {
+        auto collection = std::make_shared<Collection>("meta_test_filter_c" + std::to_string(10 + i));
+        collection->Deactivate();
+        auto c_ctx = ResourceContextBuilder<Collection>(Op::oAdd).SetResource(collection).CreatePtr();
+        auto status = meta_->Execute<Collection>(c_ctx, result_id);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_GT(result_id, 0);
+        collection->SetID(result_id);
+        ids.emplace_back(result_id);
+        collections.push_back(collection);
+    }
+
+    std::vector<Collection::Ptr> result_collections;
+
+//    {
+//        result_collections.clear();
+//        auto relation = AND_(Range_<Collection, CreatedOnField>(Range::GT, collections[2]->GetCreatedTime()),
+//                             Range_<Collection, CreatedOnField>(Range::));
+//    }
+
+    {
+        result_collections.clear();
+        auto one_relation = ONE_(Range_<Collection, IdField>(Range::EQ, ids[0]));
+        auto status = meta_->Query<Collection>(one_relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 1);
+        ASSERT_EQ(result_collections[0]->GetID(), ids[0]);
+    }
+
+    {
+        result_collections.clear();
+        auto relation = AND_(In_<Collection, StateField>({State::ACTIVE}),
+                             Between_<Collection, IdField>(ids[4], ids[14]));
+        auto status = meta_->Query<Collection>(relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 6);
+        for (auto& c : result_collections) {
+            ASSERT_TRUE(c->IsActive());
+        }
+    }
+
+    {
+        result_collections.clear();
+        auto relation = OR_(In_<Collection, StateField>({State::ACTIVE}),
+                            Between_<Collection, IdField>(ids[4], ids[14]));
+        auto status = meta_->Query<Collection>(relation, result_collections);
+        ASSERT_TRUE(status.ok()) << status.ToString();
+        ASSERT_EQ(result_collections.size(), 14);
+        for (auto& c : result_collections) {
+            ASSERT_TRUE((c->IsActive()) ||
+                        (c->GetID() >= ids[4] && c->GetID() <= ids[14]));
+        }
+    }
 }

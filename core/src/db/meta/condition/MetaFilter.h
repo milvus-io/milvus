@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
@@ -176,7 +177,7 @@ class MetaInFilter : public ComparableFilter<T> {
         return false;
     }
 
-    std::string
+    [[nodiscard]] std::string
     Dump() const override {
         std::vector<std::string> svalues(values_.size());
         for (size_t i = 0; i < values_.size(); i++) {
@@ -191,7 +192,7 @@ class MetaInFilter : public ComparableFilter<T> {
 
  private:
     const std::string res_name_;
-    const std::vector<T>& values_;
+    const std::vector<T> values_;
     bool in_;
 };
 
@@ -211,6 +212,12 @@ Between_(const T& lvalue, const T& rvalue) {
 template <typename R, typename F, typename T>
 std::shared_ptr<MetaInFilter<R, F, T>>
 In_(const std::vector<T>& values) {
+    return std::make_shared<MetaInFilter<R, F, T>>(values);
+}
+
+template <typename R, typename F, typename T>
+std::shared_ptr<MetaInFilter<R, F, T>>
+In_(std::initializer_list<T> values) {
     return std::make_shared<MetaInFilter<R, F, T>>(values);
 }
 

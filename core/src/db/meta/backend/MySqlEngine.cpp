@@ -321,14 +321,8 @@ MySqlEngine::Filter(const MetaFilterContext& context, AttrsMapList& attrs) {
             status = Status(DB_ERROR, er.what());
         }
     } catch (const mysqlpp::BadConversion& er) {
-        // Handle bad conversions
-        //        cerr << "Conversion error: " << er.what() << endl <<
-        //             "\tretrieved data size: " << er.retrieved <<
-        //             ", actual size: " << er.actual_size << endl;
         status = Status(DB_ERROR, er.what());
     } catch (const mysqlpp::Exception& er) {
-        // Catch-all for any other MySQL++ exceptions
-        //        cerr << "Error: " << er.what() << endl;
         status = Status(DB_ERROR, er.what());
     }
 

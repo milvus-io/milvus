@@ -58,7 +58,11 @@ MetaRelationCombination::FieldsFind(const Fields& fields) const {
         return false;
     };
 
-    return find(lcond_, fields) && find(rcond_, fields);
+    if (cond_ == and_) {
+        return find(lcond_, fields) && find(rcond_, fields);
+    } else {
+        return find(lcond_, fields) || find(rcond_, fields);
+    }
 }
 
 std::string
