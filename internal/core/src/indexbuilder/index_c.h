@@ -50,7 +50,7 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
 CStatus
 SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer);
 
-void
+CStatus
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
 
 #ifdef __cplusplus

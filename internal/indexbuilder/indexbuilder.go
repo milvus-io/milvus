@@ -79,8 +79,11 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 		Creds:  credentials.NewStaticV4(minIOAccessKeyID, minIOSecretAccessKey, ""),
 		Secure: minIOUseSSL,
 	})
-	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, "milvus-distributed-indexbuilder")
+	if err != nil {
+		return nil, err
+	}
 
+	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, "milvus-distributed-indexbuilder")
 	if err != nil {
 		return nil, err
 	}

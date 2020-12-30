@@ -30,13 +30,6 @@ CStatus
 CreateIndex(const char* serialized_type_params, const char* serialized_index_params, CIndex* res_index) {
     auto status = CStatus();
     try {
-        //    std::cout << "strlen(serialized_type_params): " << CGODebugUtils::Strlen(serialized_type_params,
-        //    type_params_size)
-        //              << std::endl;
-        //    std::cout << "type_params_size: " << type_params_size << std::endl;
-        //    std::cout << "strlen(serialized_index_params): "
-        //              << CGODebugUtils::Strlen(serialized_index_params, index_params_size) << std::endl;
-        //    std::cout << "index_params_size: " << index_params_size << std::endl;
         auto index =
             std::make_unique<milvus::indexbuilder::IndexWrapper>(serialized_type_params, serialized_index_params);
         *res_index = index.release();
@@ -108,8 +101,17 @@ SerializeToSlicedBuffer(CIndex index, int32_t* buffer_size, char** res_buffer) {
     return status;
 }
 
-void
+CStatus
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size) {
-    auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-    cIndex->Load(serialized_sliced_blob_buffer, size);
+    auto status = CStatus();
+    try {
+        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        cIndex->Load(serialized_sliced_blob_buffer, size);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::runtime_error& e) {
+        status.error_code = UnexpectedException;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
 }
