@@ -105,6 +105,32 @@ IndexWrapper::parse() {
         config_[milvus::knowhere::IndexParams::m] = std::stoi(m);
     }
 
+    /************************** NSG Parameter **************************/
+    if (!config_.contains(milvus::knowhere::IndexParams::knng)) {
+    } else {
+        auto knng = config_[milvus::knowhere::IndexParams::knng].get<std::string>();
+        config_[milvus::knowhere::IndexParams::knng] = std::stoi(knng);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::search_length)) {
+    } else {
+        auto search_length = config_[milvus::knowhere::IndexParams::search_length].get<std::string>();
+        config_[milvus::knowhere::IndexParams::search_length] = std::stoi(search_length);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::out_degree)) {
+    } else {
+        auto out_degree = config_[milvus::knowhere::IndexParams::out_degree].get<std::string>();
+        config_[milvus::knowhere::IndexParams::out_degree] = std::stoi(out_degree);
+    }
+
+    if (!config_.contains(milvus::knowhere::IndexParams::candidate)) {
+    } else {
+        auto candidate = config_[milvus::knowhere::IndexParams::candidate].get<std::string>();
+        config_[milvus::knowhere::IndexParams::candidate] = std::stoi(candidate);
+    }
+
+    /************************** Serialize *******************************/
     if (!config_.contains(milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE] = 4;
     } else {
@@ -132,12 +158,37 @@ IndexWrapper::dim() {
 void
 IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
-    // if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-    //     PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
+    if (is_in_need_id_list(index_type)) {
+        PanicInfo(std::string(index_type) + " doesn't support build without ids yet!");
+    }
+    // if (is_in_need_build_all_list(index_type)) {
+    //     index_->BuildAll(dataset, config_);
+    // } else {
+    //     index_->Train(dataset, config_);
+    //     index_->AddWithoutIds(dataset, config_);
     // }
-    index_->Train(dataset, config_);
-    index_->AddWithoutIds(dataset, config_);
+    index_->BuildAll(dataset, config_);
 
+    if (is_in_nm_list(index_type)) {
+        StoreRawData(dataset);
+    }
+}
+
+void
+IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
+    Assert(dataset->data().find(milvus::knowhere::meta::IDS) != dataset->data().end());
+    //    index_->Train(dataset, config_);
+    //    index_->Add(dataset, config_);
+    index_->BuildAll(dataset, config_);
+
+    if (is_in_nm_list(get_index_type())) {
+        StoreRawData(dataset);
+    }
+}
+
+void
+IndexWrapper::StoreRawData(const knowhere::DatasetPtr& dataset) {
+    auto index_type = get_index_type();
     if (is_in_nm_list(index_type)) {
         auto tensor = dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
         auto row_num = dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
@@ -151,14 +202,6 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
         raw_data_.resize(data_size);
         memcpy(raw_data_.data(), tensor, data_size);
     }
-}
-
-void
-IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
-    Assert(dataset->data().find(milvus::knowhere::meta::IDS) != dataset->data().end());
-    //    index_->Train(dataset, config_);
-    //    index_->Add(dataset, config_);
-    index_->BuildAll(dataset, config_);
 }
 
 /*

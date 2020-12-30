@@ -49,6 +49,9 @@ class IndexWrapper {
     std::optional<T>
     get_config_by_name(std::string name);
 
+    void
+    StoreRawData(const knowhere::DatasetPtr& dataset);
+
  public:
     void
     BuildWithIds(const knowhere::DatasetPtr& dataset);
