@@ -9,28 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "db/meta/condition/MetaFilter.h"
 
-#include <string>
-
-#include "db/meta/backend/MetaContext.h"
-#include "utils/Status.h"
-
-namespace milvus::engine::meta {
-
-class MetaHelper {
- private:
-    MetaHelper() = default;
-
- public:
-    static Status
-    MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
-
-    static Status
-    MetaFilterContextToSql(const MetaFilterContext& context, std::string& sql);
-
-    static Status
-    MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
-};
-
-}  // namespace milvus::engine::meta
+namespace milvus::engine::meta {}  // namespace milvus::engine::meta

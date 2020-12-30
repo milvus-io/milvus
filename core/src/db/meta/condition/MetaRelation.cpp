@@ -1,3 +1,4 @@
+
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -9,40 +10,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#pragma once
+#include "db/meta/condition/MetaRelation.h"
 
 #include <memory>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
 #include "db/meta/condition/MetaCombination.h"
 
-// TODO(yhz): Move to meta foler
 namespace milvus::engine::meta {
 
-enum MetaContextOp { oAdd = 1, oUpdate, oDelete };
+MetaCombinationPtr
+AND_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond) {
+    return std::make_shared<MetaRelationCombination>(and_, lcond, rcond);
+}
 
-struct MetaQueryContext {
-    std::string table_;
-    bool all_required_ = true;
-    std::vector<std::string> query_fields_;
-    std::unordered_map<std::string, std::vector<std::string>> filter_attrs_;
-};
+MetaCombinationPtr
+OR_(const MetaConditionPtr& lcond, const MetaConditionPtr& rcond) {
+    return std::make_shared<MetaRelationCombination>(or_, lcond, rcond);
+}
 
-struct MetaFilterContext {
-    std::string table_;
-    MetaCombinationPtr combination_;
-};
-
-struct MetaApplyContext {
-    std::string table_;
-    MetaContextOp op_ = oAdd;
-    int64_t id_ = 0;
-    std::unordered_map<std::string, std::string> attrs_;
-    std::unordered_map<std::string, std::string> filter_attrs_;
-    std::string sql_;
-};
+MetaCombinationPtr
+ONE_(const MetaFilterPtr& filter) {
+    return std::make_shared<MetaFilterCombination>(filter);
+}
 
 }  // namespace milvus::engine::meta

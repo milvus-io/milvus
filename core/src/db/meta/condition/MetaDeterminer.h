@@ -11,26 +11,15 @@
 
 #pragma once
 
-#include <string>
-
-#include "db/meta/backend/MetaContext.h"
-#include "utils/Status.h"
-
 namespace milvus::engine::meta {
 
-class MetaHelper {
- private:
-    MetaHelper() = default;
-
+template <typename T>
+class Determiner {
  public:
-    static Status
-    MetaQueryContextToSql(const MetaQueryContext& context, std::string& sql);
+    virtual ~Determiner() = default;
 
-    static Status
-    MetaFilterContextToSql(const MetaFilterContext& context, std::string& sql);
-
-    static Status
-    MetaApplyContextToSql(const MetaApplyContext& context, std::string& sql);
+    virtual bool
+    InRange(const T& v) const = 0;
 };
 
 }  // namespace milvus::engine::meta

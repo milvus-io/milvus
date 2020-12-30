@@ -13,33 +13,33 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "db/meta/backend/MetaContext.h"
-#include "db/snapshot/ResourceTypes.h"
-#include "utils/Status.h"
+#include "db/meta/condition/MetaBaseCondition.h"
+#include "db/meta/condition/MetaFinder.h"
 
 namespace milvus::engine::meta {
 
-using AttrsMap = std::unordered_map<std::string, std::string>;
-using AttrsMapList = std::vector<AttrsMap>;
-
-class MetaEngine {
+class MetaBaseFilter : public MetaBaseCondition, public Finder {
  public:
-    virtual Status
-    Query(const MetaQueryContext& context, AttrsMapList& attrs) = 0;
+    explicit MetaBaseFilter(const std::string& field) : field_(field) {
+    }
 
-    virtual Status
-    Filter(const MetaFilterContext& context, AttrsMapList& attrs) = 0;
+    ~MetaBaseFilter() override = default;
 
-    virtual Status
-    ExecuteTransaction(const std::vector<MetaApplyContext>& sql_contexts, std::vector<int64_t>& result_ids) = 0;
+    std::string
+    Field() const {
+        return field_;
+    }
 
-    virtual Status
-    TruncateAll() = 0;
+    virtual bool
+    FieldFind(const std::string& field, const std::string& v) const {
+        return (field_ == field) && StrFind(v);
+    }
+
+ private:
+    std::string field_;
 };
 
-using MetaEnginePtr = std::shared_ptr<MetaEngine>;
+using MetaFilterPtr = std::shared_ptr<MetaBaseFilter>;
 
 }  // namespace milvus::engine::meta
