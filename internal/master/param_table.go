@@ -21,6 +21,7 @@ type ParamTable struct {
 	KvRootPath            string
 	WriteNodeSegKvSubPath string
 	PulsarAddress         string
+	IndexBuilderAddress   string
 
 	// nodeID
 	ProxyIDList     []typeutil.UniqueID
@@ -49,6 +50,8 @@ type ParamTable struct {
 
 	MaxPartitionNum     int64
 	DefaultPartitionTag string
+
+	LoadIndexChannelNames []string
 }
 
 var Params ParamTable
@@ -71,6 +74,7 @@ func (p *ParamTable) Init() {
 	p.initKvRootPath()
 	p.initWriteNodeSegKvSubPath()
 	p.initPulsarAddress()
+	p.initIndexBuilderAddress()
 
 	p.initProxyIDList()
 	p.initWriteNodeIDList()
@@ -95,6 +99,8 @@ func (p *ParamTable) Init() {
 	p.initMsgChannelSubName()
 	p.initMaxPartitionNum()
 	p.initDefaultPartitionTag()
+
+	p.initLoadIndexChannelNames()
 }
 
 func (p *ParamTable) initAddress() {
@@ -123,6 +129,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
+}
+
+func (p *ParamTable) initIndexBuilderAddress() {
+	ret, err := p.Load("_IndexBuilderAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.IndexBuilderAddress = ret
 }
 
 func (p *ParamTable) initMetaRootPath() {
@@ -345,4 +359,12 @@ func (p *ParamTable) initDefaultPartitionTag() {
 	}
 
 	p.DefaultPartitionTag = defaultTag
+}
+
+func (p *ParamTable) initLoadIndexChannelNames() {
+	loadIndexChannelName, err := p.Load("msgChannel.chanNamePrefix.cmd")
+	if err != nil {
+		panic(err)
+	}
+	p.LoadIndexChannelNames = []string{loadIndexChannelName}
 }

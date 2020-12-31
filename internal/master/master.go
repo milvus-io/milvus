@@ -10,6 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
+
+	indexbuilderclient "github.com/zilliztech/milvus-distributed/internal/indexbuilder/client"
+
+	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
+
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -175,9 +181,15 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	m.scheduler.SetDDMsgStream(pulsarDDStream)
 	m.scheduler.SetIDAllocator(func() (UniqueID, error) { return m.idAllocator.AllocOne() })
 
-	flushClient := &MockWriteNodeClient{}
-	buildIndexClient := &MockBuildIndexClient{}
-	loadIndexClient := &MockLoadIndexClient{}
+	flushClient, err := writerclient.NewWriterClient(Params.EtcdAddress, kvRootPath, Params.WriteNodeSegKvSubPath, pulsarDDStream)
+	if err != nil {
+		return nil, err
+	}
+	buildIndexClient, err := indexbuilderclient.NewBuildIndexClient(ctx, Params.IndexBuilderAddress)
+	if err != nil {
+		return nil, err
+	}
+	loadIndexClient := client.NewLoadIndexClient(ctx, Params.PulsarAddress, Params.LoadIndexChannelNames)
 
 	m.indexLoadSch = NewIndexLoadScheduler(ctx, loadIndexClient, m.metaTable)
 	m.indexBuildSch = NewIndexBuildScheduler(ctx, buildIndexClient, m.metaTable, m.indexLoadSch)
