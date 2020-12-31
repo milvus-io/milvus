@@ -26,6 +26,10 @@ getdeps:
 	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
 	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off go get github.com/quasilyte/go-ruleguard/...)
 
+tools/bin/revive: tools/check/go.mod
+	cd tools/check; \
+	$(GO) build -o ../bin/revive github.com/mgechev/revive
+
 cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
@@ -49,8 +53,12 @@ else
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
 endif
 
+lint:tools/bin/revive
+	@echo "Running $@ check"
+	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
+
 #TODO: Check code specifications by golangci-lint
-lint:
+static-check:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
@@ -68,7 +76,7 @@ else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: getdeps cppcheck fmt lint ruleguard
+verifiers: getdeps cppcheck fmt static-check ruleguard
 
 # Builds various components locally.
 build-go: build-cpp

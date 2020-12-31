@@ -413,6 +413,9 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
 			unMarshalFunc := (*ms.unmarshal).tempMap[headerMsg.MsgType]
+			if unMarshalFunc == nil {
+				panic("null unMarshalFunc for " + headerMsg.MsgType.String() + " msg type")
+			}
 			tsMsg, err := unMarshalFunc(pulsarMsg.Payload())
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
