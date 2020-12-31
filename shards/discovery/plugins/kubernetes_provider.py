@@ -170,7 +170,7 @@ class EventHandler(threading.Thread):
         self.terminate = True
 
     def on_drop(self, event, **kwargs):
-        pass
+        self.mgr.delete_pod(event['pod'])
 
     def on_pod_started(self, event, **kwargs):
         try_cnt = 3
