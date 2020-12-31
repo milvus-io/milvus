@@ -14,7 +14,9 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type Client struct {
-	client indexbuilderpb.IndexBuildServiceClient
+	client  indexbuilderpb.IndexBuildServiceClient
+	address string
+	ctx     context.Context
 }
 
 type IndexDescription struct {
@@ -26,12 +28,9 @@ type IndexDescription struct {
 }
 
 func NewBuildIndexClient(ctx context.Context, address string) (*Client, error) {
-	conn, err := grpc.DialContext(ctx, address, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		return nil, err
-	}
 	return &Client{
-		client: indexbuilderpb.NewIndexBuildServiceClient(conn),
+		address: address,
+		ctx:     ctx,
 	}, nil
 }
 
@@ -39,7 +38,22 @@ func parseTS(t int64) time.Time {
 	return time.Unix(0, t)
 }
 
+func (c *Client) tryConnect() error {
+	if c.client != nil {
+		return nil
+	}
+	conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		return err
+	}
+	c.client = indexbuilderpb.NewIndexBuildServiceClient(conn)
+	return nil
+}
+
 func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
+	if c.tryConnect() != nil {
+		panic("BuildIndexWithoutID: failed to connect index builder")
+	}
 	var typeParamsKV []*commonpb.KeyValuePair
 	for typeParam := range typeParams {
 		typeParamsKV = append(typeParamsKV, &commonpb.KeyValuePair{
@@ -72,6 +86,9 @@ func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[st
 }
 
 func (c *Client) DescribeIndex(indexID UniqueID) (*IndexDescription, error) {
+	if c.tryConnect() != nil {
+		panic("DescribeIndex: failed to connect index builder")
+	}
 	ctx := context.TODO()
 	request := &indexbuilderpb.DescribleIndexRequest{
 		IndexID: indexID,
@@ -92,6 +109,9 @@ func (c *Client) DescribeIndex(indexID UniqueID) (*IndexDescription, error) {
 }
 
 func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
+	if c.tryConnect() != nil {
+		panic("GetIndexFilePaths: failed to connect index builder")
+	}
 	ctx := context.TODO()
 	request := &indexbuilderpb.GetIndexFilePathsRequest{
 		IndexID: indexID,

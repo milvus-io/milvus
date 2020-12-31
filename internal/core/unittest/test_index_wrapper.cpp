@@ -99,105 +99,14 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
             {milvus::knowhere::Metric::TYPE, metric_type},
         };
     } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NSG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::IndexParams::nlist, 163},
-            {milvus::knowhere::IndexParams::nprobe, 8},
-            {milvus::knowhere::IndexParams::knng, 20},
-            {milvus::knowhere::IndexParams::search_length, 40},
-            {milvus::knowhere::IndexParams::out_degree, 30},
-            {milvus::knowhere::IndexParams::candidate, 100},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-        };
-#ifdef MILVUS_SUPPORT_SPTAG
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-#endif
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_HNSW) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_ANNOY) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::n_trees, 4},
-            {milvus::knowhere::IndexParams::search_k, 100},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWFlat) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWPQ) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-            {milvus::knowhere::IndexParams::PQM, 8},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWSQ) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NGTPANNG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::IndexParams::edge_size, 10},
-            {milvus::knowhere::IndexParams::epsilon, 0.1},
-            {milvus::knowhere::IndexParams::max_search_edges, 50},
-            {milvus::knowhere::IndexParams::forcedly_pruned_edge_size, 60},
-            {milvus::knowhere::IndexParams::selectively_pruned_edge_size, 30},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NGTONNG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::IndexParams::edge_size, 20},
-            {milvus::knowhere::IndexParams::epsilon, 0.1},
-            {milvus::knowhere::IndexParams::max_search_edges, 50},
-            {milvus::knowhere::IndexParams::outgoing_edge_size, 5},
-            {milvus::knowhere::IndexParams::incoming_edge_size, 40},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-        };
+        return milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
+                                        {milvus::knowhere::IndexParams::nlist, 163},
+                                        {milvus::knowhere::IndexParams::nprobe, 8},
+                                        {milvus::knowhere::IndexParams::knng, 20},
+                                        {milvus::knowhere::IndexParams::search_length, 40},
+                                        {milvus::knowhere::IndexParams::out_degree, 30},
+                                        {milvus::knowhere::IndexParams::candidate, 100},
+                                        {milvus::knowhere::Metric::TYPE, metric_type}};
     }
     return milvus::knowhere::Config();
 }
@@ -457,17 +366,6 @@ INSTANTIATE_TEST_CASE_P(
                       std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
                                 milvus::knowhere::Metric::JACCARD),
                       std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, milvus::knowhere::Metric::JACCARD),
-#ifdef MILVUS_SUPPORT_SPTAG
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, milvus::knowhere::Metric::L2),
-#endif
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_HNSW, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_ANNOY, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWFlat, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWPQ, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWSQ, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_NGTPANNG, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_NGTONNG, milvus::knowhere::Metric::L2),
                       std::pair(milvus::knowhere::IndexEnum::INDEX_NSG, milvus::knowhere::Metric::L2)));
 
 TEST_P(IndexWrapperTest, Constructor) {
