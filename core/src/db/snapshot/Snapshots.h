@@ -11,7 +11,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/count.hpp>
+#include <boost/accumulators/statistics/max.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/min.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -88,9 +96,9 @@ class Snapshots {
     DoDropCollection(ScopedSnapshotT& ss, const LSN_TYPE& lsn);
 
     void
-    OnReaderTimer(const boost::system::error_code&);
+    OnReaderTimer(const boost::system::error_code&, TimerContext*);
     void
-    OnWriterTimer(const boost::system::error_code&);
+    OnWriterTimer(const boost::system::error_code&, TimerContext*);
 
     Status
     LoadNoLock(StorePtr store, ID_TYPE collection_id, SnapshotHolderPtr& holder);
@@ -104,8 +112,15 @@ class Snapshots {
     mutable std::shared_timed_mutex inactive_mtx_;
     std::map<ID_TYPE, SnapshotHolderPtr> inactive_holders_;
     std::set<ID_TYPE> invalid_ssid_;
-    std::atomic<TS_TYPE> latest_updated_ = std::numeric_limits<TS_TYPE>::min();
     StorePtr store_;
+
+    std::atomic<TS_TYPE> latest_updated_ = std::numeric_limits<TS_TYPE>::min();
+    boost::accumulators::accumulator_set<
+        double, boost::accumulators::stats<boost::accumulators::tag::count, boost::accumulators::tag::mean,
+                                           boost::accumulators::tag::max, boost::accumulators::tag::min>
+        /* boost::accumulators::features<boost::accumulators::tag::count> */
+        >
+        reader_time_acc_;
 };
 
 }  // namespace milvus::engine::snapshot

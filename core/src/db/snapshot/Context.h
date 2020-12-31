@@ -12,6 +12,7 @@
 #pragma once
 
 #include <iostream>
+#include <limits>
 #include <map>
 #include <string>
 #include <unordered_map>

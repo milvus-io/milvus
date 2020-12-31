@@ -943,10 +943,8 @@ GetAllActiveSnapshotIDsOperation::GetAllActiveSnapshotIDsOperation(const RangeCo
 Status
 GetAllActiveSnapshotIDsOperation::DoExecute(StorePtr store) {
     std::vector<CollectionCommitPtr> ccs;
-    /* LOG_ENGINE_WARNING_ << "Upper=" << updated_time_range_.upper_bound_ << " Lower=" << updated_time_range_.low_bound_; */
-    STATUS_CHECK(store->GetActiveResourcesByAttrs<CollectionCommit>(ccs, {meta::F_ID, meta::F_COLLECTON_ID},
-                updated_time_range_.upper_bound_,
-                updated_time_range_.low_bound_));
+    STATUS_CHECK(store->GetActiveResourcesByAttrs<CollectionCommit>(
+        ccs, {meta::F_ID, meta::F_COLLECTON_ID}, updated_time_range_.upper_bound_, updated_time_range_.low_bound_));
 
     for (auto& cc : ccs) {
         auto cid = cc->GetCollectionId();

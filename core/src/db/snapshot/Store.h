@@ -14,8 +14,8 @@
 #include "codecs/Codec.h"
 #include "db/Utils.h"
 #include "db/meta/MetaFactory.h"
-#include "db/meta/condition/MetaRelation.h"
 #include "db/meta/condition/MetaFilter.h"
+#include "db/meta/condition/MetaRelation.h"
 #include "db/snapshot/ResourceContext.h"
 #include "db/snapshot/ResourceHelper.h"
 #include "db/snapshot/ResourceTypes.h"
@@ -33,6 +33,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>

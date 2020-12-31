@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -331,7 +332,7 @@ class GetAllActiveSnapshotIDsOperation : public Operations {
  public:
     using BaseT = Operations;
 
-    GetAllActiveSnapshotIDsOperation(const RangeContext& context);
+    explicit GetAllActiveSnapshotIDsOperation(const RangeContext& context);
 
     Status DoExecute(StorePtr) override;
 
