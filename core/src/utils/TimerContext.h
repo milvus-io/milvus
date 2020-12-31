@@ -24,7 +24,7 @@
 namespace milvus {
 
 struct TimerContext {
-    using HandlerT = std::function<void(const boost::system::error_code&)>;
+    using HandlerT = std::function<void(const boost::system::error_code&, TimerContext* ctx)>;
     struct Context {
         /* Context(int interval_us, HandlerT& handler, ThreadPoolPtr pool = nullptr) */
         /*     : interval_(interval_us), handler_(handler), timer_(io, interval_), pool_(pool) { */
@@ -58,7 +58,7 @@ struct TimerContext {
 inline void
 TimerContext::Reschedule(const boost::system::error_code& ec) {
     try {
-        pool_->enqueue(handler_, ec);
+        pool_->enqueue(handler_, ec, this);
     } catch (std::exception& ex) {
         LOG_SERVER_ERROR_ << "Fail to enqueue handler: " << std::string(ex.what());
     }
