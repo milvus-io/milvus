@@ -19,13 +19,14 @@
 #include "db/snapshot/OperationExecutor.h"
 #include "db/snapshot/SnapshotPolicyFactory.h"
 #include "utils/CommonUtil.h"
+#include "utils/TimeRecorder.h"
 #include "utils/TimerContext.h"
 
 #include <utility>
 
 namespace milvus::engine::snapshot {
 
-static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 100 * 1000;
+static constexpr int DEFAULT_READER_TIMER_INTERVAL_US = 120 * 1000;
 static constexpr int DEFAULT_WRITER_TIMER_INTERVAL_US = 2000 * 1000;
 
 Status
@@ -245,9 +246,11 @@ Snapshots::GetHolderNoLock(ID_TYPE collection_id, SnapshotHolderPtr& holder) con
 }
 
 void
-Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
+Snapshots::OnReaderTimer(const boost::system::error_code& ec, TimerContext* timer) {
     std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
-    auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>();
+    RangeContext ctx;
+    ctx.low_bound_ = latest_updated_;
+    auto op = std::make_shared<GetAllActiveSnapshotIDsOperation>(ctx);
     auto status = (*op)(store_);
     if (!status.ok()) {
         LOG_SERVER_ERROR_ << "Snapshots::OnReaderTimer::GetAllActiveSnapshotIDsOperation failed: " << status.message();
@@ -260,11 +263,15 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
         }
         return;
     }
+
+    latest_updated_ = std::max(op->GetLatestUpdatedTime(), latest_updated_.load());
+
     auto ids = op->GetIDs();
     ScopedSnapshotT ss;
     std::set<ID_TYPE> alive_cids;
     std::set<ID_TYPE> this_invalid_cids;
     bool diff_found = false;
+
     for (auto& [cid, ccid] : ids) {
         status = LoadSnapshot(store_, ss, cid, ccid);
         if (status.code() == SS_NOT_ACTIVE_ERROR) {
@@ -347,13 +354,20 @@ Snapshots::OnReaderTimer(const boost::system::error_code& ec) {
     auto exe_time =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start)
             .count();
-    if (exe_time > DEFAULT_READER_TIMER_INTERVAL_US) {
-        LOG_ENGINE_WARNING_ << "OnReaderTimer takes too much time: " << exe_time << " us";
+    reader_time_acc_(exe_time);
+    if (boost::accumulators::count(reader_time_acc_) >= 100) {
+        auto acc = reader_time_acc_;
+        reader_time_acc_ = {};
+        auto mean_val = boost::accumulators::mean(acc);
+        auto min_val = boost::accumulators::min(acc);
+        auto max_val = boost::accumulators::max(acc);
+        LOG_SERVER_INFO_ << "OnReaderTimer Stastics [US]: MEAN=" << mean_val << ", MIN=" << min_val
+                         << ", MAX=" << max_val;
     }
 }
 
 void
-Snapshots::OnWriterTimer(const boost::system::error_code& ec) {
+Snapshots::OnWriterTimer(const boost::system::error_code& ec, TimerContext* timer) {
     // Single mode
     if (!config.cluster.enable()) {
         std::unique_lock<std::shared_timed_mutex> lock(inactive_mtx_);
@@ -392,7 +406,7 @@ Snapshots::RegisterTimers(TimerManager* mgr) {
             ctx.interval_us = low_limit;
         }
         LOG_SERVER_INFO_ << "OnReaderTimer INTERVAL: " << ctx.interval_us << " US";
-        ctx.handler = std::bind(&Snapshots::OnReaderTimer, this, std::placeholders::_1);
+        ctx.handler = std::bind(&Snapshots::OnReaderTimer, this, std::placeholders::_1, std::placeholders::_2);
         mgr->AddTimer(ctx);
     } else {
         TimerContext::Context ctx;
@@ -410,7 +424,7 @@ Snapshots::RegisterTimers(TimerManager* mgr) {
         }
         LOG_SERVER_INFO_ << "OnWriterTimer INTERVAL: " << ctx.interval_us << " US";
 
-        ctx.handler = std::bind(&Snapshots::OnWriterTimer, this, std::placeholders::_1);
+        ctx.handler = std::bind(&Snapshots::OnWriterTimer, this, std::placeholders::_1, std::placeholders::_2);
         mgr->AddTimer(ctx);
     }
     return Status::OK();
