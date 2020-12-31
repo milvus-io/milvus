@@ -196,7 +196,7 @@ ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
                 auto loc = search_result->result_offsets_[j];
                 result_distances[loc] = search_result->result_distances_[j];
                 row_datas[loc] = search_result->row_data_[j];
-                result_ids[loc] = search_result->result_ids_[j];
+                memcpy(&result_ids[loc], search_result->row_data_[j].data(), sizeof(int64_t));
             }
             count += size;
         }
