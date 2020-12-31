@@ -81,21 +81,30 @@ Milvus can get get scalability following configuration piece in [envoy-configmap
 `envoy-configmap.yaml`
 ```yaml
 ... ...
-                  domains:
-                  - "*"
-                  routes:
-                  - match:
-                      prefix: "/milvus.grpc.MilvusService/Search"
-                    route:
-                      cluster: milvus_backend_ro
-                      timeout: 1s
-                      priority: HIGH
-                  - match:
-                      prefix: "/"
-                    route:
-                      cluster: milvus_backend_rw
-                      timeout: 3600s
-                      priority: HIGH
+      clusters:
+      - name: milvus_backend_ro
+        type: STRICT_DNS
+        connect_timeout: 1s
+        lb_policy: ROUND_ROBIN
+        dns_lookup_family: V4_ONLY
+        http2_protocol_options: {}
+        circuit_breakers:
+          thresholds:
+            priority: HIGH
+            max_pending_requests: 20480
+            max_connections: 20480
+            max_requests: 20480
+            max_retries: 1
+        load_assignment:
+          cluster_name: milvus_backend_ro
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: milvus-ro-servers
+                    port_value: 19530
+                    protocol: TCP
 ... ...  
 ```
 
