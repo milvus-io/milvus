@@ -181,15 +181,15 @@ FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
 
 CStatus
 UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info) {
-    auto status = CStatus();
     try {
         auto segment = (milvus::segcore::SegmentBase*)c_segment;
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-        auto res = segment->LoadIndexing(*load_index_info);
+        auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
         return status;
     } catch (std::exception& e) {
+        auto status = CStatus();
         status.error_code = UnexpectedException;
         status.error_msg = strdup(e.what());
         return status;

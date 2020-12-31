@@ -16,6 +16,23 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 )
 
+//func TestLoadIndexClient_LoadIndex(t *testing.T) {
+//	pulsarURL := Params.PulsarAddress
+//	loadIndexChannels := Params.LoadIndexChannelNames
+//	loadIndexClient := client.NewLoadIndexClient(context.Background(), pulsarURL, loadIndexChannels)
+//
+//	loadIndexPath := "collection0-segment0-field0"
+//	loadIndexPaths := make([]string, 0)
+//	loadIndexPaths = append(loadIndexPaths, loadIndexPath)
+//
+//	indexParams := make(map[string]string)
+//	indexParams["index_type"] = "IVF_PQ"
+//	indexParams["index_mode"] = "cpu"
+//
+//	loadIndexClient.LoadIndex(loadIndexPaths, 0, 0, "field0", indexParams)
+//	loadIndexClient.Close()
+//}
+
 func TestLoadIndexService(t *testing.T) {
 	node := newQueryNode()
 	collectionID := rand.Int63n(1000000)

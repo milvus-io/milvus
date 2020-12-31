@@ -68,6 +68,18 @@ func (scheduler *FlushScheduler) describe() error {
 						return err
 					}
 					for fieldID, data := range mapData {
+						// check field indexable
+						segMeta, err := scheduler.metaTable.GetSegmentByID(singleSegmentID)
+						if err != nil {
+							return err
+						}
+						indexable, err := scheduler.metaTable.IsIndexable(segMeta.CollectionID, fieldID)
+						if err != nil {
+							return err
+						}
+						if !indexable {
+							continue
+						}
 						info := &IndexBuildInfo{
 							segmentID:      singleSegmentID,
 							fieldID:        fieldID,
