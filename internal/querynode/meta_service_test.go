@@ -125,6 +125,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 	value := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -137,6 +138,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -190,6 +192,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	msg1 := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -202,6 +205,7 @@ func TestMetaService_processCreate(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -278,6 +282,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 	value := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -290,6 +295,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -328,6 +334,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 	newValue := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -340,6 +347,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -382,6 +390,7 @@ func TestMetaService_processModify(t *testing.T) {
 	msg1 := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -394,6 +403,7 @@ func TestMetaService_processModify(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -446,6 +456,7 @@ func TestMetaService_processModify(t *testing.T) {
 	msg3 := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -458,6 +469,7 @@ func TestMetaService_processModify(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -536,6 +548,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 	value := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -548,6 +561,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <
@@ -582,6 +596,7 @@ func TestMetaService_processDelete(t *testing.T) {
 	msg1 := `schema: <
 				name: "test"
 				fields: <
+				fieldID:100
 				name: "vec"
 				data_type: VECTOR_FLOAT
 				type_params: <
@@ -594,6 +609,7 @@ func TestMetaService_processDelete(t *testing.T) {
 				>
 				>
 				fields: <
+				fieldID:101
 				name: "age"
 				data_type: INT32
 				type_params: <

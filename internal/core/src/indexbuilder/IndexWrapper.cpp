@@ -67,75 +67,65 @@ IndexWrapper::parse() {
         config_[key] = value;
     }
 
-    if (!config_.contains(milvus::knowhere::meta::DIM)) {
-        // should raise exception here?
-        PanicInfo("dim must be specific in type params or index params!");
-    } else {
-        auto dim = config_[milvus::knowhere::meta::DIM].get<std::string>();
-        config_[milvus::knowhere::meta::DIM] = std::stoi(dim);
-    }
+    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
 
-    if (!config_.contains(milvus::knowhere::meta::TOPK)) {
-    } else {
-        auto topk = config_[milvus::knowhere::meta::TOPK].get<std::string>();
-        config_[milvus::knowhere::meta::TOPK] = std::stoi(topk);
-    }
+    /***************************** meta *******************************/
+    check_parameter<int>(milvus::knowhere::meta::DIM, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::meta::TOPK, stoi_closure, std::nullopt);
 
-    if (!config_.contains(milvus::knowhere::IndexParams::nlist)) {
-    } else {
-        auto nlist = config_[milvus::knowhere::IndexParams::nlist].get<std::string>();
-        config_[milvus::knowhere::IndexParams::nlist] = std::stoi(nlist);
-    }
-
-    if (!config_.contains(milvus::knowhere::IndexParams::nprobe)) {
-    } else {
-        auto nprobe = config_[milvus::knowhere::IndexParams::nprobe].get<std::string>();
-        config_[milvus::knowhere::IndexParams::nprobe] = std::stoi(nprobe);
-    }
-
-    if (!config_.contains(milvus::knowhere::IndexParams::nbits)) {
-    } else {
-        auto nbits = config_[milvus::knowhere::IndexParams::nbits].get<std::string>();
-        config_[milvus::knowhere::IndexParams::nbits] = std::stoi(nbits);
-    }
-
-    if (!config_.contains(milvus::knowhere::IndexParams::m)) {
-    } else {
-        auto m = config_[milvus::knowhere::IndexParams::m].get<std::string>();
-        config_[milvus::knowhere::IndexParams::m] = std::stoi(m);
-    }
+    /***************************** IVF Params *******************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::m, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
 
     /************************** NSG Parameter **************************/
-    if (!config_.contains(milvus::knowhere::IndexParams::knng)) {
-    } else {
-        auto knng = config_[milvus::knowhere::IndexParams::knng].get<std::string>();
-        config_[milvus::knowhere::IndexParams::knng] = std::stoi(knng);
-    }
+    check_parameter<int>(milvus::knowhere::IndexParams::knng, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
 
-    if (!config_.contains(milvus::knowhere::IndexParams::search_length)) {
-    } else {
-        auto search_length = config_[milvus::knowhere::IndexParams::search_length].get<std::string>();
-        config_[milvus::knowhere::IndexParams::search_length] = std::stoi(search_length);
-    }
+    /************************** HNSW Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::M, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::ef, stoi_closure, std::nullopt);
 
-    if (!config_.contains(milvus::knowhere::IndexParams::out_degree)) {
-    } else {
-        auto out_degree = config_[milvus::knowhere::IndexParams::out_degree].get<std::string>();
-        config_[milvus::knowhere::IndexParams::out_degree] = std::stoi(out_degree);
-    }
+    /************************** Annoy Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
 
-    if (!config_.contains(milvus::knowhere::IndexParams::candidate)) {
-    } else {
-        auto candidate = config_[milvus::knowhere::IndexParams::candidate].get<std::string>();
-        config_[milvus::knowhere::IndexParams::candidate] = std::stoi(candidate);
-    }
+    /************************** PQ Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
 
-    /************************** Serialize *******************************/
-    if (!config_.contains(milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
-        config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE] = 4;
+    /************************** NGT Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
+
+    /************************** NGT Search Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::epsilon, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
+
+    /************************** NGT_PANNG Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
+
+    /************************** NGT_ONNG Params *****************************/
+    check_parameter<int>(milvus::knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
+
+    /************************** Serialize Params *******************************/
+    check_parameter<int>(milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
+}
+
+template <typename T>
+void
+IndexWrapper::check_parameter(const std::string& key, std::function<T(std::string)> fn, std::optional<T> default_v) {
+    if (!config_.contains(key)) {
+        if (default_v.has_value()) {
+            config_[key] = default_v.value();
+        }
     } else {
-        auto slice_size = config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<std::string>();
-        config_[milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE] = std::stoi(slice_size);
+        auto value = config_[key];
+        config_[key] = fn(value);
     }
 }
 

@@ -26,7 +26,7 @@ func setup() {
 
 func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb.CollectionMeta {
 	fieldVec := schemapb.FieldSchema{
-		FieldID:      UniqueID(0),
+		FieldID:      UniqueID(100),
 		Name:         "vec",
 		IsPrimaryKey: false,
 		DataType:     schemapb.DataType_VECTOR_FLOAT,
@@ -45,7 +45,7 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 	}
 
 	fieldInt := schemapb.FieldSchema{
-		FieldID:      UniqueID(1),
+		FieldID:      UniqueID(101),
 		Name:         "age",
 		IsPrimaryKey: false,
 		DataType:     schemapb.DataType_INT32,
@@ -66,6 +66,7 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID) *etcdpb
 		SegmentIDs:    []UniqueID{0},
 		PartitionTags: []string{"default"},
 	}
+
 	return &collectionMeta
 }
 

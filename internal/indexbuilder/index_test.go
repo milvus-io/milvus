@@ -181,6 +181,8 @@ func TestCIndex_Codec(t *testing.T) {
 
 		err = index.Delete()
 		assert.Equal(t, err, nil)
+		err = copyIndex.Delete()
+		assert.Equal(t, err, nil)
 	}
 }
 

@@ -409,6 +409,7 @@ TEST(Query, FillSegment) {
         field->set_name("fakevec");
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
+        field->set_fieldid(100);
         field->set_data_type(pb::schema::DataType::VECTOR_FLOAT);
         auto param = field->add_type_params();
         param->set_key("dim");
@@ -421,6 +422,7 @@ TEST(Query, FillSegment) {
     {
         auto field = proto.add_fields();
         field->set_name("the_key");
+        field->set_fieldid(101);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
         field->set_data_type(pb::schema::DataType::INT32);
