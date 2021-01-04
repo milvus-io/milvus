@@ -88,7 +88,7 @@ void
 Action::PushTaskToAllNeighbour(TaskTableItemPtr task_item, const ResourcePtr& self) {
     auto neighbours = get_neighbours(self);
     for (auto& neighbour : neighbours) {
-        neighbour->task_table().Put(task_item->task, task_item);
+        neighbour->task_table().Put(task_item->get_task(), task_item);
     }
 }
 
@@ -103,7 +103,7 @@ void
 Action::SpecifiedResourceLabelTaskScheduler(const ResourceMgrPtr& res_mgr, ResourcePtr resource,
                                             std::shared_ptr<LoadCompletedEvent> event) {
     auto task_item = event->task_table_item_;
-    auto task = event->task_table_item_->task;
+    auto task = event->task_table_item_->get_task();
 
     if (resource->name() == task->path().Last()) {
         resource->WakeupExecutor();

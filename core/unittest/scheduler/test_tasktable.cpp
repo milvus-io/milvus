@@ -38,7 +38,7 @@ class TaskTableItemTest : public ::testing::Test {
 
 TEST_F(TaskTableItemTest, CONSTRUCT) {
     ASSERT_EQ(default_.id, 0);
-    ASSERT_EQ(default_.task, nullptr);
+    ASSERT_EQ(default_.get_task(), nullptr);
     ASSERT_EQ(default_.state, milvus::scheduler::TaskTableItemState::INVALID);
 }
 
@@ -178,12 +178,12 @@ TEST_F(TaskTableBaseTest, SUBSCRIBER) {
 
 TEST_F(TaskTableBaseTest, PUT_TASK) {
     empty_table_.Put(task1_);
-    ASSERT_EQ(empty_table_.at(0)->task, task1_);
+    ASSERT_EQ(empty_table_.at(0)->get_task(), task1_);
 }
 
 TEST_F(TaskTableBaseTest, PUT_INVALID_TEST) {
     empty_table_.Put(invalid_task_);
-    ASSERT_EQ(empty_table_.at(0)->task, invalid_task_);
+    ASSERT_EQ(empty_table_.at(0)->get_task(), invalid_task_);
 }
 
 TEST_F(TaskTableBaseTest, PUT_BATCH) {
@@ -191,8 +191,8 @@ TEST_F(TaskTableBaseTest, PUT_BATCH) {
     for (auto& task : tasks) {
         empty_table_.Put(task);
     }
-    ASSERT_EQ(empty_table_.at(0)->task, task1_);
-    ASSERT_EQ(empty_table_.at(1)->task, task2_);
+    ASSERT_EQ(empty_table_.at(0)->get_task(), task1_);
+    ASSERT_EQ(empty_table_.at(1)->get_task(), task2_);
 }
 
 TEST_F(TaskTableBaseTest, SIZE) {
