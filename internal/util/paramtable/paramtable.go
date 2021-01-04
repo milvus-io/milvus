@@ -57,40 +57,19 @@ func (gp *BaseTable) Init() {
 	if err != nil {
 		panic(err)
 	}
-	gp.tryloadFromEnv()
-
-}
-
-func (gp *BaseTable) tryloadFromEnv() {
 
 	minioAddress := os.Getenv("MINIO_ADDRESS")
 	if minioAddress == "" {
-		minioHost, err := gp.Load("minio.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("minio.port")
-		if err != nil {
-			panic(err)
-		}
-		minioAddress = minioHost + ":" + port
+		minioAddress = "localhost:9000"
 	}
-	err := gp.Save("_MinioAddress", minioAddress)
+	err = gp.Save("_MinioAddress", minioAddress)
 	if err != nil {
 		panic(err)
 	}
 
 	etcdAddress := os.Getenv("ETCD_ADDRESS")
 	if etcdAddress == "" {
-		etcdHost, err := gp.Load("etcd.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("etcd.port")
-		if err != nil {
-			panic(err)
-		}
-		etcdAddress = etcdHost + ":" + port
+		etcdAddress = "localhost:2379"
 	}
 	err = gp.Save("_EtcdAddress", etcdAddress)
 	if err != nil {
@@ -99,15 +78,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
 	if pulsarAddress == "" {
-		pulsarHost, err := gp.Load("pulsar.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("pulsar.port")
-		if err != nil {
-			panic(err)
-		}
-		pulsarAddress = "pulsar://" + pulsarHost + ":" + port
+		pulsarAddress = "pulsar://localhost:6650"
 	}
 	err = gp.Save("_PulsarAddress", pulsarAddress)
 	if err != nil {
@@ -116,34 +87,9 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	masterAddress := os.Getenv("MASTER_ADDRESS")
 	if masterAddress == "" {
-		masterHost, err := gp.Load("master.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("master.port")
-		if err != nil {
-			panic(err)
-		}
-		masterAddress = masterHost + ":" + port
+		masterAddress = "localhost:53100"
 	}
 	err = gp.Save("_MasterAddress", masterAddress)
-	if err != nil {
-		panic(err)
-	}
-
-	indexBuilderAddress := os.Getenv("INDEX_BUILDER_ADDRESS")
-	if indexBuilderAddress == "" {
-		indexBuilderHost, err := gp.Load("indexBuilder.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("indexBuilder.port")
-		if err != nil {
-			panic(err)
-		}
-		indexBuilderAddress = indexBuilderHost + ":" + port
-	}
-	err = gp.Save("_IndexBuilderAddress", indexBuilderAddress)
 	if err != nil {
 		panic(err)
 	}

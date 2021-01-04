@@ -115,6 +115,8 @@ ShowExprVisitor::visit(TermExpr& expr) {
     Assert(field_is_vector(expr.data_type_) == false);
     auto terms = [&] {
         switch (expr.data_type_) {
+            case DataType::BOOL:
+                return TermExtract<bool>(expr);
             case DataType::INT8:
                 return TermExtract<int8_t>(expr);
             case DataType::INT16:
