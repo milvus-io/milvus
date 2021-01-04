@@ -215,6 +215,21 @@ func (t *describeCollectionTask) Ts() (Timestamp, error) {
 	return t.req.Timestamp, nil
 }
 
+func (t *describeCollectionTask) filterSchema() error {
+	// remove system field
+	var newFields []*schemapb.FieldSchema
+	for _, fieldMeta := range t.description.Schema.Fields {
+		fieldID := fieldMeta.FieldID
+		// todo not hardcode
+		if fieldID < 100 {
+			continue
+		}
+		newFields = append(newFields, fieldMeta)
+	}
+	t.description.Schema.Fields = newFields
+	return nil
+}
+
 func (t *describeCollectionTask) Execute() error {
 	if t.req == nil {
 		return errors.New("null request")
@@ -225,10 +240,9 @@ func (t *describeCollectionTask) Execute() error {
 	if err != nil {
 		return err
 	}
-
-	t.description.Schema = collection.Schema
-
-	return nil
+	cloneSchema := proto.Clone(collection.Schema)
+	t.description.Schema = cloneSchema.(*schemapb.CollectionSchema)
+	return t.filterSchema()
 
 }
 
