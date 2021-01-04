@@ -31,6 +31,11 @@ func TestParamTable_KVRootPath(t *testing.T) {
 	assert.Equal(t, path, "by-dev/kv")
 }
 
+func TestParamTable_IndexBuilderAddress(t *testing.T) {
+	path := Params.IndexBuilderAddress
+	assert.Equal(t, path, "localhost:31000")
+}
+
 func TestParamTable_TopicNum(t *testing.T) {
 	num := Params.TopicNum
 	fmt.Println("TopicNum:", num)
