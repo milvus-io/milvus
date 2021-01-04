@@ -130,8 +130,8 @@ Resource::pick_task_execute() {
     auto indexes = task_table_.PickToExecute(std::numeric_limits<uint64_t>::max());
     for (auto index : indexes) {
         // try to set one task executing, then return
-        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
-            if (task_table_[index]->task->path().Last() != name()) {
+        if (task_table_[index]->get_task()->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
+            if (task_table_[index]->get_task()->path().Last() != name()) {
                 continue;
             }
         }
@@ -166,19 +166,19 @@ Resource::loader_function() {
             if (task_item == nullptr) {
                 break;
             }
-            if (task_item->task->Type() == TaskType::BuildIndexTask && name() == "cpu") {
+            if (task_item->get_task()->Type() == TaskType::BuildIndexTask && name() == "cpu") {
                 BuildMgrInst::GetInstance()->Take();
                 LOG_SERVER_DEBUG_ << name() << " load BuildIndexTask";
             }
-            LoadFile(task_item->task);
+            LoadFile(task_item->get_task());
             task_item->Loaded();
 
-            auto& label = task_item->task->label();
+            auto& label = task_item->get_task()->label();
             if (label != nullptr &&
-                (label->Type() != TaskLabelType::BROADCAST || task_item->task->Type() == TaskType::DeleteTask)) {
+                (label->Type() != TaskLabelType::BROADCAST || task_item->get_task()->Type() == TaskType::DeleteTask)) {
                 if (task_item->from) {
                     task_item->from->Moved();
-                    task_item->from->task = FinishedTask::Create(task_item->from->task);
+                    task_item->from->set_task(std::move(FinishedTask::Create(task_item->from->get_task())));
                     task_item->from = nullptr;
                 }
             }
@@ -208,15 +208,15 @@ Resource::executor_function() {
                 break;
             }
             auto start = get_current_timestamp();
-            Process(task_item->task);
-            task_item->task = FinishedTask::Create(task_item->task);
+            Process(task_item->get_task());
+            task_item->set_task(std::move(FinishedTask::Create(task_item->get_task())));
             auto finish = get_current_timestamp();
             ++total_task_;
             total_cost_ += finish - start;
 
             task_item->Executed();
 
-            if (task_item->task->Type() == TaskType::BuildIndexTask) {
+            if (task_item->get_task()->Type() == TaskType::BuildIndexTask) {
                 BuildMgrInst::GetInstance()->Put();
                 ResMgrInst::GetInstance()->GetResource("cpu")->WakeupLoader();
                 ResMgrInst::GetInstance()->GetResource("disk")->WakeupLoader();

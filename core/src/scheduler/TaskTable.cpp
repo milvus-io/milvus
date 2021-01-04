@@ -56,6 +56,18 @@ TaskTimestamp::Dump() const {
     return ret;
 }
 
+TaskPtr
+TaskTableItem::get_task() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return this->task;
+}
+
+void
+TaskTableItem::set_task(TaskPtr t) {
+    std::lock_guard<std::mutex> lock(mutex);
+    this->task = std::move(t);
+}
+
 bool
 TaskTableItem::IsFinish() {
     return state == TaskTableItemState::MOVED || state == TaskTableItemState::EXECUTED;
@@ -168,7 +180,7 @@ TaskTable::PickToLoad(uint64_t limit) {
             if (loaded_count >= 1)
                 return std::vector<uint64_t>();
         } else if (table_[index]->state == TaskTableItemState::START) {
-            auto task = table_[index]->task;
+            auto task = table_[index]->get_task();
 
             // if task is a build index task, limit it
             if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
@@ -266,7 +278,7 @@ void
 TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
     auto item = std::make_shared<TaskTableItem>(std::move(from));
     item->id = id_++;
-    item->task = std::move(task);
+    item->set_task(std::move(task));
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
     table_.put(std::move(item));
