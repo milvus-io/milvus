@@ -728,7 +728,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
     }
 #endif
     to_index->SetUids(uids);
-    LOG_ENGINE_DEBUG_ << "Set " << to_index->GetUids()->size() << "uids for " << location;
+    LOG_ENGINE_DEBUG_ << "Set " << to_index->UidsSize() << "uids for " << location;
     if (blacklist != nullptr) {
         to_index->SetBlacklist(blacklist);
         LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
