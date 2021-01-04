@@ -6,6 +6,8 @@
 
 #### 8.1 Overview
 
+<img src="./figs/query_service.jpeg" width=700>
+
 
 
 #### 8.2 API
@@ -115,6 +117,28 @@ type ReleasePartitionRequest struct {
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
+}
+```
+
+
+
+#### 8.2 Query Node
+
+```go
+type QueryNode interface {
+  Start() error
+  Close() error
+  
+  AddQueryStream(requestStream MsgStream, resultStream MsgStream) error
+  RemoveQueryStream(requestStreamID string) error
+  WatchDmStreams(insertStreams MsgStream) error
+  WatchDdStream(stream MsgStream) error
+  SetTimeTickStream(stream MsgStream) error
+  SetStatsStream(stream MsgStream) error
+  
+  LoadSegments(DbID UniqueID, CollID UniqueID, PartitionID UniqueID, SegIDs []UniqueID, FieldIDs []int64) error
+  ReleaseSegments(DbID UniqueID, CollID UniqueID, PartitionID UniqueID, SegIDs []UniqueID) error
+  DescribeParition(DbID UniqueID, CollID UniqueID, PartitionID UniqueID) (PartitionDescription, error)
 }
 ```
 

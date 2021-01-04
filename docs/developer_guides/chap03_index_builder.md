@@ -6,7 +6,7 @@
 
 #### 8.1 Overview
 
-
+<img src="./figs/index_service.jpeg" width=700>
 
 #### 8.2 API
 

@@ -2,6 +2,12 @@
 
 ## 6. Proxy
 
+
+
+<img src="./figs/proxy.jpeg" width=700>
+
+
+
 #### 6.0 Proxy Service API
 
 ```go
@@ -25,8 +31,6 @@ type Client interface {
   RegisterLink() (ProxyInfo, error)
 }
 ```
-
-
 
 
 

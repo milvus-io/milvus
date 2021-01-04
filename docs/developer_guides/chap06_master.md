@@ -2,7 +2,8 @@
 
 ## 10. Master
 
-,
+<img src="./figs/master.jpeg" width=700>
+
 
 #### 10.1 API
 
@@ -25,8 +26,6 @@ type Client interface {
   GetStatsChannel() (string, error)
 }
 ```
-
-
 
 
 
