@@ -12,7 +12,6 @@
 #include <string>
 #include <optional>
 #include <vector>
-#include <memory>
 #include "knowhere/index/vector_index/VecIndex.h"
 
 namespace milvus {
@@ -39,19 +38,6 @@ class IndexWrapper {
     void
     Load(const char* serialized_sliced_blob_buffer, int32_t size);
 
-    struct QueryResult {
-        std::vector<milvus::knowhere::IDType> ids;
-        std::vector<float> distances;
-        int64_t nq;
-        int64_t topk;
-    };
-
-    std::unique_ptr<QueryResult>
-    Query(const knowhere::DatasetPtr& dataset);
-
-    std::unique_ptr<QueryResult>
-    QueryWithParam(const knowhere::DatasetPtr& dataset, const char* serialized_search_params);
-
  private:
     void
     parse();
@@ -68,17 +54,9 @@ class IndexWrapper {
 
     template <typename T>
     void
-    check_parameter(knowhere::Config& conf,
-                    const std::string& key,
+    check_parameter(const std::string& key,
                     std::function<T(std::string)> fn,
                     std::optional<T> default_v = std::nullopt);
-
-    template <typename ParamsT>
-    void
-    parse_impl(const std::string& serialized_params_str, knowhere::Config& conf);
-
-    std::unique_ptr<QueryResult>
-    QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::Config& conf);
 
  public:
     void

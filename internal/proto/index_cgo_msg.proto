@@ -13,11 +13,6 @@ message IndexParams {
   repeated common.KeyValuePair params = 1;
 }
 
-// TypeParams & IndexParams will be replaced by MapParams later
-message MapParams {
-  repeated common.KeyValuePair params = 1;
-}
-
 message Binary {
   string key = 1;
   bytes value = 2;

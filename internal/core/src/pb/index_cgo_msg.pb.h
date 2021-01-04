@@ -48,7 +48,7 @@ struct TableStruct_index_5fcgo_5fmsg_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[5]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[4]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -67,9 +67,6 @@ extern BinarySetDefaultTypeInternal _BinarySet_default_instance_;
 class IndexParams;
 class IndexParamsDefaultTypeInternal;
 extern IndexParamsDefaultTypeInternal _IndexParams_default_instance_;
-class MapParams;
-class MapParamsDefaultTypeInternal;
-extern MapParamsDefaultTypeInternal _MapParams_default_instance_;
 class TypeParams;
 class TypeParamsDefaultTypeInternal;
 extern TypeParamsDefaultTypeInternal _TypeParams_default_instance_;
@@ -80,7 +77,6 @@ PROTOBUF_NAMESPACE_OPEN
 template<> ::milvus::proto::indexcgo::Binary* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::Binary>(Arena*);
 template<> ::milvus::proto::indexcgo::BinarySet* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::BinarySet>(Arena*);
 template<> ::milvus::proto::indexcgo::IndexParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::IndexParams>(Arena*);
-template<> ::milvus::proto::indexcgo::MapParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::MapParams>(Arena*);
 template<> ::milvus::proto::indexcgo::TypeParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::TypeParams>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -363,143 +359,6 @@ class IndexParams :
 };
 // -------------------------------------------------------------------
 
-class MapParams :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.indexcgo.MapParams) */ {
- public:
-  MapParams();
-  virtual ~MapParams();
-
-  MapParams(const MapParams& from);
-  MapParams(MapParams&& from) noexcept
-    : MapParams() {
-    *this = ::std::move(from);
-  }
-
-  inline MapParams& operator=(const MapParams& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline MapParams& operator=(MapParams&& from) noexcept {
-    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
-      if (this != &from) InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return GetMetadataStatic().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return GetMetadataStatic().reflection;
-  }
-  static const MapParams& default_instance();
-
-  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const MapParams* internal_default_instance() {
-    return reinterpret_cast<const MapParams*>(
-               &_MapParams_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    2;
-
-  friend void swap(MapParams& a, MapParams& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(MapParams* other) {
-    if (other == this) return;
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  inline MapParams* New() const final {
-    return CreateMaybeMessage<MapParams>(nullptr);
-  }
-
-  MapParams* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<MapParams>(arena);
-  }
-  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const MapParams& from);
-  void MergeFrom(const MapParams& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  #else
-  bool MergePartialFromCodedStream(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
-  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
-  void SerializeWithCachedSizes(
-      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
-  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
-      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
-  int GetCachedSize() const final { return _cached_size_.Get(); }
-
-  private:
-  inline void SharedCtor();
-  inline void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(MapParams* other);
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.proto.indexcgo.MapParams";
-  }
-  private:
-  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
-    return nullptr;
-  }
-  inline void* MaybeArenaPtr() const {
-    return nullptr;
-  }
-  public:
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-  private:
-  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
-    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_index_5fcgo_5fmsg_2eproto);
-    return ::descriptor_table_index_5fcgo_5fmsg_2eproto.file_level_metadata[kIndexInFileMessages];
-  }
-
-  public:
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kParamsFieldNumber = 1,
-  };
-  // repeated .milvus.proto.common.KeyValuePair params = 1;
-  int params_size() const;
-  void clear_params();
-  ::milvus::proto::common::KeyValuePair* mutable_params(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
-      mutable_params();
-  const ::milvus::proto::common::KeyValuePair& params(int index) const;
-  ::milvus::proto::common::KeyValuePair* add_params();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
-      params() const;
-
-  // @@protoc_insertion_point(class_scope:milvus.proto.indexcgo.MapParams)
- private:
-  class _Internal;
-
-  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > params_;
-  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  friend struct ::TableStruct_index_5fcgo_5fmsg_2eproto;
-};
-// -------------------------------------------------------------------
-
 class Binary :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.indexcgo.Binary) */ {
  public:
@@ -542,7 +401,7 @@ class Binary :
                &_Binary_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    2;
 
   friend void swap(Binary& a, Binary& b) {
     a.Swap(&b);
@@ -692,7 +551,7 @@ class BinarySet :
                &_BinarySet_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    3;
 
   friend void swap(BinarySet& a, BinarySet& b) {
     a.Swap(&b);
@@ -856,37 +715,6 @@ IndexParams::params() const {
 
 // -------------------------------------------------------------------
 
-// MapParams
-
-// repeated .milvus.proto.common.KeyValuePair params = 1;
-inline int MapParams::params_size() const {
-  return params_.size();
-}
-inline ::milvus::proto::common::KeyValuePair* MapParams::mutable_params(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.indexcgo.MapParams.params)
-  return params_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
-MapParams::mutable_params() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.indexcgo.MapParams.params)
-  return &params_;
-}
-inline const ::milvus::proto::common::KeyValuePair& MapParams::params(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.indexcgo.MapParams.params)
-  return params_.Get(index);
-}
-inline ::milvus::proto::common::KeyValuePair* MapParams::add_params() {
-  // @@protoc_insertion_point(field_add:milvus.proto.indexcgo.MapParams.params)
-  return params_.Add();
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
-MapParams::params() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.indexcgo.MapParams.params)
-  return params_;
-}
-
-// -------------------------------------------------------------------
-
 // Binary
 
 // string key = 1;
@@ -1028,8 +856,6 @@ BinarySet::datas() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

@@ -38,95 +38,94 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
     Assert(index_ != nullptr);
 }
 
-template <typename ParamsT>  // ugly here, ParamsT will just be MapParams later
 void
-IndexWrapper::parse_impl(const std::string& serialized_params_str, knowhere::Config& conf) {
+IndexWrapper::parse() {
+    namespace indexcgo = milvus::proto::indexcgo;
     bool deserialized_success;
 
-    ParamsT params;
-    deserialized_success = google::protobuf::TextFormat::ParseFromString(serialized_params_str, &params);
+    indexcgo::TypeParams type_config;
+    deserialized_success = google::protobuf::TextFormat::ParseFromString(type_params_, &type_config);
     Assert(deserialized_success);
 
-    for (auto i = 0; i < params.params_size(); ++i) {
-        const auto& param = params.params(i);
-        const auto& key = param.key();
-        const auto& value = param.value();
-        conf[key] = value;
+    indexcgo::IndexParams index_config;
+    deserialized_success = google::protobuf::TextFormat::ParseFromString(index_params_, &index_config);
+    Assert(deserialized_success);
+
+    for (auto i = 0; i < type_config.params_size(); ++i) {
+        const auto& type_param = type_config.params(i);
+        const auto& key = type_param.key();
+        const auto& value = type_param.value();
+        type_config_[key] = value;
+        config_[key] = value;
+    }
+
+    for (auto i = 0; i < index_config.params_size(); ++i) {
+        const auto& index_param = index_config.params(i);
+        const auto& key = index_param.key();
+        const auto& value = index_param.value();
+        index_config_[key] = value;
+        config_[key] = value;
     }
 
     auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
 
     /***************************** meta *******************************/
-    check_parameter<int>(conf, milvus::knowhere::meta::DIM, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::meta::TOPK, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::meta::DIM, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::meta::TOPK, stoi_closure, std::nullopt);
 
     /***************************** IVF Params *******************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::m, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::m, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
 
     /************************** NSG Parameter **************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::knng, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::knng, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
 
     /************************** HNSW Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::M, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::ef, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::M, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::ef, stoi_closure, std::nullopt);
 
     /************************** Annoy Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
 
     /************************** PQ Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
 
     /************************** NGT Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
 
     /************************** NGT Search Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::epsilon, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::epsilon, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
 
     /************************** NGT_PANNG Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
 
     /************************** NGT_ONNG Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(milvus::knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
 
     /************************** Serialize Params *******************************/
-    check_parameter<int>(conf, milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
-}
-
-void
-IndexWrapper::parse() {
-    namespace indexcgo = milvus::proto::indexcgo;
-
-    parse_impl<indexcgo::TypeParams>(type_params_, type_config_);
-    parse_impl<indexcgo::IndexParams>(index_params_, index_config_);
-
-    config_.update(type_config_);  // just like dict().update in Python, amazing
-    config_.update(index_config_);
+    check_parameter<int>(milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
 }
 
 template <typename T>
 void
-IndexWrapper::check_parameter(knowhere::Config& conf,
-                              const std::string& key,
-                              std::function<T(std::string)> fn,
-                              std::optional<T> default_v) {
-    if (!conf.contains(key)) {
+IndexWrapper::check_parameter(const std::string& key, std::function<T(std::string)> fn, std::optional<T> default_v) {
+    if (!config_.contains(key)) {
         if (default_v.has_value()) {
-            conf[key] = default_v.value();
+            config_[key] = default_v.value();
         }
     } else {
-        auto value = conf[key];
-        conf[key] = fn(value);
+        auto value = config_[key];
+        config_[key] = fn(value);
     }
 }
 
@@ -256,39 +255,6 @@ IndexWrapper::get_index_type() {
     // the index_type of all ivf-based index will change to ivf flat after loaded
     auto type = get_config_by_name<std::string>("index_type");
     return type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-}
-
-std::unique_ptr<IndexWrapper::QueryResult>
-IndexWrapper::Query(const knowhere::DatasetPtr& dataset) {
-    return std::move(QueryImpl(dataset, config_));
-}
-
-std::unique_ptr<IndexWrapper::QueryResult>
-IndexWrapper::QueryWithParam(const knowhere::DatasetPtr& dataset, const char* serialized_search_params) {
-    namespace indexcgo = milvus::proto::indexcgo;
-    milvus::knowhere::Config search_conf;
-    parse_impl<indexcgo::MapParams>(std::string(serialized_search_params), search_conf);
-
-    return std::move(QueryImpl(dataset, search_conf));
-}
-
-std::unique_ptr<IndexWrapper::QueryResult>
-IndexWrapper::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::Config& conf) {
-    auto res = index_->Query(dataset, conf, nullptr);
-    auto ids = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto distances = res->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    auto nq = dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-    auto k = config_[milvus::knowhere::meta::TOPK].get<int64_t>();
-
-    auto query_res = std::make_unique<IndexWrapper::QueryResult>();
-    query_res->nq = nq;
-    query_res->topk = k;
-    query_res->ids.resize(nq * k);
-    query_res->distances.resize(nq * k);
-    memcpy(query_res->ids.data(), ids, sizeof(int64_t) * nq * k);
-    memcpy(query_res->distances.data(), distances, sizeof(float) * nq * k);
-
-    return std::move(query_res);
 }
 
 }  // namespace indexbuilder
