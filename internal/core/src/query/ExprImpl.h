@@ -13,12 +13,11 @@
 #include "Expr.h"
 #include <tuple>
 #include <vector>
-#include <boost/container/vector.hpp>
 
 namespace milvus::query {
 template <typename T>
 struct TermExprImpl : TermExpr {
-    boost::container::vector<T> terms_;
+    std::vector<T> terms_;
 };
 
 template <typename T>
