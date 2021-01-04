@@ -21,7 +21,8 @@ etcd:
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  writeNodeKvSubPath: writer
+  writeNodeSegKvSubPath: writer/segment
+  writeNodeDDLKvSubPath: writer/ddl
   segThreshold: 10000
 
 minio:

@@ -36,13 +36,15 @@ type ParamTable struct {
 	DefaultPartitionTag string
 	SliceIndex          int
 
-	EtcdAddress          string
-	MetaRootPath         string
-	MinioAddress         string
-	MinioAccessKeyID     string
-	MinioSecretAccessKey string
-	MinioUseSSL          bool
-	MinioBucketName      string
+	EtcdAddress           string
+	MetaRootPath          string
+	WriteNodeSegKvSubPath string
+	WriteNodeDDLKvSubPath string
+	MinioAddress          string
+	MinioAccessKeyID      string
+	MinioSecretAccessKey  string
+	MinioUseSSL           bool
+	MinioBucketName       string
 
 	FlushInsertBufSize int
 	FlushDdBufSize     int
@@ -78,6 +80,8 @@ func (p *ParamTable) Init() {
 	p.initPulsarAddress()
 	p.initEtcdAddress()
 	p.initMetaRootPath()
+	p.initWriteNodeSegKvSubPath()
+	p.initWriteNodeDDLKvSubPath()
 	p.initInsertLogRootPath()
 	p.initDdLogRootPath()
 
@@ -297,6 +301,22 @@ func (p *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	p.MetaRootPath = rootPath + "/" + subPath
+}
+
+func (p *ParamTable) initWriteNodeSegKvSubPath() {
+	subPath, err := p.Load("etcd.writeNodeSegKvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.WriteNodeSegKvSubPath = subPath + "/"
+}
+
+func (p *ParamTable) initWriteNodeDDLKvSubPath() {
+	subPath, err := p.Load("etcd.writeNodeDDLKvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.WriteNodeDDLKvSubPath = subPath + "/"
 }
 
 func (p *ParamTable) initInsertLogRootPath() {

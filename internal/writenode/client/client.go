@@ -25,7 +25,7 @@ type Client struct {
 	flushStream msgstream.MsgStream
 }
 
-func NewWriterClient(etcdAddress string, kvRootPath string, writeNodeKvSubPath string, flushStream msgstream.MsgStream) (*Client, error) {
+func NewWriterClient(etcdAddress string, kvRootPath string, writeNodeSegKvSubPath string, flushStream msgstream.MsgStream) (*Client, error) {
 	// init kv client
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
 	if err != nil {
@@ -35,7 +35,7 @@ func NewWriterClient(etcdAddress string, kvRootPath string, writeNodeKvSubPath s
 
 	return &Client{
 		kvClient:    kvClient,
-		kvPrefix:    writeNodeKvSubPath,
+		kvPrefix:    writeNodeSegKvSubPath,
 		flushStream: flushStream,
 	}, nil
 }

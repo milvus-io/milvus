@@ -105,12 +105,12 @@ func (mt *metaTable) saveDDLFlushMeta(meta *pb.DDLFlushMeta) error {
 
 	mt.collID2DdlMeta[meta.CollectionID] = meta
 
-	return mt.client.Save("/writer/ddl/"+strconv.FormatInt(meta.CollectionID, 10), value)
+	return mt.client.Save(Params.WriteNodeDDLKvSubPath+strconv.FormatInt(meta.CollectionID, 10), value)
 }
 
 func (mt *metaTable) reloadDdlMetaFromKV() error {
 	mt.collID2DdlMeta = make(map[UniqueID]*pb.DDLFlushMeta)
-	_, values, err := mt.client.LoadWithPrefix("writer/ddl")
+	_, values, err := mt.client.LoadWithPrefix(Params.WriteNodeDDLKvSubPath)
 	if err != nil {
 		return err
 	}
@@ -132,13 +132,13 @@ func (mt *metaTable) saveSegFlushMeta(meta *pb.SegmentFlushMeta) error {
 
 	mt.segID2FlushMeta[meta.SegmentID] = *meta
 
-	return mt.client.Save("/writer/segment/"+strconv.FormatInt(meta.SegmentID, 10), value)
+	return mt.client.Save(Params.WriteNodeSegKvSubPath+strconv.FormatInt(meta.SegmentID, 10), value)
 }
 
 func (mt *metaTable) reloadSegMetaFromKV() error {
 	mt.segID2FlushMeta = make(map[UniqueID]pb.SegmentFlushMeta)
 
-	_, values, err := mt.client.LoadWithPrefix("writer/segment")
+	_, values, err := mt.client.LoadWithPrefix(Params.WriteNodeSegKvSubPath)
 	if err != nil {
 		return err
 	}

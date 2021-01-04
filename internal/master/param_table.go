@@ -16,10 +16,11 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	EtcdAddress   string
-	MetaRootPath  string
-	KvRootPath    string
-	PulsarAddress string
+	EtcdAddress           string
+	MetaRootPath          string
+	KvRootPath            string
+	WriteNodeSegKvSubPath string
+	PulsarAddress         string
 
 	// nodeID
 	ProxyIDList     []typeutil.UniqueID
@@ -68,6 +69,7 @@ func (p *ParamTable) Init() {
 	p.initEtcdAddress()
 	p.initMetaRootPath()
 	p.initKvRootPath()
+	p.initWriteNodeSegKvSubPath()
 	p.initPulsarAddress()
 
 	p.initProxyIDList()
@@ -145,6 +147,14 @@ func (p *ParamTable) initKvRootPath() {
 		panic(err)
 	}
 	p.KvRootPath = rootPath + "/" + subPath
+}
+
+func (p *ParamTable) initWriteNodeSegKvSubPath() {
+	subPath, err := p.Load("etcd.writeNodeSegKvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.WriteNodeSegKvSubPath = subPath + "/"
 }
 
 func (p *ParamTable) initTopicNum() {
