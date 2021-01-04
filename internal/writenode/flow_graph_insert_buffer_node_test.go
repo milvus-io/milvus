@@ -1,8 +1,10 @@
 package writenode
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"log"
 	"math"
 	"testing"
 	"time"
@@ -67,64 +69,78 @@ func genInsertMsg() insertMsg {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
+	log.Println(len(rawData))
 
 	// Binary vector
 	// Dimension of binary vector is 32
-	var bvector = [4]byte{255, 255, 255, 0}
-	for _, ele := range bvector {
-		bs := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bs, uint32(ele))
-		rawData = append(rawData, bs...)
-	}
+	// size := 4,  = 32 / 8
+	var bvector = []byte{255, 255, 255, 0}
+	rawData = append(rawData, bvector...)
+	log.Println(len(rawData))
 
 	// Bool
-	bb := make([]byte, 4)
 	var fieldBool = true
-	var fieldBoolInt uint32
-	if fieldBool {
-		fieldBoolInt = 1
-	} else {
-		fieldBoolInt = 0
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.LittleEndian, fieldBool); err != nil {
+		panic(err)
 	}
 
-	binary.LittleEndian.PutUint32(bb, fieldBoolInt)
-	rawData = append(rawData, bb...)
+	rawData = append(rawData, buf.Bytes()...)
+	log.Println(len(rawData))
 
 	// int8
 	var dataInt8 int8 = 100
-	bint8 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint8, uint32(dataInt8))
-	rawData = append(rawData, bint8...)
+	bint8 := new(bytes.Buffer)
+	if err := binary.Write(bint8, binary.LittleEndian, dataInt8); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bint8.Bytes()...)
+	log.Println(len(rawData))
 
 	// int16
 	var dataInt16 int16 = 200
-	bint16 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint16, uint32(dataInt16))
-	rawData = append(rawData, bint16...)
+	bint16 := new(bytes.Buffer)
+	if err := binary.Write(bint16, binary.LittleEndian, dataInt16); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bint16.Bytes()...)
+	log.Println(len(rawData))
 
 	// int32
 	var dataInt32 int32 = 300
-	bint32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint32, uint32(dataInt32))
-	rawData = append(rawData, bint32...)
+	bint32 := new(bytes.Buffer)
+	if err := binary.Write(bint32, binary.LittleEndian, dataInt32); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bint32.Bytes()...)
+	log.Println(len(rawData))
 
 	// int64
 	var dataInt64 int64 = 300
-	bint64 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint64, uint32(dataInt64))
-	rawData = append(rawData, bint64...)
+	bint64 := new(bytes.Buffer)
+	if err := binary.Write(bint64, binary.LittleEndian, dataInt64); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bint64.Bytes()...)
+	log.Println(len(rawData))
 
 	// float32
 	var datafloat float32 = 1.1
-	bfloat32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bfloat32, math.Float32bits(datafloat))
-	rawData = append(rawData, bfloat32...)
+	bfloat32 := new(bytes.Buffer)
+	if err := binary.Write(bfloat32, binary.LittleEndian, datafloat); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bfloat32.Bytes()...)
+	log.Println(len(rawData))
 
 	// float64
 	var datafloat64 float64 = 2.2
-	bfloat64 := make([]byte, 8)
-	binary.LittleEndian.PutUint64(bfloat64, math.Float64bits(datafloat64))
-	rawData = append(rawData, bfloat64...)
+	bfloat64 := new(bytes.Buffer)
+	if err := binary.Write(bfloat64, binary.LittleEndian, datafloat64); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, bfloat64.Bytes()...)
+	log.Println(len(rawData))
 
 	timeRange := TimeRange{
 		timestampMin: 0,
