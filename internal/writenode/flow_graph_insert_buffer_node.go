@@ -542,15 +542,21 @@ func (ibNode *insertBufferNode) getMeta(segID UniqueID) (*etcdpb.SegmentMeta, *e
 	segMeta := &etcdpb.SegmentMeta{}
 
 	key := path.Join(SegmentPrefix, strconv.FormatInt(segID, 10))
-	value, _ := ibNode.kvClient.Load(key)
-	err := proto.UnmarshalText(value, segMeta)
+	value, err := ibNode.kvClient.Load(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = proto.UnmarshalText(value, segMeta)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	collMeta := &etcdpb.CollectionMeta{}
 	key = path.Join(CollectionPrefix, strconv.FormatInt(segMeta.GetCollectionID(), 10))
-	value, _ = ibNode.kvClient.Load(key)
+	value, err = ibNode.kvClient.Load(key)
+	if err != nil {
+		return nil, nil, err
+	}
 	err = proto.UnmarshalText(value, collMeta)
 	if err != nil {
 		return nil, nil, err
