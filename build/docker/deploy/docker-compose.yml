@@ -11,6 +11,7 @@ services:
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ADDRESS: ${ETCD_ADDRESS}
+      INDEX_BUILDER_ADDRESS: ${INDEX_BUILDER_ADDRESS}
     networks: 
       - milvus
 
@@ -25,6 +26,21 @@ services:
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
     networks: 
+      - milvus
+
+  indexbuilder:
+    image: ${TARGET_REPO}/indexbuilder:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/indexbuilder/DockerFile
+      cache_from:
+        - ${SOURCE_REPO}/indexbuilder:${SOURCE_TAG}
+    environment:
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+
+    networks:
       - milvus
 
   querynode:

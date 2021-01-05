@@ -17,6 +17,10 @@ dir ('build/docker/deploy') {
             sh 'docker-compose build --force-rm master'
             sh 'docker-compose push master'
 
+            sh 'docker pull ${SOURCE_REPO}/indexbuilder:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm indexbuilder'
+            sh 'docker-compose push indexbuilder'
+
             sh 'docker pull ${SOURCE_REPO}/proxy:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm proxy'
             sh 'docker-compose push proxy'

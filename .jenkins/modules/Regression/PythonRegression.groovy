@@ -6,6 +6,7 @@ try {
     dir ('build/docker/deploy') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} pull'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d master'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexbuilder'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxy'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=1 -d querynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=2 -d querynode'
