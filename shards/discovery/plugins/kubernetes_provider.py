@@ -208,8 +208,8 @@ class EventHandler(threading.Thread):
 
         pods_with_event = set()
         for each_event in event['events']:
-            if not re.match(self.pod_patt, event['pod']):
-                # logger.warning(f"Do not match pod {event['pod']}")
+            if not re.match(self.pod_patt, each_event['pod']):
+                # logger.warning(f"Do not match pod {each_event['pod']}")
                 # Pod name mismatch, do not add it
                 return
             pods_with_event.add(each_event['pod'])
