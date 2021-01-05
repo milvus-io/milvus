@@ -173,4 +173,45 @@ public class TestAddVectors {
         InsertResponse res = client.insert(insertParam);
         assert(!res.getResponse().ok());
     }
+
+    // test load collection
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_partition(MilvusClient client, String collectionName) {
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        client.createPartition(collectionName, tag);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+        client.insert(insertParam);
+        List<String> tags = new ArrayList<>();
+        tags.add(tag);
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert load_res.ok();
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_not_existed_partition(MilvusClient client, String collectionName) {
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        List<String> tags = new ArrayList<>();
+        tags.add(tag);
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert !load_res.ok();
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_empty_partitions(MilvusClient client, String collectionName) {
+        List<String> tags = new ArrayList<>();
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert load_res.ok();
+    }
+
+    @Test(dataProvider = "Collection", dataProviderClass = MainClass.class)
+    public void test_load_partitions_after_insert(MilvusClient client, String collectionName) {
+        List<String> tags = new ArrayList<>();
+        String tag = RandomStringUtils.randomAlphabetic(10);
+        tags.add(tag);
+        client.createPartition(collectionName, tag);
+        InsertParam insertParam = new InsertParam.Builder(collectionName).withFloatVectors(vectors).withPartitionTag(tag).build();
+        client.insert(insertParam);
+        Response load_res = client.loadCollection(collectionName, tags);
+        assert load_res.ok();
+    }
 }

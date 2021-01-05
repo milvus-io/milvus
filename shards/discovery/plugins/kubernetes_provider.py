@@ -170,7 +170,7 @@ class EventHandler(threading.Thread):
         self.terminate = True
 
     def on_drop(self, event, **kwargs):
-        pass
+        self.mgr.delete_pod(event['pod'])
 
     def on_pod_started(self, event, **kwargs):
         try_cnt = 3
@@ -208,6 +208,10 @@ class EventHandler(threading.Thread):
 
         pods_with_event = set()
         for each_event in event['events']:
+            if not re.match(self.pod_patt, each_event['pod']):
+                # logger.warning(f"Do not match pod {each_event['pod']}")
+                # Pod name mismatch, do not add it
+                return
             pods_with_event.add(each_event['pod'])
             if each_event['ready']:
                 self.record_pending_add(each_event['pod'],

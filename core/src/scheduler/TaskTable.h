@@ -64,11 +64,16 @@ struct TaskTableItem : public interface::dumpable {
     TaskTableItem(TaskTableItem&&) = delete;
 
     uint64_t id;               // auto increment from 0;
-    TaskPtr task;              // the task;
     TaskTableItemState state;  // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
     TaskTableItemPtr from;
+
+    TaskPtr
+    get_task();
+
+    void
+    set_task(TaskPtr task);
 
     bool
     IsFinish();
@@ -93,6 +98,9 @@ struct TaskTableItem : public interface::dumpable {
 
     json
     Dump() const override;
+
+ private:
+    TaskPtr task;  // the task;
 };
 
 class TaskTable : public interface::dumpable {

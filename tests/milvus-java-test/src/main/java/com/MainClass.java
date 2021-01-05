@@ -34,12 +34,11 @@ public class MainClass {
 
     @DataProvider(name="ConnectInstance")
     public Object[][] connectInstance() throws ConnectFailedException {
-        MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost(host)
-                .withPort(port)
-                .build();
-        client.connect(connectParam);
+            .withHost(host)
+            .withPort(port)
+            .build();
+        MilvusClient client = new MilvusGrpcClient(connectParam);
         String collectionName = RandomStringUtils.randomAlphabetic(10);
         return new Object[][]{{client, collectionName}};
     }
@@ -47,15 +46,15 @@ public class MainClass {
     @DataProvider(name="DisConnectInstance")
     public Object[][] disConnectInstance() throws ConnectFailedException {
         // Generate connection instance
-        MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
-                .withHost(host)
-                .withPort(port)
-                .build();
-        client.connect(connectParam);
+            .withHost(host)
+            .withPort(port)
+            .build();
+        MilvusClient client = new MilvusGrpcClient(connectParam);
+
         try {
-            client.disconnect();
-        } catch (InterruptedException e) {
+            client.close();
+        } catch (Exception e) {
             e.printStackTrace();
         }
         String collectionName = RandomStringUtils.randomAlphabetic(10);
@@ -69,12 +68,11 @@ public class MainClass {
         for (int i = 0; i < metricTypes.length; ++i) {
             String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
             // Generate connection instance
-            MilvusClient client = new MilvusGrpcClient();
             ConnectParam connectParam = new ConnectParam.Builder()
-                    .withHost(host)
-                    .withPort(port)
-                    .build();
-            client.connect(connectParam);
+                .withHost(host)
+                .withPort(port)
+                .build();
+            MilvusClient client = new MilvusGrpcClient(connectParam);
 //            List<String> tableNames = client.listCollections().getCollectionNames();
 //            for (int j = 0; j < tableNames.size(); ++j
 //                 ) {
@@ -82,9 +80,9 @@ public class MainClass {
 //            }
 //            Thread.currentThread().sleep(2000);
             CollectionMapping cm = new CollectionMapping.Builder(collectionName, dimension)
-                    .withIndexFileSize(index_file_size)
-                    .withMetricType(metricTypes[i])
-                    .build();
+                .withIndexFileSize(index_file_size)
+                .withMetricType(metricTypes[i])
+                .build();
             Response res = client.createCollection(cm);
             if (!res.ok()) {
                 System.out.println(res.getMessage());
@@ -102,12 +100,11 @@ public class MainClass {
         for (int i = 0; i < metricTypes.length; ++i) {
             String collectionName = metricTypes[i].toString()+"_"+RandomStringUtils.randomAlphabetic(10);
             // Generate connection instance
-            MilvusClient client = new MilvusGrpcClient();
             ConnectParam connectParam = new ConnectParam.Builder()
-                    .withHost(host)
-                    .withPort(port)
-                    .build();
-            client.connect(connectParam);
+                .withHost(host)
+                .withPort(port)
+                .build();
+            MilvusClient client = new MilvusGrpcClient(connectParam);
 //            List<String> tableNames = client.listCollections().getCollectionNames();
 //            for (int j = 0; j < tableNames.size(); ++j
 //            ) {
@@ -115,9 +112,9 @@ public class MainClass {
 //            }
 //            Thread.currentThread().sleep(2000);
             CollectionMapping cm = new CollectionMapping.Builder(collectionName, dimension)
-                    .withIndexFileSize(index_file_size)
-                    .withMetricType(metricTypes[i])
-                    .build();
+                .withIndexFileSize(index_file_size)
+                .withMetricType(metricTypes[i])
+                .build();
             Response res = client.createCollection(cm);
             if (!res.ok()) {
                 System.out.println(res.getMessage());
