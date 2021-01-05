@@ -58,16 +58,24 @@ func (scheduler *IndexBuildScheduler) schedule(info interface{}) error {
 	}
 
 	// parse index params
+	typeParams, err := scheduler.metaTable.GetFieldTypeParams(segMeta.CollectionID, indexBuildInfo.fieldID)
+	if err != nil {
+		return err
+	}
 	indexParams, err := scheduler.metaTable.GetFieldIndexParams(segMeta.CollectionID, indexBuildInfo.fieldID)
 	if err != nil {
 		return err
 	}
+	typeParamsMap := make(map[string]string)
 	indexParamsMap := make(map[string]string)
+	for _, kv := range typeParams {
+		typeParamsMap[kv.Key] = kv.Value
+	}
 	for _, kv := range indexParams {
 		indexParamsMap[kv.Key] = kv.Value
 	}
 
-	indexID, err := scheduler.client.BuildIndexWithoutID(indexBuildInfo.binlogFilePath, nil, indexParamsMap)
+	indexID, err := scheduler.client.BuildIndexWithoutID(indexBuildInfo.binlogFilePath, typeParamsMap, indexParamsMap)
 	log.Printf("build index for segment %d field %d", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
 	if err != nil {
 		return err
