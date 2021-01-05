@@ -13,13 +13,16 @@ function bred(){
 files=()
 files_need_gofmt=()
 
-if [ -f "$1" ];then
-    files+=("$1")
-fi
-
-if [ -d "$1" ];then
-    for file in `find $1 -type f | grep "\.go$"`; do
-        files+=("$file")
+if [[ $# -ne 0 ]]; then
+    for arg in "$@"; do
+        if [ -f "$arg" ];then
+            files+=("$arg")
+        fi
+        if [ -d "$arg" ];then
+            for file in `find $arg -type f | grep "\.go$"`; do
+                files+=("$file")
+            done
+        fi
     done
 fi
 
