@@ -83,7 +83,7 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 		return nil, err
 	}
 
-	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, "milvus-distributed-indexbuilder")
+	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, Params.MinioBucketName)
 	if err != nil {
 		return nil, err
 	}
