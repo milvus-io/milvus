@@ -88,7 +88,6 @@ func (it *IndexAddTask) Execute() error {
 	t.table = it.table
 	t.indexID = it.indexID
 	t.kv = it.kv
-	t.req = it.req
 	var cancel func()
 	t.ctx, cancel = context.WithTimeout(it.ctx, reqTimeoutInterval)
 	defer cancel()
@@ -122,7 +121,7 @@ type IndexBuildTask struct {
 	indexID   UniqueID
 	kv        kv.Base
 	savePaths []string
-	req       *indexbuilderpb.BuildIndexRequest
+	indexMeta *indexbuilderpb.IndexMeta
 }
 
 func newIndexBuildTask() *IndexBuildTask {
@@ -152,7 +151,7 @@ func (it *IndexBuildTask) Execute() error {
 	}
 
 	typeParams := make(map[string]string)
-	for _, kvPair := range it.req.GetTypeParams() {
+	for _, kvPair := range it.indexMeta.Req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := typeParams[key]
 		if ok {
@@ -162,7 +161,7 @@ func (it *IndexBuildTask) Execute() error {
 	}
 
 	indexParams := make(map[string]string)
-	for _, kvPair := range it.req.GetIndexParams() {
+	for _, kvPair := range it.indexMeta.Req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := indexParams[key]
 		if ok {
@@ -202,7 +201,7 @@ func (it *IndexBuildTask) Execute() error {
 		return blobs
 	}
 
-	toLoadDataPaths := it.req.GetDataPaths()
+	toLoadDataPaths := it.indexMeta.Req.GetDataPaths()
 	keys := make([]string, 0)
 	blobs := make([]*Blob, 0)
 	for _, path := range toLoadDataPaths {
