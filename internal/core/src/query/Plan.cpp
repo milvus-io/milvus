@@ -21,6 +21,7 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/algorithm/string.hpp>
 #include <algorithm>
+#include "query/generated/VerifyPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -138,6 +139,8 @@ Parser::CreatePlanImpl(const std::string& dsl_str) {
     if (predicate != nullptr) {
         vec_node->predicate_ = std::move(predicate);
     }
+    VerifyPlanNodeVisitor verifier;
+    vec_node->accept(verifier);
 
     auto plan = std::make_unique<Plan>(schema);
     plan->tag2field_ = std::move(tag2field_);
