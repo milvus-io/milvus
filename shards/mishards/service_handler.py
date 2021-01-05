@@ -571,11 +571,14 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     @mark_grpc_method
     def PreloadCollection(self, request, context):
-        _collection_name, _partition_tags = Parser.parse_proto_PreloadCollectionParam(request)
+        _status, _pack = Parser.parse_proto_PreloadCollectionParam(request)
 
-        # if not _status.OK():
-        #     return status_pb2.Status(error_code=_status.code,
-        #                              reason=_status.message)
+        if not _status.OK():
+            return status_pb2.Status(error_code=_status.code,
+                                     reason=_status.message)
+
+        _collection_name, _partition_tags = _pack
+
         logger.info('PreloadCollection {} | {}'.format(_collection_name, _partition_tags))
         _status = self._preload_collection(_collection_name, _partition_tags)
         return status_pb2.Status(error_code=_status.code,
