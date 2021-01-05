@@ -68,6 +68,7 @@ func (task *createIndexTask) Execute() error {
 				fieldID:        fieldID,
 				fieldName:      task.req.FieldName,
 				indexFilePaths: indexMeta.IndexFilePaths,
+				indexParams:    indexMeta.IndexParams,
 			})
 			if err != nil {
 				return err

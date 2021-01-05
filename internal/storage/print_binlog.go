@@ -236,7 +236,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			return err
 		}
 		for i, v := range val {
-			fmt.Printf("\t\t%d : %f\n", i, v)
+			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_STRING:
 		rows, err := reader.GetPayloadLengthFromReader()

@@ -48,6 +48,9 @@ func (scheduler *FlushScheduler) schedule(id interface{}) error {
 	return nil
 }
 func (scheduler *FlushScheduler) describe() error {
+	timeTick := time.Tick(100 * time.Millisecond)
+	descTasks := make(map[UniqueID]bool)
+	closable := make([]UniqueID, 0)
 	for {
 		select {
 		case <-scheduler.ctx.Done():
@@ -55,62 +58,72 @@ func (scheduler *FlushScheduler) describe() error {
 				log.Printf("broadcast context done, exit")
 				return errors.New("broadcast done exit")
 			}
-		case singleSegmentID := <-scheduler.segmentDescribeChan:
-			for {
+		case <-timeTick:
+			for singleSegmentID := range descTasks {
 				description, err := scheduler.client.DescribeSegment(singleSegmentID)
 				if err != nil {
+					log.Printf("describe segment %d err %s", singleSegmentID, err.Error())
+					continue
+				}
+				if !description.IsClosed {
+					continue
+				}
+
+				log.Printf("flush segment %d is closed", singleSegmentID)
+				mapData, err := scheduler.client.GetInsertBinlogPaths(singleSegmentID)
+				if err != nil {
+					log.Printf("get insert binlog paths err, segID: %d, err: %s", singleSegmentID, err.Error())
+					continue
+				}
+				segMeta, err := scheduler.metaTable.GetSegmentByID(singleSegmentID)
+				if err != nil {
+					log.Printf("get segment from metable failed, segID: %d, err: %s", singleSegmentID, err.Error())
+					continue
+				}
+				for fieldID, data := range mapData {
+					// check field indexable
+					indexable, err := scheduler.metaTable.IsIndexable(segMeta.CollectionID, fieldID)
+					if err != nil {
+						log.Printf("check field indexable from meta table failed, collID: %d, fieldID: %d, err %s", segMeta.CollectionID, fieldID, err.Error())
+						continue
+					}
+					if !indexable {
+						continue
+					}
+					info := &IndexBuildInfo{
+						segmentID:      singleSegmentID,
+						fieldID:        fieldID,
+						binlogFilePath: data,
+					}
+					err = scheduler.indexBuilderSch.Enqueue(info)
+					log.Printf("segment %d field %d enqueue build index scheduler", singleSegmentID, fieldID)
+					if err != nil {
+						log.Printf("index build enqueue failed, %s", err.Error())
+						continue
+					}
+				}
+				// Save data to meta table
+				segMeta.BinlogFilePaths = make([]*etcdpb.FieldBinlogFiles, 0)
+				for k, v := range mapData {
+					segMeta.BinlogFilePaths = append(segMeta.BinlogFilePaths, &etcdpb.FieldBinlogFiles{
+						FieldID:     k,
+						BinlogFiles: v,
+					})
+				}
+				if err = scheduler.metaTable.UpdateSegment(segMeta); err != nil {
 					return err
 				}
-				if description.IsClosed {
-					log.Printf("flush segment %d is closed", singleSegmentID)
-					mapData, err := scheduler.client.GetInsertBinlogPaths(singleSegmentID)
-					if err != nil {
-						return err
-					}
-					for fieldID, data := range mapData {
-						// check field indexable
-						segMeta, err := scheduler.metaTable.GetSegmentByID(singleSegmentID)
-						if err != nil {
-							return err
-						}
-						indexable, err := scheduler.metaTable.IsIndexable(segMeta.CollectionID, fieldID)
-						if err != nil {
-							return err
-						}
-						if !indexable {
-							continue
-						}
-						info := &IndexBuildInfo{
-							segmentID:      singleSegmentID,
-							fieldID:        fieldID,
-							binlogFilePath: data,
-						}
-						err = scheduler.indexBuilderSch.Enqueue(info)
-						log.Printf("segment %d field %d enqueue build index scheduler", singleSegmentID, fieldID)
-						if err != nil {
-							return err
-						}
-					}
-					// Save data to meta table
-					segMeta, err := scheduler.metaTable.GetSegmentByID(singleSegmentID)
-					if err != nil {
-						return err
-					}
-					segMeta.BinlogFilePaths = make([]*etcdpb.FieldBinlogFiles, 0)
-					for k, v := range mapData {
-						segMeta.BinlogFilePaths = append(segMeta.BinlogFilePaths, &etcdpb.FieldBinlogFiles{
-							FieldID:     k,
-							BinlogFiles: v,
-						})
-					}
-					if err = scheduler.metaTable.UpdateSegment(segMeta); err != nil {
-						return err
-					}
-					log.Printf("flush segment %d finished", singleSegmentID)
-					break
-				}
-				time.Sleep(1 * time.Second)
+				log.Printf("flush segment %d finished", singleSegmentID)
+				closable = append(closable, singleSegmentID)
 			}
+
+			// remove closed segment and clear closable
+			for _, segID := range closable {
+				delete(descTasks, segID)
+			}
+			closable = closable[:0]
+		case segID := <-scheduler.segmentDescribeChan:
+			descTasks[segID] = false
 		}
 	}
 
