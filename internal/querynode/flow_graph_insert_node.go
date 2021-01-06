@@ -90,6 +90,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 	wg.Wait()
 
 	var res Msg = &serviceTimeMsg{
+		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
 	return []*Msg{&res}

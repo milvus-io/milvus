@@ -50,6 +50,7 @@ func (dsService *dataSyncService) initNodes() {
 
 	var ddNode Node = newDDNode(dsService.ctx, dsService.ddChan, dsService.replica)
 	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.insertChan, dsService.replica)
+	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&ddStreamNode)
@@ -58,6 +59,7 @@ func (dsService *dataSyncService) initNodes() {
 	dsService.fg.AddNode(&ddNode)
 
 	dsService.fg.AddNode(&insertBufferNode)
+	dsService.fg.AddNode(&gcNode)
 
 	// dmStreamNode
 	var err = dsService.fg.SetEdges(dmStreamNode.Name(),
@@ -98,9 +100,17 @@ func (dsService *dataSyncService) initNodes() {
 	// insertBufferNode
 	err = dsService.fg.SetEdges(insertBufferNode.Name(),
 		[]string{filterDmNode.Name()},
-		[]string{},
+		[]string{gcNode.Name()},
 	)
 	if err != nil {
 		log.Fatal("set edges failed in node:", insertBufferNode.Name())
+	}
+
+	// gcNode
+	err = dsService.fg.SetEdges(gcNode.Name(),
+		[]string{insertBufferNode.Name()},
+		[]string{})
+	if err != nil {
+		log.Fatal("set edges failed in node:", gcNode.Name())
 	}
 }

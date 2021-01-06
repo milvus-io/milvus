@@ -91,6 +91,11 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	}
 	ddNode.ddMsg = &ddMsg
 
+	gcRecord := gcRecord{
+		collections: make([]UniqueID, 0),
+	}
+	ddNode.ddMsg.gcRecord = &gcRecord
+
 	// sort tsMessages
 	tsMessages := msMsg.TsMessages()
 	sort.Slice(tsMessages,
@@ -259,10 +264,10 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	collectionID := msg.CollectionID
 
-	err := ddNode.replica.removeCollection(collectionID)
-	if err != nil {
-		log.Println(err)
-	}
+	//err := ddNode.replica.removeCollection(collectionID)
+	//if err != nil {
+	//	log.Println(err)
+	//}
 
 	// remove collection
 	if _, ok := ddNode.ddRecords.collectionRecords[collectionID]; !ok {
@@ -291,6 +296,8 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.DropCollectionRequest.String())
 	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Timestamp)
 	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropCollectionEventType)
+
+	ddNode.ddMsg.gcRecord.collections = append(ddNode.ddMsg.gcRecord.collections, collectionID)
 }
 
 func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {

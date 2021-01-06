@@ -30,7 +30,12 @@ func (stNode *serviceTimeNode) Operate(in []*Msg) []*Msg {
 	// update service time
 	stNode.replica.getTSafe().set(serviceTimeMsg.timeRange.timestampMax)
 	//fmt.Println("update tSafe to:", getPhysicalTime(serviceTimeMsg.timeRange.timestampMax))
-	return nil
+
+	var res Msg = &gcMsg{
+		gcRecord:  serviceTimeMsg.gcRecord,
+		timeRange: serviceTimeMsg.timeRange,
+	}
+	return []*Msg{&res}
 }
 
 func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
