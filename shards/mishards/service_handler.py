@@ -132,12 +132,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 all_topk_results.append(ret)
             else:
                 futures = []
+                start = time.time()
                 for addr, files_tuple in routing.items():
                     search_file_ids, ud_file_ids = files_tuple
                     if ud_file_ids:
                         logger.debug(f"<{addr}> needed update segment ids {ud_file_ids}")
                     conn = self.router.query_conn(addr, metadata=metadata)
-                    start = time.time()
                     ud_file_ids and conn.reload_segments(collection_id, ud_file_ids)
                     span = kwargs.get('span', None)
                     span = span if span else (None if self.tracer.empty else
@@ -155,6 +155,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 for f in futures:
                     ret = f.result(raw=True)
                     all_topk_results.append(ret)
+                logger.debug("Search in routing {} cost {} s".format(routing, time.time() - start))
 
         reverse = collection_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge', child_of=p_span):
@@ -308,7 +309,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         topk = request.topk
 
         if len(request.extra_params) == 0:
-            raise exceptions.SearchParamError(message="Search parma loss", metadata=metadata)
+            raise exceptions.SearchParamError(message="Search param loss", metadata=metadata)
         params = ujson.loads(str(request.extra_params[0].value))
 
         logger.info('Search {}: topk={} params={}'.format(
@@ -329,7 +330,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 metadata=metadata).get_collection_info(collection_name)
             if not status.OK():
                 raise exceptions.CollectionNotFoundError(collection_name,
-                                                    metadata=metadata)
+                                                         metadata=metadata)
 
             self.collection_meta[collection_name] = info
             collection_meta = info
