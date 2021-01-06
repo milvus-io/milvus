@@ -14,6 +14,7 @@ set(MILVUS_TEST_FILES
         test_binary.cpp
         test_index_wrapper.cpp
         test_sealed.cpp
+        test_reduce.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
@@ -24,10 +25,8 @@ target_link_libraries(all_tests
         gtest_main
         milvus_segcore
         milvus_indexbuilder
-        knowhere
         log
         pthread
-        milvus_utils
         )
 
 install (TARGETS all_tests DESTINATION unittest)

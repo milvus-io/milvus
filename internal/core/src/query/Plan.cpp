@@ -21,6 +21,7 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/algorithm/string.hpp>
 #include <algorithm>
+#include "query/generated/VerifyPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -106,7 +107,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
-    Assert(!field_is_vector(data_type));
+    Assert(!datatype_is_vector(data_type));
 
     switch (data_type) {
         case DataType::BOOL:
@@ -138,6 +139,8 @@ Parser::CreatePlanImpl(const std::string& dsl_str) {
     if (predicate != nullptr) {
         vec_node->predicate_ = std::move(predicate);
     }
+    VerifyPlanNodeVisitor verifier;
+    vec_node->accept(verifier);
 
     auto plan = std::make_unique<Plan>(schema);
     plan->tag2field_ = std::move(tag2field_);
@@ -152,7 +155,7 @@ Parser::ParseTermNode(const Json& out_body) {
     auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
-    Assert(!field_is_vector(data_type));
+    Assert(!datatype_is_vector(data_type));
     switch (data_type) {
         case DataType::BOOL: {
             return ParseTermNodeImpl<bool>(field_name, body);

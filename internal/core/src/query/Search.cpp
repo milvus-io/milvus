@@ -16,7 +16,7 @@
 
 #include <faiss/utils/distances.h>
 #include "utils/tools.h"
-#include "query/BruteForceSearch.h"
+#include "query/SearchBruteForce.h"
 
 namespace milvus::query {
 
@@ -34,13 +34,13 @@ create_bitmap_view(std::optional<const BitmapSimple*> bitmaps_opt, int64_t chunk
 }
 
 Status
-QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
-                    const query::QueryInfo& info,
-                    const float* query_data,
-                    int64_t num_queries,
-                    Timestamp timestamp,
-                    std::optional<const BitmapSimple*> bitmaps_opt,
-                    QueryResult& results) {
+FloatSearch(const segcore::SegmentSmallIndex& segment,
+            const query::QueryInfo& info,
+            const float* query_data,
+            int64_t num_queries,
+            Timestamp timestamp,
+            std::optional<const BitmapSimple*> bitmaps_opt,
+            QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -75,6 +75,7 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     const auto& indexing_entry = indexing_record.get_vec_entry(vecfield_offset);
     auto search_conf = indexing_entry.get_search_conf(topK);
 
+    // TODO: use sub_qr
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
         auto indexing = indexing_entry.get_vec_indexing(chunk_id);
         auto dataset = knowhere::GenDataset(num_queries, dim, query_data);
@@ -99,10 +100,12 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     Assert(vec_chunk_size == indexing_entry.get_chunk_size());
     auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
 
+    // TODO: use sub_qr
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         std::vector<int64_t> buf_uids(total_count, -1);
         std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
 
+        // should be not visitable
         faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
         auto& chunk = vec_ptr->get_chunk(chunk_id);
 
@@ -112,6 +115,7 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
         auto nsize = element_end - element_begin;
 
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
+        // TODO: make it wrapped
         faiss::knn_L2sqr(query_data, chunk.data(), dim, num_queries, nsize, &buf, bitmap_view);
 
         Assert(buf_uids.size() == total_count);
@@ -134,13 +138,13 @@ QueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
 }
 
 Status
-BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
-                          const query::QueryInfo& info,
-                          const uint8_t* query_data,
-                          int64_t num_queries,
-                          Timestamp timestamp,
-                          std::optional<const BitmapSimple*> bitmaps_opt,
-                          QueryResult& results) {
+BinarySearch(const segcore::SegmentSmallIndex& segment,
+             const query::QueryInfo& info,
+             const uint8_t* query_data,
+             int64_t num_queries,
+             Timestamp timestamp,
+             std::optional<const BitmapSimple*> bitmaps_opt,
+             QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -169,8 +173,8 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
     auto total_count = topK * num_queries;
 
     // step 3: small indexing search
-    std::vector<int64_t> final_uids(total_count, -1);
-    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+    // TODO: this is too intrusive
+    // TODO: use QuerySubResult instead
     query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, code_size, query_data};
 
     using segcore::BinaryVector;
@@ -181,30 +185,27 @@ BinaryQueryBruteForceImpl(const segcore::SegmentSmallIndex& segment,
 
     auto vec_chunk_size = vec_ptr->get_chunk_size();
     auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
+    SubQueryResult final_result(num_queries, topK, metric_type);
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
-        std::vector<int64_t> buf_uids(total_count, -1);
-        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
-
         auto& chunk = vec_ptr->get_chunk(chunk_id);
         auto element_begin = chunk_id * vec_chunk_size;
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
         auto nsize = element_end - element_begin;
 
         auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-        BinarySearchBruteForce(query_dataset, chunk.data(), nsize, buf_dis.data(), buf_uids.data(), bitmap_view);
+        auto sub_result = BinarySearchBruteForce(query_dataset, chunk.data(), nsize, bitmap_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : buf_uids) {
+        for (auto& x : sub_result.mutable_labels()) {
             if (x != -1) {
                 x += chunk_id * vec_chunk_size;
             }
         }
-
-        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        final_result.merge(sub_result);
     }
 
-    results.result_distances_ = std::move(final_dis);
-    results.internal_seg_offsets_ = std::move(final_uids);
+    results.result_distances_ = std::move(final_result.mutable_values());
+    results.internal_seg_offsets_ = std::move(final_result.mutable_labels());
     results.topK_ = topK;
     results.num_queries_ = num_queries;
 

@@ -402,7 +402,7 @@ TEST(Query, FillSegment) {
     pb::schema::CollectionSchema proto;
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
-    proto.set_autoid(true);
+    proto.set_autoid(false);
 
     {
         auto field = proto.add_fields();
@@ -425,7 +425,7 @@ TEST(Query, FillSegment) {
         field->set_fieldid(101);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::INT32);
+        field->set_data_type(pb::schema::DataType::INT64);
     }
 
     auto schema = Schema::ParseFrom(proto);
@@ -466,18 +466,17 @@ TEST(Query, FillSegment) {
     result.result_offsets_.resize(topk * num_queries);
     segment->FillTargetEntry(plan.get(), result);
 
-    // TODO: deprecated result_ids_
-    ASSERT_EQ(result.result_ids_, result.internal_seg_offsets_);
-
     auto ans = result.row_data_;
     ASSERT_EQ(ans.size(), topk * num_queries);
     int64_t std_index = 0;
+    auto std_vec = dataset.get_col<int64_t>(1);
     for (auto& vec : ans) {
         ASSERT_EQ(vec.size(), sizeof(int64_t));
         int64_t val;
         memcpy(&val, vec.data(), sizeof(int64_t));
-        auto std_val = result.result_ids_[std_index];
-        ASSERT_EQ(val, std_val);
+        auto internal_offset = result.internal_seg_offsets_[std_index];
+        auto std_val = std_vec[internal_offset];
+        ASSERT_EQ(val, std_val) << "io:" << internal_offset;
         ++std_index;
     }
 }

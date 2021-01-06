@@ -19,7 +19,7 @@
 #include "PlanNodeVisitor.h"
 
 namespace milvus::query {
-class ExecPlanNodeVisitor : public PlanNodeVisitor {
+class VerifyPlanNodeVisitor : public PlanNodeVisitor {
  public:
     void
     visit(FloatVectorANNS& node) override;
@@ -29,27 +29,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  public:
     using RetType = QueryResult;
-    ExecPlanNodeVisitor(segcore::SegmentBase& segment, Timestamp timestamp, const PlaceholderGroup& placeholder_group)
-        : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
-    }
-    // using RetType = nlohmann::json;
-
-    RetType
-    get_moved_result(PlanNode& node) {
-        assert(!ret_.has_value());
-        node.accept(*this);
-        assert(ret_.has_value());
-        auto ret = std::move(ret_).value();
-        ret_ = std::nullopt;
-        return ret;
-    }
+    VerifyPlanNodeVisitor() = default;
 
  private:
-    // std::optional<RetType> ret_;
-    segcore::SegmentBase& segment_;
-    Timestamp timestamp_;
-    const PlaceholderGroup& placeholder_group_;
-
     std::optional<RetType> ret_;
 };
 }  // namespace milvus::query
