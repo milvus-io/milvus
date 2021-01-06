@@ -58,10 +58,6 @@ if __name__ == "__main__":
                 'visitor_name': "ExecExprVisitor",
                 "parameter_name": 'expr',
             },
-            {
-                'visitor_name': "VerifyExprVisitor",
-                "parameter_name": 'expr',
-            },
         ],
         'PlanNode': [
             {
@@ -72,10 +68,7 @@ if __name__ == "__main__":
                 'visitor_name': "ExecPlanNodeVisitor",
                 "parameter_name": 'node',
             },
-            {
-                'visitor_name': "VerifyPlanNodeVisitor",
-                "parameter_name": 'node',
-            },
+
         ]
     }
     extract_extra_body(visitor_info, query_path)

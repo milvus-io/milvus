@@ -24,6 +24,5 @@ target_link_libraries(milvus_segcore
         dl backtrace
         milvus_common
         milvus_query
-        milvus_utils
         )
 
