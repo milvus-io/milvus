@@ -37,7 +37,13 @@ func NewFlushScheduler(ctx context.Context, client WriteNodeClient, metaTable *m
 
 func (scheduler *FlushScheduler) schedule(id interface{}) error {
 	segmentID := id.(UniqueID)
-	err := scheduler.client.FlushSegment(segmentID)
+	segmentMeta, err := scheduler.metaTable.GetSegmentByID(segmentID)
+	if err != nil {
+		return err
+	}
+
+	// todo set corrent timestamp
+	err = scheduler.client.FlushSegment(segmentID, segmentMeta.CollectionID, segmentMeta.PartitionTag, Timestamp(0))
 	log.Printf("flush segment %d", segmentID)
 	if err != nil {
 		return err
