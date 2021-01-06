@@ -66,6 +66,9 @@ class IndexWrapper {
     void
     StoreRawData(const knowhere::DatasetPtr& dataset);
 
+    void
+    LoadRawData();
+
     template <typename T>
     void
     check_parameter(knowhere::Config& conf,
@@ -92,6 +95,7 @@ class IndexWrapper {
     milvus::json index_config_;
     knowhere::Config config_;
     std::vector<uint8_t> raw_data_;
+    std::once_flag raw_data_loaded_;
 };
 
 }  // namespace indexbuilder

@@ -18,7 +18,7 @@
 
 namespace milvus {
 inline int
-field_sizeof(DataType data_type, int dim = 1) {
+datatype_sizeof(DataType data_type, int dim = 1) {
     switch (data_type) {
         case DataType::BOOL:
             return sizeof(bool);
@@ -78,7 +78,7 @@ datatype_name(DataType data_type) {
 }
 
 inline bool
-field_is_vector(DataType datatype) {
+datatype_is_vector(DataType datatype) {
     return datatype == DataType::VECTOR_BINARY || datatype == DataType::VECTOR_FLOAT;
 }
 
@@ -119,9 +119,9 @@ struct FieldMeta {
     int
     get_sizeof() const {
         if (is_vector()) {
-            return field_sizeof(type_, get_dim());
+            return datatype_sizeof(type_, get_dim());
         } else {
-            return field_sizeof(type_, 1);
+            return datatype_sizeof(type_, 1);
         }
     }
 

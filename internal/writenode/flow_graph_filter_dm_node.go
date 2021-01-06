@@ -1,7 +1,10 @@
 package writenode
 
 import (
+	"context"
 	"log"
+
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -31,11 +34,34 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
+	var childs []opentracing.Span
+	tracer := opentracing.GlobalTracer()
+	if tracer != nil {
+		for _, msg := range msgStreamMsg.TsMessages() {
+			if msg.Type() == internalPb.MsgType_kInsert {
+				var child opentracing.Span
+				ctx := msg.GetContext()
+				if parent := opentracing.SpanFromContext(ctx); parent != nil {
+					child = tracer.StartSpan("pass filter node",
+						opentracing.FollowsFrom(parent.Context()))
+				} else {
+					child = tracer.StartSpan("pass filter node")
+				}
+				child.SetTag("hash keys", msg.HashKeys())
+				child.SetTag("start time", msg.BeginTs())
+				child.SetTag("end time", msg.EndTs())
+				msg.SetContext(opentracing.ContextWithSpan(ctx, child))
+				childs = append(childs, child)
+			}
+		}
+	}
+
 	ddMsg, ok := (*in[1]).(*ddMsg)
 	if !ok {
 		log.Println("type assertion failed for ddMsg")
 		// TODO: add error handling
 	}
+
 	fdmNode.ddMsg = ddMsg
 
 	var iMsg = insertMsg{
@@ -56,11 +82,20 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 		}
 	}
 
-	for _, msg := range msgStreamMsg.TsMessages() {
+	for key, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case internalPb.MsgType_kInsert:
+			var ctx2 context.Context
+			if childs != nil {
+				if childs[key] != nil {
+					ctx2 = opentracing.ContextWithSpan(msg.GetContext(), childs[key])
+				} else {
+					ctx2 = context.Background()
+				}
+			}
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
 			if resMsg != nil {
+				resMsg.SetContext(ctx2)
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
 		// case internalPb.MsgType_kDelete:
@@ -69,8 +104,11 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
-
 	var res Msg = &iMsg
+
+	for _, child := range childs {
+		child.Finish()
+	}
 	return []*Msg{&res}
 }
 

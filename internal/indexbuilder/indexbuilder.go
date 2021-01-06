@@ -11,9 +11,6 @@ import (
 
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -71,19 +68,16 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 
 	idAllocator, err := allocator.NewIDAllocator(b.loopCtx, Params.MasterAddress)
 
-	minIOEndPoint := Params.MinIOAddress
-	minIOAccessKeyID := Params.MinIOAccessKeyID
-	minIOSecretAccessKey := Params.MinIOSecretAccessKey
-	minIOUseSSL := Params.MinIOUseSSL
-	minIOClient, err := minio.New(minIOEndPoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(minIOAccessKeyID, minIOSecretAccessKey, ""),
-		Secure: minIOUseSSL,
-	})
-	if err != nil {
-		return nil, err
+	option := &miniokv.Option{
+		Address:           Params.MinIOAddress,
+		AccessKeyID:       Params.MinIOAccessKeyID,
+		SecretAccessKeyID: Params.MinIOSecretAccessKey,
+		UseSSL:            Params.MinIOUseSSL,
+		BucketName:        Params.MinioBucketName,
+		CreateBucket:      true,
 	}
 
-	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, minIOClient, Params.MinioBucketName)
+	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, option)
 	if err != nil {
 		return nil, err
 	}

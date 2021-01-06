@@ -5,8 +5,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/indexbuilder"
@@ -68,13 +66,16 @@ func TestLoadIndexService(t *testing.T) {
 	binarySet, err := index.Serialize()
 	assert.Equal(t, err, nil)
 
-	//save index to minio
-	minioClient, err := minio.New(Params.MinioEndPoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(Params.MinioAccessKeyID, Params.MinioSecretAccessKey, ""),
-		Secure: Params.MinioUseSSLStr,
-	})
-	assert.Equal(t, err, nil)
-	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, minioClient, Params.MinioBucketName)
+	option := &minioKV.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		BucketName:        Params.MinioBucketName,
+		CreateBucket:      true,
+	}
+
+	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, option)
 	assert.Equal(t, err, nil)
 	indexPaths := make([]string, 0)
 	for _, index := range binarySet {

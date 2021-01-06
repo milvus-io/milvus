@@ -50,7 +50,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             schema->primary_key_offset_opt_ = schema->size();
         }
 
-        if (field_is_vector(data_type)) {
+        if (datatype_is_vector(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             auto index_map = RepeatedKeyValToMap(child.index_params());
             if (!index_map.count("metric_type")) {

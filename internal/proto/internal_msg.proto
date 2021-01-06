@@ -272,6 +272,8 @@ message FlushMsg {
     MsgType msg_type = 1;
     int64 segmentID = 2;
     uint64 timestamp = 3;
+    int64 collectionID = 4;
+    string partitionTag = 5;
 }
 
 

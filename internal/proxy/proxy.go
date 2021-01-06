@@ -2,12 +2,18 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go"
+	"github.com/uber/jaeger-client-go/config"
 
 	"google.golang.org/grpc"
 
@@ -39,6 +45,9 @@ type Proxy struct {
 	manipulationMsgStream *msgstream.PulsarMsgStream
 	queryMsgStream        *msgstream.PulsarMsgStream
 
+	tracer opentracing.Tracer
+	closer io.Closer
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -51,10 +60,27 @@ func Init() {
 func CreateProxy(ctx context.Context) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
+	var err error
 	p := &Proxy{
 		proxyLoopCtx:    ctx1,
 		proxyLoopCancel: cancel,
 	}
+
+	cfg := &config.Configuration{
+		ServiceName: "tracing",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+		Reporter: &config.ReporterConfig{
+			LogSpans: true,
+		},
+	}
+	p.tracer, p.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(p.tracer)
 
 	pulsarAddress := Params.PulsarAddress()
 
@@ -198,6 +224,8 @@ func (p *Proxy) stopProxyLoop() {
 	p.tick.Close()
 
 	p.proxyLoopWg.Wait()
+
+	p.closer.Close()
 }
 
 // Close closes the server.

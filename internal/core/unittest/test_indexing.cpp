@@ -33,7 +33,7 @@
 #include "test_utils/Timer.h"
 #include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
-#include "query/BruteForceSearch.h"
+#include "query/SearchBruteForce.h"
 
 using std::cin;
 using std::cout;
@@ -245,8 +245,6 @@ TEST(Indexing, BinaryBruteForce) {
     schema->AddField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
     schema->AddField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
-    vector<float> distances(result_count);
-    vector<int64_t> ids(result_count);
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto line_sizeof = schema->operator[](0).get_sizeof();
     auto query_data = 1024 * line_sizeof + bin_vec.data();
@@ -258,13 +256,13 @@ TEST(Indexing, BinaryBruteForce) {
         query_data                          //
     };
 
-    query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, distances.data(), ids.data());
+    auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N);
 
     QueryResult qr;
     qr.num_queries_ = num_queries;
     qr.topK_ = topk;
-    qr.internal_seg_offsets_ = ids;
-    qr.result_distances_ = distances;
+    qr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
+    qr.result_distances_ = std::move(sub_result.mutable_values());
 
     auto json = QueryResultToJson(qr);
     auto ref = json::parse(R"(

@@ -16,7 +16,6 @@ type key2SegMsg struct {
 type ddMsg struct {
 	collectionRecords map[string][]metaOperateRecord
 	partitionRecords  map[string][]metaOperateRecord
-	gcRecord          *gcRecord
 	timeRange         TimeRange
 }
 
@@ -27,7 +26,6 @@ type metaOperateRecord struct {
 
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	gcRecord       *gcRecord
 	timeRange      TimeRange
 }
 
@@ -37,12 +35,6 @@ type deleteMsg struct {
 }
 
 type serviceTimeMsg struct {
-	gcRecord  *gcRecord
-	timeRange TimeRange
-}
-
-type gcMsg struct {
-	gcRecord  *gcRecord
 	timeRange TimeRange
 }
 
@@ -63,39 +55,42 @@ type DeletePreprocessData struct {
 	count         int32
 }
 
-// TODO: replace partitionWithID by partition id
-type partitionWithID struct {
-	partitionTag string
-	collectionID UniqueID
-}
-
-type gcRecord struct {
-	// collections and partitions to be dropped
-	collections []UniqueID
-	// TODO: use partition id
-	partitions []partitionWithID
-}
-
 func (ksMsg *key2SegMsg) TimeTick() Timestamp {
 	return ksMsg.timeRange.timestampMax
+}
+
+func (ksMsg *key2SegMsg) DownStreamNodeIdx() int {
+	return 0
 }
 
 func (suMsg *ddMsg) TimeTick() Timestamp {
 	return suMsg.timeRange.timestampMax
 }
 
+func (suMsg *ddMsg) DownStreamNodeIdx() int {
+	return 0
+}
+
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
+}
+
+func (iMsg *insertMsg) DownStreamNodeIdx() int {
+	return 0
 }
 
 func (dMsg *deleteMsg) TimeTick() Timestamp {
 	return dMsg.timeRange.timestampMax
 }
 
+func (dMsg *deleteMsg) DownStreamNodeIdx() int {
+	return 0
+}
+
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {
 	return stMsg.timeRange.timestampMax
 }
 
-func (gcMsg *gcMsg) TimeTick() Timestamp {
-	return gcMsg.timeRange.timestampMax
+func (stMsg *serviceTimeMsg) DownStreamNodeIdx() int {
+	return 0
 }

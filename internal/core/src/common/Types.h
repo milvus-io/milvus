@@ -14,13 +14,15 @@
 #include <faiss/MetricType.h>
 #include <string>
 #include <boost/align/aligned_allocator.hpp>
+#include <memory>
 #include <vector>
 
 namespace milvus {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 using engine::DataType;
 using engine::FieldElementType;
-using engine::QueryResult;
+using engine::idx_t;
+
 using MetricType = faiss::MetricType;
 
 MetricType
@@ -38,5 +40,34 @@ constexpr std::false_type always_false{};
 
 template <typename T>
 using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 512>>;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+struct QueryResult {
+    QueryResult() = default;
+    QueryResult(uint64_t num_queries, uint64_t topK) : topK_(topK), num_queries_(num_queries) {
+        auto count = get_row_count();
+        result_distances_.resize(count);
+        internal_seg_offsets_.resize(count);
+    }
+
+    [[nodiscard]] uint64_t
+    get_row_count() const {
+        return topK_ * num_queries_;
+    }
+
+ public:
+    uint64_t num_queries_;
+    uint64_t topK_;
+    uint64_t seg_id_;
+    std::vector<float> result_distances_;
+
+ public:
+    // TODO(gexi): utilize these field
+    std::vector<int64_t> internal_seg_offsets_;
+    std::vector<int64_t> result_offsets_;
+    std::vector<std::vector<char>> row_data_;
+};
+
+using QueryResultPtr = std::shared_ptr<QueryResult>;
 
 }  // namespace milvus

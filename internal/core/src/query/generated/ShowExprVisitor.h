@@ -19,7 +19,7 @@
 #include "ExprVisitor.h"
 
 namespace milvus::query {
-class ShowExprVisitor : ExprVisitor {
+class ShowExprVisitor : public ExprVisitor {
  public:
     void
     visit(BoolUnaryExpr& expr) override;
