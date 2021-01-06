@@ -7,10 +7,15 @@ import (
 	"log"
 	"path"
 	"strconv"
+	"time"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
@@ -18,6 +23,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -31,13 +37,13 @@ type (
 
 	insertBufferNode struct {
 		BaseNode
+		kvClient                      *etcdkv.EtcdKV
 		insertBuffer                  *insertBuffer
 		minIOKV                       kv.Base
 		minioPrifex                   string
 		idAllocator                   *allocator.IDAllocator
 		outCh                         chan *insertFlushSyncMsg
 		pulsarWriteNodeTimeTickStream *msgstream.PulsarMsgStream
-		replica                       collectionReplica
 	}
 
 	insertBuffer struct {
@@ -101,7 +107,6 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			continue
 		}
 		currentSegID := msg.GetSegmentID()
-		collectionName := msg.GetCollectionName()
 
 		idata, ok := ibNode.insertBuffer.insertData[currentSegID]
 		if !ok {
@@ -111,19 +116,16 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		}
 
 		// 1.1 Get CollectionMeta from etcd
-		collection, err := ibNode.replica.getCollectionByName(collectionName)
-		//collSchema, err := ibNode.getCollectionSchemaByName(collectionName)
+		segMeta, collMeta, err := ibNode.getMeta(currentSegID)
 		if err != nil {
 			// GOOSE TODO add error handler
 			log.Println("Get meta wrong:", err)
 			continue
 		}
 
-		collectionID := collection.ID()
-		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
-		for _, field := range collSchema.Fields {
+		for _, field := range collMeta.Schema.Fields {
 			switch field.DataType {
 			case schemapb.DataType_VECTOR_FLOAT:
 				var dim int
@@ -370,10 +372,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				log.Println("partitionTag to partitionID wrong")
 				// TODO GOOSE add error handler
 			}
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSchema,
-				ID:     collectionID,
-			}
+
 			inCodec := storage.NewInsertCodec(collMeta)
 
 			// buffer data to binlogs
@@ -389,7 +388,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			log.Println(".. Clearing buffer")
 
 			//   1.5.2 binLogs -> minIO/S3
-			collIDStr := strconv.FormatInt(collectionID, 10)
+			collIDStr := strconv.FormatInt(segMeta.GetCollectionID(), 10)
 			partitionIDStr := strconv.FormatInt(partitionID, 10)
 			segIDStr := strconv.FormatInt(currentSegID, 10)
 			keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
@@ -448,24 +447,20 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	for _, msg := range iMsg.flushMessages {
 		currentSegID := msg.GetSegmentID()
 		flushTs := msg.GetTimestamp()
-		partitionTag := msg.GetPartitionTag()
-		collectionID := msg.GetCollectionID()
+
 		log.Printf(". Receiving flush message segID(%v)...", currentSegID)
 
 		if ibNode.insertBuffer.size(currentSegID) > 0 {
 			log.Println(".. Buffer not empty, flushing ...")
-			collSchema, err := ibNode.getCollectionSchemaByID(collectionID)
+			segMeta, collMeta, err := ibNode.getMeta(currentSegID)
 			if err != nil {
 				// GOOSE TODO add error handler
 				log.Println("Get meta wrong: ", err)
 			}
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSchema,
-				ID:     collectionID,
-			}
 			inCodec := storage.NewInsertCodec(collMeta)
 
 			// partitionTag -> partitionID
+			partitionTag := segMeta.GetPartitionTag()
 			partitionID, err := typeutil.Hash32String(partitionTag)
 			if err != nil {
 				// GOOSE TODO add error handler
@@ -483,7 +478,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			delete(ibNode.insertBuffer.insertData, currentSegID)
 
 			//   binLogs -> minIO/S3
-			collIDStr := strconv.FormatInt(collectionID, 10)
+			collIDStr := strconv.FormatInt(segMeta.GetCollectionID(), 10)
 			partitionIDStr := strconv.FormatInt(partitionID, 10)
 			segIDStr := strconv.FormatInt(currentSegID, 10)
 			keyPrefix := path.Join(ibNode.minioPrifex, collIDStr, partitionIDStr, segIDStr)
@@ -542,20 +537,31 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	return nil
 }
 
-func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return nil, err
-	}
-	return ret.schema, nil
-}
+func (ibNode *insertBufferNode) getMeta(segID UniqueID) (*etcdpb.SegmentMeta, *etcdpb.CollectionMeta, error) {
 
-func (ibNode *insertBufferNode) getCollectionSchemaByName(collectionName string) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByName(collectionName)
+	segMeta := &etcdpb.SegmentMeta{}
+
+	key := path.Join(SegmentPrefix, strconv.FormatInt(segID, 10))
+	value, err := ibNode.kvClient.Load(key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return ret.schema, nil
+	err = proto.UnmarshalText(value, segMeta)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	collMeta := &etcdpb.CollectionMeta{}
+	key = path.Join(CollectionPrefix, strconv.FormatInt(segMeta.GetCollectionID(), 10))
+	value, err = ibNode.kvClient.Load(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = proto.UnmarshalText(value, collMeta)
+	if err != nil {
+		return nil, nil, err
+	}
+	return segMeta, collMeta, nil
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -576,7 +582,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.pulsarWriteNodeTimeTickStream.Produce(&msgPack)
 }
 
-func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, replica collectionReplica) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -590,18 +596,34 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 		maxSize:    maxSize,
 	}
 
-	// MinIO
-
-	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+	// EtcdKV
+	ETCDAddr := Params.EtcdAddress
+	MetaRootPath := Params.MetaRootPath
+	log.Println("metaRootPath: ", MetaRootPath)
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{ETCDAddr},
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		panic(err)
 	}
+	kvClient := etcdkv.NewEtcdKV(cli, MetaRootPath)
 
-	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
+	// MinIO
+	minioendPoint := Params.MinioAddress
+	miniioAccessKeyID := Params.MinioAccessKeyID
+	miniioSecretAccessKey := Params.MinioSecretAccessKey
+	minioUseSSL := Params.MinioUseSSL
+	minioBucketName := Params.MinioBucketName
+
+	minioClient, err := minio.New(minioendPoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(miniioAccessKeyID, miniioSecretAccessKey, ""),
+		Secure: minioUseSSL,
+	})
+	if err != nil {
+		panic(err)
+	}
+	minIOKV, err := miniokv.NewMinIOKV(ctx, minioClient, minioBucketName)
 	if err != nil {
 		panic(err)
 	}
@@ -622,12 +644,12 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 
 	return &insertBufferNode{
 		BaseNode:                      baseNode,
+		kvClient:                      kvClient,
 		insertBuffer:                  iBuffer,
 		minIOKV:                       minIOKV,
 		minioPrifex:                   minioPrefix,
 		idAllocator:                   idAllocator,
 		outCh:                         outCh,
 		pulsarWriteNodeTimeTickStream: wTt,
-		replica:                       replica,
 	}
 }

@@ -9,25 +9,19 @@ import (
 )
 
 type WriteNodeClient interface {
-	FlushSegment(segmentID UniqueID, collectionID UniqueID, partitionTag string, timestamp Timestamp) error
+	FlushSegment(segmentID UniqueID) error
 	DescribeSegment(segmentID UniqueID) (*writerclient.SegmentDescription, error)
 	GetInsertBinlogPaths(segmentID UniqueID) (map[UniqueID][]string, error)
 }
 
 type MockWriteNodeClient struct {
-	segmentID    UniqueID
-	flushTime    time.Time
-	partitionTag string
-	timestamp    Timestamp
-	collectionID UniqueID
+	segmentID UniqueID
+	flushTime time.Time
 }
 
-func (m *MockWriteNodeClient) FlushSegment(segmentID UniqueID, collectionID UniqueID, partitionTag string, timestamp Timestamp) error {
+func (m *MockWriteNodeClient) FlushSegment(segmentID UniqueID) error {
 	m.flushTime = time.Now()
 	m.segmentID = segmentID
-	m.collectionID = collectionID
-	m.partitionTag = partitionTag
-	m.timestamp = timestamp
 	return nil
 }
 

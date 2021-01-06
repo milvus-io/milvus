@@ -45,8 +45,8 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	go fService.start()
 
 	Params.FlushDdBufSize = 4
-	replica := newReplica()
-	ddNode := newDDNode(ctx, ddChan, replica)
+
+	ddNode := newDDNode(ctx, ddChan)
 
 	colID := UniqueID(0)
 	colName := "col-test-0"

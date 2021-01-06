@@ -137,7 +137,7 @@ TEST(CApiTest, SearchTest) {
     auto offset = PreInsert(segment, N);
 
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    ASSERT_EQ(ins_res.error_code, Success);
+    assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"(
     {
@@ -176,11 +176,11 @@ TEST(CApiTest, SearchTest) {
     void* plan = nullptr;
 
     auto status = CreatePlan(collection, dsl_string, &plan);
-    ASSERT_EQ(status.error_code, Success);
+    assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
     status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
-    ASSERT_EQ(status.error_code, Success);
+    assert(status.error_code == Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
@@ -189,7 +189,7 @@ TEST(CApiTest, SearchTest) {
 
     CQueryResult search_result;
     auto res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &search_result);
-    ASSERT_EQ(res.error_code, Success);
+    assert(res.error_code == Success);
 
     DeletePlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
