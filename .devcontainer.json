@@ -1,11 +1,10 @@
 {
     "name": "Milvus Distributed Dev Container Definition",
-    "image": "milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201209-104246",
-    "runArgs": [ "--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined" ],
+    "dockerComposeFile": ["./docker-compose-vscode.yml"],
+    "service": "ubuntu",
+    "initializeCommand": "scripts/init_devcontainer.sh && docker-compose -f docker-compose-vscode.yml down all -v || true && docker-compose -f docker-compose-vscode.yml pull --ignore-pull-failures ubuntu",
     "workspaceFolder": "/go/src/github.com/zilliztech/milvus-distributed",
-    "workspaceMount": "source=${localWorkspaceFolder},target=/go/src/github.com/zilliztech/milvus-distributed,type=bind,consistency=cached",
-    "remoteUser": "debugger",
-    "remoteEnv": {"CCACHE_COMPILERCHECK":"content", "CCACHE_MAXSIZE": "2G", "CCACHE_COMPRESS": "1", "CCACHE_COMPRESSLEVEL": "5"},
+    "shutdownAction": "stopCompose",
     "extensions": [
       "ms-vscode.cpptools",
       "golang.go"

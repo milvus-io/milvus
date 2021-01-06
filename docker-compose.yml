@@ -10,11 +10,13 @@ x-ccache: &ccache
 services:
   ubuntu:
     image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+    # Build devcontainer
     build:
       context: .
       dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
         - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
+    # user: {{ CURRENT_ID }}
     shm_size: 2G
     environment:
       <<: *ccache
@@ -26,36 +28,37 @@ services:
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-ccache:/ccache:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-go-mod:/go/pkg/mod:delegated
     working_dir: "/go/src/github.com/zilliztech/milvus-distributed"
+    # Command
     command: &ubuntu-command >
       /bin/bash -c "
         make check-proto-product && make verifiers && make unittest"
     networks:
       - milvus
 
-  gdbserver:
-    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
-    build:
-      context: .
-      dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
-      cache_from:
-        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
-    security_opt: # options needed for gdb debugging
-      - seccomp:unconfined
-      - apparmor:unconfined
-    environment:
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
-      MINIO_ADDRESS: ${MINIO_ADDRESS}
-    volumes:
-      - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
-    container_name: debugger
-    entrypoint: ["/usr/sbin/sshd", "-D"]
-    ports:
-      - "7776:22"
-      - "7777:7777"
-    networks:
-      - milvus
+#  gdbserver:
+#    image: ${REPO}:${ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+#    build:
+#      context: .
+#      dockerfile: build/docker/env/cpu/ubuntu${UBUNTU}/Dockerfile
+#      cache_from:
+#        - ${REPO}:${ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
+#    security_opt: # options needed for gdb debugging
+#      - seccomp:unconfined
+#      - apparmor:unconfined
+#    environment:
+#      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+#      ETCD_ADDRESS: ${ETCD_ADDRESS}
+#      MINIO_ADDRESS: ${MINIO_ADDRESS}
+#    volumes:
+#      - .:/go/src/github.com/zilliztech/milvus-distributed:delegated
+#      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${ARCH}-ubuntu${UBUNTU}-gdbserver-home:/home/debugger:delegated
+#    container_name: debugger
+#    entrypoint: ["/usr/sbin/sshd", "-D"]
+#    ports:
+#      - "7776:22"
+#      - "7777:7777"
+#    networks:
+#      - milvus
 
   etcd:
     image: quay.io/coreos/etcd:v3.4.13
