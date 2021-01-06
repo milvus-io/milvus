@@ -17,11 +17,12 @@ type FlushScheduler struct {
 	segmentDescribeChan chan UniqueID
 	indexBuilderSch     persistenceScheduler
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx                context.Context
+	cancel             context.CancelFunc
+	globalTSOAllocator func() (Timestamp, error)
 }
 
-func NewFlushScheduler(ctx context.Context, client WriteNodeClient, metaTable *metaTable, buildScheduler *IndexBuildScheduler) *FlushScheduler {
+func NewFlushScheduler(ctx context.Context, client WriteNodeClient, metaTable *metaTable, buildScheduler *IndexBuildScheduler, globalTSOAllocator func() (Timestamp, error)) *FlushScheduler {
 	ctx2, cancel := context.WithCancel(ctx)
 
 	return &FlushScheduler{
@@ -32,6 +33,7 @@ func NewFlushScheduler(ctx context.Context, client WriteNodeClient, metaTable *m
 		segmentDescribeChan: make(chan UniqueID, 100),
 		ctx:                 ctx2,
 		cancel:              cancel,
+		globalTSOAllocator:  globalTSOAllocator,
 	}
 }
 
@@ -42,8 +44,12 @@ func (scheduler *FlushScheduler) schedule(id interface{}) error {
 		return err
 	}
 
+	ts, err := scheduler.globalTSOAllocator()
+	if err != nil {
+		return err
+	}
 	// todo set corrent timestamp
-	err = scheduler.client.FlushSegment(segmentID, segmentMeta.CollectionID, segmentMeta.PartitionTag, Timestamp(0))
+	err = scheduler.client.FlushSegment(segmentID, segmentMeta.CollectionID, segmentMeta.PartitionTag, ts)
 	log.Printf("flush segment %d", segmentID)
 	if err != nil {
 		return err

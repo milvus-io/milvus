@@ -193,7 +193,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 
 	m.indexLoadSch = NewIndexLoadScheduler(ctx, loadIndexClient, m.metaTable)
 	m.indexBuildSch = NewIndexBuildScheduler(ctx, buildIndexClient, m.metaTable, m.indexLoadSch)
-	m.flushSch = NewFlushScheduler(ctx, flushClient, m.metaTable, m.indexBuildSch)
+	m.flushSch = NewFlushScheduler(ctx, flushClient, m.metaTable, m.indexBuildSch, func() (Timestamp, error) { return m.tsoAllocator.AllocOne() })
 
 	m.segmentAssigner = NewSegmentAssigner(ctx, metakv,
 		func() (Timestamp, error) { return m.tsoAllocator.AllocOne() },

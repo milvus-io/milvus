@@ -107,7 +107,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
-    Assert(!datatype_is_vector(data_type));
+    Assert(!field_is_vector(data_type));
 
     switch (data_type) {
         case DataType::BOOL:
@@ -155,7 +155,7 @@ Parser::ParseTermNode(const Json& out_body) {
     auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
-    Assert(!datatype_is_vector(data_type));
+    Assert(!field_is_vector(data_type));
     switch (data_type) {
         case DataType::BOOL: {
             return ParseTermNodeImpl<bool>(field_name, body);

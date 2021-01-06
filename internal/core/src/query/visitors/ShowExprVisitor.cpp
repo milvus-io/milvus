@@ -112,7 +112,7 @@ TermExtract(const TermExpr& expr_raw) {
 void
 ShowExprVisitor::visit(TermExpr& expr) {
     Assert(!ret_.has_value());
-    Assert(datatype_is_vector(expr.data_type_) == false);
+    Assert(field_is_vector(expr.data_type_) == false);
     auto terms = [&] {
         switch (expr.data_type_) {
             case DataType::BOOL:
@@ -161,7 +161,7 @@ ConditionExtract(const RangeExpr& expr_raw) {
 void
 ShowExprVisitor::visit(RangeExpr& expr) {
     Assert(!ret_.has_value());
-    Assert(datatype_is_vector(expr.data_type_) == false);
+    Assert(field_is_vector(expr.data_type_) == false);
     auto conditions = [&] {
         switch (expr.data_type_) {
             case DataType::BOOL:

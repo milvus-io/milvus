@@ -79,7 +79,7 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
         SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
                        bitset_pack, ret);
     } else {
-        FloatSearch(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
+        QueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
     }
 
     ret_ = ret;
@@ -104,7 +104,7 @@ ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
         bitset_pack = &bitmap_holder;
     }
 
-    BinarySearch(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
+    BinaryQueryBruteForceImpl(*segment, node.query_info_, src_data, num_queries, timestamp_, bitset_pack, ret);
     ret_ = ret;
 }
 

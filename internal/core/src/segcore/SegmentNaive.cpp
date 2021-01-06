@@ -274,13 +274,18 @@ SegmentNaive::QueryImpl(query::QueryDeprecatedPtr query_info, Timestamp timestam
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
 
     auto total_num = num_queries * topK;
+    result.result_ids_.resize(total_num);
     result.result_distances_.resize(total_num);
 
     result.num_queries_ = num_queries;
     result.topK_ = topK;
 
-    std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
+    std::copy_n(ids, total_num, result.result_ids_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());
+
+    for (auto& id : result.result_ids_) {
+        id = record_.uids_[id];
+    }
 
     return Status::OK();
 }
@@ -342,7 +347,7 @@ SegmentNaive::QuerySlowImpl(query::QueryDeprecatedPtr query_info, Timestamp time
     result.topK_ = topK;
     auto row_num = topK * num_queries;
 
-    result.internal_seg_offsets_.resize(row_num);
+    result.result_ids_.resize(row_num);
     result.result_distances_.resize(row_num);
 
     for (int q_id = 0; q_id < num_queries; ++q_id) {
@@ -351,7 +356,7 @@ SegmentNaive::QuerySlowImpl(query::QueryDeprecatedPtr query_info, Timestamp time
             auto dst_id = topK - 1 - i + q_id * topK;
             auto [dis, offset] = records[q_id].top();
             records[q_id].pop();
-            result.internal_seg_offsets_[dst_id] = offset;
+            result.result_ids_[dst_id] = record_.uids_[offset];
             result.result_distances_[dst_id] = dis;
         }
     }

@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "IndexMeta.h"
-#include "common/Types.h"
+#include "utils/Types.h"
 #include "common/Schema.h"
 #include <memory>
 
