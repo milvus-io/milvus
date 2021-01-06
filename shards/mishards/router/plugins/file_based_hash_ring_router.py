@@ -66,8 +66,10 @@ class Factory(RouterMixin):
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
         if not collections:
-            logger.error("Cannot find collection {} / {} in metadata".format(collection_name, partition_tags))
-            raise exceptions.CollectionNotFoundError('{}:{}'.format(collection_name, partition_tags), metadata=metadata)
+            logger.error("Cannot find collection {} / {} in metadata during routing. Meta url: {}"
+                         .format(collection_name, partition_tags, db.url))
+            raise exceptions.CollectionNotFoundError("{}:{} not found in metadata".format(collection_name, partition_tags),
+                                                     metadata=metadata)
 
         collection_list = []
         if not partition_tags:
