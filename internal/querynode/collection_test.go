@@ -23,7 +23,7 @@ func TestCollection_Partitions(t *testing.T) {
 func TestCollection_newCollection(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
@@ -36,7 +36,7 @@ func TestCollection_newCollection(t *testing.T) {
 func TestCollection_deleteCollection(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)

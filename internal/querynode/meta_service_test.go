@@ -98,7 +98,7 @@ func TestMetaService_isSegmentChannelRangeInQueryNodeChannelRange(t *testing.T) 
 func TestMetaService_printCollectionStruct(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	printCollectionStruct(collectionMeta)
 }
 

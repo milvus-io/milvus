@@ -37,7 +37,7 @@ const (
 	nlist          = 100
 	m              = 4
 	nbits          = 8
-	nb             = 8 * 10000
+	nb             = 10000
 	nprobe         = 8
 	sliceSize      = 4
 	efConstruction = 200
@@ -192,15 +192,19 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 func generateFloatVectors() []float32 {
 	vectors := make([]float32, 0)
 	for i := 0; i < nb; i++ {
-		vectors = append(vectors, rand.Float32())
+		for j := 0; j < dim; j++ {
+			vectors = append(vectors, rand.Float32())
+		}
 	}
 	return vectors
 }
 
 func generateBinaryVectors() []byte {
 	vectors := make([]byte, 0)
-	for i := 0; i < nb/8; i++ {
-		vectors = append(vectors, byte(rand.Intn(8)))
+	for i := 0; i < nb; i++ {
+		for j := 0; j < dim/8; j++ {
+			vectors = append(vectors, byte(rand.Intn(8)))
+		}
 	}
 	return vectors
 }

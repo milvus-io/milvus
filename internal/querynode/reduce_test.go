@@ -16,7 +16,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 

@@ -375,7 +375,7 @@ generate_data(int N) {
 }
 
 std::string
-generate_collection_shema(std::string metric_type, std::string dim) {
+generate_collection_shema(std::string metric_type, std::string dim, bool is_binary) {
     schema::CollectionSchema collection_schema;
     collection_schema.set_name("collection_test");
     collection_schema.set_autoid(true);
@@ -383,7 +383,11 @@ generate_collection_shema(std::string metric_type, std::string dim) {
     auto vec_field_schema = collection_schema.add_fields();
     vec_field_schema->set_name("fakevec");
     vec_field_schema->set_fieldid(100);
-    vec_field_schema->set_data_type(schema::DataType::VECTOR_FLOAT);
+    if (is_binary) {
+        vec_field_schema->set_data_type(schema::DataType::VECTOR_BINARY);
+    } else {
+        vec_field_schema->set_data_type(schema::DataType::VECTOR_FLOAT);
+    }
     auto metric_type_param = vec_field_schema->add_index_params();
     metric_type_param->set_key("metric_type");
     metric_type_param->set_value(metric_type);
@@ -838,7 +842,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     constexpr auto DIM = 16;
     constexpr auto K = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16");
+    std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0);
@@ -958,12 +962,12 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_Predicate_Range) {
+TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16");
+    std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0);
@@ -1096,12 +1100,12 @@ TEST(CApiTest, UpdateSegmentIndex_With_Predicate_Range) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_Predicate_Term) {
+TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16");
+    std::string schema_string = generate_collection_shema("L2", "16", false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0);
@@ -1215,6 +1219,290 @@ TEST(CApiTest, UpdateSegmentIndex_With_Predicate_Term) {
     CQueryResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
+
+    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    for (int i = 0; i < num_queries; ++i) {
+        auto offset = i * K;
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
+                  search_result_on_raw_index->result_distances_[offset]);
+    }
+
+    DeleteLoadIndexInfo(c_load_index_info);
+    DeletePlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteQueryResult(c_search_result_on_smallIndex);
+    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
+    // insert data to segment
+    constexpr auto DIM = 16;
+    constexpr auto K = 5;
+
+    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    auto collection = NewCollection(schema_string.c_str());
+    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto segment = NewSegment(collection, 0);
+
+    auto N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<uint8_t>(0);
+    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+
+    PreInsert(segment, N);
+    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    assert(ins_res.error_code == Success);
+
+    const char* dsl_string = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "counter": {
+                        "GE": 420000,
+                        "LT": 420010
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "JACCARD",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    // create place_holder_group
+    int num_queries = 5;
+    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto blob = raw_group.SerializeAsString();
+
+    // search on segment's small index
+    void* plan = nullptr;
+    auto status = CreatePlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    assert(status.error_code == Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    Timestamp time = 10000000;
+
+    CQueryResult c_search_result_on_smallIndex;
+    auto res_before_load_index =
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    assert(res_before_load_index.error_code == Success);
+
+    // load index to segment
+    auto conf = milvus::knowhere::Config{
+        {milvus::knowhere::meta::DIM, DIM},
+        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::IndexParams::nprobe, 10},
+        {milvus::knowhere::IndexParams::nlist, 100},
+        {milvus::knowhere::IndexParams::m, 4},
+        {milvus::knowhere::IndexParams::nbits, 8},
+        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    };
+
+    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+
+    // gen query dataset
+    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
+    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<float> vec_dis;
+    for (int j = 0; j < K * num_queries; ++j) {
+        vec_dis.push_back(dis[j] * -1);
+    }
+
+    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
+    search_result_on_raw_index->result_distances_ = vec_dis;
+
+    auto binary_set = indexing->Serialize(conf);
+    void* c_load_index_info = nullptr;
+    status = NewLoadIndexInfo(&c_load_index_info);
+    assert(status.error_code == Success);
+    std::string index_type_key = "index_type";
+    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_mode_key = "index_mode";
+    std::string index_mode_value = "cpu";
+    std::string metric_type_key = "metric_type";
+    std::string metric_type_value = "JACCARD";
+
+    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendFieldInfo(c_load_index_info, "fakevec", 0);
+    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
+
+    status = UpdateSegmentIndex(segment, c_load_index_info);
+    assert(status.error_code == Success);
+
+    CQueryResult c_search_result_on_bigIndex;
+    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    assert(res_after_load_index.error_code == Success);
+
+    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    for (int i = 0; i < num_queries; ++i) {
+        auto offset = i * K;
+        ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
+                  search_result_on_raw_index->result_distances_[offset]);
+    }
+
+    DeleteLoadIndexInfo(c_load_index_info);
+    DeletePlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteQueryResult(c_search_result_on_smallIndex);
+    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
+    // insert data to segment
+    constexpr auto DIM = 16;
+    constexpr auto K = 5;
+
+    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    auto collection = NewCollection(schema_string.c_str());
+    auto schema = ((segcore::Collection*)collection)->get_schema();
+    auto segment = NewSegment(collection, 0);
+
+    auto N = 1000 * 1000;
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<uint8_t>(0);
+    auto query_ptr = vec_col.data() + 420000 * DIM / 8;
+
+    PreInsert(segment, N);
+    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    assert(ins_res.error_code == Success);
+
+    const char* dsl_string = R"({
+        "bool": {
+            "must": [
+            {
+                "term": {
+                    "counter": {
+                        "values": [420000, 420001, 420002, 420003, 420004]
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "JACCARD",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    // create place_holder_group
+    int num_queries = 5;
+    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto blob = raw_group.SerializeAsString();
+
+    // search on segment's small index
+    void* plan = nullptr;
+    auto status = CreatePlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    assert(status.error_code == Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    Timestamp time = 10000000;
+
+    CQueryResult c_search_result_on_smallIndex;
+    auto res_before_load_index =
+        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    assert(res_before_load_index.error_code == Success);
+
+    // load index to segment
+    auto conf = milvus::knowhere::Config{
+        {milvus::knowhere::meta::DIM, DIM},
+        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::IndexParams::nprobe, 10},
+        {milvus::knowhere::IndexParams::nlist, 100},
+        {milvus::knowhere::IndexParams::m, 4},
+        {milvus::knowhere::IndexParams::nbits, 8},
+        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    };
+
+    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+
+    // gen query dataset
+    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
+    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<float> vec_dis;
+    for (int j = 0; j < K * num_queries; ++j) {
+        vec_dis.push_back(dis[j] * -1);
+    }
+
+    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
+    search_result_on_raw_index->result_distances_ = vec_dis;
+
+    auto binary_set = indexing->Serialize(conf);
+    void* c_load_index_info = nullptr;
+    status = NewLoadIndexInfo(&c_load_index_info);
+    assert(status.error_code == Success);
+    std::string index_type_key = "index_type";
+    std::string index_type_value = "BIN_IVF_FLAT";
+    std::string index_mode_key = "index_mode";
+    std::string index_mode_value = "cpu";
+    std::string metric_type_key = "metric_type";
+    std::string metric_type_value = "JACCARD";
+
+    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendFieldInfo(c_load_index_info, "fakevec", 0);
+    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
+
+    status = UpdateSegmentIndex(segment, c_load_index_info);
+    assert(status.error_code == Success);
+
+    CQueryResult c_search_result_on_bigIndex;
+    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    assert(res_after_load_index.error_code == Success);
+
+    std::vector<CQueryResult> results;
+    results.push_back(c_search_result_on_bigIndex);
+    bool is_selected[1] = {false};
+    status = ReduceQueryResults(results.data(), 1, is_selected);
+    assert(status.error_code == Success);
+    FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {

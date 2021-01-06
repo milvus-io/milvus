@@ -14,7 +14,7 @@ import (
 func TestPlan_Plan(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 
@@ -36,7 +36,7 @@ func TestPlan_Plan(t *testing.T) {
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
 	assert.NotEqual(t, "", schemaBlob)
 

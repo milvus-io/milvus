@@ -86,10 +86,14 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         auto& index_params = load_index_info->index_params;
         bool find_index_type = index_params.count("index_type") > 0 ? true : false;
         bool find_index_mode = index_params.count("index_mode") > 0 ? true : false;
-        Assert(find_index_mode == true);
         Assert(find_index_type == true);
-        auto mode = index_params["index_mode"] == "CPU" ? milvus::knowhere::IndexMode::MODE_CPU
-                                                        : milvus::knowhere::IndexMode::MODE_GPU;
+        milvus::knowhere::IndexMode mode;
+        if (find_index_mode) {
+            mode = index_params["index_mode"] == "CPU" ? milvus::knowhere::IndexMode::MODE_CPU
+                                                       : milvus::knowhere::IndexMode::MODE_GPU;
+        } else {
+            mode = milvus::knowhere::IndexMode::MODE_CPU;
+        }
         load_index_info->index =
             milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
         load_index_info->index->Load(*binary_set);

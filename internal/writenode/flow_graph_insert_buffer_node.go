@@ -115,7 +115,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		//collSchema, err := ibNode.getCollectionSchemaByName(collectionName)
 		if err != nil {
 			// GOOSE TODO add error handler
-			log.Println("Get meta wrong:", err)
+			log.Println("bbb, Get meta wrong:", err)
 			continue
 		}
 
@@ -457,7 +457,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			collSchema, err := ibNode.getCollectionSchemaByID(collectionID)
 			if err != nil {
 				// GOOSE TODO add error handler
-				log.Println("Get meta wrong: ", err)
+				log.Println("aaa, Get meta wrong: ", err)
 			}
 			collMeta := &etcdpb.CollectionMeta{
 				Schema: collSchema,
