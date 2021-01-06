@@ -44,6 +44,11 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		},
 	}
 	ddNode.ddMsg = &ddMsg
+	gcRecord := gcRecord{
+		collections: make([]UniqueID, 0),
+		partitions:  make([]partitionWithID, 0),
+	}
+	ddNode.ddMsg.gcRecord = &gcRecord
 
 	// sort tsMessages
 	tsMessages := msMsg.TsMessages()
@@ -115,11 +120,11 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	collectionID := msg.CollectionID
 
-	err := ddNode.replica.removeCollection(collectionID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
+	//err := ddNode.replica.removeCollection(collectionID)
+	//if err != nil {
+	//	log.Println(err)
+	//	return
+	//}
 
 	collectionName := msg.CollectionName.CollectionName
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
@@ -127,6 +132,8 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 			createOrDrop: false,
 			timestamp:    msg.Timestamp,
 		})
+
+	ddNode.ddMsg.gcRecord.collections = append(ddNode.ddMsg.gcRecord.collections, collectionID)
 }
 
 func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
@@ -150,17 +157,22 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	collectionID := msg.CollectionID
 	partitionTag := msg.PartitionName.Tag
 
-	err := ddNode.replica.removePartition(collectionID, partitionTag)
-	if err != nil {
-		log.Println(err)
-		return
-	}
+	//err := ddNode.replica.removePartition(collectionID, partitionTag)
+	//if err != nil {
+	//	log.Println(err)
+	//	return
+	//}
 
 	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
 		metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Timestamp,
 		})
+
+	ddNode.ddMsg.gcRecord.partitions = append(ddNode.ddMsg.gcRecord.partitions, partitionWithID{
+		partitionTag: partitionTag,
+		collectionID: collectionID,
+	})
 }
 
 func newDDNode(replica collectionReplica) *ddNode {

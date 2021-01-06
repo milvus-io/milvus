@@ -4,7 +4,6 @@ import "github.com/zilliztech/milvus-distributed/internal/msgstream"
 
 type Msg interface {
 	TimeTick() Timestamp
-	DownStreamNodeIdx() int
 }
 
 type MsgStreamMsg struct {
