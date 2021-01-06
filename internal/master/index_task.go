@@ -12,7 +12,7 @@ type createIndexTask struct {
 	req                 *internalpb.CreateIndexRequest
 	indexBuildScheduler *IndexBuildScheduler
 	indexLoadScheduler  *IndexLoadScheduler
-	segManager          *SegmentManager
+	segManager          SegmentManager
 }
 
 func (task *createIndexTask) Type() internalpb.MsgType {

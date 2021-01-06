@@ -46,8 +46,9 @@ func TestMaster_DropCollectionTask(t *testing.T) {
 		CollectionName: nil,
 	}
 	var collectionTask task = &dropCollectionTask{
-		req:      &req,
-		baseTask: baseTask{},
+		req:        &req,
+		baseTask:   baseTask{},
+		segManager: NewMockSegmentManager(),
 	}
 	assert.Equal(t, internalpb.MsgType_kDropPartition, collectionTask.Type())
 	ts, err := collectionTask.Ts()
@@ -55,8 +56,9 @@ func TestMaster_DropCollectionTask(t *testing.T) {
 	assert.Nil(t, err)
 
 	collectionTask = &dropCollectionTask{
-		req:      nil,
-		baseTask: baseTask{},
+		req:        nil,
+		baseTask:   baseTask{},
+		segManager: NewMockSegmentManager(),
 	}
 
 	assert.Equal(t, internalpb.MsgType_kNone, collectionTask.Type())

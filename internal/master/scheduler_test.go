@@ -130,6 +130,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 			mt:  meta,
 			cv:  make(chan error),
 		},
+		segManager: NewMockSegmentManager(),
 	}
 
 	err = scheduler.Enqueue(dropCollectionTask)

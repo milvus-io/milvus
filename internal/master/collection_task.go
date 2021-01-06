@@ -19,7 +19,8 @@ type createCollectionTask struct {
 
 type dropCollectionTask struct {
 	baseTask
-	req *internalpb.DropCollectionRequest
+	req        *internalpb.DropCollectionRequest
+	segManager SegmentManager
 }
 
 type hasCollectionTask struct {
@@ -163,6 +164,11 @@ func (t *dropCollectionTask) Execute() error {
 		return err
 	}
 
+	// before drop collection in segment manager, if segment manager receive a time tick from write node,
+	// maybe this collection can not be found in meta table.
+	if err = t.segManager.DropCollection(collectionID); err != nil {
+		return err
+	}
 	ts, err := t.Ts()
 	if err != nil {
 		return err
