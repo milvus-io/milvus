@@ -1,0 +1,24 @@
+
+# create if absent
+
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: glusterfs
+
+---
+
+apiVersion: storage.k8s.io/v1beta1
+kind: StorageClass
+metadata:
+  name: gluster-heketi
+  namespace: glusterfs
+provisioner: kubernetes.io/glusterfs
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  # resturl: "ip:port"
+  # restuser: "admin"
+  # restuserkey: "admin"
+  volumetype: "replicate:3"

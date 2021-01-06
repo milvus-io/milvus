@@ -1,0 +1,138 @@
+---
+apiVersion: v1
+data:
+  timezone: Asia/shanghai
+kind: ConfigMap
+metadata:
+  name: timezone
+  namespace: milvus-demo
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: envoy
+  name: envoy
+  namespace: milvus-demo
+data:
+  envoy.yaml: |-
+    static_resources:
+      listeners:
+      - name: milvus_backend_listeners
+        address:
+          socket_address:
+            protocol: TCP
+            address: 0.0.0.0
+            port_value: 80
+        filter_chains:
+          filters:
+          - name: envoy.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager
+              codec_type: auto
+              stat_prefix: ingress_http
+              route_config:
+                name: local_route
+                virtual_hosts:
+                - name: backend
+                  retry_policy:
+                    retry_on: unavailable
+                  domains:
+                  - "*"
+                  routes:
+                  - match:
+                      prefix: "/milvus.grpc.MilvusService/Search"
+                    route:
+                      cluster: milvus_backend_ro
+                      timeout: 1s
+                      priority: HIGH
+                  - match:
+                      prefix: "/"
+                    route:
+                      cluster: milvus_backend_rw
+                      timeout: 3600s
+                      priority: HIGH                      
+              http_filters:
+              - name: envoy.router
+              add_user_agent: true
+              access_log:
+              - name: envoy.file_access_log
+                filter:
+                  or_filter:
+                    filters:
+                      - status_code_filter:
+                          comparison:
+                            op: GE
+                            value:
+                              default_value: 400
+                              runtime_key: access_log.access_error.status
+                      - duration_filter:
+                          comparison:
+                            op: GE
+                            value:
+                              default_value: 200
+                              runtime_key: access_log.access_error.duration
+                      - traceable_filter: {}
+                typed_config:
+                  "@type": type.googleapis.com/envoy.config.accesslog.v2.FileAccessLog
+                  path: "/var/log/envoy/access_error.log"
+                  format: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%\" %RESPONSE_CODE% %RESPONSE_FLAGS% [receivrd-bytes:%BYTES_RECEIVED%] [sent-bytes:%BYTES_SENT%] [time:%DURATION%] %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% \"%REQ(X-FORWARDED-FOR)%\" \"%REQ(USER-AGENT)%\" \"%REQ(X-REQUEST-ID)%\" \"%REQ(:AUTHORITY)%\" \"%REQ(X-LYFT-USER-ID)%\" \"%RESP(GRPC-STATUS)%\"\n"
+      clusters:
+      - name: milvus_backend_ro
+        type: STRICT_DNS
+        connect_timeout: 1s
+        lb_policy: ROUND_ROBIN
+        dns_lookup_family: V4_ONLY
+        http2_protocol_options: {}
+        circuit_breakers:
+          thresholds:
+            priority: HIGH
+            max_pending_requests: 20480
+            max_connections: 20480
+            max_requests: 20480
+            max_retries: 1
+        load_assignment:
+          cluster_name: milvus_backend_ro
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: milvus-ro-servers
+                    port_value: 19530
+                    protocol: TCP
+      - name: milvus_backend_rw
+        type: STRICT_DNS
+        connect_timeout: 1s
+        lb_policy: LEAST_REQUEST
+        dns_lookup_family: V4_ONLY
+        http2_protocol_options: {}
+        circuit_breakers:
+          thresholds:
+            priority: HIGH
+            max_pending_requests: 20480
+            max_connections: 20480
+            max_requests: 20480
+            max_retries: 1
+        load_assignment:
+          cluster_name: milvus_backend_rw
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: milvus-rw-servers
+                    port_value: 19530
+                    protocol: TCP
+
+    cluster_manager:
+      outlier_detection:
+        event_log_path: /var/log/envoy/outlier_events.log
+    admin:
+      access_log_path: /var/log/envoy/admin_access.log
+      address:
+        socket_address:
+          protocol: TCP
+          address: 0.0.0.0
+          port_value: 9901

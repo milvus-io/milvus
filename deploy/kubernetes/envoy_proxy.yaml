@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  namespace: milvus-demo
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 32000
+  selector:
+    app: milvus
+    tier: proxy
+
+---
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: milvus
+    tier: proxy
+  name: milvus-proxy
+  namespace: milvus-demo
+spec:
+  selector:
+    matchLabels:
+      app: milvus
+      tier: proxy
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: proxy
+    spec:
+      containers:
+      - image: envoyproxy/envoy:v1.11.0
+        imagePullPolicy: IfNotPresent
+        name: milvus-proxy
+        ports:
+        - containerPort: 80
+          name: tcp
+          protocol: TCP
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /etc/localtime
+          name: time
+        - mountPath: /etc/timezone
+          name: timezone
+          subPath: timezone
+        - mountPath: /etc/envoy/envoy.yaml
+          name: envoy
+          subPath: envoy.yaml
+        - mountPath: /var/log/envoy
+          name: milvus-log-disk
+          subPath: envoylog
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+      - hostPath:
+          path: /etc/localtime
+          type: ""
+        name: time
+      - configMap:
+          defaultMode: 420
+          name: timezone
+        name: timezone
+      - configMap:
+          defaultMode: 420
+          name: envoy
+        name: envoy
+      - configMap:
+          defaultMode: 420
+          name: milvus-proxy-configmap
+        name: milvus-proxy-configmap
+      - name: milvus-log-disk
+        persistentVolumeClaim:
+          claimName: milvus-proxy-log
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: milvus
+    tier: proxy
+  name: milvus-proxy
+  namespace: milvus-demo
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: milvus
+      tier: proxy
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: proxy
+    spec:
+      containers:
+        - image: docker.ke.com:80/vsearch/envoyproxy/envoy:v1.11.0
+          imagePullPolicy: IfNotPresent
+          name: milvus-proxy
+          ports:
+            - containerPort: 80
+              name: tcp
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /etc/localtime
+              name: time
+            - mountPath: /etc/timezone
+              name: timezone
+              subPath: timezone
+            - mountPath: /etc/envoy/envoy.yaml
+              name: envoy
+              subPath: envoy.yaml
+            - mountPath: /var/log/envoy
+              name: milvus-log-disk
+              subPath: envoylog
+      restartPolicy: Always
+      volumes:
+        - hostPath:
+            path: /etc/localtime
+            type: ""
+          name: time
+        - configMap:
+            defaultMode: 420
+            name: timezone
+          name: timezone
+        - configMap:
+            defaultMode: 420
+            name: envoy
+          name: envoy
+        - configMap:
+            defaultMode: 420
+            name: milvus-proxy-configmap
+          name: milvus-proxy-configmap
+        - name: milvus-log-disk
+          persistentVolumeClaim:
+            claimName: milvus-proxy-log

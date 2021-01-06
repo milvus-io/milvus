@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: milvus-mysql-configmap
+  namespace: milvus-demo
+data:
+    milvus_mysql_config.yml: |
+      [mysqld]
+      pid-file        = /var/run/mysqld/mysqld.pid
+      socket          = /var/run/mysqld/mysqld.sock
+      datadir         = /data
+      log-error       = /var/log/mysql/error.log # mount out to host
+      # By default we only accept connections from localhost
+      bind-address   = 0.0.0.0
+      # Disabling symbolic-links is recommended to prevent assorted security risks
+      symbolic-links=0
+      character-set-server = utf8mb4
+      collation-server = utf8mb4_unicode_ci
+      init_connect='SET NAMES utf8mb4'
+      skip-character-set-client-handshake = true
+      max_connections = 1000
+      wait_timeout = 31536000

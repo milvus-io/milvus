@@ -1,0 +1,75 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: milvus-mysql
+  namespace: milvus-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: milvus
+    tier: mysql
+  ports:
+  - protocol: TCP
+    port: 3306
+    targetPort: 3306
+    name: mysql
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-mysql
+  namespace: milvus-demo
+spec:
+  selector:
+    matchLabels:
+      app: milvus
+      tier: mysql
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: milvus
+        tier: mysql
+    spec:
+      containers:
+      - name: milvus-mysql
+        image: mysql:5.7
+        imagePullPolicy: IfNotPresent
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - "/bin/sh"
+              - "-c"
+              - |
+                echo 'start init schema' >> ~/start.log
+                mysql -h milvus-mysql -uroot -p${MYSQL_ROOT_PASSWORD} -e "CREATE DATABASE IF NOT EXISTS ${MYSQL_DATABASE};" >> ~/start.log
+                mysql -uroot -p${MYSQL_ROOT_PASSWORD} -e "GRANT ALL PRIVILEGES ON ${MYSQL_DATABASE}.* TO 'root'@'%';" >> ~/start.log
+                echo 'end int schema' >> ~/start.log
+        env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: milvusroot
+          - name: MYSQL_DATABASE
+            value: milvus-demo
+        ports:
+          - name: mysql-port
+            containerPort: 3306
+        volumeMounts:
+        - name: milvus-mysql-disk
+          mountPath: /data
+          subPath: mysql
+        - name: milvus-mysql-configmap
+          mountPath: /etc/mysql/mysql.conf.d/mysqld.cnf
+          subPath: milvus_mysql_config.yml
+      volumes:
+      - name: milvus-mysql-disk
+        persistentVolumeClaim:
+            claimName: milvus-mysql-disk
+      - name: milvus-mysql-configmap
+        configMap:
+            name: milvus-mysql-configmap
+
+
+            
