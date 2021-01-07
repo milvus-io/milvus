@@ -182,6 +182,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			insertMsg := &msgstream.InsertMsg{
 				InsertRequest: sliceRequest,
 			}
+			insertMsg.SetMsgContext(request.GetMsgContext())
 			if together { // all rows with same hash value are accumulated to only one message
 				if len(result[key].Msgs) <= 0 {
 					result[key].Msgs = append(result[key].Msgs, insertMsg)

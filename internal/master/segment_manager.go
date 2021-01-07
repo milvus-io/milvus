@@ -297,8 +297,7 @@ func (manager *SegmentManagerImpl) syncWriteNodeTimestamp(timeTick Timestamp) er
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	for _, status := range manager.collStatus {
-		for i := 0; i < len(status.segments); i++ {
-			segStatus := status.segments[i]
+		for i, segStatus := range status.segments {
 			if !segStatus.closable {
 				closable, err := manager.judgeSegmentClosable(segStatus)
 				if err != nil {
@@ -319,7 +318,6 @@ func (manager *SegmentManagerImpl) syncWriteNodeTimestamp(timeTick Timestamp) er
 				continue
 			}
 			status.segments = append(status.segments[:i], status.segments[i+1:]...)
-			i--
 			ts, err := manager.globalTSOAllocator()
 			if err != nil {
 				log.Printf("allocate tso error: %s", err.Error())

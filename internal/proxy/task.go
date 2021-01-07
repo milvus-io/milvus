@@ -7,6 +7,9 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -74,12 +77,21 @@ func (it *InsertTask) Type() internalpb.MsgType {
 }
 
 func (it *InsertTask) PreExecute() error {
+	span, ctx := opentracing.StartSpanFromContext(it.ctx, "InsertTask preExecute")
+	defer span.Finish()
+	it.ctx = ctx
+	span.SetTag("hash keys", it.ReqID)
+	span.SetTag("start time", it.BeginTs())
 	collectionName := it.BaseInsertTask.CollectionName
 	if err := ValidateCollectionName(collectionName); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 	partitionTag := it.BaseInsertTask.PartitionTag
 	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
@@ -87,22 +99,36 @@ func (it *InsertTask) PreExecute() error {
 }
 
 func (it *InsertTask) Execute() error {
+	span, ctx := opentracing.StartSpanFromContext(it.ctx, "InsertTask Execute")
+	defer span.Finish()
+	it.ctx = ctx
+	span.SetTag("hash keys", it.ReqID)
+	span.SetTag("start time", it.BeginTs())
 	collectionName := it.BaseInsertTask.CollectionName
+	span.LogFields(oplog.String("collection_name", collectionName))
 	if !globalMetaCache.Hit(collectionName) {
 		err := globalMetaCache.Sync(collectionName)
 		if err != nil {
+			span.LogFields(oplog.Error(err))
+			span.Finish()
 			return err
 		}
 	}
 	description, err := globalMetaCache.Get(collectionName)
 	if err != nil || description == nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 	autoID := description.Schema.AutoID
+	span.LogFields(oplog.Bool("auto_id", autoID))
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	rowNums := len(it.BaseInsertTask.RowData)
 	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
+	span.LogFields(oplog.Int("rowNums", rowNums),
+		oplog.Int("rowIDBegin", int(rowIDBegin)),
+		oplog.Int("rowIDEnd", int(rowIDEnd)))
 	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
 		offset := i - rowIDBegin
@@ -125,6 +151,8 @@ func (it *InsertTask) Execute() error {
 		EndTs:   it.EndTs(),
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
+	tsMsg.SetMsgContext(ctx)
+	span.LogFields(oplog.String("send msg", "send msg"))
 	msgPack.Msgs[0] = tsMsg
 	err = it.manipulationMsgStream.Produce(msgPack)
 
@@ -138,11 +166,14 @@ func (it *InsertTask) Execute() error {
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
+		span.LogFields(oplog.Error(err))
 	}
 	return nil
 }
 
 func (it *InsertTask) PostExecute() error {
+	span, _ := opentracing.StartSpanFromContext(it.ctx, "InsertTask postExecute")
+	defer span.Finish()
 	return nil
 }
 
@@ -352,24 +383,38 @@ func (qt *QueryTask) SetTs(ts Timestamp) {
 }
 
 func (qt *QueryTask) PreExecute() error {
+	span, ctx := opentracing.StartSpanFromContext(qt.ctx, "QueryTask preExecute")
+	defer span.Finish()
+	qt.ctx = ctx
+	span.SetTag("hash keys", qt.ReqID)
+	span.SetTag("start time", qt.BeginTs())
+
 	collectionName := qt.query.CollectionName
 	if !globalMetaCache.Hit(collectionName) {
 		err := globalMetaCache.Sync(collectionName)
 		if err != nil {
+			span.LogFields(oplog.Error(err))
+			span.Finish()
 			return err
 		}
 	}
 	_, err := globalMetaCache.Get(collectionName)
 	if err != nil { // err is not nil if collection not exists
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
 	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 
 	for _, tag := range qt.query.PartitionTags {
 		if err := ValidatePartitionTag(tag, false); err != nil {
+			span.LogFields(oplog.Error(err))
+			span.Finish()
 			return err
 		}
 	}
@@ -379,6 +424,8 @@ func (qt *QueryTask) PreExecute() error {
 	}
 	queryBytes, err := proto.Marshal(qt.query)
 	if err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		return err
 	}
 	qt.Query = &commonpb.Blob{
@@ -388,6 +435,11 @@ func (qt *QueryTask) PreExecute() error {
 }
 
 func (qt *QueryTask) Execute() error {
+	span, ctx := opentracing.StartSpanFromContext(qt.ctx, "QueryTask Execute")
+	defer span.Finish()
+	qt.ctx = ctx
+	span.SetTag("hash keys", qt.ReqID)
+	span.SetTag("start time", qt.BeginTs())
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: qt.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -401,22 +453,31 @@ func (qt *QueryTask) Execute() error {
 		EndTs:   qt.Timestamp,
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
+	tsMsg.SetMsgContext(ctx)
 	msgPack.Msgs[0] = tsMsg
 	err := qt.queryMsgStream.Produce(msgPack)
 	log.Printf("[Proxy] length of searchMsg: %v", len(msgPack.Msgs))
 	if err != nil {
+		span.LogFields(oplog.Error(err))
+		span.Finish()
 		log.Printf("[Proxy] send search request failed: %v", err)
 	}
 	return err
 }
 
 func (qt *QueryTask) PostExecute() error {
+	span, _ := opentracing.StartSpanFromContext(qt.ctx, "QueryTask postExecute")
+	defer span.Finish()
+	span.SetTag("hash keys", qt.ReqID)
+	span.SetTag("start time", qt.BeginTs())
 	for {
 		select {
 		case <-qt.ctx.Done():
 			log.Print("wait to finish failed, timeout!")
+			span.LogFields(oplog.String("wait to finish failed, timeout", "wait to finish failed, timeout"))
 			return errors.New("wait to finish failed, timeout")
 		case searchResults := <-qt.resultBuf:
+			span.LogFields(oplog.String("receive result", "receive result"))
 			filterSearchResult := make([]*internalpb.SearchResult, 0)
 			var filterReason string
 			for _, partialSearchResult := range searchResults {
@@ -435,6 +496,7 @@ func (qt *QueryTask) PostExecute() error {
 						Reason:    filterReason,
 					},
 				}
+				span.LogFields(oplog.Error(errors.New(filterReason)))
 				return errors.New(filterReason)
 			}
 
@@ -526,6 +588,7 @@ func (qt *QueryTask) PostExecute() error {
 				reducedHitsBs, err := proto.Marshal(reducedHits)
 				if err != nil {
 					log.Println("marshal error")
+					span.LogFields(oplog.Error(err))
 					return err
 				}
 				qt.result.Hits = append(qt.result.Hits, reducedHitsBs)
@@ -637,7 +700,10 @@ func (dct *DescribeCollectionTask) PreExecute() error {
 func (dct *DescribeCollectionTask) Execute() error {
 	var err error
 	dct.result, err = dct.masterClient.DescribeCollection(dct.ctx, &dct.DescribeCollectionRequest)
-	globalMetaCache.Update(dct.CollectionName.CollectionName, dct.result)
+	if err != nil {
+		return err
+	}
+	err = globalMetaCache.Update(dct.CollectionName.CollectionName, dct.result)
 	return err
 }
 
