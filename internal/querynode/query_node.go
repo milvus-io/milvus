@@ -97,9 +97,6 @@ func (node *QueryNode) Close() {
 	if node.searchService != nil {
 		node.searchService.close()
 	}
-	if node.loadIndexService != nil {
-		node.loadIndexService.close()
-	}
 	if node.statsService != nil {
 		node.statsService.close()
 	}
