@@ -170,14 +170,14 @@ func (task *describeIndexProgressTask) Execute() error {
 	// total segment nums
 	totalSegmentNums := len(collMeta.SegmentIDs)
 
-	// get completed segment nums from querynode's runtime stats
-	relatedSegments := task.runtimeStats.GetTotalNumOfRelatedSegments(collMeta.ID, fieldID, task.req.ExtraParams)
-
-	if int64(totalSegmentNums) == relatedSegments {
-		task.resp.Value = true
-	} else {
-		task.resp.Value = false
+	indexParams, err := task.mt.GetFieldIndexParams(collMeta.ID, fieldID)
+	if err != nil {
+		return err
 	}
 
+	// get completed segment nums from querynode's runtime stats
+	relatedSegments := task.runtimeStats.GetTotalNumOfRelatedSegments(collMeta.ID, fieldID, indexParams)
+
+	task.resp.Value = int64(totalSegmentNums) == relatedSegments
 	return nil
 }
