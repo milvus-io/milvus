@@ -236,7 +236,7 @@ func newMeta() {
 			},
 			{
 				FieldID:     0,
-				Name:        "RawID",
+				Name:        "RowID",
 				Description: "test collection filed 1",
 				DataType:    schemapb.DataType_INT64,
 				TypeParams: []*commonpb.KeyValuePair{

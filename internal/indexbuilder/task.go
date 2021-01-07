@@ -223,14 +223,24 @@ func (it *IndexBuildTask) Execute() error {
 
 	for _, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
-		floatVectorFieldData, ok := value.(*storage.FloatVectorFieldData)
-		if !ok {
-			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
+		floatVectorFieldData, fOk := value.(*storage.FloatVectorFieldData)
+		if fOk {
+			err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
+			if err != nil {
+				return err
+			}
 		}
 
-		err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
-		if err != nil {
-			return err
+		binaryVectorFieldData, bOk := value.(*storage.BinaryVectorFieldData)
+		if bOk {
+			err = it.index.BuildBinaryVecIndexWithoutIds(binaryVectorFieldData.Data)
+			if err != nil {
+				return err
+			}
+		}
+
+		if !fOk || !bOk {
+			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
 		}
 
 		indexBlobs, err := it.index.Serialize()

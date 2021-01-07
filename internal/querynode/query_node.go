@@ -14,12 +14,6 @@ import "C"
 
 import (
 	"context"
-	"fmt"
-	"io"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
-	"github.com/uber/jaeger-client-go/config"
 )
 
 type QueryNode struct {
@@ -36,10 +30,6 @@ type QueryNode struct {
 	searchService    *searchService
 	loadIndexService *loadIndexService
 	statsService     *statsService
-
-	//opentracing
-	tracer opentracing.Tracer
-	closer io.Closer
 }
 
 func Init() {
@@ -49,47 +39,31 @@ func Init() {
 func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 
 	ctx1, cancel := context.WithCancel(ctx)
-	q := &QueryNode{
-		queryNodeLoopCtx:    ctx1,
-		queryNodeLoopCancel: cancel,
-		QueryNodeID:         queryNodeID,
-
-		dataSyncService: nil,
-		metaService:     nil,
-		searchService:   nil,
-		statsService:    nil,
-	}
-
-	var err error
-	cfg := &config.Configuration{
-		ServiceName: "tracing",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-		Reporter: &config.ReporterConfig{
-			LogSpans: true,
-		},
-	}
-	q.tracer, q.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(q.tracer)
 
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
 	tSafe := newTSafe()
 
-	q.replica = &collectionReplicaImpl{
+	var replica collectionReplica = &collectionReplicaImpl{
 		collections: collections,
 		segments:    segmentsMap,
 
 		tSafe: tSafe,
 	}
 
-	return q
+	return &QueryNode{
+		queryNodeLoopCtx:    ctx1,
+		queryNodeLoopCancel: cancel,
+		QueryNodeID:         queryNodeID,
+
+		replica: replica,
+
+		dataSyncService: nil,
+		metaService:     nil,
+		searchService:   nil,
+		statsService:    nil,
+	}
 }
 
 func (node *QueryNode) Start() error {
@@ -126,8 +100,4 @@ func (node *QueryNode) Close() {
 	if node.statsService != nil {
 		node.statsService.close()
 	}
-	if node.closer != nil {
-		node.closer.Close()
-	}
-
 }
