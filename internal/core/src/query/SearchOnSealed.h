@@ -20,7 +20,7 @@ void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
                const QueryInfo& query_info,
-               const float* query_data,
+               const void* query_data,
                int64_t num_queries,
                Timestamp timestamp,
                std::optional<const BitmapSimple*> bitmaps_opt,
