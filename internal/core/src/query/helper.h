@@ -10,24 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <faiss/utils/BinaryDistance.h>
-#include "segcore/ConcurrentVector.h"
-#include "common/Schema.h"
-#include "query/SubQueryResult.h"
-#include "query/helper.h"
+#include "common/Types.h"
 
 namespace milvus::query {
+namespace dataset {
 
-SubQueryResult
-BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
-                       const uint8_t* binary_chunk,
-                       int64_t chunk_size,
-                       const faiss::BitsetView& bitset);
+struct FloatQueryDataset {
+    MetricType metric_type;
+    int64_t num_queries;
+    int64_t topk;
+    int64_t dim;
+    const float* query_data;
+};
 
-SubQueryResult
-FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
-                      const float* chunk_data,
-                      int64_t chunk_size,
-                      const faiss::BitsetView& bitset);
+struct BinaryQueryDataset {
+    MetricType metric_type;
+    int64_t num_queries;
+    int64_t topk;
+    int64_t dim;
+    const uint8_t* query_data;
+};
 
+}  // namespace dataset
 }  // namespace milvus::query

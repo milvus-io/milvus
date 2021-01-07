@@ -16,6 +16,9 @@
 #include <cstring>
 #include "segcore/SegmentBase.h"
 #include "Constants.h"
+#include <boost/algorithm/string/predicate.hpp>
+using boost::algorithm::starts_with;
+
 namespace milvus::segcore {
 
 struct GeneratedData {
@@ -92,11 +95,25 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
         switch (field.get_data_type()) {
             case engine::DataType::VECTOR_FLOAT: {
                 auto dim = field.get_dim();
-                vector<float> data(dim * N);
-                for (auto& x : data) {
-                    x = distr(er) + offset;
+                vector<float> final;
+                bool is_ip = starts_with(field.get_name(), "normalized");
+                for (int n = 0; n < N; ++n) {
+                    vector<float> data(dim);
+                    float sum = 0;
+                    for (auto& x : data) {
+                        x = distr(er) + offset;
+                        sum += x * x;
+                    }
+                    if (is_ip) {
+                        sum = sqrt(sum);
+                        for (auto& x : data) {
+                            x /= sum;
+                        }
+                    }
+
+                    final.insert(final.end(), data.begin(), data.end());
                 }
-                insert_cols(data);
+                insert_cols(final);
                 break;
             }
             case engine::DataType::VECTOR_BINARY: {
@@ -111,9 +128,9 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
             }
             case engine::DataType::INT64: {
                 vector<int64_t> data(N);
-                int64_t index = 0;
                 // begin with counter
-                if (field.get_name().rfind("counter", 0) == 0) {
+                if (starts_with(field.get_name(), "counter")) {
+                    int64_t index = 0;
                     for (auto& x : data) {
                         x = index++;
                     }

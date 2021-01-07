@@ -45,7 +45,7 @@ VecIndexingEntry::get_build_conf() const {
     return knowhere::Config{{knowhere::meta::DIM, field_meta_.get_dim()},
                             {knowhere::IndexParams::nlist, 100},
                             {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                            {knowhere::Metric::TYPE, MetricTypeToName(field_meta_.get_metric_type())},
                             {knowhere::meta::DEVICEID, 0}};
 }
 
@@ -55,7 +55,7 @@ VecIndexingEntry::get_search_conf(int top_K) const {
                             {knowhere::meta::TOPK, top_K},
                             {knowhere::IndexParams::nlist, 100},
                             {knowhere::IndexParams::nprobe, 4},
-                            {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                            {knowhere::Metric::TYPE, MetricTypeToName(field_meta_.get_metric_type())},
                             {knowhere::meta::DEVICEID, 0}};
 }
 

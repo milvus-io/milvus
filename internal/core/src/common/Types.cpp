@@ -20,24 +20,25 @@
 
 namespace milvus {
 
-using boost::algorithm::to_lower_copy;
+using boost::algorithm::to_upper_copy;
 namespace Metric = knowhere::Metric;
 static const auto metric_bimap = [] {
     boost::bimap<std::string, MetricType> mapping;
     using pos = boost::bimap<std::string, MetricType>::value_type;
-    mapping.insert(pos(to_lower_copy(std::string(Metric::L2)), MetricType::METRIC_L2));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::IP)), MetricType::METRIC_INNER_PRODUCT));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::JACCARD)), MetricType::METRIC_Jaccard));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::TANIMOTO)), MetricType::METRIC_Tanimoto));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::HAMMING)), MetricType::METRIC_Hamming));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::SUBSTRUCTURE)), MetricType::METRIC_Substructure));
-    mapping.insert(pos(to_lower_copy(std::string(Metric::SUPERSTRUCTURE)), MetricType::METRIC_Superstructure));
+    mapping.insert(pos(std::string(Metric::L2), MetricType::METRIC_L2));
+    mapping.insert(pos(std::string(Metric::IP), MetricType::METRIC_INNER_PRODUCT));
+    mapping.insert(pos(std::string(Metric::JACCARD), MetricType::METRIC_Jaccard));
+    mapping.insert(pos(std::string(Metric::TANIMOTO), MetricType::METRIC_Tanimoto));
+    mapping.insert(pos(std::string(Metric::HAMMING), MetricType::METRIC_Hamming));
+    mapping.insert(pos(std::string(Metric::SUBSTRUCTURE), MetricType::METRIC_Substructure));
+    mapping.insert(pos(std::string(Metric::SUPERSTRUCTURE), MetricType::METRIC_Superstructure));
     return mapping;
 }();
 
 MetricType
 GetMetricType(const std::string& type_name) {
-    auto real_name = to_lower_copy(type_name);
+    // Assume Metric is all upper at knowhere
+    auto real_name = to_upper_copy(type_name);
     AssertInfo(metric_bimap.left.count(real_name), "metric type not found: (" + type_name + ")");
     return metric_bimap.left.at(real_name);
 }

@@ -106,6 +106,13 @@ struct FieldMeta {
         return vector_info_->dim_;
     }
 
+    MetricType
+    get_metric_type() const {
+        Assert(is_vector());
+        Assert(vector_info_.has_value());
+        return vector_info_->metric_type_;
+    }
+
     const std::string&
     get_name() const {
         return name_;

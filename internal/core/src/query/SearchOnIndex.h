@@ -10,24 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <faiss/utils/BinaryDistance.h>
-#include "segcore/ConcurrentVector.h"
-#include "common/Schema.h"
+
 #include "query/SubQueryResult.h"
 #include "query/helper.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include "utils/Json.h"
 
 namespace milvus::query {
-
 SubQueryResult
-BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
-                       const uint8_t* binary_chunk,
-                       int64_t chunk_size,
-                       const faiss::BitsetView& bitset);
-
-SubQueryResult
-FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
-                      const float* chunk_data,
-                      int64_t chunk_size,
-                      const faiss::BitsetView& bitset);
+SearchOnIndex(const dataset::FloatQueryDataset& query_dataset,
+              const knowhere::VecIndex& indexing,
+              const knowhere::Config& search_conf,
+              const faiss::BitsetView& bitset);
 
 }  // namespace milvus::query

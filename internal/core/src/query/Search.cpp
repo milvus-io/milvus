@@ -17,6 +17,7 @@
 #include <faiss/utils/distances.h>
 #include "utils/tools.h"
 #include "query/SearchBruteForce.h"
+#include "query/SearchOnIndex.h"
 
 namespace milvus::query {
 
@@ -65,11 +66,14 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
     auto dim = field.get_dim();
     auto topK = info.topK_;
     auto total_count = topK * num_queries;
+    auto metric_type = GetMetricType(info.metric_type_);
     // TODO: optimize
 
     // step 3: small indexing search
-    std::vector<int64_t> final_uids(total_count, -1);
-    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+    // std::vector<int64_t> final_uids(total_count, -1);
+    // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+    SubQueryResult final_qr(num_queries, topK, metric_type);
+    dataset::FloatQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
     auto max_indexed_id = indexing_record.get_finished_ack();
     const auto& indexing_entry = indexing_record.get_vec_entry(vecfield_offset);
@@ -77,20 +81,18 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
 
     // TODO: use sub_qr
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
+        auto bitset = create_bitmap_view(bitmaps_opt, chunk_id);
         auto indexing = indexing_entry.get_vec_indexing(chunk_id);
-        auto dataset = knowhere::GenDataset(num_queries, dim, query_data);
-        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-        auto ans = indexing->Query(dataset, search_conf, bitmap_view);
-        auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
-        auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
+        auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, bitset);
+
         // convert chunk uid to segment uid
-        for (int64_t i = 0; i < total_count; ++i) {
-            auto& x = uids[i];
+        for (auto& x : sub_qr.mutable_labels()) {
             if (x != -1) {
                 x += chunk_id * indexing_entry.get_chunk_size();
             }
         }
-        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), dis, uids);
+
+        final_qr.merge(sub_qr);
     }
     using segcore::FloatVector;
     auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
@@ -100,37 +102,28 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
     Assert(vec_chunk_size == indexing_entry.get_chunk_size());
     auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
 
-    // TODO: use sub_qr
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
-        std::vector<int64_t> buf_uids(total_count, -1);
-        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
 
-        // should be not visitable
-        faiss::float_maxheap_array_t buf = {(size_t)num_queries, (size_t)topK, buf_uids.data(), buf_dis.data()};
         auto& chunk = vec_ptr->get_chunk(chunk_id);
 
         auto element_begin = chunk_id * vec_chunk_size;
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
+        auto chunk_size = element_end - element_begin;
 
-        auto nsize = element_end - element_begin;
-
-        auto bitmap_view = create_bitmap_view(bitmaps_opt, chunk_id);
-        // TODO: make it wrapped
-        faiss::knn_L2sqr(query_data, chunk.data(), dim, num_queries, nsize, &buf, bitmap_view);
-
-        Assert(buf_uids.size() == total_count);
+        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), chunk_size, bitmap_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : buf_uids) {
+        for (auto& x : sub_qr.mutable_labels()) {
             if (x != -1) {
                 x += chunk_id * vec_chunk_size;
             }
         }
-        segcore::merge_into(num_queries, topK, final_dis.data(), final_uids.data(), buf_dis.data(), buf_uids.data());
+        final_qr.merge(sub_qr);
     }
 
-    results.result_distances_ = std::move(final_dis);
-    results.internal_seg_offsets_ = std::move(final_uids);
+    results.result_distances_ = std::move(final_qr.mutable_values());
+    results.internal_seg_offsets_ = std::move(final_qr.mutable_labels());
     results.topK_ = topK;
     results.num_queries_ = num_queries;
 
@@ -168,14 +161,13 @@ BinarySearch(const segcore::SegmentSmallIndex& segment,
 
     Assert(field.get_data_type() == DataType::VECTOR_BINARY);
     auto dim = field.get_dim();
-    auto code_size = dim / 8;
     auto topK = info.topK_;
     auto total_count = topK * num_queries;
 
     // step 3: small indexing search
     // TODO: this is too intrusive
     // TODO: use QuerySubResult instead
-    query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, code_size, query_data};
+    query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
     using segcore::BinaryVector;
     auto vec_ptr = record.get_entity<BinaryVector>(vecfield_offset);

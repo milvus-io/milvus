@@ -246,17 +246,16 @@ TEST(Indexing, BinaryBruteForce) {
     schema->AddField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(0);
-    auto line_sizeof = schema->operator[](0).get_sizeof();
-    auto query_data = 1024 * line_sizeof + bin_vec.data();
+    auto query_data = 1024 * dim / 8 + bin_vec.data();
     query::dataset::BinaryQueryDataset query_dataset{
         faiss::MetricType::METRIC_Jaccard,  //
         num_queries,                        //
         topk,                               //
-        line_sizeof,                        //
+        dim,                                //
         query_data                          //
     };
 
-    auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N);
+    auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, nullptr);
 
     QueryResult qr;
     qr.num_queries_ = num_queries;

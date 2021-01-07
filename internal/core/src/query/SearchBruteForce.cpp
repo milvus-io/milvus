@@ -16,11 +16,13 @@
 #include <queue>
 #include "SubQueryResult.h"
 
+#include <faiss/utils/distances.h>
+
 namespace milvus::query {
 
 SubQueryResult
 BinarySearchBruteForceFast(MetricType metric_type,
-                           int64_t code_size,
+                           int64_t dim,
                            const uint8_t* binary_chunk,
                            int64_t chunk_size,
                            int64_t topk,
@@ -31,6 +33,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
     float* result_distances = sub_result.get_values();
     idx_t* result_labels = sub_result.get_labels();
 
+    int64_t code_size = dim / 8;
     const idx_t block_size = chunk_size;
     bool use_heap = true;
 
@@ -95,14 +98,26 @@ BinarySearchBruteForceFast(MetricType metric_type,
     return sub_result;
 }
 
-void
-FloatSearchBruteForceFast(MetricType metric_type,
-                          const float* chunk_data,
-                          int64_t chunk_size,
-                          float* result_distances,
-                          idx_t* result_labels,
-                          const faiss::BitsetView& bitset) {
-    // TODO
+SubQueryResult
+FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
+                      const float* chunk_data,
+                      int64_t chunk_size,
+                      const faiss::BitsetView& bitset) {
+    auto metric_type = query_dataset.metric_type;
+    auto num_queries = query_dataset.num_queries;
+    auto topk = query_dataset.topk;
+    auto dim = query_dataset.dim;
+    SubQueryResult sub_qr(num_queries, topk, metric_type);
+
+    if (metric_type == MetricType::METRIC_L2) {
+        faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
+        faiss::knn_L2sqr(query_dataset.query_data, chunk_data, dim, num_queries, chunk_size, &buf, bitset);
+        return sub_qr;
+    } else {
+        faiss::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_labels(), sub_qr.get_values()};
+        faiss::knn_inner_product(query_dataset.query_data, chunk_data, dim, num_queries, chunk_size, &buf, bitset);
+        return sub_qr;
+    }
 }
 
 SubQueryResult
@@ -111,7 +126,7 @@ BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
                        int64_t chunk_size,
                        const faiss::BitsetView& bitset) {
     // TODO: refactor the internal function
-    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.code_size, binary_chunk, chunk_size,
+    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, binary_chunk, chunk_size,
                                       query_dataset.topk, query_dataset.num_queries, query_dataset.query_data, bitset);
 }
 }  // namespace milvus::query
