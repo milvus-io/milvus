@@ -89,12 +89,6 @@ func TestFlushSyncService_Start(t *testing.T) {
 			time.Sleep(time.Millisecond * 50)
 		}
 
-		for {
-			if len(ddChan) == 0 && len(insertChan) == 0 {
-				break
-			}
-		}
-
 		ret, err := fService.metaTable.getSegBinlogPaths(SegID)
 		assert.NoError(t, err)
 		assert.Equal(t, map[int64][]string{
