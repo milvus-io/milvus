@@ -10,7 +10,6 @@
 [![CodeFactor Grade](https://www.codefactor.io/repository/github/milvus-io/milvus/badge)](https://www.codefactor.io/repository/github/milvus-io/milvus)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95)](https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard)
 
-
 # Welcome to the world of Milvus
 
 ## What is Milvus
@@ -29,8 +28,8 @@ Milvus was released under the Apache 2.0 License and officially open sourced in 
 
 ### Install Milvus
 
-- To install Milvus using Docker, see [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) 
-- To install Milvus from source code, see [build from source](INSTALL.md).
+-   To install Milvus using Docker, see [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) 
+-   To install Milvus from source code, see [build from source](INSTALL.md).
 
 ### Try example programs
 
@@ -49,9 +48,9 @@ You can use [Python](https://www.milvus.io/docs/example_code.md), [Java](https:/
 
 Milvus has been used in hundreds of organizations and institutions worldwide mainly in the following scenarios:
 
-- Image, video, and audio search.
-- Text search, recommender system, interactive question answering system, and other text search fields.
-- Drug discovery, genetic screening, and other biomedical fields.
+-   Image, video, and audio search.
+-   Text search, recommender system, interactive question answering system, and other text search fields.
+-   Drug discovery, genetic screening, and other biomedical fields.
 
 See [Scenarios](https://www.milvus.io/scenarios/) for more detailed application scenarios and demos.
 
@@ -71,10 +70,10 @@ It is a **Work in Progress**, and is subject to reasonable adjustments when nece
 
 You are welcome to join our community. :heart: We appreciate any contributions from you. 
 
-- For a detailed contribution workflow, see our [contribution guidelines](CONTRIBUTING.md). 
-- All the contributors should follow the [code of conduct](CODE_OF_CONDUCT.md) of Milvus.
-- To track issues and bugs, use [GitHub issues](https://github.com/milvus-io/milvus/issues).
-- To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
+-   For a detailed contribution workflow, see our [contribution guidelines](CONTRIBUTING.md). 
+-   All the contributors should follow the [code of conduct](CODE_OF_CONDUCT.md) of Milvus.
+-   To track issues and bugs, use [GitHub issues](https://github.com/milvus-io/milvus/issues).
+-   To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
 
 See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
 
@@ -84,19 +83,13 @@ See our [community](https://github.com/milvus-io/community) repository to learn 
 
 ## Resources 
 
-- [Milvus.io](https://www.milvus.io) 
-
-- [Milvus FAQ](https://www.milvus.io/docs/operational_faq.md) 
-
-- [Milvus Medium](https://medium.com/@milvusio) 
-
-- [Milvus CSDN](https://zilliz.blog.csdn.net/) 
-
-- [Milvus Twitter](https://twitter.com/milvusio) 
-
-- [Milvus Facebook](https://www.facebook.com/io.milvus.5) 
-
-- [Milvus design docs](DESIGN.md) 
+-   [Milvus.io](https://www.milvus.io) 
+-   [Milvus FAQ](https://www.milvus.io/docs/operational_faq.md) 
+-   [Milvus Medium](https://medium.com/@milvusio) 
+-   [Milvus CSDN](https://zilliz.blog.csdn.net/) 
+-   [Milvus Twitter](https://twitter.com/milvusio) 
+-   [Milvus Facebook](https://www.facebook.com/io.milvus.5) 
+-   [Milvus design docs](DESIGN.md) 
 
 ## License 
 

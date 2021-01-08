@@ -30,8 +30,8 @@ Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，
 
 ### 安装 Milvus
 
-- 使用 Docker 容器安装 Milvus，详见 [Milvus 安装指南](https://www.milvus.io/cn/docs/install_milvus.md)。
-- 基于源码编译，详见[源码安装](INSTALL.md)。
+-   使用 Docker 容器安装 Milvus，详见 [Milvus 安装指南](https://www.milvus.io/cn/docs/install_milvus.md)。
+-   基于源码编译，详见[源码安装](INSTALL.md)。
 
 ### 试用示例代码
 
@@ -50,9 +50,9 @@ Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，
 
 Milvus 已经广泛应用于多个领域，在全球范围内上被数百家组织和机构采用:
 
-- 图像、视频、音频等音视频搜索领域
-- 文本搜索、推荐和交互式问答系统等文本搜索领域
-- 新药搜索、基因筛选等生物医药领域
+-   图像、视频、音频等音视频搜索领域。
+-   文本搜索、推荐和交互式问答系统等文本搜索领域。
+-   新药搜索、基因筛选等生物医药领域。
 
 体验在线场景展示，详见 [Milvus 应用场景](https://milvus.io/cn/scenarios)。
 
@@ -72,10 +72,10 @@ Milvus 已经广泛应用于多个领域，在全球范围内上被数百家组�
 
 我们由衷期盼你加入开发者社区，成为本项目的贡献者。
 
-- 如果你想为 Milvus 项目贡献代码，详见[贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。
-- 贡献者应遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)参与本项目。
-- 使用 [GitHub issues](https://github.com/milvus-io/milvus/issues) 追踪问题和补丁。
-- 如果你对 Milvus 有任何与功能、SDK 等相关的问题，欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 参与讨论。
+-   如果你想为 Milvus 项目贡献代码，详见[贡献者指南](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。
+-   贡献者应遵循 Milvus [行为准则](https://github.com/milvus-io/milvus/blob/master/CODE_OF_CONDUCT.md)参与本项目。
+-   使用 [GitHub issues](https://github.com/milvus-io/milvus/issues) 追踪问题和补丁。
+-   如果你对 Milvus 有任何与功能、SDK 等相关的问题，欢迎加入 [Slack](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) 参与讨论。
 
 ## 加入 Milvus 技术交流微信群
 
@@ -84,17 +84,11 @@ Milvus 已经广泛应用于多个领域，在全球范围内上被数百家组�
 ## 相关链接
 
 -   [Milvus.io](https://www.milvus.io)
-
 -   [Milvus 常见问题](https://www.milvus.io/cn/docs/operational_faq.md)
-
 -   [Milvus Medium](https://medium.com/@milvusio)
-
 -   [Milvus CSDN](https://zilliz.blog.csdn.net/)
-
 -   [Milvus Twitter](https://twitter.com/milvusio)
-
 -   [Milvus Facebook](https://www.facebook.com/io.milvus.5)
-
 -   [Milvus 设计文档](DESIGN.md)
 
 ## 许可协议
