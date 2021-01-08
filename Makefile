@@ -76,7 +76,7 @@ else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: getdeps cppcheck fmt static-check ruleguard
+verifiers: getdeps cppcheck fmt static-check
 
 # Builds various components locally.
 build-go: build-cpp
@@ -127,7 +127,6 @@ install: all
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxy $(GOPATH)/bin/proxy
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/writenode $(GOPATH)/bin/writenode
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexbuilder $(GOPATH)/bin/indexbuilder
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
@@ -135,10 +134,7 @@ clean:
 	@echo "Cleaning up all the generated files"
 	@find . -name '*.test' | xargs rm -fv
 	@find . -name '*~' | xargs rm -fv
-	@rm -rf bin/
-	@rm -rf lib/
-	@rm -rf $(GOPATH)/bin/master
-	@rm -rf $(GOPATH)/bin/proxy
-	@rm -rf $(GOPATH)/bin/querynode
-	@rm -rf $(GOPATH)/bin/writenode
-	@rm -rf $(GOPATH)/bin/indexbuilder
+	@rm -rvf querynode
+	@rm -rvf master
+	@rm -rvf proxy
+	@rm -rvf writenode

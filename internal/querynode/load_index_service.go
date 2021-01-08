@@ -100,6 +100,7 @@ func (lis *loadIndexService) start() {
 					continue
 				}
 				// 1. use msg's index paths to get index bytes
+				fmt.Println("start load index")
 				var indexBuffer [][]byte
 				var err error
 				fn := func() error {
@@ -136,6 +137,13 @@ func (lis *loadIndexService) start() {
 			}
 		}
 	}
+}
+
+func (lis *loadIndexService) close() {
+	if lis.loadIndexMsgStream != nil {
+		lis.loadIndexMsgStream.Close()
+	}
+	lis.cancel()
 }
 
 func (lis *loadIndexService) printIndexParams(index []*commonpb.KeyValuePair) {

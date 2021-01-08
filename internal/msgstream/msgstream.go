@@ -4,15 +4,12 @@ import (
 	"context"
 	"log"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	oplog "github.com/opentracing/opentracing-go/log"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -154,29 +151,6 @@ func (ms *PulsarMsgStream) Close() {
 	}
 }
 
-type propertiesReaderWriter struct {
-	ppMap map[string]string
-}
-
-func (ppRW *propertiesReaderWriter) Set(key, val string) {
-	// The GRPC HPACK implementation rejects any uppercase keys here.
-	//
-	// As such, since the HTTP_HEADERS format is case-insensitive anyway, we
-	// blindly lowercase the key (which is guaranteed to work in the
-	// Inject/Extract sense per the OpenTracing spec).
-	key = strings.ToLower(key)
-	ppRW.ppMap[key] = val
-}
-
-func (ppRW *propertiesReaderWriter) ForeachKey(handler func(key, val string) error) error {
-	for k, val := range ppRW.ppMap {
-		if err := handler(k, val); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 	tsMsgs := msgPack.Msgs
 	if len(tsMsgs) <= 0 {
@@ -226,50 +200,11 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 			if err != nil {
 				return err
 			}
-
-			msg := &pulsar.ProducerMessage{Payload: mb}
-			var child opentracing.Span
-			if v.Msgs[i].Type() == internalPb.MsgType_kInsert ||
-				v.Msgs[i].Type() == internalPb.MsgType_kSearch ||
-				v.Msgs[i].Type() == internalPb.MsgType_kSearchResult {
-				tracer := opentracing.GlobalTracer()
-				ctx := v.Msgs[i].GetMsgContext()
-				if ctx == nil {
-					ctx = context.Background()
-				}
-
-				if parent := opentracing.SpanFromContext(ctx); parent != nil {
-					child = tracer.StartSpan("start send pulsar msg",
-						opentracing.FollowsFrom(parent.Context()))
-				} else {
-					child = tracer.StartSpan("start send pulsar msg")
-				}
-				child.SetTag("hash keys", v.Msgs[i].HashKeys())
-				child.SetTag("start time", v.Msgs[i].BeginTs())
-				child.SetTag("end time", v.Msgs[i].EndTs())
-				child.SetTag("msg type", v.Msgs[i].Type())
-				msg.Properties = make(map[string]string)
-				err = tracer.Inject(child.Context(), opentracing.TextMap, &propertiesReaderWriter{msg.Properties})
-				if err != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-					return err
-				}
-				child.LogFields(oplog.String("inject success", "inject success"))
-			}
-
 			if _, err := (*ms.producers[k]).Send(
 				context.Background(),
-				msg,
+				&pulsar.ProducerMessage{Payload: mb},
 			); err != nil {
-				if child != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-				}
 				return err
-			}
-			if child != nil {
-				child.Finish()
 			}
 		}
 	}
@@ -283,49 +218,13 @@ func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 		if err != nil {
 			return err
 		}
-		msg := &pulsar.ProducerMessage{Payload: mb}
-		var child opentracing.Span
-		if v.Type() == internalPb.MsgType_kInsert ||
-			v.Type() == internalPb.MsgType_kSearch ||
-			v.Type() == internalPb.MsgType_kSearchResult {
-			tracer := opentracing.GlobalTracer()
-			ctx := v.GetMsgContext()
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if parent := opentracing.SpanFromContext(ctx); parent != nil {
-				child = tracer.StartSpan("start send pulsar msg",
-					opentracing.FollowsFrom(parent.Context()))
-			} else {
-				child = tracer.StartSpan("start send pulsar msg, start time: %d")
-			}
-			child.SetTag("hash keys", v.HashKeys())
-			child.SetTag("start time", v.BeginTs())
-			child.SetTag("end time", v.EndTs())
-			child.SetTag("msg type", v.Type())
-			msg.Properties = make(map[string]string)
-			err = tracer.Inject(child.Context(), opentracing.TextMap, &propertiesReaderWriter{msg.Properties})
-			if err != nil {
-				child.LogFields(oplog.Error(err))
-				child.Finish()
-				return err
-			}
-			child.LogFields(oplog.String("inject success", "inject success"))
-		}
 		for i := 0; i < producerLen; i++ {
 			if _, err := (*ms.producers[i]).Send(
 				context.Background(),
-				msg,
+				&pulsar.ProducerMessage{Payload: mb},
 			); err != nil {
-				if child != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-				}
 				return err
 			}
-		}
-		if child != nil {
-			child.Finish()
 		}
 	}
 	return nil
@@ -359,7 +258,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 	for {
 		select {
 		case <-ms.ctx.Done():
-			log.Println("done")
 			return
 		default:
 			tsMsgList := make([]TsMsg, 0)
@@ -372,7 +270,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 				}
 
 				pulsarMsg, ok := value.Interface().(pulsar.ConsumerMessage)
-
 				if !ok {
 					log.Printf("type assertion failed, not consumer message type")
 					continue
@@ -386,23 +283,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 					continue
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.MsgType)
-				if tsMsg.Type() == internalPb.MsgType_kSearch ||
-					tsMsg.Type() == internalPb.MsgType_kSearchResult {
-					tracer := opentracing.GlobalTracer()
-					spanContext, err := tracer.Extract(opentracing.HTTPHeaders, &propertiesReaderWriter{pulsarMsg.Properties()})
-					if err != nil {
-						log.Println("extract message err")
-						log.Println(err.Error())
-					}
-					span := opentracing.StartSpan("pulsar msg received",
-						ext.RPCServerOption(spanContext))
-					span.SetTag("msg type", tsMsg.Type())
-					span.SetTag("hash keys", tsMsg.HashKeys())
-					span.SetTag("start time", tsMsg.BeginTs())
-					span.SetTag("end time", tsMsg.EndTs())
-					tsMsg.SetMsgContext(opentracing.ContextWithSpan(context.Background(), span))
-					span.Finish()
-				}
 				if err != nil {
 					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 					continue
@@ -466,8 +346,6 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	ms.inputBuf = make([]TsMsg, 0)
 	isChannelReady := make([]bool, len(ms.consumers))
 	eofMsgTimeStamp := make(map[int]Timestamp)
-	spans := make(map[Timestamp]opentracing.Span)
-	ctxs := make(map[Timestamp]context.Context)
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -493,22 +371,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 			ms.inputBuf = append(ms.inputBuf, ms.unsolvedBuf...)
 			ms.unsolvedBuf = ms.unsolvedBuf[:0]
 			for _, v := range ms.inputBuf {
-				var ctx context.Context
-				var span opentracing.Span
-				if v.Type() == internalPb.MsgType_kInsert {
-					if _, ok := spans[v.BeginTs()]; !ok {
-						span, ctx = opentracing.StartSpanFromContext(v.GetMsgContext(), "after find time tick")
-						ctxs[v.BeginTs()] = ctx
-						spans[v.BeginTs()] = span
-					}
-				}
 				if v.EndTs() <= timeStamp {
 					timeTickBuf = append(timeTickBuf, v)
-					if v.Type() == internalPb.MsgType_kInsert {
-						v.SetMsgContext(ctxs[v.BeginTs()])
-						spans[v.BeginTs()].Finish()
-						delete(spans, v.BeginTs())
-					}
 				} else {
 					ms.unsolvedBuf = append(ms.unsolvedBuf, v)
 				}
@@ -556,24 +420,6 @@ func (ms *PulsarTtMsgStream) findTimeTick(channelIndex int,
 			if err != nil {
 				log.Printf("Failed to unmarshal, error = %v", err)
 			}
-
-			if tsMsg.Type() == internalPb.MsgType_kInsert {
-				tracer := opentracing.GlobalTracer()
-				spanContext, err := tracer.Extract(opentracing.HTTPHeaders, &propertiesReaderWriter{pulsarMsg.Properties()})
-				if err != nil {
-					log.Println("extract message err")
-					log.Println(err.Error())
-				}
-				span := opentracing.StartSpan("pulsar msg received",
-					ext.RPCServerOption(spanContext))
-				span.SetTag("hash keys", tsMsg.HashKeys())
-				span.SetTag("start time", tsMsg.BeginTs())
-				span.SetTag("end time", tsMsg.EndTs())
-				span.SetTag("msg type", tsMsg.Type())
-				tsMsg.SetMsgContext(opentracing.ContextWithSpan(context.Background(), span))
-				span.Finish()
-			}
-
 			if headerMsg.MsgType == internalPb.MsgType_kTimeTick {
 				eofMsgMap[channelIndex] = tsMsg.(*TimeTickMsg).Timestamp
 				return
@@ -654,7 +500,7 @@ func insertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != internalPb.MsgType_kInsert {
-			return nil, errors.New("msg's must be Insert")
+			return nil, errors.New(string("msg's must be Insert"))
 		}
 		insertRequest := request.(*InsertMsg)
 		keys := hashKeys[i]
@@ -665,7 +511,7 @@ func insertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		keysLen := len(keys)
 
 		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
-			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
+			return nil, errors.New(string("the length of hashValue, timestamps, rowIDs, RowData are not equal"))
 		}
 		for index, key := range keys {
 			_, ok := result[key]
@@ -688,9 +534,6 @@ func insertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			}
 
 			insertMsg := &InsertMsg{
-				BaseMsg: BaseMsg{
-					MsgCtx: request.GetMsgContext(),
-				},
 				InsertRequest: sliceRequest,
 			}
 			result[key].Msgs = append(result[key].Msgs, insertMsg)
@@ -703,7 +546,7 @@ func deleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 	result := make(map[int32]*MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != internalPb.MsgType_kDelete {
-			return nil, errors.New("msg's must be Delete")
+			return nil, errors.New(string("msg's must be Delete"))
 		}
 		deleteRequest := request.(*DeleteMsg)
 		keys := hashKeys[i]
@@ -713,7 +556,7 @@ func deleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		keysLen := len(keys)
 
 		if keysLen != timestampLen || keysLen != primaryKeysLen {
-			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
+			return nil, errors.New(string("the length of hashValue, timestamps, primaryKeys are not equal"))
 		}
 
 		for index, key := range keys {
@@ -747,7 +590,7 @@ func defaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 	for i, request := range tsMsgs {
 		keys := hashKeys[i]
 		if len(keys) != 1 {
-			return nil, errors.New("len(msg.hashValue) must equal 1")
+			return nil, errors.New(string("len(msg.hashValue) must equal 1"))
 		}
 		key := keys[0]
 		_, ok := result[key]
