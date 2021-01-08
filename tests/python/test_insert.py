@@ -101,7 +101,6 @@ class TestInsertBase:
         connect.flush([collection])
         connect.drop_collection(collection)
 
-    @pytest.mark.skip("create_index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         '''
@@ -119,7 +118,6 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    @pytest.mark.skip("create_index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         '''
@@ -136,7 +134,6 @@ class TestInsertBase:
             if field["name"] == field_name:
                 assert field["indexes"][0] == get_simple_index
 
-    @pytest.mark.skip(" todo fix search")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -313,7 +310,6 @@ class TestInsertBinary:
         connect.flush([binary_collection])
         assert connect.count_entities(binary_collection) == default_nb
 
-    @pytest.mark.skip("create index")
     def test_insert_binary_after_create_index(self, connect, binary_collection, get_binary_index):
         '''
         target: test insert binary entities after build index
@@ -330,7 +326,6 @@ class TestInsertBinary:
             if field["name"] == binary_field_name:
                 assert field["indexes"][0] == get_binary_index
 
-    @pytest.mark.skip("create index")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         '''
