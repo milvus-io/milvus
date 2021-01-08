@@ -64,7 +64,7 @@ See our [test reports](https://github.com/milvus-io/bootcamp/tree/master/EN_benc
 
 To learn what's coming up soon in Milvus, read our [Roadmap](https://github.com/milvus-io/milvus/milestones).
 
-It is a **Work in Progress**, and is subject to reasonable adjustments when necessary. And we greatly appreciate any comments, requirements and suggestions on the Milvus roadmap.:clap:
+It is a **Work in Progress**, and is subject to reasonable adjustments when necessary. We greatly appreciate any comments, requirements and suggestions on the Milvus roadmap.:clap:
 
 ## Join our community
 
