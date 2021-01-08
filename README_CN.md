@@ -22,7 +22,7 @@ Milvus 的架构如下：
 
 ![arch](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_arch.png)
 
-更多 Milvus 相关介绍和整体架构信息，详见 [Milvus 简介](https://www.milvus.io/docs/overview.md)。你可以通过 [版本发布说明](https://www.milvus.io/docs/release_notes.md) 获取最新版本的功能和更新。
+更多 Milvus 相关介绍和整体架构信息，详见 [Milvus 简介](https://www.milvus.io/cn/docs/overview.md)。你可以通过 [版本发布说明](https://www.milvus.io/cn/docs/release_notes.md) 获取最新版本的功能和更新。
 
 Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，是 [LF AI & DATA 基金会](https://lfaidata.foundation/)的孵化项目。Milvus 的源代码被托管于 [Github](https://github.com/milvus-io/milvus)。
 
@@ -30,7 +30,7 @@ Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，
 
 ### 安装 Milvus
 
-- 使用 Docker 容器安装 Milvus，详见 [Milvus 安装指南](https://www.milvus.io/docs/install_milvus.md)。
+- 使用 Docker 容器安装 Milvus，详见 [Milvus 安装指南](https://www.milvus.io/cn/docs/install_milvus.md)。
 - 基于源码编译，详见[源码安装](INSTALL.md)。
 
 ### 试用示例代码
@@ -54,13 +54,13 @@ Milvus 已经广泛应用于多个领域，在全球范围内上被数百家组�
 - 文本搜索、推荐和交互式问答系统等文本搜索领域
 - 新药搜索、基因筛选等生物医药领域
 
-体验在线场景展示，详见 [Milvus 应用场景](https://milvus.io/scenarios)。
+体验在线场景展示，详见 [Milvus 应用场景](https://milvus.io/cn/scenarios)。
 
 了解更详细的应用场景和解决方案，详见 [Milvus 训练营](https://github.com/milvus-io/bootcamp)。
 
 ## 性能基准测试
 
-更多 Milvus 性能基准的信息，详见[测试报告](https://github.com/milvus-io/milvus/tree/master/docs)。
+更多 Milvus 性能基准的信息，详见[测试报告](https://github.com/milvus-io/bootcamp/tree/master/benchmark_test)。
 
 ## 路线图
 

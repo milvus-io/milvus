@@ -59,7 +59,7 @@ See [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed soluti
 
 ## Benchmark
 
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+See our [test reports](https://github.com/milvus-io/bootcamp/tree/master/EN_benchmark_test) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 
@@ -77,6 +77,10 @@ You are welcome to join our community. :heart: We appreciate any contributions f
 - To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
 
 See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
+
+## Join Milvus WeChat group
+
+![qrcode](https://github.com/milvus-io/docs/blob/master/v0.11.0/assets/qrcode.png)
 
 ## Resources 
 
