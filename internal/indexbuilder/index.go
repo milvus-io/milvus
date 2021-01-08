@@ -14,6 +14,7 @@ package indexbuilder
 import "C"
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"unsafe"
 
@@ -105,10 +106,13 @@ func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {
 		CStatus
 		BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors);
 	*/
+	fmt.Println("before BuildFloatVecIndexWithoutIds")
 	status := C.BuildFloatVecIndexWithoutIds(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
 	errorCode := status.error_code
+	fmt.Println("BuildFloatVecIndexWithoutIds error code: ", errorCode)
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
+		fmt.Println("BuildFloatVecIndexWithoutIds error msg: ", errorMsg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("BuildFloatVecIndexWithoutIds failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
@@ -142,6 +146,8 @@ func (index *CIndex) Delete() error {
 }
 
 func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
+	fmt.Println("NNNNNNNNNNNNNNNNNNNNNNNNNNN typeParams: ", typeParams)
+	fmt.Println("NNNNNNNNNNNNNNNNNNNNNNNNNNN indexParams: ", indexParams)
 	protoTypeParams := &indexcgopb.TypeParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
 	}
@@ -168,10 +174,14 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 					CIndex* res_index);
 	*/
 	var indexPtr C.CIndex
+	fmt.Println("before create index ........................................")
 	status := C.CreateIndex(typeParamsPointer, indexParamsPointer, &indexPtr)
+	fmt.Println("after create index ........................................")
 	errorCode := status.error_code
+	fmt.Println("EEEEEEEEEEEEEEEEEEEEEEEEEE error code: ", errorCode)
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
+		fmt.Println("EEEEEEEEEEEEEEEEEEEEEEEEEE error msg: ", errorMsg)
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return nil, errors.New(" failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
