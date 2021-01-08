@@ -4,6 +4,7 @@
 **/cmake-build-release/*
 internal/core/output/*
 internal/core/build/*
+internal/kv/rocksdb/cwrapper/output/*
 **/.idea/*
 pulsar/client-cpp/build/
 pulsar/client-cpp/build/*

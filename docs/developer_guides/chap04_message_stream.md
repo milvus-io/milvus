@@ -1,3 +1,5 @@
+
+
 ## 8. Message Stream Service
 
 
@@ -45,6 +47,8 @@ type ChannelDescriptions struct {
   Descriptions []ChannelDescription
 }
 ```
+
+
 
 
 
@@ -149,56 +153,4 @@ func (dispatcher *MarshalDispatcher) addDefaultMsgTemplates()
 func NewUnmarshalDispatcher() *UnmarshalDispatcher
 ```
 
-
-
-#### A.4 RocksMQ
-
-RocksMQ is a RocksDB-based messaging/streaming library.
-
-```go
-type ProducerMessage struct {
-  Key string
-  Payload []byte
-} 
-```
-
-```go
-type ConsumerMessage struct {
-  MsgID MessageID
-  Key string
-  Payload []byte
-} 
-```
-
-
-
-```GO
-type RocksMQ struct {
-  CreateChannel(channelName string) error
-  DestroyChannel(channelName string) error
-  CreateConsumerGroup(groupName string) error
-  DestroyConsumerGroup(groupName string) error
-  
-  Produce(channelName string, messages []ProducerMessage) error
-  Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error)
-  Seek(groupName string, channelName string, msgID MessageID) error
-}
-```
-
-
-
-##### A.4.1 Meta
-
-* channel meta
-
-```go
-"$(channel_name)/start_id", MessageID
-"$(channel_name)/end_id", MessageID
-```
-
-* consumer group meta
-
-```go
-"$(group_name)/$(channel_name)/current_id", MessageID
-```
 
