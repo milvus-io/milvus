@@ -24,6 +24,11 @@ func (task *createIndexTask) Ts() (Timestamp, error) {
 }
 
 func (task *createIndexTask) Execute() error {
+	// modify schema
+	if err := task.mt.UpdateFieldIndexParams(task.req.CollectionName, task.req.FieldName, task.req.ExtraParams); err != nil {
+		return err
+	}
+	// check if closed segment has the same index build history
 	collMeta, err := task.mt.GetCollectionByName(task.req.CollectionName)
 	if err != nil {
 		return err
@@ -39,20 +44,6 @@ func (task *createIndexTask) Execute() error {
 		return fmt.Errorf("can not find field name %s", task.req.FieldName)
 	}
 
-	// pre checks
-	isIndexable, err := task.mt.IsIndexable(collMeta.ID, fieldID)
-	if err != nil {
-		return err
-	}
-	if !isIndexable {
-		return fmt.Errorf("field %s is not vector", task.req.FieldName)
-	}
-
-	// modify schema
-	if err := task.mt.UpdateFieldIndexParams(task.req.CollectionName, task.req.FieldName, task.req.ExtraParams); err != nil {
-		return err
-	}
-	// check if closed segment has the same index build history
 	for _, segID := range collMeta.SegmentIDs {
 		segMeta, err := task.mt.GetSegmentByID(segID)
 		if err != nil {

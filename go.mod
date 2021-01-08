@@ -4,14 +4,17 @@ go 1.15
 
 require (
 	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
+	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/apache/pulsar-client-go v0.1.1
-	github.com/aws/aws-sdk-go v1.30.8
+	github.com/apache/thrift v0.13.0
+	github.com/aws/aws-sdk-go v1.30.8 // indirect
 	github.com/coreos/etcd v3.3.25+incompatible // indirect
-	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548
+	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/git-hooks/git-hooks v1.3.1 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
+	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.3.2
 	github.com/google/btree v1.0.0
 	github.com/klauspost/compress v1.10.11 // indirect
@@ -20,12 +23,12 @@ require (
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/ginkgo v1.12.1 // indirect
 	github.com/onsi/gomega v1.10.0 // indirect
-	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712 // indirect
 	github.com/pingcap/errors v0.11.4 // indirect
 	github.com/pingcap/log v0.0.0-20200828042413-fce0951f1463 // indirect
-	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48
+	github.com/pivotal-golang/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
 	github.com/prometheus/client_golang v1.5.1 // indirect
 	github.com/prometheus/common v0.10.0 // indirect
 	github.com/prometheus/procfs v0.1.3 // indirect
@@ -35,7 +38,9 @@ require (
 	github.com/spf13/cast v1.3.0
 	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.6.1
-	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b
+	github.com/tikv/client-go v0.0.0-20200824032810-95774393107b // indirect
+	github.com/uber/jaeger-client-go v2.25.0+incompatible
+	github.com/uber/jaeger-lib v2.4.0+incompatible // indirect
 	github.com/urfave/cli v1.22.5 // indirect
 	github.com/yahoo/athenz v1.9.16 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
@@ -50,7 +55,7 @@ require (
 	google.golang.org/genproto v0.0.0-20200122232147-0452cf42e150 // indirect
 	google.golang.org/grpc v1.31.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	gopkg.in/yaml.v2 v2.3.0
+	gopkg.in/yaml.v2 v2.3.0 // indirect
 	honnef.co/go/tools v0.0.1-2020.1.4 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
