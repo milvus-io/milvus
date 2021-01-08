@@ -440,7 +440,7 @@ func (qt *QueryTask) PostExecute() error {
 
 			hits := make([][]*servicepb.Hits, 0)
 			for _, partialSearchResult := range filterSearchResult {
-				if len(partialSearchResult.Hits) <= 0 {
+				if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
 					filterReason += "nq is zero\n"
 					continue
 				}
