@@ -374,9 +374,6 @@ func (qt *QueryTask) PreExecute() error {
 		}
 	}
 	qt.MsgType = internalpb.MsgType_kSearch
-	if qt.query.PartitionTags == nil || len(qt.query.PartitionTags) <= 0 {
-		qt.query.PartitionTags = []string{Params.defaultPartitionTag()}
-	}
 	queryBytes, err := proto.Marshal(qt.query)
 	if err != nil {
 		return err

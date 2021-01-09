@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -223,7 +224,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		return errors.New("unmarshal query failed")
 	}
 	collectionName := query.CollectionName
-	partitionTags := query.PartitionTags
+	partitionTagsInQuery := query.PartitionTags
 	collection, err := ss.replica.getCollectionByName(collectionName)
 	if err != nil {
 		return err
@@ -245,11 +246,29 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	for _, partitionTag := range partitionTags {
-		partition, err := ss.replica.getPartitionByTag(collectionID, partitionTag)
-		if err != nil {
-			continue
+	fmt.Println("search msg's partitionTag = ", partitionTagsInQuery)
+
+	var partitionTagsInCol []string
+	for _, partition := range collection.partitions {
+		partitionTag := partition.partitionTag
+		partitionTagsInCol = append(partitionTagsInCol, partitionTag)
+	}
+	var searchPartitionTag []string
+	if len(partitionTagsInQuery) == 0 {
+		searchPartitionTag = partitionTagsInCol
+	} else {
+		for _, tag := range partitionTagsInCol {
+			for _, toMatchTag := range partitionTagsInQuery {
+				re := regexp.MustCompile("^" + toMatchTag + "$")
+				if re.MatchString(tag) {
+					searchPartitionTag = append(searchPartitionTag, tag)
+				}
+			}
 		}
+	}
+
+	for _, partitionTag := range searchPartitionTag {
+		partition, _ := ss.replica.getPartitionByTag(collectionID, partitionTag)
 		for _, segment := range partition.segments {
 			//fmt.Println("dsl = ", dsl)
 
@@ -360,6 +379,7 @@ func (ss *searchService) publishSearchResult(msg msgstream.TsMsg) error {
 }
 
 func (ss *searchService) publishFailedSearchResult(msg msgstream.TsMsg, errMsg string) error {
+	fmt.Println("Public fail SearchResult!")
 	msgPack := msgstream.MsgPack{}
 	searchMsg, ok := msg.(*msgstream.SearchMsg)
 	if !ok {
