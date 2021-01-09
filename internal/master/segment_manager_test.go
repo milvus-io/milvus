@@ -272,6 +272,8 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 	syncWriteChan <- tsMsg
 	time.Sleep(300 * time.Millisecond)
 
+	segManager.mu.RLock()
+	defer segManager.mu.RUnlock()
 	status := segManager.collStatus[collID]
 	assert.Empty(t, status.segments)
 }

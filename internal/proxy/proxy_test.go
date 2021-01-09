@@ -210,6 +210,7 @@ func TestProxy_CreateCollection(t *testing.T) {
 		wg.Add(1)
 		go func(group *sync.WaitGroup) {
 			defer group.Done()
+			println("collectionName:", collectionName)
 			createCollection(t, collectionName)
 			dropCollection(t, collectionName)
 		}(&wg)
