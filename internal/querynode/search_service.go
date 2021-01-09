@@ -283,25 +283,37 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	if len(searchResults) <= 0 {
-		var results = internalpb.SearchResult{
-			MsgType:         internalpb.MsgType_kSearchResult,
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			ReqID:           searchMsg.ReqID,
-			ProxyID:         searchMsg.ProxyID,
-			QueryNodeID:     ss.queryNodeID,
-			Timestamp:       searchTimestamp,
-			ResultChannelID: searchMsg.ResultChannelID,
-			Hits:            nil,
+		for _, group := range placeholderGroups {
+			nq := group.getNumOfQuery()
+			nilHits := make([][]byte, nq)
+			hit := &servicepb.Hits{}
+			for i := 0; i < int(nq); i++ {
+				bs, err := proto.Marshal(hit)
+				if err != nil {
+					return err
+				}
+				nilHits[i] = bs
+			}
+			var results = internalpb.SearchResult{
+				MsgType:         internalpb.MsgType_kSearchResult,
+				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
+				ReqID:           searchMsg.ReqID,
+				ProxyID:         searchMsg.ProxyID,
+				QueryNodeID:     ss.queryNodeID,
+				Timestamp:       searchTimestamp,
+				ResultChannelID: searchMsg.ResultChannelID,
+				Hits:            nilHits,
+			}
+			searchResultMsg := &msgstream.SearchResultMsg{
+				BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
+				SearchResult: results,
+			}
+			err = ss.publishSearchResult(searchResultMsg)
+			if err != nil {
+				return err
+			}
+			return nil
 		}
-		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg:      msgstream.BaseMsg{HashValues: []uint32{uint32(searchMsg.ResultChannelID)}},
-			SearchResult: results,
-		}
-		err = ss.publishSearchResult(searchResultMsg)
-		if err != nil {
-			return err
-		}
-		return nil
 	}
 
 	inReduced := make([]bool, len(searchResults))
