@@ -128,7 +128,7 @@ ConstructTopkQueryResult(const ::milvus::grpc::QueryResult& grpc_result, TopKQue
                                    sizeof(float) * float_size);
                             vectors.float_data = float_data;
                         } else if (bin_size > 0) {
-                            std::vector<uint8_t> bin_data(bin_size / 8);
+                            std::vector<uint8_t> bin_data(bin_size);
                             memcpy(bin_data.data(), grpc_field.vector_record().records(offset).binary_data().data(),
                                    bin_size);
                             vectors.binary_data = bin_data;
