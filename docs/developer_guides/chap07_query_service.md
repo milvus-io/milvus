@@ -2,20 +2,21 @@
 
 ## 8. Query Service
 
-
-
 #### 8.1 Overview
 
 <img src="./figs/query_service.jpeg" width=700>
 
 
 
-#### 8.2 API
+#### 8.2 Query Service API
 
 ```go
 type Client interface {
-  DescribeService() (ServiceDescription, error)
-  DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
+  RegisterNode(req NodeInfo) (InitParams, error)
+  GetServiceStates() (ServiceStatesResponse, error)
+  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
+  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
+  GetPartitionStates(req PartitionStatesRequest) (PartitionStatesResponse, error)
   LoadPartitions(req LoadPartitonRequest) error
   ReleasePartitions(req ReleasePartitionRequest) error
   CreateQueryChannel() (QueryChannels, error)
@@ -26,62 +27,95 @@ type Client interface {
 
 
 
-* *DescribeService*
+* *RegisterNode*
 
 ```go
-type QueryNodeDescription struct {
-  ResourceCost ResourceCost 
+type NodeInfo struct {}
+
+type InitParams struct {}
+```
+
+* *GetServiceStates*
+
+```go
+type NodeState = int
+
+const (
+  INITIALIZING NodeState = 0
+  HEALTHY NodeState = 1
+  ABNORMAL NodeState = 2
+)
+
+//type ResourceCost struct {
+//  MemUsage int64
+//  CpuUsage float32
+//}
+
+type QueryNodeStates struct {
+  NodeState NodeState
+  //ResourceCost ResourceCost 
 }
 
-type CollectionDescription struct {
-  ParitionIDs []UniqueID
+type ServiceStatesResponse struct {
+  ServiceState NodeState
+}
+```
+
+* *ShowCollections*
+
+```go
+type ShowCollectionRequest struct {
+  DbID UniqueID
 }
 
-type DbDescription struct {
-  CollectionDescriptions []CollectionDescription
+type ShowCollectionResponse struct {
+  CollectionIDs []UniqueID
+}
+```
+
+* *ShowPartitions*
+
+```go
+type ShowPartitionRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
 }
 
-type ServiceDescription struct {
-  DbDescriptions map[UniqueID]DbDescription
-  NodeDescriptions map[UniqueID]QueryNodeDescription
+type ShowPartitionResponse struct {
+  PartitionIDs []UniqueID
 }
 ```
 
 
 
-* *DescribeParition*
+* *GetPartitionStates*
 
 ```go
-type DescribeParitionRequest struct {
-  DbID UniqueID
-  CollectionID UniqueID
-  partitionIDs []UniqueID
-}
-
 type PartitionState = int
 
 const (
   NOT_EXIST PartitionState = 0
-  ON_DISK PartitionState = 1
-  PARTIAL_IN_MEMORY PartitionState = 2
-	IN_MEMORY PartitionState = 3
-  PARTIAL_IN_GPU PartitionState = 4
-  IN_GPU PartitionState = 5
+  NOT_PRESENT PartitionState = 1
+  ON_DISK PartitionState = 2
+  PARTIAL_IN_MEMORY PartitionState = 3
+	IN_MEMORY PartitionState = 4
+  PARTIAL_IN_GPU PartitionState = 5
+  IN_GPU PartitionState = 6
 )
 
-type ResourceCost struct {
-  MemUsage int64
-  CpuUsage float32
+type PartitionStatesRequest struct {
+	DbID UniqueID
+  CollectionID UniqueID
+  partitionIDs []UniqueID
 }
 
-type PartitionDescription struct {
-  ID UniqueID
+type PartitionStates struct {
+  PartitionID UniqueID
   State PartitionState
-  ResourceCost ResourceCost
 }
 
-type PartitionDescriptions struct {
-  PartitionDescriptions []PartitionDescription
+type PartitionStatesResponse struct {
+  States []PartitionStates
 }
 ```
 
@@ -122,6 +156,33 @@ type ReleasePartitionRequest struct {
 
 
 
+* *LoadSegments*
+
+```go
+type LoadSegmentRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+  SegmentIDs []UniqueID
+  FieldIDs []int64
+}
+```
+
+
+
+* *ReleaseSegments*
+
+```go
+type ReleaseSegmentRequest struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+  SegmentIDs []UniqueID
+}
+```
+
+
+
 #### 8.2 Query Node
 
 ```go
@@ -129,20 +190,17 @@ type QueryNode interface {
   Start() error
   Close() error
   
-  AddQueryStream(requestStream MsgStream, resultStream MsgStream) error
-  RemoveQueryStream(requestStreamID string) error
-  WatchDmStreams(insertStreams MsgStream) error
-  WatchDdStream(stream MsgStream) error
-  SetTimeTickStream(stream MsgStream) error
-  SetStatsStream(stream MsgStream) error
+  AddQueryChannel(channelIDs QueryChannels) error
+  RemoveQueryChannel(channelIDs QueryChannels) error
+  WatchDmChannels(insertChannelIDs []string) error
+  //SetTimeTickChannel(channelID string) error
+  //SetStatsChannel(channelID string) error
   
-  LoadSegments(DbID UniqueID, CollID UniqueID, PartitionID UniqueID, SegIDs []UniqueID, FieldIDs []int64) error
-  ReleaseSegments(DbID UniqueID, CollID UniqueID, PartitionID UniqueID, SegIDs []UniqueID) error
-  DescribeParition(DbID UniqueID, CollID UniqueID, PartitionID UniqueID) (PartitionDescription, error)
+  LoadSegments(req LoadSegmentRequest) error
+  ReleaseSegments(req ReleaseSegmentRequest) error
+  DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
 }
 ```
-
-
 
 
 

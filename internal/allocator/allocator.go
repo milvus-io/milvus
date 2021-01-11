@@ -137,10 +137,7 @@ type Allocator struct {
 }
 
 func (ta *Allocator) Start() error {
-	connectMasterFn := func() error {
-		return ta.connectMaster()
-	}
-	err := Retry(10, time.Millisecond*200, connectMasterFn)
+	err := ta.connectMaster()
 	if err != nil {
 		panic("connect to master failed")
 	}

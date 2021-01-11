@@ -81,7 +81,7 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 							// get a legal Timestamp
 							ts := ttBarrier.minTimestamp()
 							lastTt := atomic.LoadInt64(&(ttBarrier.lastTt))
-							if lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
+							if ttBarrier.lastTt != 0 && ttBarrier.minTtInterval > ts-Timestamp(lastTt) {
 								continue
 							}
 							ttBarrier.outTt <- ts
