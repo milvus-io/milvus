@@ -35,7 +35,11 @@ Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，
 
 ### 试用示例代码
 
-你可以尝试用 [Python](https://www.milvus.io/docs/example_code.md)，[Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)，[Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)，或者 [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 运行 Milvus 示例代码。
+可以尝试用以下方式运行 Milvus 示例代码： 
+-   [Python](https://www.milvus.io/docs/example_code.md)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 
 
 ## 支持的客户端
 
@@ -48,7 +52,7 @@ Milvus 在 Apache 2 License 协议下发布，于 2019 年 10 月正式开源，
 
 ## 应用场景
 
-Milvus 已经广泛应用于多个领域，在全球范围内上被数百家组织和机构采用:
+Milvus 已经广泛应用于多个领域，在全球范围内上被 600 多家组织和机构采用:
 
 -   图像、视频、音频等音视频搜索领域。
 -   文本搜索、推荐和交互式问答系统等文本搜索领域。

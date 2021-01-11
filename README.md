@@ -14,7 +14,7 @@
 
 ## What is Milvus
 
-Milvus is an embeddings similarity search engine that is highly flexible, reliable, and blazing fast. It supports adding, deleting, updating, and near-real-time search of embeddings on a scale of trillion bytes. By encapsulating multiple widely adopted index libraries, such as Faiss, NMSLIB, and Annoy, it provides a comprehensive set of intuitive APIs, allowing you to choose index types based on your scenario. By supporting the filtering of scalar data, Milvus takes the recall rate even higher and adds more flexibility to your search. 
+Milvus is an vector similarity search engine that is highly flexible, reliable, and blazing fast. It supports adding, deleting, updating, and near-real-time search of embeddings on a scale of trillion bytes. By encapsulating multiple widely adopted index libraries, such as Faiss, NMSLIB, and Annoy, it provides a comprehensive set of intuitive APIs, allowing you to choose index types based on your scenario. By supporting the filtering of scalar data, Milvus takes the recall rate even higher and adds more flexibility to your search. 
 
 The Milvus architecture is as follows:
 
@@ -33,7 +33,11 @@ Milvus was released under the Apache 2.0 License and officially open sourced in 
 
 ### Try example programs
 
-You can use [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) example code to try a Milvus example program.
+You can use the following example code to try a Milvus example program:
+-   [Python](https://www.milvus.io/docs/example_code.md)
+-   [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples)
+-   [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples)
+-   [C++](https://github.com/milvus-io/milvus/tree/master/sdk/examples) 
 
 ## Supported clients
 
@@ -46,7 +50,7 @@ You can use [Python](https://www.milvus.io/docs/example_code.md), [Java](https:/
 
 ## Application scenarios
 
-Milvus has been used in hundreds of organizations and institutions worldwide mainly in the following scenarios:
+Milvus has been used by over 600 organizations and institutions worldwide mainly in the following scenarios:
 
 -   Image, video, and audio search.
 -   Text search, recommender system, interactive question answering system, and other text search fields.
@@ -76,10 +80,6 @@ You are welcome to join our community. :heart: We appreciate any contributions f
 -   To connect with other users and contributors, welcome to join our [Slack channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ).
 
 See our [community](https://github.com/milvus-io/community) repository to learn more about our governance and access more community resources.
-
-## Join Milvus WeChat group
-
-![qrcode](https://github.com/milvus-io/docs/blob/master/v0.11.0/assets/qrcode.png)
 
 ## Resources 
 
