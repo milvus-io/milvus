@@ -14,6 +14,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <tuple>
 
 #include "index/knowhere/knowhere/index/IndexType.h"
 
@@ -57,6 +58,14 @@ Need_BuildAll_list() {
     return ret;
 }
 
+std::vector<std::tuple<std::string, std::string>>
+unsupported_index_combinations() {
+    static std::vector<std::tuple<std::string, std::string>> ret{
+        std::make_tuple(std::string(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT), std::string(knowhere::Metric::L2)),
+    };
+    return ret;
+}
+
 template <typename T>
 bool
 is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
@@ -82,6 +91,12 @@ is_in_need_build_all_list(const milvus::knowhere::IndexType& index_type) {
 bool
 is_in_need_id_list(const milvus::knowhere::IndexType& index_type) {
     return is_in_list<std::string>(index_type, Need_ID_List);
+}
+
+bool
+is_unsupported(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type) {
+    return is_in_list<std::tuple<std::string, std::string>>(std::make_tuple(index_type, metric_type),
+                                                            unsupported_index_combinations);
 }
 
 }  // namespace indexbuilder

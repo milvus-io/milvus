@@ -218,7 +218,6 @@ func CreateServer(ctx context.Context) (*Master, error) {
 
 	m.grpcServer = grpc.NewServer()
 	masterpb.RegisterMasterServer(m.grpcServer, m)
-
 	return m, nil
 }
 
