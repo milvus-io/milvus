@@ -31,14 +31,12 @@ try {
 } catch(exc) {
     throw exc
 } finally {
-    dir ('build/docker/deploy') {
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} ps | tail -n +3 | awk \'{ print $1 }\' | ( while read arg; do docker logs -t $arg >& $arg.log; done )'
-        archiveArtifacts artifacts: "**.log", allowEmptyArchive: true
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} down --rmi all -v || true'
-    }
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v pulsar'
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v etcd'
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} rm -f -s -v minio'
+    dir ('build/docker/deploy') {
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} down --rmi all -v || true'
+    }
     dir ('build/docker/test') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run --rm regression /bin/bash -c "rm -rf __pycache__ && rm -rf .pytest_cache"'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} down --rmi all -v || true'

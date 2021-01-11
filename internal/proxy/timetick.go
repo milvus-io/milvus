@@ -24,12 +24,12 @@ type timeTick struct {
 	tsoAllocator  *allocator.TimestampAllocator
 	tickMsgStream *msgstream.PulsarMsgStream
 
-	peerID    UniqueID
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    func()
-	timer     *time.Ticker
-	tickLock  sync.RWMutex
+	peerID UniqueID
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel func()
+	timer  *time.Ticker
+
 	checkFunc tickCheckFunc
 }
 
@@ -85,8 +85,6 @@ func (tt *timeTick) tick() error {
 	} else {
 		//log.Printf("proxy send time tick message")
 	}
-	tt.tickLock.Lock()
-	defer tt.tickLock.Unlock()
 	tt.lastTick = tt.currentTick
 	return nil
 }
@@ -107,8 +105,6 @@ func (tt *timeTick) tickLoop() {
 }
 
 func (tt *timeTick) LastTick() Timestamp {
-	tt.tickLock.RLock()
-	defer tt.tickLock.RUnlock()
 	return tt.lastTick
 }
 

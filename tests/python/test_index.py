@@ -17,7 +17,7 @@ query, query_vecs = gen_query_vectors(field_name, default_entities, default_top_
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
-# @pytest.mark.skip("wait for debugging...")
+@pytest.mark.skip("wait for debugging...")
 class TestIndexBase:
     @pytest.fixture(
         scope="function",
@@ -132,7 +132,7 @@ class TestIndexBase:
         '''
         ids = connect.bulk_insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
-        # logging.getLogger().info(connect.get_collection_stats(collection))
+        logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -140,7 +140,6 @@ class TestIndexBase:
         res = connect.search(collection, query)
         assert len(res) == nq
 
-    @pytest.mark.skip("can't_pass_ci")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.level(2)
     def test_create_index_multithread(self, connect, collection, args):
@@ -176,7 +175,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.skip("count_entries")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_insert_flush(self, connect, collection, get_simple_index):
@@ -203,7 +201,6 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
 
     # TODO:
-    @pytest.mark.skip("get_collection_stats")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
@@ -278,7 +275,7 @@ class TestIndexBase:
         ids = connect.bulk_insert(collection, default_entities)
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
-        # logging.getLogger().info(connect.get_collection_stats(collection))
+        logging.getLogger().info(connect.get_collection_stats(collection))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -287,7 +284,6 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.skip("test_create_index_multithread_ip")
     @pytest.mark.level(2)
     def test_create_index_multithread_ip(self, connect, collection, args):
         '''
@@ -324,7 +320,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.skip("count_entries")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection, get_simple_index):
         '''
@@ -352,8 +347,6 @@ class TestIndexBase:
         connect.create_index(collection, field_name, get_simple_index)
 
     # TODO:
-
-    @pytest.mark.skip("get_collection_stats")
     @pytest.mark.level(2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
@@ -376,7 +369,6 @@ class TestIndexBase:
     ******************************************************************
     """
 
-    @pytest.mark.skip("drop_index")
     def test_drop_index(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -390,7 +382,6 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
@@ -407,7 +398,6 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_drop_index_without_connect(self, dis_connect, collection):
         '''
@@ -418,7 +408,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
-    @pytest.mark.skip("drop_index")
     def test_drop_index_collection_not_existed(self, connect):
         '''
         target: test drop index interface when collection name not existed
@@ -430,7 +419,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name, field_name)
 
-    @pytest.mark.skip("drop_index")
     def test_drop_index_collection_not_create(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -441,7 +429,6 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_create_drop_index_repeatly(self, connect, collection, get_simple_index):
         '''
@@ -453,7 +440,6 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
-    @pytest.mark.skip("drop_index")
     def test_drop_index_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -468,7 +454,6 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_drop_index_repeatly_ip(self, connect, collection, get_simple_index):
         '''
@@ -486,7 +471,6 @@ class TestIndexBase:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_drop_index_without_connect_ip(self, dis_connect, collection):
         '''
@@ -497,7 +481,6 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
-    @pytest.mark.skip("drop_index")
     def test_drop_index_collection_not_create_ip(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -508,7 +491,6 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.skip("drop_index")
     @pytest.mark.level(2)
     def test_create_drop_index_repeatly_ip(self, connect, collection, get_simple_index):
         '''
@@ -522,6 +504,7 @@ class TestIndexBase:
             connect.drop_index(collection, field_name)
 
 
+@pytest.mark.skip("binary")
 class TestIndexBinary:
     @pytest.fixture(
         scope="function",
@@ -607,7 +590,6 @@ class TestIndexBinary:
         res = connect.search(binary_collection, query, search_params=search_param)
         assert len(res) == nq
 
-    @pytest.mark.skip("get status for build index failed")
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         '''
@@ -631,7 +613,6 @@ class TestIndexBinary:
     ******************************************************************
     """
 
-    @pytest.mark.skip("get_collection_stats does not impl")
     def test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -651,7 +632,6 @@ class TestIndexBinary:
                         if "index_type" in file:
                             assert file["index_type"] == get_jaccard_index["index_type"]
 
-    @pytest.mark.skip("get_collection_stats does not impl")
     def test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test describe index interface
@@ -680,7 +660,6 @@ class TestIndexBinary:
     ******************************************************************
     """
 
-    @pytest.mark.skip("get_collection_stats and drop_index do not impl")
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -695,7 +674,6 @@ class TestIndexBinary:
         # assert stats["partitions"][0]["segments"][0]["index_name"] == default_index_type
         assert not stats["partitions"][0]["segments"]
 
-    @pytest.mark.skip("get_collection_stats does not impl")
     def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -721,6 +699,7 @@ class TestIndexBinary:
                             assert False
 
 
+@pytest.mark.skip("wait for debugging...")
 class TestIndexInvalid(object):
     """
     Test create / describe / drop index interfaces with invalid collection names
@@ -759,6 +738,7 @@ class TestIndexInvalid(object):
             connect.create_index(collection, field_name, get_simple_index)
 
 
+@pytest.mark.skip("wait for debugging...")
 class TestIndexAsync:
     @pytest.fixture(scope="function", autouse=True)
     def skip_http_check(self, args):

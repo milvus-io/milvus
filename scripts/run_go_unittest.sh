@@ -8,15 +8,13 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   SOURCE="$(readlink "$SOURCE")"
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
-ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
+SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 # ignore Minio,S3 unittes
-MILVUS_DIR="${ROOT_DIR}/internal/"
+MILVUS_DIR="${SCRIPTS_DIR}/../internal/"
 echo $MILVUS_DIR
-
-go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
-go test -race -cover "${MILVUS_DIR}/writenode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/master/..." -failfast
-go test -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." -failfast
+go test -cover "${MILVUS_DIR}/kv/..." -failfast
+go test -cover "${MILVUS_DIR}/proxy/..." -failfast
+go test -cover "${MILVUS_DIR}/writenode/..." -failfast
+go test -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
+#go test -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." -failfast
