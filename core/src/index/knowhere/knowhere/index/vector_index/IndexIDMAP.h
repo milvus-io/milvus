@@ -61,7 +61,7 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
 
     int64_t
     IndexSize() override {
-        return Count() * Dim() * sizeof(FloatType);
+        return Count() * (Dim() * sizeof(FloatType) + sizeof(int64_t));
     }
 
 #if 0
