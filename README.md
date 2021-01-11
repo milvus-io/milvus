@@ -14,7 +14,7 @@
 
 ## What is Milvus
 
-Milvus is an vector similarity search engine that is highly flexible, reliable, and blazing fast. It supports adding, deleting, updating, and near-real-time search of embeddings on a scale of trillion bytes. By encapsulating multiple widely adopted index libraries, such as Faiss, NMSLIB, and Annoy, it provides a comprehensive set of intuitive APIs, allowing you to choose index types based on your scenario. By supporting the filtering of scalar data, Milvus takes the recall rate even higher and adds more flexibility to your search. 
+Milvus is a vector similarity search engine that is highly flexible, reliable, and blazing fast. It supports adding, deleting, updating, and near-real-time search of embeddings on a scale of trillion bytes. By encapsulating multiple widely adopted index libraries, such as Faiss, NMSLIB, and Annoy, it provides a comprehensive set of intuitive APIs, allowing you to choose index types based on your scenario. By supporting the filtering of scalar data, Milvus takes the recall rate even higher and adds more flexibility to your search. 
 
 The Milvus architecture is as follows:
 
