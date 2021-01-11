@@ -157,6 +157,9 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 		log.Printf("Warning: Receive empty msgPack")
 		return nil
 	}
+	if len(ms.producers) <= 0 {
+		return errors.New("nil producer in msg stream")
+	}
 	reBucketValues := make([][]int32, len(tsMsgs))
 	for channelID, tsMsg := range tsMsgs {
 		hashValues := tsMsg.HashKeys()

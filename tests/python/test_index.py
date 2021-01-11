@@ -24,12 +24,12 @@ class TestIndexBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
+        import copy
         logging.getLogger().info(request.param)
-        # TODO: Determine the service mode
-        # if str(connect._cmd("mode")) == "CPU":
-        if request.param["index_type"] in index_cpu_not_support():
-            pytest.skip("sq8h not support in CPU mode")
-        return request.param
+        if str(connect._cmd("mode")) == "CPU":
+            if request.param["index_type"] in index_cpu_not_support():
+                pytest.skip("sq8h not support in CPU mode")
+        return copy.deepcopy(request.param)
 
     @pytest.fixture(
         scope="function",
@@ -287,7 +287,6 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.skip("test_create_index_multithread_ip")
     @pytest.mark.level(2)
     def test_create_index_multithread_ip(self, connect, collection, args):
         '''
