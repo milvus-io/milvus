@@ -1,8 +1,6 @@
 
 set(SEGCORE_FILES
-        SegmentNaive.cpp
         SegmentSmallIndex.cpp
-        IndexMeta.cpp
         Collection.cpp
         collection_c.cpp
         segment_c.cpp

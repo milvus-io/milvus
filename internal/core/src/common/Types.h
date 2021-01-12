@@ -16,6 +16,7 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <memory>
 #include <vector>
+#include <NamedType/named_type.hpp>
 
 namespace milvus {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -69,5 +70,9 @@ struct QueryResult {
 };
 
 using QueryResultPtr = std::shared_ptr<QueryResult>;
+
+using FieldId = fluent::NamedType<int64_t, struct FieldIdTag, fluent::Comparable, fluent::Hashable>;
+using FieldName = fluent::NamedType<std::string, struct FieldNameTag, fluent::Comparable, fluent::Hashable>;
+using FieldOffset = fluent::NamedType<int64_t, struct FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 
 }  // namespace milvus

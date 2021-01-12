@@ -61,7 +61,7 @@ SearchOnSealed(const Schema& schema,
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
-    Assert(record.test_readiness(field_offset));
+    Assert(record.is_ready(field_offset));
     auto indexing_entry = record.get_entry(field_offset);
     std::cout << " SearchOnSealed, indexing_entry->metric:" << indexing_entry->metric_type_ << std::endl;
     std::cout << " SearchOnSealed, query_info.metric_type_:" << query_info.metric_type_ << std::endl;

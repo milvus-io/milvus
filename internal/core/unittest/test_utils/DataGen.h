@@ -96,7 +96,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
             case engine::DataType::VECTOR_FLOAT: {
                 auto dim = field.get_dim();
                 vector<float> final;
-                bool is_ip = starts_with(field.get_name(), "normalized");
+                bool is_ip = starts_with(field.get_name().get(), "normalized");
                 for (int n = 0; n < N; ++n) {
                     vector<float> data(dim);
                     float sum = 0;
@@ -129,7 +129,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
             case engine::DataType::INT64: {
                 vector<int64_t> data(N);
                 // begin with counter
-                if (starts_with(field.get_name(), "counter")) {
+                if (starts_with(field.get_name().get(), "counter")) {
                     int64_t index = 0;
                     for (auto& x : data) {
                         x = index++;

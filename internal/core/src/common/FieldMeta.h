@@ -84,12 +84,12 @@ datatype_is_vector(DataType datatype) {
 
 struct FieldMeta {
  public:
-    FieldMeta(std::string_view name, DataType type) : name_(name), type_(type) {
+    FieldMeta(const FieldName& name, FieldId id, DataType type) : name_(name), id_(id), type_(type) {
         Assert(!is_vector());
     }
 
-    FieldMeta(std::string_view name, DataType type, int64_t dim, MetricType metric_type)
-        : name_(name), type_(type), vector_info_(VectorInfo{dim, metric_type}) {
+    FieldMeta(const FieldName& name, FieldId id, DataType type, int64_t dim, MetricType metric_type)
+        : name_(name), id_(id), type_(type), vector_info_(VectorInfo{dim, metric_type}) {
         Assert(is_vector());
     }
 
@@ -113,9 +113,14 @@ struct FieldMeta {
         return vector_info_->metric_type_;
     }
 
-    const std::string&
+    const FieldName&
     get_name() const {
         return name_;
+    }
+
+    const FieldId&
+    get_id() const {
+        return id_;
     }
 
     DataType
@@ -137,7 +142,8 @@ struct FieldMeta {
         int64_t dim_;
         MetricType metric_type_;
     };
-    std::string name_;
+    FieldName name_;
+    FieldId id_;
     DataType type_ = DataType::NONE;
     std::optional<VectorInfo> vector_info_;
 };
