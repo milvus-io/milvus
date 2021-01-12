@@ -54,34 +54,48 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 		loopCancel: cancel,
 	}
 
-	etcdAddress := Params.EtcdAddress
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+	connectEtcdFn := func() error {
+		etcdAddress := Params.EtcdAddress
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
+		if err != nil {
+			return err
+		}
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		metakv, err := NewMetaTable(etcdKV)
+		if err != nil {
+			return err
+		}
+		b.metaTable = metakv
+		return nil
+	}
+	err := Retry(10, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
 		return nil, err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	metakv, err := NewMetaTable(etcdKV)
-	if err != nil {
-		return nil, err
-	}
-	b.metaTable = metakv
 
 	idAllocator, err := allocator.NewIDAllocator(b.loopCtx, Params.MasterAddress)
+	b.idAllocator = idAllocator
 
-	option := &miniokv.Option{
-		Address:           Params.MinIOAddress,
-		AccessKeyID:       Params.MinIOAccessKeyID,
-		SecretAccessKeyID: Params.MinIOSecretAccessKey,
-		UseSSL:            Params.MinIOUseSSL,
-		BucketName:        Params.MinioBucketName,
-		CreateBucket:      true,
+	connectMinIOFn := func() error {
+		option := &miniokv.Option{
+			Address:           Params.MinIOAddress,
+			AccessKeyID:       Params.MinIOAccessKeyID,
+			SecretAccessKeyID: Params.MinIOSecretAccessKey,
+			UseSSL:            Params.MinIOUseSSL,
+			BucketName:        Params.MinioBucketName,
+			CreateBucket:      true,
+		}
+
+		b.kv, err = miniokv.NewMinIOKV(b.loopCtx, option)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-
-	b.kv, err = miniokv.NewMinIOKV(b.loopCtx, option)
+	err = Retry(10, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
 		return nil, err
 	}
-	b.idAllocator = idAllocator
 
 	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator, b.kv, b.metaTable)
 	if err != nil {

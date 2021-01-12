@@ -12,7 +12,7 @@ pulsar/client-cpp/build/*
 # vscode generated files
 .vscode
 docker-compose-vscode.yml
-docker-compose-vscode.yml.bak
+docker-compose-vscode.yml.tmp
 
 cmake-build-debug
 cmake-build-release

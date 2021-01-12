@@ -6,13 +6,13 @@
 
 
 
-#### 8.2 API
+#### 8.2 Message Stream Service API
 
 ```go
 type Client interface {
-  CreateChannels(req CreateChannelRequest) (ChannelID []string, error)
-  DestoryChannels(channelID []string) error
-  DescribeChannels(channelID []string) (ChannelDescriptions, error)
+  CreateChannels(req CreateChannelRequest) (CreateChannelResponse, error)
+  DestoryChannels(req DestoryChannelRequest) error
+  DescribeChannels(req DescribeChannelRequest) (DescribeChannelResponse, error)
 }
 ```
 
@@ -28,7 +28,19 @@ type OwnerDescription struct {
 
 type CreateChannelRequest struct {
   OwnerDescription OwnerDescription
-  numChannels int
+  NumChannels int
+}
+
+type CreateChannelResponse struct {
+  ChannelIDs []string
+}
+```
+
+* *DestoryChannels*
+
+```go
+type DestoryChannelRequest struct {
+	ChannelIDs []string
 }
 ```
 
@@ -37,11 +49,16 @@ type CreateChannelRequest struct {
 * *DescribeChannels*
 
 ```go
+type DescribeChannelRequest struct {
+	ChannelIDs []string
+}
+
 type ChannelDescription struct {
+  ChannelID string
   Owner OwnerDescription
 }
 
-type ChannelDescriptions struct {
+type DescribeChannelResponse struct {
   Descriptions []ChannelDescription
 }
 ```
@@ -56,7 +73,7 @@ const {
   kInsert MsgType = 400
   kDelete MsgType = 401
   kSearch MsgType = 500
-  KSearchResult MsgType = 1000
+  kSearchResult MsgType = 1000
   
   kSegStatistics MsgType = 1100
   

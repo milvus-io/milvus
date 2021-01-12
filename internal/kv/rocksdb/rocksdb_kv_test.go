@@ -52,3 +52,43 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, vals[0], "123")
 	assert.Equal(t, vals[1], "456")
 }
+
+func TestRocksdbKV_Prefix(t *testing.T) {
+	name := "/tmp/rocksdb"
+	rocksdbKV, err := rocksdbkv.NewRocksdbKV(name)
+	if err != nil {
+		panic(err)
+	}
+
+	defer rocksdbKV.Close()
+	// Need to call RemoveWithPrefix
+	defer rocksdbKV.RemoveWithPrefix("")
+
+	err = rocksdbKV.Save("abcd", "123")
+	assert.Nil(t, err)
+
+	err = rocksdbKV.Save("abdd", "1234")
+	assert.Nil(t, err)
+
+	err = rocksdbKV.Save("abddqqq", "1234555")
+	assert.Nil(t, err)
+
+	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
+	assert.Nil(t, err)
+	assert.Equal(t, len(keys), 1)
+	assert.Equal(t, len(vals), 1)
+	//fmt.Println(keys)
+	//fmt.Println(vals)
+
+	err = rocksdbKV.RemoveWithPrefix("abc")
+	assert.Nil(t, err)
+	val, err := rocksdbKV.Load("abc")
+	assert.Nil(t, err)
+	assert.Equal(t, len(val), 0)
+	val, err = rocksdbKV.Load("abdd")
+	assert.Nil(t, err)
+	assert.Equal(t, val, "1234")
+	val, err = rocksdbKV.Load("abddqqq")
+	assert.Nil(t, err)
+	assert.Equal(t, val, "1234555")
+}

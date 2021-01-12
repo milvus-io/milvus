@@ -133,7 +133,7 @@ AppendBinaryIndex(CBinarySet c_binary_set, void* index_binary, int64_t index_siz
         auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
         std::string index_key(c_index_key);
         uint8_t* index = (uint8_t*)index_binary;
-        std::shared_ptr<uint8_t[]> data(index);
+        std::shared_ptr<uint8_t[]> data(index, [](void*) {});
         binary_set->Append(index_key, data, index_size);
 
         auto status = CStatus();

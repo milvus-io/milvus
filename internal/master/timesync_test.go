@@ -192,15 +192,15 @@ func TestTt_SoftTtBarrierStart(t *testing.T) {
 
 func TestTt_SoftTtBarrierGetTimeTickClose(t *testing.T) {
 	channels := []string{"SoftTtBarrierGetTimeTickClose"}
-	ttmsgs := [][2]int{
-		{1, 10},
-		{2, 20},
-		{3, 30},
-		{4, 40},
-		{1, 30},
-		{2, 30},
-	}
-	inStream, ttStream := producer(channels, ttmsgs)
+	//ttmsgs := [][2]int{
+	//	{1, 10},
+	//	{2, 20},
+	//	{3, 30},
+	//	{4, 40},
+	//	{1, 30},
+	//	{2, 30},
+	//}
+	inStream, ttStream := producer(channels, nil)
 	defer func() {
 		(*inStream).Close()
 		(*ttStream).Close()
@@ -259,15 +259,15 @@ func TestTt_SoftTtBarrierGetTimeTickClose(t *testing.T) {
 
 func TestTt_SoftTtBarrierGetTimeTickCancel(t *testing.T) {
 	channels := []string{"SoftTtBarrierGetTimeTickCancel"}
-	ttmsgs := [][2]int{
-		{1, 10},
-		{2, 20},
-		{3, 30},
-		{4, 40},
-		{1, 30},
-		{2, 30},
-	}
-	inStream, ttStream := producer(channels, ttmsgs)
+	//ttmsgs := [][2]int{
+	//	{1, 10},
+	//	{2, 20},
+	//	{3, 30},
+	//	{4, 40},
+	//	{1, 30},
+	//	{2, 30},
+	//}
+	inStream, ttStream := producer(channels, nil)
 	defer func() {
 		(*inStream).Close()
 		(*ttStream).Close()
