@@ -6,13 +6,13 @@
 
 
 
-#### 8.2 Message Stream Service API
+#### 8.2 API
 
 ```go
 type Client interface {
-  CreateChannels(req CreateChannelRequest) (CreateChannelResponse, error)
-  DestoryChannels(req DestoryChannelRequest) error
-  DescribeChannels(req DescribeChannelRequest) (DescribeChannelResponse, error)
+  CreateChannels(req CreateChannelRequest) (ChannelID []string, error)
+  DestoryChannels(channelID []string) error
+  DescribeChannels(channelID []string) (ChannelDescriptions, error)
 }
 ```
 
@@ -28,19 +28,7 @@ type OwnerDescription struct {
 
 type CreateChannelRequest struct {
   OwnerDescription OwnerDescription
-  NumChannels int
-}
-
-type CreateChannelResponse struct {
-  ChannelIDs []string
-}
-```
-
-* *DestoryChannels*
-
-```go
-type DestoryChannelRequest struct {
-	ChannelIDs []string
+  numChannels int
 }
 ```
 
@@ -49,16 +37,11 @@ type DestoryChannelRequest struct {
 * *DescribeChannels*
 
 ```go
-type DescribeChannelRequest struct {
-	ChannelIDs []string
-}
-
 type ChannelDescription struct {
-  ChannelID string
   Owner OwnerDescription
 }
 
-type DescribeChannelResponse struct {
+type ChannelDescriptions struct {
   Descriptions []ChannelDescription
 }
 ```
@@ -73,7 +56,7 @@ const {
   kInsert MsgType = 400
   kDelete MsgType = 401
   kSearch MsgType = 500
-  kSearchResult MsgType = 1000
+  KSearchResult MsgType = 1000
   
   kSegStatistics MsgType = 1100
   
@@ -174,42 +157,55 @@ RocksMQ is a RocksDB-based messaging/streaming library.
 
 ```go
 type ProducerMessage struct {
-  Key string
-  Payload []byte
+  payload []byte
 } 
 ```
 
+
+
 ```go
 type ConsumerMessage struct {
-  MsgID MessageID
-  Key string
-  Payload []byte
+  msgID MessageID
+  payload []byte
 } 
 ```
 
 
 
 ```GO
-type RocksMQ struct {
-  CreateChannel(channelName string) error
-  DestroyChannel(channelName string) error
-  CreateConsumerGroup(groupName string) error
-  DestroyConsumerGroup(groupName string) error
-  
-  Produce(channelName string, messages []ProducerMessage) error
-  Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error)
-  Seek(groupName string, channelName string, msgID MessageID) error
+type Channel struct {
+    beginOffset MessageID
+    endOffset MessageID
 }
+
+type ComsumerGroupContext struct {
+    currentOffset MessageID
+}
+
+// Every collection has its RocksMQ
+type RocksMQ struct {
+    channels map[string]Channel
+    cgCtxs map[string]ComsumerGroupContext
+    mu sync.Mutex
+}
+
+func (rmq *RocksMQ) CreateChannel(channelName string) error // create channel, add record in meta-store
+func (rmq *RocksMQ) DestroyChannel(channelName string) error // drop channel, delete record in meta-store
+func (rmq *RocksMQ) CreateConsumerGroup(groupName string) error // create consumer group, add record in meta-store
+func (rmq *RocksMQ) DestroyConsumerGroup(groupName string) error // drop consumer group, delete record in meta-store
+func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) error // produce a batch of message, insert into rocksdb
+func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error) // comsume up to n messages, modify current_id in Etcd
+func (rmq *RocksMQ) Seek(groupName string, channelName string, msgID MessageID) error // modify current_id in Etcd
 ```
 
 
 
-##### A.4.1 Meta
+##### A.4.1 Meta (stored in Etcd)
 
 * channel meta
 
 ```go
-"$(channel_name)/start_id", MessageID
+"$(channel_name)/begin_id", MessageID
 "$(channel_name)/end_id", MessageID
 ```
 
@@ -219,3 +215,12 @@ type RocksMQ struct {
 "$(group_name)/$(channel_name)/current_id", MessageID
 ```
 
+
+
+##### A.4.2 Data (stored in RocksDB)
+
+- data
+
+```go
+"$(channel_name)/$(unique_id)", []byte
+```

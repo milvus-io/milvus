@@ -13,8 +13,8 @@
 ```go
 type Client interface {
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
-	GetIndexStates(req IndexStatesRequest) (IndexStatesResponse, error)
-	GetIndexFilePaths(req IndexFilePathRequest) (IndexFilePathsResponse, error)
+	DescribeIndex(indexID UniqueID) (IndexDescription, error)
+	GetIndexFilePaths(indexID UniqueID) (IndexFilePaths, error)
 }
 ```
 
@@ -36,23 +36,19 @@ type BuildIndexResponse struct {
 
 
 
-* *GetIndexStates*
+* *DescribeIndex*
 
 ```go
-type IndexStatesRequest struct {
-	IndexID UniqueID 
-}
-
-enum IndexState {
+enum IndexStatus {
     NONE = 0;
     UNISSUED = 1;
     INPROGRESS = 2;
     FINISHED = 3;
 }
 
-type IndexStatesResponse struct {
+type IndexDescription struct {
 	ID                UniqueID
-	State            IndexState
+	Status            IndexStatus
 	EnqueueTime       time.Time
 	ScheduleTime      time.Time
 	BuildCompleteTime time.Time
@@ -64,11 +60,7 @@ type IndexStatesResponse struct {
 * *GetIndexFilePaths*
 
 ```go
-type IndexFilePathRequest struct {
-  IndexID UniqueID
-}
-
-type IndexFilePathsResponse struct {
+type IndexFilePaths struct {
   FilePaths []string
 }
 ```
@@ -82,7 +74,7 @@ type IndexNode interface {
   Start() error
   Close() error
   
-//  SetTimeTickChannel(channelID string) error
+  SetTimeTickChannel(channelID string) error
   SetStatsChannel(channelID string) error
   
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
