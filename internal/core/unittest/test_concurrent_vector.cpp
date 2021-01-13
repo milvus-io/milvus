@@ -18,10 +18,10 @@
 #include <vector>
 
 #include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
 
 using std::cin;

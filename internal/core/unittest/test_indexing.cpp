@@ -19,10 +19,10 @@
 
 #include <faiss/utils/distances.h>
 #include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>

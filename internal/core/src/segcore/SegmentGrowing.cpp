@@ -9,29 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#pragma once
-// Generated File
-// DO NOT EDIT
-#include "utils/Json.h"
-#include "query/PlanImpl.h"
 #include "segcore/SegmentGrowing.h"
-#include <utility>
-#include "PlanNodeVisitor.h"
+#include "segcore/SegmentGrowingImpl.h"
 
-namespace milvus::query {
-class VerifyPlanNodeVisitor : public PlanNodeVisitor {
- public:
-    void
-    visit(FloatVectorANNS& node) override;
+namespace milvus::segcore {
 
-    void
-    visit(BinaryVectorANNS& node) override;
+int
+TestABI() {
+    return 42;
+}
 
- public:
-    using RetType = QueryResult;
-    VerifyPlanNodeVisitor() = default;
+std::unique_ptr<SegmentGrowing>
+CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size) {
+    auto segment = std::make_unique<SegmentGrowingImpl>(schema, chunk_size);
+    return segment;
+}
 
- private:
-    std::optional<RetType> ret_;
-};
-}  // namespace milvus::query
+}  // namespace milvus::segcore

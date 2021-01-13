@@ -16,7 +16,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <utility>
 #include <deque>
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "query/ExprImpl.h"
 #include "ExprVisitor.h"
 
@@ -37,7 +37,7 @@ class ExecExprVisitor : public ExprVisitor {
 
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
-    explicit ExecExprVisitor(segcore::SegmentSmallIndex& segment) : segment_(segment) {
+    explicit ExecExprVisitor(const segcore::SegmentGrowingImpl& segment) : segment_(segment) {
     }
     RetType
     call_child(Expr& expr) {
@@ -63,7 +63,7 @@ class ExecExprVisitor : public ExprVisitor {
     ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType;
 
  private:
-    segcore::SegmentSmallIndex& segment_;
+    const segcore::SegmentGrowingImpl& segment_;
     std::optional<RetType> ret_;
 };
 }  // namespace milvus::query

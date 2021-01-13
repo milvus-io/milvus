@@ -11,7 +11,7 @@
 
 #pragma once
 #include <optional>
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include <deque>
 #include <boost/dynamic_bitset.hpp>
 #include "query/SubQueryResult.h"
@@ -23,7 +23,7 @@ using BitmapSimple = std::deque<BitmapChunk>;
 // TODO: merge these two search into one
 // note: c++17 don't support optional ref
 Status
-FloatSearch(const segcore::SegmentSmallIndex& segment,
+FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const QueryInfo& info,
             const float* query_data,
             int64_t num_queries,
@@ -32,7 +32,7 @@ FloatSearch(const segcore::SegmentSmallIndex& segment,
             QueryResult& results);
 
 Status
-BinarySearch(const segcore::SegmentSmallIndex& segment,
+BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const query::QueryInfo& info,
              const uint8_t* query_data,
              int64_t num_queries,

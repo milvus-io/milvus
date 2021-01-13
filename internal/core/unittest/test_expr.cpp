@@ -21,7 +21,7 @@
 #include "query/Plan.h"
 #include "utils/tools.h"
 #include <regex>
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 using namespace milvus;
 
 TEST(Expr, Naive) {
@@ -293,7 +293,7 @@ TEST(Expr, TestRange) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 
-    auto seg = CreateSegment(schema);
+    auto seg = CreateGrowingSegment(schema);
     int N = 10000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -305,7 +305,7 @@ TEST(Expr, TestRange) {
         seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
     }
 
-    auto seg_promote = dynamic_cast<SegmentSmallIndex*>(seg.get());
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ExecExprVisitor visitor(*seg_promote);
     for (auto [clause, ref_func] : testcases) {
         auto loc = dsl_string_tmp.find("@@@@");
@@ -377,7 +377,7 @@ TEST(Expr, TestTerm) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 
-    auto seg = CreateSegment(schema);
+    auto seg = CreateGrowingSegment(schema);
     int N = 10000;
     std::vector<int> age_col;
     int num_iters = 100;
@@ -389,7 +389,7 @@ TEST(Expr, TestTerm) {
         seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
     }
 
-    auto seg_promote = dynamic_cast<SegmentSmallIndex*>(seg.get());
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ExecExprVisitor visitor(*seg_promote);
     for (auto [clause, ref_func] : testcases) {
         auto loc = dsl_string_tmp.find("@@@@");
@@ -480,7 +480,7 @@ TEST(Expr, TestSimpleDsl) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
 
-    auto seg = CreateSegment(schema);
+    auto seg = CreateGrowingSegment(schema);
     std::vector<int> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
@@ -491,7 +491,7 @@ TEST(Expr, TestSimpleDsl) {
         seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
     }
 
-    auto seg_promote = dynamic_cast<SegmentSmallIndex*>(seg.get());
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ExecExprVisitor visitor(*seg_promote);
     for (auto [clause, ref_func] : testcases) {
         Json dsl;

@@ -17,7 +17,7 @@
 // #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 // #include "segment/SegmentReader.h"
 // #include "segment/SegmentWriter.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 // #include "utils/Json.h"
 #include "test_utils/DataGen.h"
 #include <random>
@@ -67,7 +67,7 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
     schema->AddDebugField("age", DataType::INT32);
     int N = 1000 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto segment = CreateSegment(schema);
+    auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->PreDelete(N);
 }
@@ -99,7 +99,7 @@ TEST(SegmentCoreTest, MockTest) {
     assert(raw_data.size() == line_sizeof * N);
 
     // auto index_meta = std::make_shared<IndexMeta>(schema);
-    auto segment = CreateSegment(schema);
+    auto segment = CreateGrowingSegment(schema);
 
     RowBasedRawData data_chunk{raw_data.data(), (int)line_sizeof, N};
     auto offset = segment->PreInsert(N);

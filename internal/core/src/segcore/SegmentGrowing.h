@@ -19,6 +19,7 @@
 #include "query/deprecated/GeneralQuery.h"
 #include "query/Plan.h"
 #include "common/LoadIndex.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace segcore {
@@ -34,7 +35,7 @@ struct RowBasedRawData {
 int
 TestABI();
 
-class SegmentBase {
+class SegmentGrowing : public SegmentInternalInterface {
  public:
     // definitions
     enum class SegmentState {
@@ -44,9 +45,6 @@ class SegmentBase {
     };
 
  public:
-    virtual ~SegmentBase() = default;
-    // SegmentBase(std::shared_ptr<FieldsInfo> collection);
-
     virtual int64_t
     PreInsert(int64_t size) = 0;
 
@@ -59,36 +57,19 @@ class SegmentBase {
 
     virtual int64_t
     PreDelete(int64_t size) = 0;
-    // TODO: add id into delete log, possibly bitmap
 
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
- public:
     virtual Status
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_groups[],
-           const Timestamp timestamps[],
-           int num_groups,
-           QueryResult& results) = 0;
-
-    virtual Status
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) = 0;
+    LoadIndexing(const LoadIndexInfo& info) = 0;
 
     // stop receive insert requests
     virtual Status
     Close() = 0;
 
-    virtual Status
-    LoadIndexing(const LoadIndexInfo& info) = 0;
-
-    virtual int64_t
-    GetMemoryUsageInBytes() = 0;
-
  public:
-    virtual ssize_t
-    get_row_count() const = 0;
-
+    // feature not implemented
     virtual SegmentState
     get_state() const = 0;
 
@@ -96,10 +77,10 @@ class SegmentBase {
     get_deleted_count() const = 0;
 };
 
-using SegmentBasePtr = std::unique_ptr<SegmentBase>;
+using SegmentBasePtr = std::unique_ptr<SegmentGrowing>;
 
 SegmentBasePtr
-CreateSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
+CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
 
 }  // namespace segcore
 }  // namespace milvus

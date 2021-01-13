@@ -16,7 +16,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <utility>
 #include <deque>
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "query/ExprImpl.h"
 #include "ExprVisitor.h"
 

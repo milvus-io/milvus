@@ -14,7 +14,7 @@
 #include <random>
 #include <memory>
 #include <cstring>
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include "Constants.h"
 #include <boost/algorithm/string/predicate.hpp>
 using boost::algorithm::starts_with;

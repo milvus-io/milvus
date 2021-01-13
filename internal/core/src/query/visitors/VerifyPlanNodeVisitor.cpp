@@ -11,7 +11,7 @@
 
 #include "query/generated/VerifyPlanNodeVisitor.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 

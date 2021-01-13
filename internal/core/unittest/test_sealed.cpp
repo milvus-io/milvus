@@ -59,7 +59,7 @@ TEST(Sealed, without_predicate) {
         vec_col.push_back(0);
     }
     auto query_ptr = vec_col.data() + 4200 * dim;
-    auto segment = CreateSegment(schema);
+    auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
@@ -72,7 +72,7 @@ TEST(Sealed, without_predicate) {
     Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
     auto pre_result = QueryResultToJson(qr);
     auto indexing = std::make_shared<knowhere::IVF>();
 
@@ -112,7 +112,7 @@ TEST(Sealed, without_predicate) {
     segment->LoadIndexing(load_info);
     qr = QueryResult();
 
-    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
 
     auto post_result = QueryResultToJson(qr);
     std::cout << ref_result.dump(1);
@@ -161,7 +161,7 @@ TEST(Sealed, with_predicate) {
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(0);
     auto query_ptr = vec_col.data() + 420000 * dim;
-    auto segment = CreateSegment(schema);
+    auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
@@ -174,7 +174,7 @@ TEST(Sealed, with_predicate) {
     Timestamp time = 10000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
     auto pre_qr = qr;
     auto indexing = std::make_shared<knowhere::IVF>();
 
@@ -205,7 +205,7 @@ TEST(Sealed, with_predicate) {
     segment->LoadIndexing(load_info);
     qr = QueryResult();
 
-    segment->Search(plan.get(), ph_group_arr.data(), &time, 1, qr);
+    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
 
     auto post_qr = qr;
     for (int i = 0; i < num_queries; ++i) {

@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/Collection.h"
 #include "segcore/segment_c.h"
 #include <knowhere/index/vector_index/VecIndex.h>
@@ -25,7 +25,7 @@ CSegmentBase
 NewSegment(CCollection collection, uint64_t segment_id) {
     auto col = (milvus::segcore::Collection*)collection;
 
-    auto segment = milvus::segcore::CreateSegment(col->get_schema());
+    auto segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
 
     // TODO: delete print
     std::cout << "create segment " << segment_id << std::endl;
@@ -34,7 +34,7 @@ NewSegment(CCollection collection, uint64_t segment_id) {
 
 void
 DeleteSegment(CSegmentBase segment) {
-    auto s = (milvus::segcore::SegmentBase*)segment;
+    auto s = (milvus::segcore::SegmentGrowing*)segment;
 
     // TODO: delete print
     std::cout << "delete segment " << std::endl;
@@ -58,7 +58,7 @@ Insert(CSegmentBase c_segment,
        void* raw_data,
        int sizeof_per_row,
        int64_t count) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     milvus::segcore::RowBasedRawData dataChunk{};
 
     dataChunk.raw_data = raw_data;
@@ -85,7 +85,7 @@ Insert(CSegmentBase c_segment,
 
 int64_t
 PreInsert(CSegmentBase c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     // TODO: delete print
     // std::cout << "PreInsert segment " << std::endl;
@@ -95,7 +95,7 @@ PreInsert(CSegmentBase c_segment, int64_t size) {
 CStatus
 Delete(
     CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     try {
         auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
@@ -114,7 +114,7 @@ Delete(
 
 int64_t
 PreDelete(CSegmentBase c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     // TODO: delete print
     // std::cout << "PreDelete segment " << std::endl;
@@ -128,7 +128,7 @@ Search(CSegmentBase c_segment,
        uint64_t* timestamps,
        int num_groups,
        CQueryResult* result) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
     for (int i = 0; i < num_groups; ++i) {
@@ -139,7 +139,7 @@ Search(CSegmentBase c_segment,
 
     auto status = CStatus();
     try {
-        auto res = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups, *query_result);
+        *query_result = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups);
         if (plan->plan_node_->query_info_.metric_type_ != "IP") {
             for (auto& dis : query_result->result_distances_) {
                 dis *= -1;
@@ -163,13 +163,13 @@ Search(CSegmentBase c_segment,
 
 CStatus
 FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     auto result = (milvus::QueryResult*)c_result;
 
     auto status = CStatus();
     try {
-        auto res = segment->FillTargetEntry(plan, *result);
+        segment->FillTargetEntry(plan, *result);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::runtime_error& e) {
@@ -183,7 +183,7 @@ CStatus
 UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info) {
     auto status = CStatus();
     try {
-        auto segment = (milvus::segcore::SegmentBase*)c_segment;
+        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
         auto res = segment->LoadIndexing(*load_index_info);
         status.error_code = Success;
@@ -199,7 +199,7 @@ UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info) {
 
 int
 Close(CSegmentBase c_segment) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto status = segment->Close();
     return status.code();
 }
@@ -211,14 +211,14 @@ BuildIndex(CCollection c_collection, CSegmentBase c_segment) {
 
 bool
 IsOpened(CSegmentBase c_segment) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto status = segment->get_state();
-    return status == milvus::segcore::SegmentBase::SegmentState::Open;
+    return status == milvus::segcore::SegmentGrowing::SegmentState::Open;
 }
 
 int64_t
 GetMemoryUsageInBytes(CSegmentBase c_segment) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto mem_size = segment->GetMemoryUsageInBytes();
     return mem_size;
 }
@@ -227,14 +227,14 @@ GetMemoryUsageInBytes(CSegmentBase c_segment) {
 
 int64_t
 GetRowCount(CSegmentBase c_segment) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto row_count = segment->get_row_count();
     return row_count;
 }
 
 int64_t
 GetDeletedCount(CSegmentBase c_segment) {
-    auto segment = (milvus::segcore::SegmentBase*)c_segment;
+    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto deleted_count = segment->get_deleted_count();
     return deleted_count;
 }

@@ -11,10 +11,10 @@
 
 #include "utils/Json.h"
 #include "query/PlanImpl.h"
-#include "segcore/SegmentBase.h"
+#include "segcore/SegmentGrowing.h"
 #include <utility>
 #include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentSmallIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "query/Search.h"
 #include "query/SearchOnSealed.h"
@@ -28,7 +28,9 @@ namespace impl {
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
     using RetType = QueryResult;
-    ExecPlanNodeVisitor(segcore::SegmentBase& segment, Timestamp timestamp, const PlaceholderGroup& placeholder_group)
+    ExecPlanNodeVisitor(const segcore::SegmentGrowing& segment,
+                        Timestamp timestamp,
+                        const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
     // using RetType = nlohmann::json;
@@ -45,7 +47,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    segcore::SegmentBase& segment_;
+    const segcore::SegmentGrowing& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
@@ -58,7 +60,7 @@ void
 ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!ret_.has_value());
-    auto segment = dynamic_cast<segcore::SegmentSmallIndex*>(&segment_);
+    auto segment = dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
     auto& ph = placeholder_group_.at(0);
@@ -89,7 +91,7 @@ void
 ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!ret_.has_value());
-    auto segment = dynamic_cast<segcore::SegmentSmallIndex*>(&segment_);
+    auto segment = dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
     auto& ph = placeholder_group_.at(0);
