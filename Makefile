@@ -24,7 +24,7 @@ get-build-deps:
 getdeps:
 	@mkdir -p ${GOPATH}/bin
 	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
-	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && GO111MODULE=off go get github.com/quasilyte/go-ruleguard/...)
+	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1)
 
 tools/bin/revive: tools/check/go.mod
 	cd tools/check; \
@@ -82,7 +82,7 @@ else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: getdeps cppcheck fmt static-check
+verifiers: getdeps cppcheck fmt static-check ruleguard
 
 # Builds various components locally.
 build-go: build-cpp get-rocksdb

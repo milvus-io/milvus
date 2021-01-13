@@ -572,7 +572,7 @@ func (qt *QueryTask) PostExecute() error {
 							continue
 						}
 						distance := hits[q][i].Scores[loc]
-						if distance > maxDistance || (distance == maxDistance && choice != q) {
+						if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
 							choice = q
 							maxDistance = distance
 							valid = true
