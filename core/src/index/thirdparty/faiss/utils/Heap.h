@@ -5,16 +5,18 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// -*- c++ -*-
 
 /*
- * C++ support for heaps. The set of functions is tailored for
- * efficient similarity search.
+ * C++ support for heaps. The set of functions is tailored for efficient
+ * similarity search.
  *
- * There is no specific object for a heap, and the functions that
- * operate on a signle heap are inlined, because heaps are often
- * small. More complex functions are implemented in Heaps.cpp
+ * There is no specific object for a heap, and the functions that operate on a
+ * single heap are inlined, because heaps are often small. More complex
+ * functions are implemented in Heaps.cpp
  *
+ * All heap functions rely on a C template class that define the type of the
+ * keys and values and their ordering (increasing with CMax and decreasing with
+ * Cmin). The C types are defined in ordered_key_value.h
  */
 
 
@@ -31,52 +33,11 @@
 
 #include <limits>
 
+#include <faiss/utils/ordered_key_value.h>
 
 namespace faiss {
 
-/*******************************************************************
- * C object: uniform handling of min and max heap
- *******************************************************************/
 
-/** The C object gives the type T of the values in the heap, the type
- *  of the keys, TI and the comparison that is done: > for the minheap
- *  and < for the maxheap. The neutral value will always be dropped in
- *  favor of any other value in the heap.
- */
-
-template <typename T_, typename TI_>
-struct CMax;
-
-// traits of minheaps = heaps where the minimum value is stored on top
-// useful to find the *max* values of an array
-template <typename T_, typename TI_>
-struct CMin {
-    typedef T_ T;
-    typedef TI_ TI;
-    typedef CMax<T_, TI_> Crev;
-    inline static bool cmp (T a, T b) {
-        return a < b;
-    }
-    // value that will be popped first -> must be smaller than all others
-    // for int types this is not strictly the smallest val (-max - 1)
-    inline static T neutral () {
-        return -std::numeric_limits<T>::max();
-    }
-};
-
-
-template <typename T_, typename TI_>
-struct CMax {
-    typedef T_ T;
-    typedef TI_ TI;
-    typedef CMin<T_, TI_> Crev;
-    inline static bool cmp (T a, T b) {
-        return a > b;
-    }
-    inline static T neutral () {
-        return std::numeric_limits<T>::max();
-    }
-};
 
 
 /*******************************************************************
@@ -88,8 +49,8 @@ struct CMax {
  */
 template <class C> inline
 void heap_swap_top (size_t k,
-                     typename C::T * bh_val, typename C::TI * bh_ids,
-                     typename C::T val, typename C::TI ids)
+                    typename C::T * bh_val, typename C::TI * bh_ids,
+                    typename C::T val, typename C::TI ids)
 {
     bh_val--; /* Use 1-based indexing for easier node->child translation */
     bh_ids--;
@@ -118,10 +79,6 @@ void heap_swap_top (size_t k,
     bh_ids[i] = ids;
 }
 
-
-/** Pops the top element from the heap defined by bh_val[0..k-1] and
- * bh_ids[0..k-1].  on output the element at k-1 is undefined.
- */
 template <class C> inline
 void heap_pop (size_t k, typename C::T * bh_val, typename C::TI * bh_ids)
 {
@@ -181,13 +138,11 @@ void heap_push (size_t k,
 
 
 /* Partial instanciation for heaps with TI = int64_t */
-
 template <typename T> inline
 void minheap_swap_top (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
 {
     heap_swap_top<CMin<T, int64_t> > (k, bh_val, bh_ids, val, ids);
 }
-
 
 template <typename T> inline
 void minheap_pop (size_t k, T * bh_val, int64_t * bh_ids)
@@ -202,13 +157,11 @@ void minheap_push (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
     heap_push<CMin<T, int64_t> > (k, bh_val, bh_ids, val, ids);
 }
 
-
 template <typename T> inline
 void maxheap_swap_top (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
 {
     heap_swap_top<CMax<T, int64_t> > (k, bh_val, bh_ids, val, ids);
 }
-
 
 template <typename T> inline
 void maxheap_pop (size_t k, T * bh_val, int64_t * bh_ids)
@@ -234,37 +187,37 @@ void maxheap_push (size_t k, T * bh_val, int64_t * bh_ids, T val, int64_t ids)
  * (bh_val, bh_ids) can be the same as (x, ids) */
 template <class C> inline
 void heap_heapify (
-        size_t k,
-        typename C::T *  bh_val,
-        typename C::TI *  bh_ids,
-        const typename C::T * x = nullptr,
-        const typename C::TI * ids = nullptr,
-        size_t k0 = 0)
+    size_t k,
+    typename C::T *  bh_val,
+    typename C::TI *  bh_ids,
+    const typename C::T * x = nullptr,
+    const typename C::TI * ids = nullptr,
+    size_t k0 = 0)
 {
-   if (k0 > 0) assert (x);
+    if (k0 > 0) assert (x);
 
-   if (ids) {
-       for (size_t i = 0; i < k0; i++)
-           heap_push<C> (i+1, bh_val, bh_ids, x[i], ids[i]);
-   } else {
-       for (size_t i = 0; i < k0; i++)
-           heap_push<C> (i+1, bh_val, bh_ids, x[i], i);
-   }
+    if (ids) {
+        for (size_t i = 0; i < k0; i++)
+            heap_push<C> (i+1, bh_val, bh_ids, x[i], ids[i]);
+    } else {
+        for (size_t i = 0; i < k0; i++)
+            heap_push<C> (i+1, bh_val, bh_ids, x[i], i);
+    }
 
-   for (size_t i = k0; i < k; i++) {
-       bh_val[i] = C::neutral();
-       bh_ids[i] = -1;
-   }
+    for (size_t i = k0; i < k; i++) {
+        bh_val[i] = C::neutral();
+        bh_ids[i] = -1;
+    }
 
 }
 
 template <typename T> inline
 void minheap_heapify (
-        size_t k, T *  bh_val,
-        int64_t * bh_ids,
-        const T * x = nullptr,
-        const int64_t * ids = nullptr,
-        size_t k0 = 0)
+    size_t k, T *  bh_val,
+    int64_t * bh_ids,
+    const T * x = nullptr,
+    const int64_t * ids = nullptr,
+    size_t k0 = 0)
 {
     heap_heapify< CMin<T, int64_t> > (k, bh_val, bh_ids, x, ids, k0);
 }
@@ -272,12 +225,12 @@ void minheap_heapify (
 
 template <typename T> inline
 void maxheap_heapify (
-        size_t k,
-        T * bh_val,
-        int64_t * bh_ids,
-         const T * x = nullptr,
-         const int64_t * ids = nullptr,
-         size_t k0 = 0)
+    size_t k,
+    T * bh_val,
+    int64_t * bh_ids,
+    const T * x = nullptr,
+    const int64_t * ids = nullptr,
+    size_t k0 = 0)
 {
     heap_heapify< CMax<T, int64_t> > (k, bh_val, bh_ids, x, ids, k0);
 }
@@ -301,13 +254,15 @@ void heap_addn (size_t k,
     if (ids)
         for (i = 0; i < n; i++) {
             if (C::cmp (bh_val[0], x[i])) {
-                heap_swap_top<C> (k, bh_val, bh_ids, x[i], ids[i]);
+                heap_pop<C> (k, bh_val, bh_ids);
+                heap_push<C> (k, bh_val, bh_ids, x[i], ids[i]);
             }
         }
     else
         for (i = 0; i < n; i++) {
             if (C::cmp (bh_val[0], x[i])) {
-                heap_swap_top<C> (k, bh_val, bh_ids, x[i], i);
+                heap_pop<C> (k, bh_val, bh_ids);
+                heap_push<C> (k, bh_val, bh_ids, x[i], i);
             }
         }
 }
