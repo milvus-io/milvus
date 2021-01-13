@@ -110,6 +110,7 @@ struct ServerConfig {
         Integer clustering_type;
         Integer simd_type;
         Integer statistics_level;
+        Floating early_stop_threshold;
     } engine;
 
     struct GPU {

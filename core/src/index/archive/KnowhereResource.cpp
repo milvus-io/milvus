@@ -71,8 +71,8 @@ KnowhereResource::Initialize() {
     }
 
     // init faiss global variable
-    int64_t use_blas_threshold = config.engine.use_blas_threshold();
-    faiss::distance_compute_blas_threshold = use_blas_threshold;
+    faiss::distance_compute_blas_threshold = config.engine.use_blas_threshold();
+    faiss::early_stop_threshold = config.engine.early_stop_threshold();
 
     int64_t clustering_type = config.engine.clustering_type();
     switch (clustering_type) {

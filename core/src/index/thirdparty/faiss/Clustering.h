@@ -25,8 +25,11 @@ enum ClusteringType
     K_MEANS_TWO,
 };
 
-//The default algorithm use the K_MEANS
+// The default algorithm use the K_MEANS
 extern ClusteringType clustering_type;
+
+// K-Means Early Stop Threshold; defaults to 0.0
+extern double early_stop_threshold;
 
 
 /** Class for the clustering parameters. Can be passed to the
