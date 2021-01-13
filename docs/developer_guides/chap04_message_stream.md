@@ -195,14 +195,14 @@ type Channel struct {
     endOffset MessageID
 }
 
-type ComsumerGroupContext struct {
+type ConsumerGroupContext struct {
     currentOffset MessageID
 }
 
 // Every collection has its RocksMQ
 type RocksMQ struct {
     channels map[string]Channel
-    cgCtxs map[string]ComsumerGroupContext
+    cgCtxs map[string]ConsumerGroupContext
     mu sync.Mutex
 }
 
