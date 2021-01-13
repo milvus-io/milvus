@@ -8,10 +8,12 @@
 
 <img src="./figs/index_service.jpeg" width=700>
 
-#### 8.2 API
+#### 8.2 Index Service Interface
 
 ```go
-type Client interface {
+type IndexService interface {
+  Service
+  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
 	GetIndexStates(req IndexStatesRequest) (IndexStatesResponse, error)
 	GetIndexFilePaths(req IndexFilePathRequest) (IndexFilePathsResponse, error)
@@ -19,6 +21,20 @@ type Client interface {
 ```
 
 
+
+* *RegisterNode*
+
+```go
+type RegisterNodeRequest struct {
+  RequestBase
+  Address string
+  Port int64
+}
+
+type RegisterNodeResponse struct {
+  //InitParams
+}
+```
 
 * *BuildIndex*
 
@@ -33,8 +49,6 @@ type BuildIndexResponse struct {
   IndexID UniqueID
 }
 ```
-
-
 
 * *GetIndexStates*
 
@@ -53,13 +67,11 @@ enum IndexState {
 type IndexStatesResponse struct {
 	ID                UniqueID
 	State            IndexState
-	EnqueueTime       time.Time
-	ScheduleTime      time.Time
-	BuildCompleteTime time.Time
+	//EnqueueTime       time.Time
+	//ScheduleTime      time.Time
+	//BuildCompleteTime time.Time
 }
 ```
-
-
 
 * *GetIndexFilePaths*
 
@@ -75,15 +87,13 @@ type IndexFilePathsResponse struct {
 
 
 
-#### 8.3 Index Node
+#### 8.3 Index Node Interface
 
 ```go
 type IndexNode interface {
-  Start() error
-  Close() error
-  
+  Service
 //  SetTimeTickChannel(channelID string) error
-  SetStatsChannel(channelID string) error
+//  SetStatsChannel(channelID string) error
   
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
 }

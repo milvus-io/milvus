@@ -98,11 +98,11 @@ TEST(Expr, Range) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
     auto plan = CreatePlan(*schema, dsl_string);
     ShowPlanNodeVisitor shower;
-    Assert(plan->tag2field_.at("$0") == "fakevec");
+    Assert(plan->tag2field_.at("$0") == schema->get_offset(FieldName("fakevec")));
     auto out = shower.call_child(*plan->plan_node_);
     std::cout << out.dump(4);
 }
@@ -140,11 +140,11 @@ TEST(Expr, RangeBinary) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
+    schema->AddDebugField("age", DataType::INT32);
     auto plan = CreatePlan(*schema, dsl_string);
     ShowPlanNodeVisitor shower;
-    Assert(plan->tag2field_.at("$0") == "fakevec");
+    Assert(plan->tag2field_.at("$0") == schema->get_offset(FieldName("fakevec")));
     auto out = shower.call_child(*plan->plan_node_);
     std::cout << out.dump(4);
 }
@@ -182,8 +182,8 @@ TEST(Expr, InvalidRange) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
     ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
 }
 
@@ -221,8 +221,8 @@ TEST(Expr, InvalidDSL) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
     ASSERT_ANY_THROW(CreatePlan(*schema, dsl_string));
 }
 
@@ -231,13 +231,13 @@ TEST(Expr, ShowExecutor) {
     using namespace milvus::segcore;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
     info.metric_type_ = "L2";
     info.topK_ = 20;
-    info.field_id_ = "fakevec";
+    info.field_offset_ = FieldOffset(0);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
     PlanNodePtr base(node.release());
@@ -290,8 +290,8 @@ TEST(Expr, TestRange) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
 
     auto seg = CreateSegment(schema);
     int N = 10000;
@@ -374,8 +374,8 @@ TEST(Expr, TestTerm) {
     }
 })";
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
 
     auto seg = CreateSegment(schema);
     int N = 10000;
@@ -477,8 +477,8 @@ TEST(Expr, TestSimpleDsl) {
     }
 
     auto schema = std::make_shared<Schema>();
-    schema->AddField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddField("age", DataType::INT32);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
 
     auto seg = CreateSegment(schema);
     std::vector<int> age_col;

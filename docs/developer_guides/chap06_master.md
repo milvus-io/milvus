@@ -4,11 +4,12 @@
 
 <img src="./figs/master.jpeg" width=700>
 
-
-#### 10.1 API
+#### 10.1 Master Interface
 
 ```go
-type Client interface {
+type Master interface {
+  Service
+  
   CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
@@ -29,22 +30,63 @@ type Client interface {
   AllocID(req IDRequest) (IDResponse, error)
   
   GetDdChannel() (string, error)
-  GetTimeTickChannel() (string, error)
-  GetStatsChannel() (string, error)
 }
 ```
 
 
 
+* *RequestBase*
+
+```go
+type RequestBase struct {
+  MsgType MsgType
+  ReqID	UniqueID
+  Timestamp Timestamp
+  RequestorID UniqueID
+}
+```
+
+* *CreateCollection*
+
+```go
+type CreateCollectionRequest struct {
+  RequestBase
+  DbName string
+  Schema []bytes
+}
+```
+
+* *DropCollection*
+
+```go
+type DropCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+}
+```
+
+* *HasCollection*
+
+```go
+type HasCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+}
+```
+
 * *DescribeCollection*
 
 ```go
 type DescribeCollectionRequest struct {
+  RequestBase
+  DbName string
   CollectionName string
 }
 
 type CollectionDescriptionResponse struct {
-  Schema CollectionSchema
+  Schema []bytes
 }
 ```
 
@@ -52,6 +94,8 @@ type CollectionDescriptionResponse struct {
 
 ```go
 type CollectionStatsRequest struct {
+  RequestBase
+  DbName string
   CollectionName string
 }
 
@@ -63,8 +107,46 @@ type CollectionStatsResponse struct {
 * *ShowCollections*
 
 ```go
+type ShowCollectionRequest struct {
+  RequestBase
+	DbName string
+}
+
 type ShowCollectionResponse struct {
   CollectionNames []string
+}
+```
+
+* *CreatePartition*
+
+```go
+type CreatePartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+}
+```
+
+* *DropPartition*
+
+```go
+type DropPartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+}
+```
+
+* *HasPartition*
+
+```go
+type HasPartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
 }
 ```
 
@@ -72,8 +154,10 @@ type ShowCollectionResponse struct {
 
 ```go
 type PartitionStatsRequest struct {
+  RequestBase
+  DbName string
   CollectionName string
-  PartitionTag string
+  PartitionName string
 }
 
 type PartitionStatsResponse struct {
@@ -84,8 +168,27 @@ type PartitionStatsResponse struct {
 * *ShowPartitions*
 
 ```go
+type CreatePartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+}
+
 type ShowPartitionResponse struct {
-  PartitionTags []string
+  PartitionNames []string
+}
+```
+
+* *CreateIndex*
+
+```go
+type CreateIndexRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  FieldName string
+  Params []KeyValuePair
 }
 ```
 
@@ -93,6 +196,8 @@ type ShowPartitionResponse struct {
 
 ```go
 type DescribeIndexRequest struct {
+  RequestBase
+  DbName string
   CollectionName string
   FieldName string
 }
@@ -107,7 +212,33 @@ type DescribeIndexResponse struct {
 }
 ```
 
+* *AllocTimestamp*
 
+```go
+type TsoRequest struct {
+  RequestBase
+  Count uint32
+}
+
+type TsoResponse struct {
+  StartTime Timestamp
+  Count uint32
+}
+```
+
+* *AllocID*
+
+```go
+type IDRequest struct {
+  RequestBase
+  Count uint32
+}
+
+type IDResponse struct {
+  StartID UniqueID
+  Count uint32
+}
+```
 
 
 
@@ -467,7 +598,7 @@ func NewSegmentManagement(ctx context.Context) *SegmentManagement
 
 ###### 10.7.1 Assign Segment ID to Inserted Rows
 
-Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelID, collectionName, partitionTag)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
+Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelID, collectionName, partitionName)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
 
 ```go
 func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)

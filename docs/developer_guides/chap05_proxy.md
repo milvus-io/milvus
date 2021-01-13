@@ -1,5 +1,3 @@
-
-
 ## 6. Proxy
 
 
@@ -8,21 +6,34 @@
 
 
 
-#### 6.0 Proxy Service API
+#### 6.0 Proxy Service Interface
 
 ```go
-type Client interface {
-  RegisterLink() (ProxyInfo, error)
-  RegisterNode(req NodeInfo) (InitParams, error)
-  GetTimeTickChannel() (string, error)
-  GetStatsChannel() (string, error)
+type ProxyService interface {
+  Service
+  RegisterLink() (RegisterLinkResponse, error)
+  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
+  InvalidateCollectionMetaCache(req InvalidateCollMetaCacheRequest) error
+}
+```
+
+
+
+* *RequestBase*
+
+```go
+type RequestBase struct {
+  MsgType MsgType
+  ReqID	UniqueID
+  Timestamp Timestamp
+  RequestorID UniqueID
 }
 ```
 
 * *RegisterLink*
 
 ```go
-type ProxyInfo struct {
+type RegisterLinkResponse struct {
   Address string
   Port int32
 }
@@ -31,41 +42,197 @@ type ProxyInfo struct {
 * *RegisterNode*
 
 ```go
-type NodeInfo struct {}
+type RegisterNodeRequest struct {
+  RequestBase
+  Address string
+  Port int64
+}
 
-type InitParams struct {}
+type RegisterNodeResponse struct {
+  //InitParams
+}
+```
+
+* *InvalidateCollectionMetaCache*
+
+```go
+type InvalidateCollMetaCacheRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+}
 ```
 
 
 
-#### 6.0 ProxyNode
+#### 6.0 Proxy Node Interface
 
 ```go
 type ProxyNode interface {
-  Start() error
-  Close() error
-  
-  SetTimeTickChannel(channelID string) error
-  SetStatsChannel(channelID string) error
+  Service
+  //SetTimeTickChannel(channelID string) error
+  //SetStatsChannel(channelID string) error
   
 	CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
+  LoadCollection(req LoadCollectionRequest) error
+  ReleaseCollection(req ReleaseCollectionRequest) error
   DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
   GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
-  ShowCollections(req ShowCollectionRequest) ([]string, error)
+  ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
   
   CreatePartition(req CreatePartitionRequest) error
   DropPartition(req DropPartitionRequest) error
   HasPartition(req HasPartitionRequest) (bool, error)
+  LoadPartitions(req LoadPartitonRequest) error
+  ReleasePartitions(req ReleasePartitionRequest) error
   GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
-  ShowPartitions(req ShowPartitionRequest) ([]string, error)
+  ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse)
   
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
   
-  Insert(req RowBatch) (InsertResponse, error)
+  Insert(req InsertRequest) (InsertResponse, error)
   Search(req SearchRequest) (SearchResults, error)
+  Flush(req FlushRequest) error
+}
+```
+
+
+
+* *CreateCollection*
+
+See *Master API* for detailed definitions.
+
+* *DropCollection*
+
+See *Master API* for detailed definitions.
+
+* *HasCollection*
+
+See *Master API* for detailed definitions.
+
+* *LoadCollection*
+
+```go
+type LoadCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+}
+```
+
+* *ReleaseCollection*
+
+```go
+type ReleaseCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+}
+```
+
+* *DescribeCollection*
+
+See *Master API* for detailed definitions.
+
+* *GetCollectionStatistics*
+
+See *Master API* for detailed definitions.
+
+* *ShowCollections*
+
+See *Master API* for detailed definitions.
+
+* *CreatePartition*
+
+See *Master API* for detailed definitions.
+
+* *DropPartition*
+
+See *Master API* for detailed definitions.
+
+* *HasPartition*
+
+See *Master API* for detailed definitions.
+
+* *LoadPartitions*
+
+```go
+type LoadPartitonRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionNames []string
+}
+```
+
+* *ReleasePartitions*
+
+```go
+type ReleasePartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionNames []string
+}
+```
+
+* *GetPartitionStatistics*
+
+See *Master API* for detailed definitions.
+
+* *ShowPartitions*
+
+See *Master API* for detailed definitions.
+
+* *CreateIndex*
+
+See *Master API* for detailed definitions.
+
+* *DescribeIndex*
+
+See *Master API* for detailed definitions.
+
+* *Insert*
+
+```go
+type InsertRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  RowData []Blob
+  HashKeys []uint32
+}
+
+type InsertResponse struct {
+  RowIDBegin UniqueID
+  RowIDEnd UniqueID
+}
+```
+
+* *Search*
+
+```go
+type SearchRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionNames []string
+  Dsl string
+  PlaceholderGroup []byte
+}
+```
+
+* *Flush*
+
+```go
+type FlushRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
 }
 ```
 

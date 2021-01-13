@@ -8,31 +8,49 @@
 
 <img src="./figs/data_service.jpeg" width=700>
 
-#### 8.2 Data Service API
+#### 8.2 Data Service Interface
 
 ```go
-type Client interface {
-  RegisterNode(req NodeInfo) (InitParams, error)
-  AssignSegmentID(req AssignSegIDRequest) (AssignSegIDResponse, error)
+type DataService interface {
+  Service
+  
+  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
   Flush(req FlushRequest) error
+  
+  AssignSegmentID(req AssignSegIDRequest) (AssignSegIDResponse, error)
   ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
   GetSegmentStates(req SegmentStatesRequest) (SegmentStatesResponse, error)
   GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
   
   GetInsertChannels(req InsertChannelRequest) ([]string, error)
-  GetTimeTickChannel() (string, error)
-  GetStatsChannel() (string, error)
 }
 ```
 
 
 
+* *RequestBase*
+
+```go
+type RequestBase struct {
+  MsgType MsgType
+  ReqID	UniqueID
+  Timestamp Timestamp
+  RequestorID UniqueID
+}
+```
+
 * *RegisterNode*
 
 ```go
-type NodeInfo struct {}
+type RegisterNodeRequest struct {
+  RequestBase
+  Address string
+  Port int64
+}
 
-type InitParams struct {}
+type RegisterNodeResponse struct {
+  //InitParams
+}
 ```
 
 * *AssignSegmentID*
@@ -46,11 +64,12 @@ type SegIDRequest struct {
 }
 
 type AssignSegIDRequest struct {
+  RequestBase
   PerChannelRequest []SegIDRequest
 }
 
 type SegIDAssignment struct {
-  SegID UniqueID
+  SegmentID UniqueID
   ChannelID string
   Count uint32
 	CollectionID UniqueID
@@ -69,6 +88,7 @@ type AssignSegIDResponse struct {
 
 ```go
 type FlushRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -80,6 +100,7 @@ type FlushRequest struct {
 
 ```go
 type ShowSegmentRequest struct {
+  RequestBase
   CollectionID UniqueID
   PartitionID UniqueID
 }
@@ -102,6 +123,7 @@ enum SegmentState {
 }
 
 type SegmentStatesRequest struct {
+  RequestBase
   SegmentID UniqueID
 }
 
@@ -118,6 +140,7 @@ type SegmentStatesResponse struct {
 
 ```go
 type InsertBinlogPathRequest struct {
+  RequestBase
   SegmentID UniqueID
 }
 
@@ -132,6 +155,7 @@ type InsertBinlogPathsResponse struct {
 
 ```go
 type InsertChannelRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -139,19 +163,40 @@ type InsertChannelRequest struct {
 
 
 
-#### 8.2 Data Node API
+#### 8.2 Data Node Interface
 
 ```go
 type DataNode interface {
-  Start() error
-  Close() error
+  Service
   
-  WatchDmChannels(channelIDs []string) error
-  WatchDdChannel(channelID string) error
-  SetTimeTickChannel(channelID string) error
-  SetStatsChannel(channelID string) error
+  WatchDmChannels(req WatchDmChannelRequest) error
+  //WatchDdChannel(channelID string) error
+  //SetTimeTickChannel(channelID string) error
+  //SetStatsChannel(channelID string) error
   
-  Flush(req FlushRequest) error
+  FlushSegments(req FlushSegRequest) error
+}
+```
+
+
+
+* *WatchDmChannels*
+
+```go
+type WatchDmChannelRequest struct {
+  RequestBase
+  InsertChannelIDs []string
+}
+```
+
+* *FlushSegments*
+
+```go
+type FlushSegRequest struct {
+  RequestBase
+  DbID UniqueID
+  CollectionID UniqueID
+  SegmentID []UniqueID
 }
 ```
 

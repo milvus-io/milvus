@@ -8,56 +8,51 @@
 
 
 
-#### 8.2 Query Service API
+#### 8.2 Query Service Interface
 
 ```go
-type Client interface {
-  RegisterNode(req NodeInfo) (InitParams, error)
-  GetServiceStates() (ServiceStatesResponse, error)
+type QueryService interface {
+  Service
+  
+  RegisterNode(req RegisterNodeRequest) (RegisterNodeResponse, error)
+  
   ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
+  LoadCollection(req LoadCollectionRequest) error
+  ReleaseCollection(req ReleaseCollectionRequest) error
+  
   ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
   GetPartitionStates(req PartitionStatesRequest) (PartitionStatesResponse, error)
   LoadPartitions(req LoadPartitonRequest) error
   ReleasePartitions(req ReleasePartitionRequest) error
-  CreateQueryChannel() (QueryChannels, error)
-  GetTimeTickChannel() (string, error)
-  GetStatsChannel() (string, error)
+  
+  CreateQueryChannel() (CreateQueryChannelResponse, error)
 }
 ```
 
 
+
+* *RequestBase*
+
+```go
+type RequestBase struct {
+  MsgType MsgType
+  ReqID	UniqueID
+  Timestamp Timestamp
+  RequestorID UniqueID
+}
+```
 
 * *RegisterNode*
 
 ```go
-type NodeInfo struct {}
-
-type InitParams struct {}
-```
-
-* *GetServiceStates*
-
-```go
-type NodeState = int
-
-const (
-  INITIALIZING NodeState = 0
-  HEALTHY NodeState = 1
-  ABNORMAL NodeState = 2
-)
-
-//type ResourceCost struct {
-//  MemUsage int64
-//  CpuUsage float32
-//}
-
-type QueryNodeStates struct {
-  NodeState NodeState
-  //ResourceCost ResourceCost 
+type RegisterNodeRequest struct {
+  RequestBase
+  Address string
+  Port int64
 }
 
-type ServiceStatesResponse struct {
-  ServiceState NodeState
+type RegisterNodeResponse struct {
+  //InitParams
 }
 ```
 
@@ -65,6 +60,7 @@ type ServiceStatesResponse struct {
 
 ```go
 type ShowCollectionRequest struct {
+  RequestBase
   DbID UniqueID
 }
 
@@ -73,10 +69,31 @@ type ShowCollectionResponse struct {
 }
 ```
 
+* *LoadCollection*
+
+```go
+type LoadCollectionRequest struct {
+  RequestBase
+  DbID UniqueID
+  CollectionID UniqueID
+}
+```
+
+* *ReleaseCollection*
+
+```go
+type ReleaseCollectionRequest struct {
+  RequestBase
+  DbID UniqueID
+  CollectionID UniqueID
+}
+```
+
 * *ShowPartitions*
 
 ```go
 type ShowPartitionRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -85,8 +102,6 @@ type ShowPartitionResponse struct {
   PartitionIDs []UniqueID
 }
 ```
-
-
 
 * *GetPartitionStates*
 
@@ -104,9 +119,10 @@ const (
 )
 
 type PartitionStatesRequest struct {
-	DbID UniqueID
+  RequestBase
+  DbID UniqueID
   CollectionID UniqueID
-  partitionIDs []UniqueID
+  PartitionIDs []UniqueID
 }
 
 type PartitionStates struct {
@@ -119,47 +135,90 @@ type PartitionStatesResponse struct {
 }
 ```
 
-
-
-* *CreateQueryChannel*
-
-```go
-type QueryChannels struct {
-  RequestChannel string
-  ResultChannel string
-}
-```
-
-
-
 * *LoadPartitions*
 
 ```go
 type LoadPartitonRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
 }
 ```
-
-
 
 * *ReleasePartitions*
 
 ```go
 type ReleasePartitionRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
 }
 ```
 
+* *CreateQueryChannel*
 
+```go
+type CreateQueryChannelResponse struct {
+  RequestChannelID string
+  ResultChannelID string
+}
+```
+
+
+
+#### 8.2 Query Node Interface
+
+```go
+type QueryNode interface {
+  Service
+  
+  AddQueryChannel(req AddQueryChannelRequest) error
+  RemoveQueryChannel(req RemoveQueryChannelRequest) error
+  WatchDmChannels(req WatchDmChannelRequest) error
+  //SetTimeTickChannel(channelID string) error
+  //SetStatsChannel(channelID string) error
+  
+  LoadSegments(req LoadSegmentRequest) error
+  ReleaseSegments(req ReleaseSegmentRequest) error
+  //DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
+}
+```
+
+
+
+* *AddQueryChannel*
+
+```go
+type AddQueryChannelRequest struct {
+  RequestChannelID string
+  ResultChannelID string
+}
+```
+
+* *RemoveQueryChannel*
+
+```go
+type RemoveQueryChannelRequest struct {
+  RequestChannelID string
+  ResultChannelID string
+}
+```
+
+* *WatchDmChannels*
+
+```go
+type WatchDmChannelRequest struct {
+  InsertChannelIDs []string
+}
+```
 
 * *LoadSegments*
 
 ```go
 type LoadSegmentRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionID UniqueID
@@ -168,37 +227,15 @@ type LoadSegmentRequest struct {
 }
 ```
 
-
-
 * *ReleaseSegments*
 
 ```go
 type ReleaseSegmentRequest struct {
+  RequestBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionID UniqueID
   SegmentIDs []UniqueID
-}
-```
-
-
-
-#### 8.2 Query Node
-
-```go
-type QueryNode interface {
-  Start() error
-  Close() error
-  
-  AddQueryChannel(channelIDs QueryChannels) error
-  RemoveQueryChannel(channelIDs QueryChannels) error
-  WatchDmChannels(insertChannelIDs []string) error
-  //SetTimeTickChannel(channelID string) error
-  //SetStatsChannel(channelID string) error
-  
-  LoadSegments(req LoadSegmentRequest) error
-  ReleaseSegments(req ReleaseSegmentRequest) error
-  DescribeParition(req DescribeParitionRequest) (PartitionDescriptions, error)
 }
 ```
 
@@ -255,17 +292,15 @@ type Segment struct {
 
 
 
-#### 8.3 Data Manipulation Service
-
-
+#### 8.3 Data Sync Service
 
 ```go
-type manipulationService struct {
+type dataSyncService struct {
 	ctx context.Context
 	pulsarURL string
 	fg *flowgraph.TimeTickedFlowGraph
 	msgStream *msgstream.PulsarMsgStream
-	node *QueryNode
+	dataReplica Replica
 }
 ```
 
