@@ -191,7 +191,7 @@ InitConfig() {
         Enum(engine.clustering_type, &ClusteringMap, ClusteringType::K_MEANS),
         Enum(engine.simd_type, &SimdMap, SimdType::AUTO),
         Integer(engine.statistics_level, 0, 3, 1),
-        Floating(engine.early_stop_threshold, 0.0, std::numeric_limits<double>::max(), 0.0),
+        Floating(engine.early_stop_threshold, 0.0, 100.0, 0.0),
 
         Bool(system.lock.enable, true),
 
