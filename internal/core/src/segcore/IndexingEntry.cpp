@@ -75,8 +75,8 @@ IndexingRecord::UpdateResourceAck(int64_t chunk_ack, const InsertRecord& record)
 
     //    std::thread([this, old_ack, chunk_ack, &record] {
     for (auto& [field_offset, entry] : entries_) {
-        auto vec_base = record.get_base_entity(field_offset);
-        entry->BuildIndexRange(old_ack, chunk_ack, vec_base.get());
+        auto vec_base = record.entity_vec_[field_offset].get();
+        entry->BuildIndexRange(old_ack, chunk_ack, vec_base);
     }
     finished_ack_.AddSegment(old_ack, chunk_ack);
     //    }).detach();

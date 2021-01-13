@@ -108,7 +108,7 @@ class IndexingRecord {
         int offset = 0;
         for (auto& field : schema_) {
             if (field.get_data_type() != DataType::VECTOR_BINARY) {
-                entries_.try_emplace(FieldOffset(offset), CreateIndex(field, chunk_size_));
+                entries_.try_emplace(offset, CreateIndex(field, chunk_size_));
             }
             ++offset;
         }
@@ -126,13 +126,13 @@ class IndexingRecord {
     }
 
     const IndexingEntry&
-    get_entry(FieldOffset field_offset) const {
+    get_entry(int field_offset) const {
         assert(entries_.count(field_offset));
         return *entries_.at(field_offset);
     }
 
     const VecIndexingEntry&
-    get_vec_entry(FieldOffset field_offset) const {
+    get_vec_entry(int field_offset) const {
         auto& entry = get_entry(field_offset);
         auto ptr = dynamic_cast<const VecIndexingEntry*>(&entry);
         AssertInfo(ptr, "invalid indexing");
@@ -140,7 +140,7 @@ class IndexingRecord {
     }
     template <typename T>
     auto
-    get_scalar_entry(FieldOffset field_offset) const -> const ScalarIndexingEntry<T>& {
+    get_scalar_entry(int field_offset) const -> const ScalarIndexingEntry<T>& {
         auto& entry = get_entry(field_offset);
         auto ptr = dynamic_cast<const ScalarIndexingEntry<T>*>(&entry);
         AssertInfo(ptr, "invalid indexing");
@@ -160,7 +160,7 @@ class IndexingRecord {
 
  private:
     // field_offset => indexing
-    std::map<FieldOffset, std::unique_ptr<IndexingEntry>> entries_;
+    std::map<int, std::unique_ptr<IndexingEntry>> entries_;
 };
 
 }  // namespace milvus::segcore

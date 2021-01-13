@@ -27,8 +27,8 @@ type searchService struct {
 	replica      collectionReplica
 	tSafeWatcher *tSafeWatcher
 
+	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
-	serviceableTimeMutex sync.Mutex
 
 	msgBuffer             chan msgstream.TsMsg
 	unsolvedMsg           []msgstream.TsMsg

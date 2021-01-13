@@ -87,15 +87,15 @@ class Parser {
 
     template <typename T>
     ExprPtr
-    ParseRangeNodeImpl(const FieldName& field_name, const Json& body);
+    ParseRangeNodeImpl(const std::string& field_name, const Json& body);
 
     template <typename T>
     ExprPtr
-    ParseTermNodeImpl(const FieldName& field_name, const Json& body);
+    ParseTermNodeImpl(const std::string& field_name, const Json& body);
 
  private:
     const Schema& schema;
-    std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> field offset
+    std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     std::optional<std::unique_ptr<VectorPlanNode>> vector_node_opt_;
 };
 
@@ -104,7 +104,7 @@ Parser::ParseRangeNode(const Json& out_body) {
     Assert(out_body.is_object());
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
-    auto field_name = FieldName(out_iter.key());
+    auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
     Assert(!datatype_is_vector(data_type));
@@ -152,7 +152,7 @@ ExprPtr
 Parser::ParseTermNode(const Json& out_body) {
     Assert(out_body.size() == 1);
     auto out_iter = out_body.begin();
-    auto field_name = FieldName(out_iter.key());
+    auto field_name = out_iter.key();
     auto body = out_iter.value();
     auto data_type = schema[field_name].get_data_type();
     Assert(!datatype_is_vector(data_type));
@@ -190,7 +190,7 @@ Parser::ParseVecNode(const Json& out_body) {
     // TODO add binary info
     Assert(out_body.size() == 1);
     auto iter = out_body.begin();
-    auto field_name = FieldName(iter.key());
+    std::string field_name = iter.key();
 
     auto& vec_info = iter.value();
     Assert(vec_info.is_object());
@@ -198,7 +198,8 @@ Parser::ParseVecNode(const Json& out_body) {
     AssertInfo(topK > 0, "topK must greater than 0");
     AssertInfo(topK < 16384, "topK is too large");
 
-    auto field_offset = schema.get_offset(field_name);
+    auto field_offset_opt = schema.get_offset(field_name);
+    AssertInfo(field_offset_opt.has_value(), "field_name(" + field_name + ") not found");
 
     auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         auto field_meta = schema.operator[](field_name);
@@ -212,24 +213,24 @@ Parser::ParseVecNode(const Json& out_body) {
     vec_node->query_info_.topK_ = topK;
     vec_node->query_info_.metric_type_ = vec_info.at("metric_type");
     vec_node->query_info_.search_params_ = vec_info.at("params");
-    vec_node->query_info_.field_offset_ = field_offset;
+    vec_node->query_info_.field_id_ = field_name;
+    vec_node->query_info_.field_offset_ = field_offset_opt.value();
     vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
     AssertInfo(!tag2field_.count(tag), "duplicated placeholder tag");
-    tag2field_.emplace(tag, field_offset);
+    tag2field_.emplace(tag, field_name);
     return vec_node;
 }
 
 template <typename T>
 ExprPtr
-Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
+Parser::ParseTermNodeImpl(const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<TermExprImpl<T>>();
-    auto field_offset = schema.get_offset(field_name);
     auto data_type = schema[field_name].get_data_type();
     Assert(body.is_object());
     auto values = body["values"];
 
-    expr->field_offset_ = field_offset;
+    expr->field_id_ = field_name;
     expr->data_type_ = data_type;
     for (auto& value : values) {
         if constexpr (std::is_same_v<T, bool>) {
@@ -251,12 +252,11 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
 
 template <typename T>
 ExprPtr
-Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
+Parser::ParseRangeNodeImpl(const std::string& field_name, const Json& body) {
     auto expr = std::make_unique<RangeExprImpl<T>>();
-    auto field_meta = schema[field_name];
-    auto data_type = field_meta.get_data_type();
+    auto data_type = schema[field_name].get_data_type();
     expr->data_type_ = data_type;
-    expr->field_offset_ = schema.get_offset(field_name);
+    expr->field_id_ = field_name;
     Assert(body.is_object());
     for (auto& item : body.items()) {
         auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
@@ -291,8 +291,8 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
         Placeholder element;
         element.tag_ = info.tag();
         Assert(plan->tag2field_.count(element.tag_));
-        auto field_offset = plan->tag2field_.at(element.tag_);
-        auto& field_meta = plan->schema_[field_offset];
+        auto field_id = plan->tag2field_.at(element.tag_);
+        auto& field_meta = plan->schema_[field_id];
         element.num_of_queries_ = info.values_size();
         AssertInfo(element.num_of_queries_, "must have queries");
         Assert(element.num_of_queries_ > 0);

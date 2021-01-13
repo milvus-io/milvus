@@ -61,8 +61,10 @@ struct BoolBinaryExpr : BinaryExpr {
     accept(ExprVisitor&) override;
 };
 
+using FieldId = std::string;
+
 struct TermExpr : Expr {
-    FieldOffset field_offset_;
+    FieldId field_id_;
     DataType data_type_ = DataType::NONE;
     // std::vector<std::any> terms_;
 
@@ -76,7 +78,7 @@ struct TermExpr : Expr {
 };
 
 struct RangeExpr : Expr {
-    FieldOffset field_offset_;
+    FieldId field_id_;
     DataType data_type_ = DataType::NONE;
     enum class OpType { GreaterThan = 0, GreaterEqual = 1, LessThan = 2, LessEqual = 3, Equal, NotEqual };
     static const std::map<std::string, OpType> mapping_;  // op_name -> op

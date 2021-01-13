@@ -75,7 +75,7 @@ ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
     auto& sealed_indexing = segment->get_sealed_indexing_record();
 
-    if (sealed_indexing.is_ready(node.query_info_.field_offset_)) {
+    if (sealed_indexing.test_readiness(node.query_info_.field_offset_)) {
         SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
                        bitset_pack, ret);
     } else {
@@ -105,7 +105,7 @@ ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     }
 
     auto& sealed_indexing = segment->get_sealed_indexing_record();
-    if (sealed_indexing.is_ready(node.query_info_.field_offset_)) {
+    if (sealed_indexing.test_readiness(node.query_info_.field_offset_)) {
         SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
                        bitset_pack, ret);
     } else {

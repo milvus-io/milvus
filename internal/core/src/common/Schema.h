@@ -24,32 +24,14 @@ namespace milvus {
 class Schema {
  public:
     void
-    AddDebugField(const std::string& name, DataType data_type) {
-        static int64_t debug_id = 1000;
-        this->AddField(FieldName(name), FieldId(debug_id), data_type);
-        debug_id++;
-    }
-
-    // auto gen field_id for convenience
-    void
-    AddDebugField(const std::string& name, DataType data_type, int64_t dim, MetricType metric_type) {
-        static int64_t debug_id = 2000;
-        auto field_meta = FieldMeta(FieldName(name), FieldId(debug_id), data_type, dim, metric_type);
-        debug_id++;
+    AddField(std::string_view field_name, DataType data_type) {
+        auto field_meta = FieldMeta(field_name, data_type);
         this->AddField(std::move(field_meta));
     }
 
-    // scalar type
     void
-    AddField(const FieldName& name, const FieldId id, DataType data_type) {
-        auto field_meta = FieldMeta(name, id, data_type);
-        this->AddField(std::move(field_meta));
-    }
-
-    // vector type
-    void
-    AddField(const FieldName& name, const FieldId id, DataType data_type, int64_t dim, MetricType metric_type) {
-        auto field_meta = FieldMeta(name, id, data_type, dim, metric_type);
+    AddField(std::string_view field_name, DataType data_type, int64_t dim, MetricType metric_type) {
+        auto field_meta = FieldMeta(field_name, data_type, dim, metric_type);
         this->AddField(std::move(field_meta));
     }
 
@@ -79,10 +61,10 @@ class Schema {
     }
 
     const FieldMeta&
-    operator[](FieldOffset field_offset) const {
-        Assert(field_offset.get() >= 0);
-        Assert(field_offset.get() < fields_.size());
-        return fields_[field_offset.get()];
+    operator[](int field_index) const {
+        Assert(field_index >= 0);
+        Assert(field_index < fields_.size());
+        return fields_[field_index];
     }
 
     auto
@@ -90,30 +72,18 @@ class Schema {
         return total_sizeof_;
     }
 
-    const std::vector<int64_t>&
+    const std::vector<int>&
     get_sizeof_infos() const {
         return sizeof_infos_;
     }
 
-    [[deprecated]] std::optional<FieldOffset>
-    get_offset_opt(const FieldName& field_name) const {
-        if (!name_offsets_.count(field_name)) {
+    std::optional<int>
+    get_offset(const std::string& field_name) const {
+        if (!offsets_.count(field_name)) {
             return std::nullopt;
         } else {
-            return name_offsets_.at(field_name);
+            return offsets_.at(field_name);
         }
-    }
-
-    FieldOffset
-    get_offset(const FieldName& field_name) const {
-        Assert(name_offsets_.count(field_name));
-        return name_offsets_.at(field_name);
-    }
-
-    FieldOffset
-    get_offset(const FieldId& field_id) const {
-        Assert(id_offsets_.count(field_id));
-        return id_offsets_.at(field_id);
     }
 
     const std::vector<FieldMeta>&
@@ -122,14 +92,14 @@ class Schema {
     }
 
     const FieldMeta&
-    operator[](const FieldName& field_name) const {
-        auto offset_iter = name_offsets_.find(field_name);
-        AssertInfo(offset_iter != name_offsets_.end(), "Cannot find field_name: " + field_name.get());
+    operator[](const std::string& field_name) const {
+        auto offset_iter = offsets_.find(field_name);
+        AssertInfo(offset_iter != offsets_.end(), "Cannot found field_name: " + field_name);
         auto offset = offset_iter->second;
         return (*this)[offset];
     }
 
-    std::optional<FieldOffset>
+    std::optional<int>
     get_primary_key_offset() const {
         return primary_key_offset_opt_;
     }
@@ -142,10 +112,7 @@ class Schema {
     AddField(FieldMeta&& field_meta) {
         auto offset = fields_.size();
         fields_.emplace_back(field_meta);
-        AssertInfo(!name_offsets_.count(field_meta.get_name()), "duplicated field name");
-        name_offsets_.emplace(field_meta.get_name(), offset);
-        AssertInfo(!id_offsets_.count(field_meta.get_id()), "duplicated field id");
-        id_offsets_.emplace(field_meta.get_id(), offset);
+        offsets_.emplace(field_meta.get_name(), offset);
         auto field_sizeof = field_meta.get_sizeof();
         sizeof_infos_.push_back(std::move(field_sizeof));
         total_sizeof_ += field_sizeof;
@@ -156,12 +123,11 @@ class Schema {
     std::vector<FieldMeta> fields_;
 
     // a mapping for random access
-    std::unordered_map<FieldName, FieldOffset> name_offsets_;  // field_name -> offset
-    std::unordered_map<FieldId, FieldOffset> id_offsets_;      // field_id -> offset
-    std::vector<int64_t> sizeof_infos_;
+    std::unordered_map<std::string, int> offsets_;
+    std::vector<int> sizeof_infos_;
     int total_sizeof_ = 0;
     bool is_auto_id_ = true;
-    std::optional<FieldOffset> primary_key_offset_opt_;
+    std::optional<int> primary_key_offset_opt_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

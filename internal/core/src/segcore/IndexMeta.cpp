@@ -8,7 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-#if 0
+
 #include "IndexMeta.h"
 #include <mutex>
 #include <cassert>
@@ -16,8 +16,7 @@ namespace milvus::segcore {
 
 Status
 IndexMeta::AddEntry(
-    const std::string& index_name, const std::string& field_name_, IndexType type, IndexMode mode, IndexConfig config) {
-    auto field_name = FieldName(field_name_);
+    const std::string& index_name, const std::string& field_name, IndexType type, IndexMode mode, IndexConfig config) {
     Entry entry{index_name, field_name, type, mode, std::move(config)};
     VerifyEntry(entry);
 
@@ -60,5 +59,3 @@ IndexMeta::VerifyEntry(const Entry& entry) {
 }
 
 }  // namespace milvus::segcore
-
-#endif
