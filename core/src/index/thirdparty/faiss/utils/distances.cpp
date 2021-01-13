@@ -574,7 +574,8 @@ void exhaustive_inner_product_seq (
     const float * x,
     const float * y,
     size_t d, size_t nx, size_t ny,
-    ResultHandler &res)
+    ResultHandler &res,
+    ConcurrentBitsetPtr bitset)
 {
     size_t check_period = InterruptCallback::get_period_hint (ny * d);
 
@@ -596,8 +597,10 @@ void exhaustive_inner_product_seq (
                 resi.begin(i);
 
                 for (size_t j = 0; j < ny; j++) {
-                    float ip = fvec_inner_product (x_i, y_j, d);
-                    resi.add_result(ip, j);
+                    if (!bitset || !bitset->test(j)) {
+                        float ip = fvec_inner_product (x_i, y_j, d);
+                        resi.add_result(ip, j);
+                    }
                     y_j += d;
                 }
                 resi.end();
@@ -613,7 +616,8 @@ void exhaustive_L2sqr_seq (
     const float * x,
     const float * y,
     size_t d, size_t nx, size_t ny,
-    ResultHandler & res)
+    ResultHandler & res,
+    ConcurrentBitsetPtr bitset)
 {
 
     size_t check_period = InterruptCallback::get_period_hint (ny * d);
@@ -632,8 +636,10 @@ void exhaustive_L2sqr_seq (
                 const float * y_j = y;
                 resi.begin(i);
                 for (size_t j = 0; j < ny; j++) {
-                    float disij = fvec_L2sqr (x_i, y_j, d);
-                    resi.add_result(disij, j);
+                    if (!bitset || !bitset->test(j)) {
+                        float disij = fvec_L2sqr (x_i, y_j, d);
+                        resi.add_result(disij, j);
+                    }
                     y_j += d;
                 }
                 resi.end();
@@ -650,7 +656,8 @@ void exhaustive_inner_product_blas (
     const float * x,
     const float * y,
     size_t d, size_t nx, size_t ny,
-    ResultHandler & res)
+    ResultHandler & res,
+    ConcurrentBitsetPtr bitset)
 {
     // BLAS does not like empty matrices
     if (nx == 0 || ny == 0) return;
@@ -699,7 +706,8 @@ void exhaustive_L2sqr_blas (
     const float * y,
     size_t d, size_t nx, size_t ny,
     ResultHandler & res,
-    const float *y_norms = nullptr)
+    const float *y_norms = nullptr,
+    ConcurrentBitsetPtr bitset = nullptr)
 {
     // BLAS does not like empty matrices
     if (nx == 0 || ny == 0) return;
@@ -788,17 +796,17 @@ void knn_inner_product (const float * x,
         HeapResultHandler<CMin<float, int64_t>> res(
             ha->nh, ha->val, ha->ids, ha->k);
         if (nx < distance_compute_blas_threshold) {
-            exhaustive_inner_product_seq (x, y, d, nx, ny, res);
+            exhaustive_inner_product_seq (x, y, d, nx, ny, res, bitset);
         } else {
-            exhaustive_inner_product_blas (x, y, d, nx, ny, res);
+            exhaustive_inner_product_blas (x, y, d, nx, ny, res, bitset);
         }
     } else {
         ReservoirResultHandler<CMin<float, int64_t>> res(
             ha->nh, ha->val, ha->ids, ha->k);
         if (nx < distance_compute_blas_threshold) {
-            exhaustive_inner_product_seq (x, y, d, nx, ny, res);
+            exhaustive_inner_product_seq (x, y, d, nx, ny, res, bitset);
         } else {
-            exhaustive_inner_product_blas (x, y, d, nx, ny, res);
+            exhaustive_inner_product_blas (x, y, d, nx, ny, res, bitset);
         }
     }
 }
@@ -817,17 +825,17 @@ void knn_L2sqr (
             ha->nh, ha->val, ha->ids, ha->k);
 
         if (nx < distance_compute_blas_threshold) {
-            exhaustive_L2sqr_seq (x, y, d, nx, ny, res);
+            exhaustive_L2sqr_seq (x, y, d, nx, ny, res, bitset);
         } else {
-            exhaustive_L2sqr_blas (x, y, d, nx, ny, res, y_norm2);
+            exhaustive_L2sqr_blas (x, y, d, nx, ny, res, y_norm2, bitset);
         }
     } else {
         ReservoirResultHandler<CMax<float, int64_t>> res(
             ha->nh, ha->val, ha->ids, ha->k);
         if (nx < distance_compute_blas_threshold) {
-            exhaustive_L2sqr_seq (x, y, d, nx, ny, res);
+            exhaustive_L2sqr_seq (x, y, d, nx, ny, res, bitset);
         } else {
-            exhaustive_L2sqr_blas (x, y, d, nx, ny, res, y_norm2);
+            exhaustive_L2sqr_blas (x, y, d, nx, ny, res, y_norm2, bitset);
         }
     }
 }
@@ -883,13 +891,14 @@ void range_search_L2sqr (
     const float * y,
     size_t d, size_t nx, size_t ny,
     float radius,
-    RangeSearchResult *res)
+    RangeSearchResult *res,
+    ConcurrentBitsetPtr bitset)
 {
     RangeSearchResultHandler<CMax<float, int64_t>> resh(res, radius);
     if (nx < distance_compute_blas_threshold) {
-        exhaustive_L2sqr_seq (x, y, d, nx, ny, resh);
+        exhaustive_L2sqr_seq (x, y, d, nx, ny, resh, bitset);
     } else {
-        exhaustive_L2sqr_blas (x, y, d, nx, ny, resh);
+        exhaustive_L2sqr_blas (x, y, d, nx, ny, resh, nullptr, bitset);
     }
 }
 
@@ -898,14 +907,15 @@ void range_search_inner_product (
     const float * y,
     size_t d, size_t nx, size_t ny,
     float radius,
-    RangeSearchResult *res)
+    RangeSearchResult *res,
+    ConcurrentBitsetPtr bitset)
 {
 
     RangeSearchResultHandler<CMin<float, int64_t>> resh(res, radius);
     if (nx < distance_compute_blas_threshold) {
-        exhaustive_inner_product_seq (x, y, d, nx, ny, resh);
+        exhaustive_inner_product_seq (x, y, d, nx, ny, resh, bitset);
     } else {
-        exhaustive_inner_product_blas (x, y, d, nx, ny, resh);
+        exhaustive_inner_product_blas (x, y, d, nx, ny, resh, bitset);
     }
 }
 

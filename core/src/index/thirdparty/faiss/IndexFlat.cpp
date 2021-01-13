@@ -96,10 +96,10 @@ void IndexFlat::range_search (idx_t n, const float *x, float radius,
     switch (metric_type) {
     case METRIC_INNER_PRODUCT:
         range_search_inner_product (x, xb.data(), d, n, ntotal,
-                                    radius, result);
+                                    radius, result, bitset);
         break;
     case METRIC_L2:
-        range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result);
+        range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result, bitset);
         break;
     default:
         FAISS_THROW_MSG("metric type not supported");
