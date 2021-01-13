@@ -24,6 +24,7 @@ extern const char* NAME_ENGINE_TYPE_IVFSQ8;
 extern const char* NAME_ENGINE_TYPE_IVFSQ8H;
 extern const char* NAME_ENGINE_TYPE_RNSG;
 extern const char* NAME_ENGINE_TYPE_IVFPQ;
+extern const char* NAME_ENGINE_TYPE_IVFHNSW;
 extern const char* NAME_ENGINE_TYPE_HNSW;
 extern const char* NAME_ENGINE_TYPE_ANNOY;
 extern const char* NAME_ENGINE_TYPE_RHNSWFLAT;
