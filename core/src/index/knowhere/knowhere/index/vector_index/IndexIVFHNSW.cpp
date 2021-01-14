@@ -112,7 +112,6 @@ IVFHNSW::UpdateIndexSize() {
     }
     auto ivf_index = static_cast<faiss::IndexIVFFlat*>(index_.get());
     auto nb = ivf_index->invlists->compute_ntotal();
-    auto nlist = ivf_index->nlist;
     auto code_size = ivf_index->code_size;
     auto hnsw_quantizer = dynamic_cast<faiss::IndexRHNSWFlat*>(ivf_index->quantizer);
     // ivf codes, ivf ids and hnsw_flat quantizer
