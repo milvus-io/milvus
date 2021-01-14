@@ -21,6 +21,7 @@
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/clone_index.h>
 #include <faiss/index_factory.h>
+#include <faiss/index_io.h>
 
 #include "faiss/IndexRHNSW.h"
 
@@ -31,6 +32,59 @@
 
 namespace milvus {
 namespace knowhere {
+
+BinarySet
+IVFHNSW::Serialize(const Config& config) {
+    if (!index_ || !index_->is_trained) {
+        KNOWHERE_THROW_MSG("index not initialize or trained");
+    }
+
+    try {
+        // Serialize IVF index and HNSW data
+        auto res_set = SerializeImpl(index_type_);
+        auto index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
+        auto real_idx = dynamic_cast<faiss::IndexRHNSWFlat*>(index->quantizer);
+        if (real_idx == nullptr) {
+            KNOWHERE_THROW_MSG("Quantizer index is not a faiss::IndexRHNSWFlat");
+        }
+
+        MemoryIOWriter writer;
+        faiss::write_index(real_idx->storage, &writer);
+        std::shared_ptr<uint8_t[]> data(writer.data_);
+        res_set.Append("HNSW_META", data, writer.rp);
+
+        if (config.contains(INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+            Disassemble(config[INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>() * 1024 * 1024, res_set);
+        }
+        return res_set;
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
+
+void
+IVFHNSW::Load(const BinarySet& binary_set) {
+    try {
+        // Load IVF index and HNSW data
+        Assemble(const_cast<BinarySet&>(binary_set));
+        LoadImpl(binary_set, index_type_);
+
+        auto index = dynamic_cast<faiss::IndexIVFFlat*>(index_.get());
+        MemoryIOReader reader;
+        auto binary = binary_set.GetByName("HNSW_META");
+        reader.total = static_cast<size_t>(binary->size);
+        reader.data_ = binary->data.get();
+
+        auto idx = faiss::read_index(&reader);
+        auto real_idx = dynamic_cast<faiss::IndexRHNSWFlat*>(index->quantizer);
+        real_idx->storage = new faiss::IndexFlat(idx->d, idx->metric_type);
+        real_idx->storage->add(idx->ntotal,
+                               reinterpret_cast<const float*>(dynamic_cast<faiss::IndexFlat*>(idx)->xb.data()));
+        real_idx->init_hnsw();
+    } catch (std::exception& e) {
+        KNOWHERE_THROW_MSG(e.what());
+    }
+}
 
 void
 IVFHNSW::Train(const DatasetPtr& dataset_ptr, const Config& config) {

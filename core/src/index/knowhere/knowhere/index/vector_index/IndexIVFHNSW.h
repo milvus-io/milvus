@@ -31,6 +31,12 @@ class IVFHNSW : public IVF {
         stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
+    BinarySet
+    Serialize(const Config&) override;
+
+    void
+    Load(const BinarySet&) override;
+
     void
     Train(const DatasetPtr&, const Config&) override;
 

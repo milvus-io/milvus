@@ -230,7 +230,7 @@ IndexRHNSW::clear_stats() {
 void IndexRHNSW::train(idx_t n, const float* x)
 {
     FAISS_THROW_IF_NOT_MSG(storage,
-       "Please use IndexHSNWFlat (or variants) instead of IndexRHNSW directly");
+       "Please use IndexRHNSWFlat (or variants) instead of IndexRHNSW directly");
     // hnsw structure does not require training
     storage->train (n, x);
     is_trained = true;
@@ -241,7 +241,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 
 {
     FAISS_THROW_IF_NOT_MSG(storage,
-       "Please use IndexHSNWFlat (or variants) instead of IndexRHNSW directly");
+       "Please use IndexRHNSWFlat (or variants) instead of IndexRHNSW directly");
     size_t nreorder = 0;
 
     idx_t check_period = InterruptCallback::get_period_hint (
@@ -324,7 +324,7 @@ void IndexRHNSW::search (idx_t n, const float *x, idx_t k,
 void IndexRHNSW::add(idx_t n, const float *x)
 {
     FAISS_THROW_IF_NOT_MSG(storage,
-       "Please use IndexHSNWFlat (or variants) instead of IndexRHNSW directly");
+       "Please use IndexRHNSWFlat (or variants) instead of IndexRHNSW directly");
     FAISS_THROW_IF_NOT(is_trained);
     int n0 = ntotal;
     storage->add(n, x);

@@ -36,14 +36,9 @@ class IVFHNSWTest : public DataGen,
     void
     SetUp() override {
         std::tie(index_type_, index_mode_) = GetParam();
-        // Init_with_default();
-        //        nb = 1000000;
-        //        nq = 1000;
-        //        k = 1000;
-        Generate(DIM, NB, NQ);
+        Generate(dim, nb, nq);
         index_ = IndexFactory(index_type_, index_mode_);
         conf_ = ParamGenerator::GetInstance().Gen(index_type_);
-        // conf_->Dump();
     }
 
     void
@@ -84,39 +79,6 @@ TEST_P(IVFHNSWTest, ivfhnsw_basic_cpu) {
     AssertAnns(result, nq, k);
 }
 
-TEST_P(IVFHNSWTest, ivfhnsw_serialize) {
-    fiu_init(0);
-    auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
-        FileIOWriter writer(filename);
-        writer(static_cast<void*>(bin->data.get()), bin->size);
-
-        FileIOReader reader(filename);
-        reader(ret, bin->size);
-    };
-
-    {
-        // serialize index
-        index_->Train(base_dataset, conf_);
-        index_->AddWithoutIds(base_dataset, conf_);
-        auto binaryset = index_->Serialize(conf_);
-        auto bin = binaryset.GetByName("IVF");
-
-        std::string filename = "/tmp/ivf_test_serialize.bin";
-        auto load_data = new uint8_t[bin->size];
-        serialize(filename, bin, load_data);
-
-        binaryset.clear();
-        std::shared_ptr<uint8_t[]> data(load_data);
-        binaryset.Append("IVF", data, bin->size);
-
-        index_->Load(binaryset);
-        EXPECT_EQ(index_->Count(), nb);
-        EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf_, nullptr);
-        AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
-    }
-}
-
 TEST_P(IVFHNSWTest, ivfhnsw_slice) {
     fiu_init(0);
     {
@@ -124,11 +86,11 @@ TEST_P(IVFHNSWTest, ivfhnsw_slice) {
         index_->Train(base_dataset, conf_);
         index_->AddWithoutIds(base_dataset, conf_);
         auto binaryset = index_->Serialize(conf_);
-
+        // load index
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf_, nullptr);
-        AssertAnns(result, nq, conf_[milvus::knowhere::meta::TOPK]);
+        AssertAnns(result, nq, k);
     }
 }
