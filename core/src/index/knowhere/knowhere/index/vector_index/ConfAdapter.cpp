@@ -230,13 +230,7 @@ IVFHNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const Inde
     CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
 
     // IVF param check
-    int64_t max_nprobe = MAX_NPROBE;
-#ifdef MILVUS_GPU_VERSION
-    if (mode == IndexMode::MODE_GPU) {
-        max_nprobe = faiss::gpu::getMaxKSelection();
-    }
-#endif
-    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, max_nprobe);
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
 
     return ConfAdapter::CheckSearch(oricfg, type, mode);
 }

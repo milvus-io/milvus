@@ -13,14 +13,9 @@
 #include <memory>
 #include <string>
 
-#ifdef MILVUS_GPU_VERSION
-#include <faiss/gpu/GpuAutoTune.h>
-#include <faiss/gpu/GpuCloner.h>
-#endif
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/clone_index.h>
-#include <faiss/index_factory.h>
 #include <faiss/index_io.h>
 
 #include "faiss/IndexRHNSW.h"

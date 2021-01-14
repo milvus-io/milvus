@@ -23,12 +23,10 @@ class IVFHNSW : public IVF {
  public:
     IVFHNSW() : IVF() {
         index_type_ = IndexEnum::INDEX_FAISS_IVFHNSW;
-        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     explicit IVFHNSW(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
         index_type_ = IndexEnum::INDEX_FAISS_IVFHNSW;
-        stats = std::make_shared<milvus::knowhere::IVFStatistics>(index_type_);
     }
 
     BinarySet
