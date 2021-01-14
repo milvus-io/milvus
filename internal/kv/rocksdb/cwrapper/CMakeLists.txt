@@ -16,27 +16,35 @@ else()
 endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 
+#-----------------------Using ccache if possible------------
+find_program(CCACHE_FOUND ccache)
+if (CCACHE_FOUND)
+    message(STATUS "Using ccache: ${CCACHE_FOUND}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
+    set(ENV{CCACHE_COMMENTS} "1")
+endif (CCACHE_FOUND)
+
 macro( build_rocksdb )
     message( STATUS "Building ROCKSDB-${ROCKSDB_VERSION} from source" )
 
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
+         "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
          #This is used to solve 'illegal instruction' problem in some machine
          "-DPORTABLE=ON"
-         "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
-          )
+        )
 
     ExternalProject_Add(
             rocksdb-ep
             PREFIX              ${CMAKE_BINARY_DIR}/3rdparty_download/rocksdb-subbuild
             BINARY_DIR          rocksdb-bin
             DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
-            INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}
+            INSTALL_DIR         ${CMAKE_INSTALL_PREFIX}
             URL                 ${ROCKSDB_SOURCE_URL}
             URL_MD5             "67f9e04fda62af551dd039c37b1808ac"
             CMAKE_ARGS          ${ROCKSDB_CMAKE_ARGS}
-            ${EP_LOG_OPTIONS}
             )
 
     ExternalProject_Get_Property( rocksdb-ep INSTALL_DIR )
@@ -49,5 +57,3 @@ macro( build_rocksdb )
 endmacro()
 
 build_rocksdb()
-
-#endif()

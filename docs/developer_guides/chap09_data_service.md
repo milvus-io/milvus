@@ -6,7 +6,7 @@
 
 #### 8.1 Overview
 
-<img src="./figs/data_service.jpeg" width=700>
+<img src="./figs/data_service.png" width=700>
 
 #### 8.2 Data Service Interface
 
@@ -58,7 +58,7 @@ type RegisterNodeResponse struct {
 ```go
 type SegIDRequest struct {
   Count uint32
-  ChannelName string
+  ChannelID string
 	CollectionID UniqueID
   PartitionID UniqueID
 }
@@ -70,7 +70,7 @@ type AssignSegIDRequest struct {
 
 type SegIDAssignment struct {
   SegmentID UniqueID
-  ChannelName string
+  ChannelID string
   Count uint32
 	CollectionID UniqueID
   PartitionID UniqueID
@@ -170,9 +170,9 @@ type DataNode interface {
   Service
   
   WatchDmChannels(req WatchDmChannelRequest) error
-  //WatchDdChannel(channelName string) error
-  //SetTimeTickChannel(channelName string) error
-  //SetStatsChannel(channelName string) error
+  //WatchDdChannel(channelID string) error
+  //SetTimeTickChannel(channelID string) error
+  //SetStatsChannel(channelID string) error
   
   FlushSegments(req FlushSegRequest) error
 }
@@ -185,7 +185,7 @@ type DataNode interface {
 ```go
 type WatchDmChannelRequest struct {
   RequestBase
-  InsertChannelNames []string
+  InsertChannelIDs []string
 }
 ```
 

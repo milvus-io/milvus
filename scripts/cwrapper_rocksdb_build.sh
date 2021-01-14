@@ -9,26 +9,33 @@ done
 DIR=$( cd -P $( dirname $SOURCE ) && pwd )
 # echo $DIR
 
+
+CMAKE_BUILD=${DIR}/../cwrapper_rocksdb_build
+OUTPUT_LIB=${DIR}/../internal/kv/rocksdb/cwrapper/output
 SRC_DIR=${DIR}/../internal/kv/rocksdb/cwrapper
-CGO_CFLAGS="-I$(SRC_DIR)/output/include"
-CGO_LDFLAGS="-L$(SRC_DIR)/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
 
-OUTPUT_LIB=${SRC_DIR}/output
-
-if [ -d ${OUTPUT_LIB} ];then
-    rm -rf ${OUTPUT_LIB}
+if [ ! -d ${CMAKE_BUILD} ];then
+    mkdir ${CMAKE_BUILD}
 fi
-mkdir ${OUTPUT_LIB}
+
+if [ ! -d ${OUTPUT_LIB} ];then
+    mkdir ${OUTPUT_LIB}
+fi
 
 BUILD_TYPE="Debug"
+CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "t:h:" arg; do
+while getopts "t:h:f:" arg; do
   case $arg in
+  f)
+    CUSTOM_THIRDPARTY_PATH=$OPTARG
+    ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
     ;;
   h) # help
     echo "-t: build type(default: Debug)
+-f: custom thirdparty path(default: "")
 -h: help
                 "
     exit 0
@@ -40,10 +47,13 @@ while getopts "t:h:" arg; do
   esac
 done
 echo "BUILD_TYPE: " $BUILD_TYPE
+echo "CUSTOM_THIRDPARTY_PATH: " $CUSTOM_THIRDPARTY_PATH
 
-pushd ${OUTPUT_LIB}
+pushd ${CMAKE_BUILD}
 CMAKE_CMD="cmake \
--DCMAKE_BUILD_TYPE=${BUILD_TYPE} ${SRC_DIR}"
+-DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+-DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
+-DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
 ${CMAKE_CMD}
 echo ${CMAKE_CMD}

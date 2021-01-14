@@ -92,8 +92,8 @@ type IndexFilePathsResponse struct {
 ```go
 type IndexNode interface {
   Service
-//  SetTimeTickChannel(channelName string) error
-//  SetStatsChannel(channelName string) error
+//  SetTimeTickChannel(channelID string) error
+//  SetStatsChannel(channelID string) error
   
   BuildIndex(req BuildIndexRequest) (BuildIndexResponse, error)
 }
