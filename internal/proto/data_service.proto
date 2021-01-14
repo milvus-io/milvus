@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package milvus.proto.data;
+
+option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/datapb";
+
+import "common.proto";
+import "internal.proto";
+
+
+message RegisterNodeRequest {
+  internal.MsgBase base = 1;
+  common.Address address = 2;
+}
+
+message RegisterNodeResponse {
+  internal.InitParams init_params = 1;
+}
+
+
+message SegIDRequest {
+  int32 count = 1;
+  string channelID = 2;
+  int64  collectionID = 3;
+  int64 partitionID = 4;
+}
+
+message AssignSegIDRequest {
+  int64 nodeID = 1;
+  string peer_role = 2;
+  repeated SegIDRequest segIDRequests = 3;
+}
+
+
+message SegIDAssignment {
+  int64 segID = 1;
+  int32 channelID = 2;
+  uint32 count = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  uint64 expire_time = 6;
+  common.Status status = 7;
+}
+
+message AssignSegIDResponse {
+  repeated SegIDAssignment segIDAssignments = 1;
+}
+
+message FlushRequest {
+  internal.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 4;
+}
+
+message ShowSegmentRequest {
+  internal.MsgBase base = 1;
+  int64  collectionID = 2;
+  int64  partitionID = 3;
+}
+
+message ShowSegmentResponse {
+  repeated int64 segmentIDs = 1;
+}
+
+enum SegmentState {
+  SegmentNone = 0;
+  SegmentNotExist = 1;
+  SegmentGrowing = 2;
+  SegmentSealed = 3;
+}
+
+
+message SegmentStatesRequest {
+  internal.MsgBase base = 1;
+  int64  segmentID = 2;
+}
+
+message SegmentStatesResponse {
+  SegmentState state = 1;
+  uint64 create_time = 2;
+  uint64 sealed_time = 3;
+}
+
+
+message InsertBinlogPathRequest {
+  internal.MsgBase base = 1;
+  int64 segmentID = 2;
+}
+
+message InsertBinlogPathsResponse {
+  repeated int64 fieldIDs = 1;
+  repeated internal.StringList paths = 2;
+}
+
+
+message InsertChannelRequest  {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64  collectionID = 3;
+}
+
+
+message WatchDmChannelRequest {
+  internal.MsgBase base = 1;
+  repeated  string channelIDs = 2;
+}
+
+
+message FlushSegRequest {
+  internal.MsgBase base = 1;
+  int64  dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4;
+}
+
+
+service DataService {
+
+   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+   rpc Flush(FlushRequest) returns (common.Status) {}
+
+   rpc AssignSegmentID(AssignSegIDRequest) returns (AssignSegIDResponse) {}
+   rpc ShowSegments(ShowSegmentRequest) returns (ShowSegmentResponse) {}
+
+   rpc GetSegmentStates(SegmentStatesRequest) returns (SegmentStatesResponse) {}
+   rpc GetInsertBinlogPaths(InsertBinlogPathRequest) returns (InsertBinlogPathsResponse) {}
+
+   rpc GetInsertChannels(InsertChannelRequest) returns (internal.StringList) {}
+
+}

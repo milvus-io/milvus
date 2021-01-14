@@ -192,6 +192,7 @@ type QueryNode interface {
 
 ```go
 type AddQueryChannelRequest struct {
+  RequestBase
   RequestChannelID string
   ResultChannelID string
 }
