@@ -32,7 +32,7 @@ type CreateChannelRequest struct {
 }
 
 type CreateChannelResponse struct {
-  ChannelIDs []string
+  ChannelNames []string
 }
 ```
 
@@ -40,7 +40,7 @@ type CreateChannelResponse struct {
 
 ```go
 type DestoryChannelRequest struct {
-	ChannelIDs []string
+	ChannelNames []string
 }
 ```
 
@@ -50,11 +50,11 @@ type DestoryChannelRequest struct {
 
 ```go
 type DescribeChannelRequest struct {
-	ChannelIDs []string
+	ChannelNames []string
 }
 
 type ChannelDescription struct {
-  ChannelID string
+  ChannelName string
   Owner OwnerDescription
 }
 

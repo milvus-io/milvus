@@ -70,8 +70,8 @@ type InvalidateCollMetaCacheRequest struct {
 ```go
 type ProxyNode interface {
   Service
-  //SetTimeTickChannel(channelID string) error
-  //SetStatsChannel(channelID string) error
+  //SetTimeTickChannel(channelName string) error
+  //SetStatsChannel(channelName string) error
   
 	CreateCollection(req CreateCollectionRequest) error
   DropCollection(req DropCollectionRequest) error
