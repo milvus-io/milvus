@@ -8,27 +8,27 @@ import "internal.proto";
 
 message CreateCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collectionName = 3;
-  repeated bytes schema = 4;
+  bytes schema = 4;
 }
 
 
 message DropCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collectionName = 3;
 }
 
 message HasCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
 message DescribeCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
@@ -38,19 +38,19 @@ message DescribeCollectionResponse {
 
 message LoadCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
 message ReleaseCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
 message CollectionStatsRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
@@ -61,7 +61,7 @@ message CollectionStatsResponse {
 
 message ShowCollectionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
 }
 
 message ShowCollectionResponse {
@@ -71,7 +71,7 @@ message ShowCollectionResponse {
 
 message CreatePartitionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
@@ -79,14 +79,14 @@ message CreatePartitionRequest {
 
 message DropPartitionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
 
 message HasPartitionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
@@ -100,14 +100,14 @@ message LoadPartitonRequest {
 
 message ReleasePartitionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   repeated  string partition_names = 4;
 }
 
 message PartitionStatsRequest  {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
 }
@@ -118,7 +118,7 @@ message PartitionStatsResponse {
 
 message ShowPartitionRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
 }
 
@@ -129,7 +129,7 @@ message ShowPartitionResponse {
 
 message CreateIndexRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
   repeated common.KeyValuePair extra_params = 5;
@@ -137,7 +137,7 @@ message CreateIndexRequest {
 
 message DescribeIndexRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
 }
@@ -153,7 +153,7 @@ message DescribeIndexResponse {
 
 message InsertRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
   repeated common.Blob row_data = 5;
@@ -167,7 +167,7 @@ message InsertResponse {
 
 message SearchRequest {
   internal.MsgBase base = 1;
-  string dbName = 2;
+  string db_name = 2;
   string collection_name = 3;
   repeated  string partition_names = 4;
   string dsl = 5;

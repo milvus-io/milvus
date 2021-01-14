@@ -79,7 +79,7 @@ message StringList {
 
 message MsgBase {
   MsgType msg_type = 1;
-  int64  reqID = 2;
+  int64  msgID = 2;
   uint64 timestamp = 3;
   int64 sourceID = 4;
 }

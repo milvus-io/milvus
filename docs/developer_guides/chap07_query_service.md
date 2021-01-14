@@ -161,8 +161,8 @@ type ReleasePartitionRequest struct {
 
 ```go
 type CreateQueryChannelResponse struct {
-  RequestChannelID string
-  ResultChannelID string
+  RequestChannelName string
+  ResultChannelName string
 }
 ```
 
@@ -177,8 +177,8 @@ type QueryNode interface {
   AddQueryChannel(req AddQueryChannelRequest) error
   RemoveQueryChannel(req RemoveQueryChannelRequest) error
   WatchDmChannels(req WatchDmChannelRequest) error
-  //SetTimeTickChannel(channelID string) error
-  //SetStatsChannel(channelID string) error
+  //SetTimeTickChannel(channelName string) error
+  //SetStatsChannel(channelName string) error
   
   LoadSegments(req LoadSegmentRequest) error
   ReleaseSegments(req ReleaseSegmentRequest) error
@@ -193,8 +193,8 @@ type QueryNode interface {
 ```go
 type AddQueryChannelRequest struct {
   RequestBase
-  RequestChannelID string
-  ResultChannelID string
+  RequestChannelName string
+  ResultChannelName string
 }
 ```
 
@@ -202,8 +202,8 @@ type AddQueryChannelRequest struct {
 
 ```go
 type RemoveQueryChannelRequest struct {
-  RequestChannelID string
-  ResultChannelID string
+  RequestChannelName string
+  ResultChannelName string
 }
 ```
 
@@ -211,7 +211,7 @@ type RemoveQueryChannelRequest struct {
 
 ```go
 type WatchDmChannelRequest struct {
-  InsertChannelIDs []string
+  InsertChannelNames []string
 }
 ```
 
