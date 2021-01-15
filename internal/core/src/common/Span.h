@@ -13,6 +13,8 @@
 #include <type_traits>
 #include "common/Types.h"
 #include <cassert>
+#include "VectorTrait.h"
+
 namespace milvus {
 // type erasure to work around virtual restriction
 class SpanBase {

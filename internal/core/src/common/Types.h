@@ -11,6 +11,7 @@
 
 #pragma once
 #include "utils/Types.h"
+#include "faiss/utils/BitsetView.h"
 #include <faiss/MetricType.h>
 #include <string>
 #include <boost/align/aligned_allocator.hpp>
@@ -75,6 +76,14 @@ using FieldId = fluent::NamedType<int64_t, struct FieldIdTag, fluent::Comparable
 using FieldName = fluent::NamedType<std::string, struct FieldNameTag, fluent::Comparable, fluent::Hashable>;
 using FieldOffset = fluent::NamedType<int64_t, struct FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 
-}  // namespace milvus
+using BitsetView = faiss::BitsetView;
+inline BitsetView
+BitsetSubView(const BitsetView& view, int64_t offset, int64_t size) {
+    if (view.empty()) {
+        return BitsetView();
+    }
+    assert(offset % 8 == 0);
+    return BitsetView(view.data() + offset / 8, size);
+}
 
-#include "VectorTrait.h"
+}  // namespace milvus
