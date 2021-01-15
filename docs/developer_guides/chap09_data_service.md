@@ -167,7 +167,7 @@ type InsertChannelRequest struct {
 
 ```go
 type InsertRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
