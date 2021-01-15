@@ -47,6 +47,9 @@ class IndexingEntry {
         return chunk_size_;
     }
 
+    virtual knowhere::Index*
+    get_indexing(int64_t chunk_id) const = 0;
+
  protected:
     // additional info
     const FieldMeta& field_meta_;
@@ -62,7 +65,7 @@ class ScalarIndexingEntry : public IndexingEntry {
 
     // concurrent
     knowhere::scalar::StructuredIndex<T>*
-    get_indexing(int64_t chunk_id) const {
+    get_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
@@ -80,7 +83,7 @@ class VecIndexingEntry : public IndexingEntry {
 
     // concurrent
     knowhere::VecIndex*
-    get_vec_indexing(int64_t chunk_id) const {
+    get_indexing(int64_t chunk_id) const override {
         Assert(field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }

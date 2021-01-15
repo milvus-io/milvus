@@ -47,6 +47,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
  private:
+    template <typename VectorType>
+    void
+    VectorVisitorImpl(VectorPlanNode& node);
+
+ private:
     // std::optional<RetType> ret_;
     const segcore::SegmentGrowing& segment_;
     Timestamp timestamp_;

@@ -20,23 +20,13 @@ namespace milvus::query {
 using BitmapChunk = boost::dynamic_bitset<>;
 using BitmapSimple = std::deque<BitmapChunk>;
 
-// TODO: merge these two search into one
-// note: c++17 don't support optional ref
-Status
-FloatSearch(const segcore::SegmentGrowingImpl& segment,
-            const QueryInfo& info,
-            const float* query_data,
-            int64_t num_queries,
-            Timestamp timestamp,
-            const faiss::BitsetView& bitset,
-            QueryResult& results);
-
-Status
-BinarySearch(const segcore::SegmentGrowingImpl& segment,
-             const query::QueryInfo& info,
-             const uint8_t* query_data,
-             int64_t num_queries,
-             Timestamp timestamp,
-             const faiss::BitsetView& bitset,
-             QueryResult& results);
+template <typename VectorType>
+void
+SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
+                const query::QueryInfo& info,
+                const EmbeddedType<VectorType>* query_data,
+                int64_t num_queries,
+                Timestamp timestamp,
+                const faiss::BitsetView& bitset,
+                QueryResult& results);
 }  // namespace milvus::query
