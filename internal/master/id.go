@@ -4,6 +4,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
+type IDAllocator interface {
+	Alloc(count uint32) (UniqueID, UniqueID, error)
+	AllocOne() (UniqueID, error)
+	UpdateID() error
+}
+
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
 	allocator Allocator
