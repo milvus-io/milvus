@@ -96,7 +96,7 @@ Milvus设置：
 - gpu_search_threshold: 1200
 - search_resources: cpu, gpu0, gpu1
 
-Milvus设置的详细定义可以参考 https://milvus.io/docs/milvus_config.md。
+Milvus设置的详细定义可以参考[服务端设置](https://milvus.io/cn/docs/milvus_config.md)。
 
 测试方法
 

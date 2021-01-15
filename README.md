@@ -58,11 +58,11 @@ Milvus has been used by over 600 organizations and institutions worldwide mainly
 
 See [Scenarios](https://www.milvus.io/scenarios/) for more detailed application scenarios and demos.
 
-See [Milvus Bootcamp](https://github.com/milvus-io/bootcamp) for detailed solutions and application scenarios.
+See [Milvus Bootcamp](https://github.com/zilliz-bootcamp) for detailed solutions and application scenarios.
 
 ## Benchmark
 
-See our [test reports](https://github.com/milvus-io/bootcamp/tree/master/EN_benchmark_test) for more information about performance benchmarking of different indexes in Milvus.
+See our [test reports](https://github.com/zilliz-bootcamp/milvus_benchmark) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 

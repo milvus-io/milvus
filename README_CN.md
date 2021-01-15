@@ -60,11 +60,11 @@ Milvus 已经广泛应用于多个领域，在全球范围内上被 600 多家�
 
 体验在线场景展示，详见 [Milvus 应用场景](https://milvus.io/cn/scenarios)。
 
-了解更详细的应用场景和解决方案，详见 [Milvus 训练营](https://github.com/milvus-io/bootcamp)。
+了解更详细的应用场景和解决方案，详见 [Milvus 训练营](https://github.com/zilliz-bootcamp)。
 
 ## 性能基准测试
 
-更多 Milvus 性能基准的信息，详见[测试报告](https://github.com/milvus-io/bootcamp/tree/master/benchmark_test)。
+更多 Milvus 性能基准的信息，详见[测试报告](https://github.com/zilliz-bootcamp/milvus_benchmark)。
 
 ## 路线图
 

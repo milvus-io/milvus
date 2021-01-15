@@ -96,7 +96,7 @@ Milvus configuration
 - gpu_search_threshold: 1200
 - search_resources: cpu, gpu0, gpu1
 
-The definitions of Milvus configuration are on https://milvus.io/docs/milvus_config.md.
+The definitions of Milvus configuration are on [Milvus Server Configuration](https://milvus.io/docs/milvus_config.md).
 
 Test method
 
