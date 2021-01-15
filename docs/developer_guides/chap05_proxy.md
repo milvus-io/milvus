@@ -19,14 +19,14 @@ type ProxyService interface {
 
 
 
-* *RequestBase*
+* *MsgBase*
 
 ```go
-type RequestBase struct {
+type MsgBase struct {
   MsgType MsgType
-  ReqID	UniqueID
+  MsgID	UniqueID
   Timestamp Timestamp
-  RequestorID UniqueID
+  SourceID UniqueID
 }
 ```
 
@@ -43,7 +43,7 @@ type RegisterLinkResponse struct {
 
 ```go
 type RegisterNodeRequest struct {
-  RequestBase
+  MsgBase
   Address string
   Port int64
 }
@@ -57,7 +57,7 @@ type RegisterNodeResponse struct {
 
 ```go
 type InvalidateCollMetaCacheRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -117,7 +117,7 @@ See *Master API* for detailed definitions.
 
 ```go
 type LoadCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -127,7 +127,7 @@ type LoadCollectionRequest struct {
 
 ```go
 type ReleaseCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -161,7 +161,7 @@ See *Master API* for detailed definitions.
 
 ```go
 type LoadPartitonRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionNames []string
@@ -172,7 +172,7 @@ type LoadPartitonRequest struct {
 
 ```go
 type ReleasePartitionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionNames []string
@@ -199,7 +199,7 @@ See *Master API* for detailed definitions.
 
 ```go
 type InsertRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
@@ -217,7 +217,7 @@ type InsertResponse struct {
 
 ```go
 type SearchRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionNames []string
@@ -230,7 +230,7 @@ type SearchRequest struct {
 
 ```go
 type FlushRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }

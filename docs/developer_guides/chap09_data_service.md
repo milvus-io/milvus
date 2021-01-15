@@ -28,14 +28,14 @@ type DataService interface {
 
 
 
-* *RequestBase*
+* *MsgBase*
 
 ```go
-type RequestBase struct {
+type MsgBase struct {
   MsgType MsgType
-  ReqID	UniqueID
+  MsgID	UniqueID
   Timestamp Timestamp
-  RequestorID UniqueID
+  SourceID UniqueID
 }
 ```
 
@@ -43,7 +43,7 @@ type RequestBase struct {
 
 ```go
 type RegisterNodeRequest struct {
-  RequestBase
+  MsgBase
   Address string
   Port int64
 }
@@ -64,7 +64,7 @@ type SegIDRequest struct {
 }
 
 type AssignSegIDRequest struct {
-  RequestBase
+  MsgBase
   PerChannelRequest []SegIDRequest
 }
 
@@ -88,7 +88,7 @@ type AssignSegIDResponse struct {
 
 ```go
 type FlushRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -100,7 +100,7 @@ type FlushRequest struct {
 
 ```go
 type ShowSegmentRequest struct {
-  RequestBase
+  MsgBase
   CollectionID UniqueID
   PartitionID UniqueID
 }
@@ -123,7 +123,7 @@ enum SegmentState {
 }
 
 type SegmentStatesRequest struct {
-  RequestBase
+  MsgBase
   SegmentID UniqueID
 }
 
@@ -140,7 +140,7 @@ type SegmentStatesResponse struct {
 
 ```go
 type InsertBinlogPathRequest struct {
-  RequestBase
+  MsgBase
   SegmentID UniqueID
 }
 
@@ -155,9 +155,27 @@ type InsertBinlogPathsResponse struct {
 
 ```go
 type InsertChannelRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
+}
+```
+
+
+
+#### 8.2 Insert Channel
+
+```go
+type InsertRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+  RowData []Blob
+  HashKeys []uint32
 }
 ```
 
@@ -184,7 +202,7 @@ type DataNode interface {
 
 ```go
 type WatchDmChannelRequest struct {
-  RequestBase
+  MsgBase
   InsertChannelNames []string
 }
 ```
@@ -193,7 +211,7 @@ type WatchDmChannelRequest struct {
 
 ```go
 type FlushSegRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   SegmentID []UniqueID

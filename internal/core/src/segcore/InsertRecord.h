@@ -28,7 +28,7 @@ struct InsertRecord {
 
     auto
     get_base_entity(FieldOffset field_offset) const {
-        auto ptr = entity_vec_[field_offset.get()];
+        auto ptr = entity_vec_[field_offset.get()].get();
         return ptr;
     }
 
@@ -36,7 +36,7 @@ struct InsertRecord {
     auto
     get_entity(FieldOffset field_offset) const {
         auto base_ptr = get_base_entity(field_offset);
-        auto ptr = std::dynamic_pointer_cast<const ConcurrentVector<Type>>(base_ptr);
+        auto ptr = dynamic_cast<const ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
@@ -45,7 +45,7 @@ struct InsertRecord {
     auto
     get_entity(FieldOffset field_offset) {
         auto base_ptr = get_base_entity(field_offset);
-        auto ptr = std::dynamic_pointer_cast<ConcurrentVector<Type>>(base_ptr);
+        auto ptr = dynamic_cast<ConcurrentVector<Type>*>(base_ptr);
         Assert(ptr);
         return ptr;
     }
@@ -54,17 +54,17 @@ struct InsertRecord {
     void
     insert_entity(int64_t chunk_size) {
         static_assert(std::is_fundamental_v<Type>);
-        entity_vec_.emplace_back(std::make_shared<ConcurrentVector<Type>>(chunk_size));
+        entity_vec_.emplace_back(std::make_unique<ConcurrentVector<Type>>(chunk_size));
     }
 
     template <typename VectorType>
     void
     insert_entity(int64_t dim, int64_t chunk_size) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        entity_vec_.emplace_back(std::make_shared<ConcurrentVector<VectorType>>(dim, chunk_size));
+        entity_vec_.emplace_back(std::make_unique<ConcurrentVector<VectorType>>(dim, chunk_size));
     }
 
  private:
-    std::vector<std::shared_ptr<VectorBase>> entity_vec_;
+    std::vector<std::unique_ptr<VectorBase>> entity_vec_;
 };
 }  // namespace milvus::segcore

@@ -35,14 +35,14 @@ type Master interface {
 
 
 
-* *RequestBase*
+* *MsgBase*
 
 ```go
-type RequestBase struct {
+type MsgBase struct {
   MsgType MsgType
-  ReqID	UniqueID
+  MsgID	UniqueID
   Timestamp Timestamp
-  RequestorID UniqueID
+  SourceID UniqueID
 }
 ```
 
@@ -50,7 +50,7 @@ type RequestBase struct {
 
 ```go
 type CreateCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   Schema []bytes
@@ -61,7 +61,7 @@ type CreateCollectionRequest struct {
 
 ```go
 type DropCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -71,7 +71,7 @@ type DropCollectionRequest struct {
 
 ```go
 type HasCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -81,7 +81,7 @@ type HasCollectionRequest struct {
 
 ```go
 type DescribeCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -95,7 +95,7 @@ type DescribeCollectionResponse struct {
 
 ```go
 type CollectionStatsRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -109,7 +109,7 @@ type CollectionStatsResponse struct {
 
 ```go
 type ShowCollectionRequest struct {
-  RequestBase
+  MsgBase
 	DbName string
 }
 
@@ -122,7 +122,7 @@ type ShowCollectionResponse struct {
 
 ```go
 type CreatePartitionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
@@ -133,7 +133,7 @@ type CreatePartitionRequest struct {
 
 ```go
 type DropPartitionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
@@ -144,7 +144,7 @@ type DropPartitionRequest struct {
 
 ```go
 type HasPartitionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
@@ -155,7 +155,7 @@ type HasPartitionRequest struct {
 
 ```go
 type PartitionStatsRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   PartitionName string
@@ -170,7 +170,7 @@ type PartitionStatsResponse struct {
 
 ```go
 type ShowPartitionRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
 }
@@ -184,7 +184,7 @@ type ShowPartitionResponse struct {
 
 ```go
 type CreateIndexRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   FieldName string
@@ -196,7 +196,7 @@ type CreateIndexRequest struct {
 
 ```go
 type DescribeIndexRequest struct {
-  RequestBase
+  MsgBase
   DbName string
   CollectionName string
   FieldName string
@@ -216,7 +216,7 @@ type DescribeIndexResponse struct {
 
 ```go
 type TsoRequest struct {
-  RequestBase
+  MsgBase
   Count uint32
 }
 
@@ -230,7 +230,7 @@ type TsoResponse struct {
 
 ```go
 type IDRequest struct {
-  RequestBase
+  MsgBase
   Count uint32
 }
 
@@ -242,25 +242,75 @@ type IDResponse struct {
 
 
 
-#### 10.1 Interfaces (RPC)
+#### 10.2 Dd (Data definitions) Channel
 
-| RPC                | description                                                  |
-| :----------------- | ------------------------------------------------------------ |
-| CreateCollection   | create a collection base on schema statement                 |
-| DropCollection     | drop a collection                                            |
-| HasCollection      | whether or not a collection exists                           |
-| DescribeCollection | show a collection's schema and its descriptive statistics    |
-| ShowCollections    | list all collections                                         |
-| CreatePartition    | create a partition                                           |
-| DropPartition      | drop a partition                                             |
-| HasPartition       | whether or not a partition exists                            |
-| DescribePartition  | show a partition's name and its descriptive statistics       |
-| ShowPartitions     | list a collection's all partitions                           |
-| AllocTimestamp     | allocate a batch of consecutive timestamps                   |
-| AllocID            | allocate a batch of consecutive IDs                          |
-| AssignSegmentID    | assign segment id to insert rows (master determines which segment these rows belong to) |
-| GetSysConfigs      | get system configurations                                    |
-|                    |                                                              |
+* *CreateCollection*
+
+```go
+type CreateCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  Schema []bytes
+}
+```
+
+* *DropCollection*
+
+```go
+type DropCollectionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  DbID UniqueID
+  CollectionID UniqueID
+}
+```
+
+* *CreatePartition*
+
+```go
+type CreatePartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+```
+
+* *DropPartition*
+
+```go
+type DropPartitionRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionName string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+```
+
+* *CreateIndex*
+
+```go
+type CreateIndexRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  FieldName string
+  DbID UniqueID
+  CollectionID UniqueID
+  FieldID int64
+  Params [] KeyValuePair
+}
+```
 
 
 

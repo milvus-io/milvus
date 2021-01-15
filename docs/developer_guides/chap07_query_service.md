@@ -31,14 +31,14 @@ type QueryService interface {
 
 
 
-* *RequestBase*
+* *MsgBase*
 
 ```go
-type RequestBase struct {
+type MsgBase struct {
   MsgType MsgType
-  ReqID	UniqueID
+  MsgID	UniqueID
   Timestamp Timestamp
-  RequestorID UniqueID
+  SourceID UniqueID
 }
 ```
 
@@ -46,7 +46,7 @@ type RequestBase struct {
 
 ```go
 type RegisterNodeRequest struct {
-  RequestBase
+  MsgBase
   Address string
   Port int64
 }
@@ -60,7 +60,7 @@ type RegisterNodeResponse struct {
 
 ```go
 type ShowCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
 }
 
@@ -73,7 +73,7 @@ type ShowCollectionResponse struct {
 
 ```go
 type LoadCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -83,7 +83,7 @@ type LoadCollectionRequest struct {
 
 ```go
 type ReleaseCollectionRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -93,7 +93,7 @@ type ReleaseCollectionRequest struct {
 
 ```go
 type ShowPartitionRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
 }
@@ -119,7 +119,7 @@ const (
 )
 
 type PartitionStatesRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
@@ -139,7 +139,7 @@ type PartitionStatesResponse struct {
 
 ```go
 type LoadPartitonRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
@@ -150,7 +150,7 @@ type LoadPartitonRequest struct {
 
 ```go
 type ReleasePartitionRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionIDs []UniqueID
@@ -163,6 +163,24 @@ type ReleasePartitionRequest struct {
 type CreateQueryChannelResponse struct {
   RequestChannelName string
   ResultChannelName string
+}
+```
+
+
+
+#### 8.2 Query Channel
+
+```go
+type SearchRequest struct {
+  RequestBase
+  DbName string
+  CollectionName string
+  PartitionNames []string
+  DbID UniqueID
+  CollectionID UniqueID
+  PartitionIDs []UniqueID
+  Dsl string
+  PlaceholderGroup []byte
 }
 ```
 
@@ -192,7 +210,7 @@ type QueryNode interface {
 
 ```go
 type AddQueryChannelRequest struct {
-  RequestBase
+  MsgBase
   RequestChannelName string
   ResultChannelName string
 }
@@ -219,7 +237,7 @@ type WatchDmChannelRequest struct {
 
 ```go
 type LoadSegmentRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionID UniqueID
@@ -232,7 +250,7 @@ type LoadSegmentRequest struct {
 
 ```go
 type ReleaseSegmentRequest struct {
-  RequestBase
+  MsgBase
   DbID UniqueID
   CollectionID UniqueID
   PartitionID UniqueID
