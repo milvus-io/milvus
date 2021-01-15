@@ -4,15 +4,10 @@
 package milvuspb
 
 import (
-	context "context"
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalpb2 "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	schemapb "github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	grpc "google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	status "google.golang.org/grpc/status"
 	math "math"
 )
 
@@ -27,43 +22,14 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
-type PlaceholderType int32
-
-const (
-	PlaceholderType_NONE          PlaceholderType = 0
-	PlaceholderType_VECTOR_BINARY PlaceholderType = 100
-	PlaceholderType_VECTOR_FLOAT  PlaceholderType = 101
-)
-
-var PlaceholderType_name = map[int32]string{
-	0:   "NONE",
-	100: "VECTOR_BINARY",
-	101: "VECTOR_FLOAT",
-}
-
-var PlaceholderType_value = map[string]int32{
-	"NONE":          0,
-	"VECTOR_BINARY": 100,
-	"VECTOR_FLOAT":  101,
-}
-
-func (x PlaceholderType) String() string {
-	return proto.EnumName(PlaceholderType_name, int32(x))
-}
-
-func (PlaceholderType) EnumDescriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{0}
-}
-
 type CreateCollectionRequest struct {
-	Base           *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName         string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName string               `protobuf:"bytes,3,opt,name=collectionName,proto3" json:"collectionName,omitempty"`
-	// `schema` is the serialized `schema.CollectionSchema`
-	Schema               []byte   `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName       string               `protobuf:"bytes,3,opt,name=collectionName,proto3" json:"collectionName,omitempty"`
+	Schema               []byte               `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
+	XXX_unrecognized     []byte               `json:"-"`
+	XXX_sizecache        int32                `json:"-"`
 }
 
 func (m *CreateCollectionRequest) Reset()         { *m = CreateCollectionRequest{} }
@@ -229,53 +195,6 @@ func (m *HasCollectionRequest) GetCollectionName() string {
 	return ""
 }
 
-type BoolResponse struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Value                bool             `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
-}
-
-func (m *BoolResponse) Reset()         { *m = BoolResponse{} }
-func (m *BoolResponse) String() string { return proto.CompactTextString(m) }
-func (*BoolResponse) ProtoMessage()    {}
-func (*BoolResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{3}
-}
-
-func (m *BoolResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_BoolResponse.Unmarshal(m, b)
-}
-func (m *BoolResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_BoolResponse.Marshal(b, m, deterministic)
-}
-func (m *BoolResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_BoolResponse.Merge(m, src)
-}
-func (m *BoolResponse) XXX_Size() int {
-	return xxx_messageInfo_BoolResponse.Size(m)
-}
-func (m *BoolResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_BoolResponse.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_BoolResponse proto.InternalMessageInfo
-
-func (m *BoolResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-func (m *BoolResponse) GetValue() bool {
-	if m != nil {
-		return m.Value
-	}
-	return false
-}
-
 type DescribeCollectionRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -289,7 +208,7 @@ func (m *DescribeCollectionRequest) Reset()         { *m = DescribeCollectionReq
 func (m *DescribeCollectionRequest) String() string { return proto.CompactTextString(m) }
 func (*DescribeCollectionRequest) ProtoMessage()    {}
 func (*DescribeCollectionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{4}
+	return fileDescriptor_02345ba45cc0e303, []int{3}
 }
 
 func (m *DescribeCollectionRequest) XXX_Unmarshal(b []byte) error {
@@ -332,18 +251,17 @@ func (m *DescribeCollectionRequest) GetCollectionName() string {
 }
 
 type DescribeCollectionResponse struct {
-	Status               *commonpb.Status           `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Schema               *schemapb.CollectionSchema `protobuf:"bytes,2,opt,name=schema,proto3" json:"schema,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                   `json:"-"`
-	XXX_unrecognized     []byte                     `json:"-"`
-	XXX_sizecache        int32                      `json:"-"`
+	Schema               [][]byte `protobuf:"bytes,1,rep,name=schema,proto3" json:"schema,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *DescribeCollectionResponse) Reset()         { *m = DescribeCollectionResponse{} }
 func (m *DescribeCollectionResponse) String() string { return proto.CompactTextString(m) }
 func (*DescribeCollectionResponse) ProtoMessage()    {}
 func (*DescribeCollectionResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{5}
+	return fileDescriptor_02345ba45cc0e303, []int{4}
 }
 
 func (m *DescribeCollectionResponse) XXX_Unmarshal(b []byte) error {
@@ -364,14 +282,7 @@ func (m *DescribeCollectionResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_DescribeCollectionResponse proto.InternalMessageInfo
 
-func (m *DescribeCollectionResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-func (m *DescribeCollectionResponse) GetSchema() *schemapb.CollectionSchema {
+func (m *DescribeCollectionResponse) GetSchema() [][]byte {
 	if m != nil {
 		return m.Schema
 	}
@@ -391,7 +302,7 @@ func (m *LoadCollectionRequest) Reset()         { *m = LoadCollectionRequest{} }
 func (m *LoadCollectionRequest) String() string { return proto.CompactTextString(m) }
 func (*LoadCollectionRequest) ProtoMessage()    {}
 func (*LoadCollectionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{6}
+	return fileDescriptor_02345ba45cc0e303, []int{5}
 }
 
 func (m *LoadCollectionRequest) XXX_Unmarshal(b []byte) error {
@@ -446,7 +357,7 @@ func (m *ReleaseCollectionRequest) Reset()         { *m = ReleaseCollectionReque
 func (m *ReleaseCollectionRequest) String() string { return proto.CompactTextString(m) }
 func (*ReleaseCollectionRequest) ProtoMessage()    {}
 func (*ReleaseCollectionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{7}
+	return fileDescriptor_02345ba45cc0e303, []int{6}
 }
 
 func (m *ReleaseCollectionRequest) XXX_Unmarshal(b []byte) error {
@@ -501,7 +412,7 @@ func (m *CollectionStatsRequest) Reset()         { *m = CollectionStatsRequest{}
 func (m *CollectionStatsRequest) String() string { return proto.CompactTextString(m) }
 func (*CollectionStatsRequest) ProtoMessage()    {}
 func (*CollectionStatsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{8}
+	return fileDescriptor_02345ba45cc0e303, []int{7}
 }
 
 func (m *CollectionStatsRequest) XXX_Unmarshal(b []byte) error {
@@ -545,7 +456,6 @@ func (m *CollectionStatsRequest) GetCollectionName() string {
 
 type CollectionStatsResponse struct {
 	Stats                []*commonpb.KeyValuePair `protobuf:"bytes,1,rep,name=stats,proto3" json:"stats,omitempty"`
-	Status               *commonpb.Status         `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
 	XXX_sizecache        int32                    `json:"-"`
@@ -555,7 +465,7 @@ func (m *CollectionStatsResponse) Reset()         { *m = CollectionStatsResponse
 func (m *CollectionStatsResponse) String() string { return proto.CompactTextString(m) }
 func (*CollectionStatsResponse) ProtoMessage()    {}
 func (*CollectionStatsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{9}
+	return fileDescriptor_02345ba45cc0e303, []int{8}
 }
 
 func (m *CollectionStatsResponse) XXX_Unmarshal(b []byte) error {
@@ -583,13 +493,6 @@ func (m *CollectionStatsResponse) GetStats() []*commonpb.KeyValuePair {
 	return nil
 }
 
-func (m *CollectionStatsResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type ShowCollectionRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -602,7 +505,7 @@ func (m *ShowCollectionRequest) Reset()         { *m = ShowCollectionRequest{} }
 func (m *ShowCollectionRequest) String() string { return proto.CompactTextString(m) }
 func (*ShowCollectionRequest) ProtoMessage()    {}
 func (*ShowCollectionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{10}
+	return fileDescriptor_02345ba45cc0e303, []int{9}
 }
 
 func (m *ShowCollectionRequest) XXX_Unmarshal(b []byte) error {
@@ -638,18 +541,17 @@ func (m *ShowCollectionRequest) GetDbName() string {
 }
 
 type ShowCollectionResponse struct {
-	CollectionNames      []string         `protobuf:"bytes,1,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
-	Status               *commonpb.Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+	CollectionNames      []string `protobuf:"bytes,1,rep,name=collection_names,json=collectionNames,proto3" json:"collection_names,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowCollectionResponse) Reset()         { *m = ShowCollectionResponse{} }
 func (m *ShowCollectionResponse) String() string { return proto.CompactTextString(m) }
 func (*ShowCollectionResponse) ProtoMessage()    {}
 func (*ShowCollectionResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{11}
+	return fileDescriptor_02345ba45cc0e303, []int{10}
 }
 
 func (m *ShowCollectionResponse) XXX_Unmarshal(b []byte) error {
@@ -677,13 +579,6 @@ func (m *ShowCollectionResponse) GetCollectionNames() []string {
 	return nil
 }
 
-func (m *ShowCollectionResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type CreatePartitionRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -698,7 +593,7 @@ func (m *CreatePartitionRequest) Reset()         { *m = CreatePartitionRequest{}
 func (m *CreatePartitionRequest) String() string { return proto.CompactTextString(m) }
 func (*CreatePartitionRequest) ProtoMessage()    {}
 func (*CreatePartitionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{12}
+	return fileDescriptor_02345ba45cc0e303, []int{11}
 }
 
 func (m *CreatePartitionRequest) XXX_Unmarshal(b []byte) error {
@@ -761,7 +656,7 @@ func (m *DropPartitionRequest) Reset()         { *m = DropPartitionRequest{} }
 func (m *DropPartitionRequest) String() string { return proto.CompactTextString(m) }
 func (*DropPartitionRequest) ProtoMessage()    {}
 func (*DropPartitionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{13}
+	return fileDescriptor_02345ba45cc0e303, []int{12}
 }
 
 func (m *DropPartitionRequest) XXX_Unmarshal(b []byte) error {
@@ -824,7 +719,7 @@ func (m *HasPartitionRequest) Reset()         { *m = HasPartitionRequest{} }
 func (m *HasPartitionRequest) String() string { return proto.CompactTextString(m) }
 func (*HasPartitionRequest) ProtoMessage()    {}
 func (*HasPartitionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{14}
+	return fileDescriptor_02345ba45cc0e303, []int{13}
 }
 
 func (m *HasPartitionRequest) XXX_Unmarshal(b []byte) error {
@@ -887,7 +782,7 @@ func (m *LoadPartitonRequest) Reset()         { *m = LoadPartitonRequest{} }
 func (m *LoadPartitonRequest) String() string { return proto.CompactTextString(m) }
 func (*LoadPartitonRequest) ProtoMessage()    {}
 func (*LoadPartitonRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{15}
+	return fileDescriptor_02345ba45cc0e303, []int{14}
 }
 
 func (m *LoadPartitonRequest) XXX_Unmarshal(b []byte) error {
@@ -950,7 +845,7 @@ func (m *ReleasePartitionRequest) Reset()         { *m = ReleasePartitionRequest
 func (m *ReleasePartitionRequest) String() string { return proto.CompactTextString(m) }
 func (*ReleasePartitionRequest) ProtoMessage()    {}
 func (*ReleasePartitionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{16}
+	return fileDescriptor_02345ba45cc0e303, []int{15}
 }
 
 func (m *ReleasePartitionRequest) XXX_Unmarshal(b []byte) error {
@@ -1013,7 +908,7 @@ func (m *PartitionStatsRequest) Reset()         { *m = PartitionStatsRequest{} }
 func (m *PartitionStatsRequest) String() string { return proto.CompactTextString(m) }
 func (*PartitionStatsRequest) ProtoMessage()    {}
 func (*PartitionStatsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{17}
+	return fileDescriptor_02345ba45cc0e303, []int{16}
 }
 
 func (m *PartitionStatsRequest) XXX_Unmarshal(b []byte) error {
@@ -1064,7 +959,6 @@ func (m *PartitionStatsRequest) GetPartitionName() string {
 
 type PartitionStatsResponse struct {
 	Stats                []*commonpb.KeyValuePair `protobuf:"bytes,1,rep,name=stats,proto3" json:"stats,omitempty"`
-	Status               *commonpb.Status         `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
 	XXX_sizecache        int32                    `json:"-"`
@@ -1074,7 +968,7 @@ func (m *PartitionStatsResponse) Reset()         { *m = PartitionStatsResponse{}
 func (m *PartitionStatsResponse) String() string { return proto.CompactTextString(m) }
 func (*PartitionStatsResponse) ProtoMessage()    {}
 func (*PartitionStatsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{18}
+	return fileDescriptor_02345ba45cc0e303, []int{17}
 }
 
 func (m *PartitionStatsResponse) XXX_Unmarshal(b []byte) error {
@@ -1102,13 +996,6 @@ func (m *PartitionStatsResponse) GetStats() []*commonpb.KeyValuePair {
 	return nil
 }
 
-func (m *PartitionStatsResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type ShowPartitionRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -1122,7 +1009,7 @@ func (m *ShowPartitionRequest) Reset()         { *m = ShowPartitionRequest{} }
 func (m *ShowPartitionRequest) String() string { return proto.CompactTextString(m) }
 func (*ShowPartitionRequest) ProtoMessage()    {}
 func (*ShowPartitionRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{19}
+	return fileDescriptor_02345ba45cc0e303, []int{18}
 }
 
 func (m *ShowPartitionRequest) XXX_Unmarshal(b []byte) error {
@@ -1165,18 +1052,17 @@ func (m *ShowPartitionRequest) GetCollectionName() string {
 }
 
 type ShowPartitionResponse struct {
-	PartitionNames       []string         `protobuf:"bytes,1,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Status               *commonpb.Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+	PartitionNames       []string `protobuf:"bytes,1,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *ShowPartitionResponse) Reset()         { *m = ShowPartitionResponse{} }
 func (m *ShowPartitionResponse) String() string { return proto.CompactTextString(m) }
 func (*ShowPartitionResponse) ProtoMessage()    {}
 func (*ShowPartitionResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{20}
+	return fileDescriptor_02345ba45cc0e303, []int{19}
 }
 
 func (m *ShowPartitionResponse) XXX_Unmarshal(b []byte) error {
@@ -1204,13 +1090,6 @@ func (m *ShowPartitionResponse) GetPartitionNames() []string {
 	return nil
 }
 
-func (m *ShowPartitionResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type CreateIndexRequest struct {
 	Base                 *internalpb2.MsgBase     `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -1226,7 +1105,7 @@ func (m *CreateIndexRequest) Reset()         { *m = CreateIndexRequest{} }
 func (m *CreateIndexRequest) String() string { return proto.CompactTextString(m) }
 func (*CreateIndexRequest) ProtoMessage()    {}
 func (*CreateIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{21}
+	return fileDescriptor_02345ba45cc0e303, []int{20}
 }
 
 func (m *CreateIndexRequest) XXX_Unmarshal(b []byte) error {
@@ -1296,7 +1175,7 @@ func (m *DescribeIndexRequest) Reset()         { *m = DescribeIndexRequest{} }
 func (m *DescribeIndexRequest) String() string { return proto.CompactTextString(m) }
 func (*DescribeIndexRequest) ProtoMessage()    {}
 func (*DescribeIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{22}
+	return fileDescriptor_02345ba45cc0e303, []int{21}
 }
 
 func (m *DescribeIndexRequest) XXX_Unmarshal(b []byte) error {
@@ -1357,7 +1236,7 @@ func (m *IndexDescription) Reset()         { *m = IndexDescription{} }
 func (m *IndexDescription) String() string { return proto.CompactTextString(m) }
 func (*IndexDescription) ProtoMessage()    {}
 func (*IndexDescription) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{23}
+	return fileDescriptor_02345ba45cc0e303, []int{22}
 }
 
 func (m *IndexDescription) XXX_Unmarshal(b []byte) error {
@@ -1394,7 +1273,6 @@ func (m *IndexDescription) GetParams() []*commonpb.KeyValuePair {
 
 type DescribeIndexResponse struct {
 	IndexDescriptions    []*IndexDescription `protobuf:"bytes,1,rep,name=index_descriptions,json=indexDescriptions,proto3" json:"index_descriptions,omitempty"`
-	Status               *commonpb.Status    `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
 	XXX_unrecognized     []byte              `json:"-"`
 	XXX_sizecache        int32               `json:"-"`
@@ -1404,7 +1282,7 @@ func (m *DescribeIndexResponse) Reset()         { *m = DescribeIndexResponse{} }
 func (m *DescribeIndexResponse) String() string { return proto.CompactTextString(m) }
 func (*DescribeIndexResponse) ProtoMessage()    {}
 func (*DescribeIndexResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{24}
+	return fileDescriptor_02345ba45cc0e303, []int{23}
 }
 
 func (m *DescribeIndexResponse) XXX_Unmarshal(b []byte) error {
@@ -1432,13 +1310,6 @@ func (m *DescribeIndexResponse) GetIndexDescriptions() []*IndexDescription {
 	return nil
 }
 
-func (m *DescribeIndexResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type InsertRequest struct {
 	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
@@ -1455,7 +1326,7 @@ func (m *InsertRequest) Reset()         { *m = InsertRequest{} }
 func (m *InsertRequest) String() string { return proto.CompactTextString(m) }
 func (*InsertRequest) ProtoMessage()    {}
 func (*InsertRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{25}
+	return fileDescriptor_02345ba45cc0e303, []int{24}
 }
 
 func (m *InsertRequest) XXX_Unmarshal(b []byte) error {
@@ -1519,19 +1390,18 @@ func (m *InsertRequest) GetHashKeys() []uint32 {
 }
 
 type InsertResponse struct {
-	RowIDBegin           int64            `protobuf:"varint,1,opt,name=rowID_begin,json=rowIDBegin,proto3" json:"rowID_begin,omitempty"`
-	RowIDEnd             int64            `protobuf:"varint,2,opt,name=rowID_end,json=rowIDEnd,proto3" json:"rowID_end,omitempty"`
-	Status               *commonpb.Status `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+	RowIDBegin           int64    `protobuf:"varint,1,opt,name=rowID_begin,json=rowIDBegin,proto3" json:"rowID_begin,omitempty"`
+	RowIDEnd             int64    `protobuf:"varint,2,opt,name=rowID_end,json=rowIDEnd,proto3" json:"rowID_end,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *InsertResponse) Reset()         { *m = InsertResponse{} }
 func (m *InsertResponse) String() string { return proto.CompactTextString(m) }
 func (*InsertResponse) ProtoMessage()    {}
 func (*InsertResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{26}
+	return fileDescriptor_02345ba45cc0e303, []int{25}
 }
 
 func (m *InsertResponse) XXX_Unmarshal(b []byte) error {
@@ -1566,126 +1436,23 @@ func (m *InsertResponse) GetRowIDEnd() int64 {
 	return 0
 }
 
-func (m *InsertResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-type PlaceholderValue struct {
-	Tag  string          `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
-	Type PlaceholderType `protobuf:"varint,2,opt,name=type,proto3,enum=milvus.proto.milvus.PlaceholderType" json:"type,omitempty"`
-	// values is a 2d-array, every array contains a vector
-	Values               [][]byte `protobuf:"bytes,3,rep,name=values,proto3" json:"values,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
-}
-
-func (m *PlaceholderValue) Reset()         { *m = PlaceholderValue{} }
-func (m *PlaceholderValue) String() string { return proto.CompactTextString(m) }
-func (*PlaceholderValue) ProtoMessage()    {}
-func (*PlaceholderValue) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{27}
-}
-
-func (m *PlaceholderValue) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PlaceholderValue.Unmarshal(m, b)
-}
-func (m *PlaceholderValue) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PlaceholderValue.Marshal(b, m, deterministic)
-}
-func (m *PlaceholderValue) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PlaceholderValue.Merge(m, src)
-}
-func (m *PlaceholderValue) XXX_Size() int {
-	return xxx_messageInfo_PlaceholderValue.Size(m)
-}
-func (m *PlaceholderValue) XXX_DiscardUnknown() {
-	xxx_messageInfo_PlaceholderValue.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_PlaceholderValue proto.InternalMessageInfo
-
-func (m *PlaceholderValue) GetTag() string {
-	if m != nil {
-		return m.Tag
-	}
-	return ""
-}
-
-func (m *PlaceholderValue) GetType() PlaceholderType {
-	if m != nil {
-		return m.Type
-	}
-	return PlaceholderType_NONE
-}
-
-func (m *PlaceholderValue) GetValues() [][]byte {
-	if m != nil {
-		return m.Values
-	}
-	return nil
-}
-
-type PlaceholderGroup struct {
-	Placeholders         []*PlaceholderValue `protobuf:"bytes,1,rep,name=placeholders,proto3" json:"placeholders,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
-	XXX_unrecognized     []byte              `json:"-"`
-	XXX_sizecache        int32               `json:"-"`
-}
-
-func (m *PlaceholderGroup) Reset()         { *m = PlaceholderGroup{} }
-func (m *PlaceholderGroup) String() string { return proto.CompactTextString(m) }
-func (*PlaceholderGroup) ProtoMessage()    {}
-func (*PlaceholderGroup) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{28}
-}
-
-func (m *PlaceholderGroup) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_PlaceholderGroup.Unmarshal(m, b)
-}
-func (m *PlaceholderGroup) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_PlaceholderGroup.Marshal(b, m, deterministic)
-}
-func (m *PlaceholderGroup) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_PlaceholderGroup.Merge(m, src)
-}
-func (m *PlaceholderGroup) XXX_Size() int {
-	return xxx_messageInfo_PlaceholderGroup.Size(m)
-}
-func (m *PlaceholderGroup) XXX_DiscardUnknown() {
-	xxx_messageInfo_PlaceholderGroup.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_PlaceholderGroup proto.InternalMessageInfo
-
-func (m *PlaceholderGroup) GetPlaceholders() []*PlaceholderValue {
-	if m != nil {
-		return m.Placeholders
-	}
-	return nil
-}
-
 type SearchRequest struct {
-	Base           *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName         string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName string               `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionNames []string             `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Dsl            string               `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
-	// serialized `PlaceholderGroup`
-	PlaceholderGroup     []byte   `protobuf:"bytes,6,opt,name=placeholder_group,json=placeholderGroup,proto3" json:"placeholder_group,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Base                 *internalpb2.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName               string               `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName       string               `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PartitionNames       []string             `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	Dsl                  string               `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	PlaceholderGroup     [][]byte             `protobuf:"bytes,6,rep,name=placeholder_group,json=placeholderGroup,proto3" json:"placeholder_group,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
+	XXX_unrecognized     []byte               `json:"-"`
+	XXX_sizecache        int32                `json:"-"`
 }
 
 func (m *SearchRequest) Reset()         { *m = SearchRequest{} }
 func (m *SearchRequest) String() string { return proto.CompactTextString(m) }
 func (*SearchRequest) ProtoMessage()    {}
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{29}
+	return fileDescriptor_02345ba45cc0e303, []int{26}
 }
 
 func (m *SearchRequest) XXX_Unmarshal(b []byte) error {
@@ -1741,111 +1508,9 @@ func (m *SearchRequest) GetDsl() string {
 	return ""
 }
 
-func (m *SearchRequest) GetPlaceholderGroup() []byte {
+func (m *SearchRequest) GetPlaceholderGroup() [][]byte {
 	if m != nil {
 		return m.PlaceholderGroup
-	}
-	return nil
-}
-
-type Hits struct {
-	IDs                  []int64   `protobuf:"varint,1,rep,packed,name=IDs,proto3" json:"IDs,omitempty"`
-	RowData              [][]byte  `protobuf:"bytes,2,rep,name=row_data,json=rowData,proto3" json:"row_data,omitempty"`
-	Scores               []float32 `protobuf:"fixed32,3,rep,packed,name=scores,proto3" json:"scores,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}  `json:"-"`
-	XXX_unrecognized     []byte    `json:"-"`
-	XXX_sizecache        int32     `json:"-"`
-}
-
-func (m *Hits) Reset()         { *m = Hits{} }
-func (m *Hits) String() string { return proto.CompactTextString(m) }
-func (*Hits) ProtoMessage()    {}
-func (*Hits) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{30}
-}
-
-func (m *Hits) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_Hits.Unmarshal(m, b)
-}
-func (m *Hits) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_Hits.Marshal(b, m, deterministic)
-}
-func (m *Hits) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_Hits.Merge(m, src)
-}
-func (m *Hits) XXX_Size() int {
-	return xxx_messageInfo_Hits.Size(m)
-}
-func (m *Hits) XXX_DiscardUnknown() {
-	xxx_messageInfo_Hits.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_Hits proto.InternalMessageInfo
-
-func (m *Hits) GetIDs() []int64 {
-	if m != nil {
-		return m.IDs
-	}
-	return nil
-}
-
-func (m *Hits) GetRowData() [][]byte {
-	if m != nil {
-		return m.RowData
-	}
-	return nil
-}
-
-func (m *Hits) GetScores() []float32 {
-	if m != nil {
-		return m.Scores
-	}
-	return nil
-}
-
-type QueryResult struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Hits                 [][]byte         `protobuf:"bytes,2,rep,name=hits,proto3" json:"hits,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
-}
-
-func (m *QueryResult) Reset()         { *m = QueryResult{} }
-func (m *QueryResult) String() string { return proto.CompactTextString(m) }
-func (*QueryResult) ProtoMessage()    {}
-func (*QueryResult) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{31}
-}
-
-func (m *QueryResult) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_QueryResult.Unmarshal(m, b)
-}
-func (m *QueryResult) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_QueryResult.Marshal(b, m, deterministic)
-}
-func (m *QueryResult) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_QueryResult.Merge(m, src)
-}
-func (m *QueryResult) XXX_Size() int {
-	return xxx_messageInfo_QueryResult.Size(m)
-}
-func (m *QueryResult) XXX_DiscardUnknown() {
-	xxx_messageInfo_QueryResult.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_QueryResult proto.InternalMessageInfo
-
-func (m *QueryResult) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-func (m *QueryResult) GetHits() [][]byte {
-	if m != nil {
-		return m.Hits
 	}
 	return nil
 }
@@ -1863,7 +1528,7 @@ func (m *FlushRequest) Reset()         { *m = FlushRequest{} }
 func (m *FlushRequest) String() string { return proto.CompactTextString(m) }
 func (*FlushRequest) ProtoMessage()    {}
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_02345ba45cc0e303, []int{32}
+	return fileDescriptor_02345ba45cc0e303, []int{27}
 }
 
 func (m *FlushRequest) XXX_Unmarshal(b []byte) error {
@@ -1906,11 +1571,9 @@ func (m *FlushRequest) GetCollectionName() string {
 }
 
 func init() {
-	proto.RegisterEnum("milvus.proto.milvus.PlaceholderType", PlaceholderType_name, PlaceholderType_value)
 	proto.RegisterType((*CreateCollectionRequest)(nil), "milvus.proto.milvus.CreateCollectionRequest")
 	proto.RegisterType((*DropCollectionRequest)(nil), "milvus.proto.milvus.DropCollectionRequest")
 	proto.RegisterType((*HasCollectionRequest)(nil), "milvus.proto.milvus.HasCollectionRequest")
-	proto.RegisterType((*BoolResponse)(nil), "milvus.proto.milvus.BoolResponse")
 	proto.RegisterType((*DescribeCollectionRequest)(nil), "milvus.proto.milvus.DescribeCollectionRequest")
 	proto.RegisterType((*DescribeCollectionResponse)(nil), "milvus.proto.milvus.DescribeCollectionResponse")
 	proto.RegisterType((*LoadCollectionRequest)(nil), "milvus.proto.milvus.LoadCollectionRequest")
@@ -1934,869 +1597,63 @@ func init() {
 	proto.RegisterType((*DescribeIndexResponse)(nil), "milvus.proto.milvus.DescribeIndexResponse")
 	proto.RegisterType((*InsertRequest)(nil), "milvus.proto.milvus.InsertRequest")
 	proto.RegisterType((*InsertResponse)(nil), "milvus.proto.milvus.InsertResponse")
-	proto.RegisterType((*PlaceholderValue)(nil), "milvus.proto.milvus.PlaceholderValue")
-	proto.RegisterType((*PlaceholderGroup)(nil), "milvus.proto.milvus.PlaceholderGroup")
 	proto.RegisterType((*SearchRequest)(nil), "milvus.proto.milvus.SearchRequest")
-	proto.RegisterType((*Hits)(nil), "milvus.proto.milvus.Hits")
-	proto.RegisterType((*QueryResult)(nil), "milvus.proto.milvus.QueryResult")
 	proto.RegisterType((*FlushRequest)(nil), "milvus.proto.milvus.FlushRequest")
 }
 
 func init() { proto.RegisterFile("milvus.proto", fileDescriptor_02345ba45cc0e303) }
 
 var fileDescriptor_02345ba45cc0e303 = []byte{
-	// 1409 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x58, 0xdd, 0x6f, 0x1b, 0x45,
-	0x10, 0xcf, 0xc5, 0x8e, 0x9b, 0x4c, 0xfc, 0x95, 0x6d, 0x93, 0xb8, 0xae, 0x80, 0xf4, 0xa0, 0xd4,
-	0xfd, 0x4a, 0xa4, 0x14, 0x09, 0x78, 0x40, 0x6a, 0xdd, 0xf4, 0xc3, 0x6a, 0x9b, 0x86, 0x4b, 0xa8,
-	0x14, 0x50, 0x65, 0xd6, 0xbe, 0x25, 0x3e, 0x71, 0xf6, 0x1d, 0xb7, 0xeb, 0xa4, 0xe9, 0x2b, 0x08,
-	0x5e, 0x00, 0xc1, 0xbf, 0xc0, 0x03, 0x2f, 0xbc, 0x41, 0x41, 0xfc, 0x53, 0x88, 0x3f, 0x01, 0xb4,
-	0x1f, 0xb9, 0xdc, 0x5d, 0xf6, 0x62, 0x13, 0x54, 0xd9, 0x79, 0xf3, 0x8e, 0x67, 0x67, 0x7e, 0x3b,
-	0xf3, 0xdb, 0xbd, 0x99, 0x81, 0x7c, 0xd7, 0x71, 0x77, 0xfb, 0x74, 0xd9, 0x0f, 0x3c, 0xe6, 0xa1,
-	0xb3, 0xd1, 0xd5, 0xb2, 0x5c, 0x54, 0xf3, 0x6d, 0xaf, 0xdb, 0xf5, 0x7a, 0x52, 0x58, 0x2d, 0x3a,
-	0x3d, 0x46, 0x82, 0x1e, 0x76, 0xd5, 0x3a, 0x4f, 0xdb, 0x1d, 0xd2, 0xc5, 0x72, 0x65, 0xfe, 0x6c,
-	0xc0, 0xe2, 0x9d, 0x80, 0x60, 0x46, 0xee, 0x78, 0xae, 0x4b, 0xda, 0xcc, 0xf1, 0x7a, 0x16, 0xf9,
-	0xa2, 0x4f, 0x28, 0x43, 0xab, 0x90, 0x6d, 0x61, 0x4a, 0x2a, 0xc6, 0x92, 0x51, 0x9b, 0x5d, 0x7d,
-	0x7d, 0x39, 0xe6, 0x2b, 0xb4, 0xfa, 0x98, 0xee, 0xd4, 0x31, 0x25, 0x96, 0xd0, 0x45, 0x8b, 0x70,
-	0xc6, 0x6e, 0x35, 0x7b, 0xb8, 0x4b, 0x2a, 0x93, 0x4b, 0x46, 0x6d, 0xc6, 0xca, 0xd9, 0xad, 0x75,
-	0xdc, 0x25, 0xe8, 0x6d, 0x28, 0xb6, 0x43, 0x0f, 0x5c, 0x52, 0xc9, 0x88, 0xff, 0x13, 0x52, 0xb4,
-	0x00, 0x39, 0x09, 0xb0, 0x92, 0x5d, 0x32, 0x6a, 0x79, 0x4b, 0xad, 0xcc, 0x6f, 0x0d, 0x98, 0x5f,
-	0x0b, 0x3c, 0x7f, 0x3c, 0x60, 0x72, 0x38, 0xe7, 0x1e, 0x60, 0xfa, 0x8a, 0xd1, 0x5c, 0x86, 0xd2,
-	0xa1, 0x5f, 0xa9, 0xa0, 0x87, 0xb3, 0x0d, 0xf9, 0xba, 0xe7, 0xb9, 0x16, 0xa1, 0xbe, 0xd7, 0xa3,
-	0x04, 0xdd, 0x84, 0x1c, 0x65, 0x98, 0xf5, 0xa9, 0xc2, 0x71, 0x21, 0x8e, 0x43, 0x11, 0x64, 0x53,
-	0xa8, 0x58, 0x4a, 0x15, 0x9d, 0x83, 0xa9, 0x5d, 0xec, 0xf6, 0x25, 0x88, 0x69, 0x4b, 0x2e, 0xcc,
-	0x1f, 0x0d, 0x38, 0xbf, 0x46, 0x68, 0x3b, 0x70, 0x5a, 0x64, 0x5c, 0x8e, 0xfb, 0x83, 0x01, 0x55,
-	0x1d, 0xa6, 0xff, 0x73, 0xfa, 0x0f, 0x42, 0xe2, 0x4d, 0x8a, 0x4d, 0x97, 0xe2, 0x9b, 0xd4, 0xad,
-	0x39, 0xf4, 0xb6, 0x29, 0x04, 0x21, 0x3f, 0xbf, 0x33, 0x60, 0xfe, 0x91, 0x87, 0xed, 0x31, 0x0a,
-	0x51, 0xc5, 0x22, 0x2e, 0xc1, 0x74, 0x6c, 0xb2, 0xf6, 0xbd, 0x01, 0x0b, 0x91, 0xf8, 0x31, 0xcc,
-	0xe8, 0x68, 0x01, 0x7d, 0xc3, 0x1f, 0xbf, 0x24, 0x20, 0xc5, 0xa1, 0x77, 0x61, 0x8a, 0x13, 0x83,
-	0x53, 0x28, 0x53, 0x9b, 0x5d, 0xbd, 0xa8, 0xa5, 0xd0, 0x43, 0xb2, 0xff, 0x94, 0x5f, 0x92, 0x0d,
-	0xec, 0x04, 0x96, 0xd4, 0x8f, 0x90, 0x6f, 0x72, 0x68, 0xf2, 0x99, 0x36, 0xcc, 0x6f, 0x76, 0xbc,
-	0xbd, 0x57, 0x9b, 0x29, 0xf3, 0x39, 0x2c, 0x24, 0xbd, 0xa8, 0xd3, 0x5e, 0x81, 0x72, 0x22, 0x64,
-	0xf2, 0xe0, 0x33, 0x56, 0x29, 0x1e, 0xb3, 0x13, 0x9e, 0xef, 0x77, 0x9e, 0x7a, 0xf1, 0x99, 0xd9,
-	0xc0, 0x01, 0x73, 0x46, 0xce, 0x45, 0x74, 0x09, 0x8a, 0xfe, 0x01, 0x12, 0xa9, 0x97, 0x15, 0x7a,
-	0x85, 0x50, 0x2a, 0x22, 0xf6, 0x9b, 0x01, 0xe7, 0xf8, 0x57, 0xe7, 0x74, 0xa1, 0xfe, 0xd5, 0x80,
-	0xb3, 0x0f, 0x30, 0x3d, 0x5d, 0xa0, 0x5f, 0x1a, 0x70, 0x96, 0x3f, 0xa0, 0x12, 0xf5, 0xa8, 0x41,
-	0x5f, 0x86, 0x52, 0x1c, 0x34, 0xad, 0x64, 0xc5, 0x7d, 0x28, 0xc6, 0x50, 0x53, 0xf3, 0x4f, 0x03,
-	0x16, 0xd5, 0x3b, 0x3b, 0x26, 0xf1, 0x1e, 0x1a, 0xfa, 0x4b, 0x03, 0xe6, 0x43, 0xcc, 0xa3, 0x7f,
-	0x8e, 0x87, 0x25, 0xca, 0xd7, 0x06, 0x2c, 0x24, 0x61, 0x8f, 0xe4, 0xd1, 0xe6, 0x35, 0x20, 0x7f,
-	0x4f, 0xc7, 0x23, 0xef, 0x66, 0x5f, 0x7e, 0x43, 0x22, 0x68, 0x54, 0x54, 0x34, 0x84, 0x30, 0x74,
-	0x84, 0x38, 0x59, 0x14, 0xfe, 0x36, 0x00, 0xc9, 0xa7, 0xbd, 0xd1, 0xb3, 0xc9, 0xf3, 0xd1, 0x52,
-	0xe8, 0x35, 0x80, 0xcf, 0x1c, 0xe2, 0xda, 0x51, 0xfa, 0xcc, 0x08, 0x89, 0xf8, 0x7b, 0x0d, 0xf2,
-	0xe4, 0x39, 0x0b, 0x70, 0xd3, 0xc7, 0x01, 0xee, 0xd2, 0xca, 0xd4, 0xb0, 0x34, 0x99, 0x15, 0xdb,
-	0x36, 0xc4, 0x2e, 0xf3, 0x17, 0xfe, 0x51, 0x50, 0xd5, 0xe7, 0xd8, 0x9f, 0xd9, 0x74, 0xa1, 0x2c,
-	0x40, 0x4a, 0xc4, 0x3e, 0xdf, 0xc6, 0xb7, 0x38, 0x5c, 0x26, 0xb7, 0x18, 0x72, 0x8b, 0x90, 0x08,
-	0x8b, 0xef, 0x43, 0x4e, 0x05, 0x68, 0x72, 0xd8, 0x00, 0xa9, 0x0d, 0xe6, 0x4f, 0xbc, 0x4d, 0x8b,
-	0xc7, 0x46, 0xb1, 0x70, 0x0b, 0x90, 0xf4, 0x69, 0x1f, 0x02, 0x39, 0xb8, 0xa8, 0x89, 0x5a, 0x5b,
-	0x2d, 0x92, 0xb0, 0xad, 0x39, 0x27, 0x21, 0x39, 0x21, 0x65, 0xff, 0x31, 0xa0, 0xd0, 0xe8, 0x51,
-	0x12, 0xb0, 0xd3, 0xf0, 0xe0, 0xa1, 0x77, 0x60, 0x3a, 0xf0, 0xf6, 0x9a, 0x36, 0x66, 0x58, 0x31,
-	0xf6, 0xbc, 0xf6, 0x94, 0x75, 0xd7, 0x6b, 0x59, 0x67, 0x02, 0x6f, 0x6f, 0x0d, 0x33, 0x8c, 0x2e,
-	0xc0, 0x4c, 0x07, 0xd3, 0x4e, 0xf3, 0x73, 0xb2, 0x4f, 0x2b, 0xb9, 0xa5, 0x4c, 0xad, 0x60, 0x4d,
-	0x73, 0xc1, 0x43, 0xb2, 0x4f, 0xcd, 0x2f, 0x0d, 0x28, 0x1e, 0x44, 0x40, 0xe5, 0xe7, 0x0d, 0x98,
-	0x0d, 0xbc, 0xbd, 0xc6, 0x5a, 0xb3, 0x45, 0x76, 0x9c, 0x9e, 0x88, 0x44, 0xc6, 0x02, 0x21, 0xaa,
-	0x73, 0x09, 0x37, 0x28, 0x15, 0x48, 0xcf, 0x16, 0x27, 0xce, 0x58, 0xd3, 0x42, 0x70, 0xb7, 0x67,
-	0x47, 0xf2, 0x90, 0x19, 0x3e, 0x0f, 0xbb, 0x50, 0xde, 0x70, 0x71, 0x9b, 0x74, 0x3c, 0xd7, 0x26,
-	0x81, 0x20, 0x13, 0x2a, 0x43, 0x86, 0xe1, 0x1d, 0xc5, 0x49, 0xfe, 0x13, 0xbd, 0x07, 0x59, 0xb6,
-	0xef, 0xcb, 0x20, 0x17, 0x57, 0xdf, 0xd2, 0x52, 0x25, 0x62, 0x66, 0x6b, 0xdf, 0x27, 0x96, 0xd8,
-	0x81, 0x16, 0x20, 0x27, 0x7a, 0x58, 0x0e, 0x2a, 0x53, 0xcb, 0x5b, 0x6a, 0x65, 0x3e, 0x8b, 0xf9,
-	0xbd, 0x1f, 0x78, 0x7d, 0x1f, 0x35, 0x20, 0xef, 0x1f, 0xca, 0x8e, 0x27, 0x66, 0x12, 0xb4, 0x15,
-	0xdb, 0x6a, 0xfe, 0x65, 0x40, 0x61, 0x93, 0xe0, 0xa0, 0xdd, 0x39, 0x1d, 0x85, 0x00, 0x8f, 0xb9,
-	0x4d, 0xdd, 0xca, 0x94, 0x8c, 0xb9, 0x4d, 0x5d, 0x74, 0x0d, 0xe6, 0x22, 0x47, 0x6a, 0xee, 0xf0,
-	0x10, 0x55, 0x72, 0x62, 0x20, 0x53, 0xf6, 0x13, 0xa1, 0x33, 0x1f, 0x42, 0xf6, 0x81, 0xc3, 0x84,
-	0x99, 0xc6, 0x9a, 0x8c, 0x5c, 0xc6, 0xe2, 0x3f, 0xd1, 0xf9, 0x08, 0x73, 0x27, 0x45, 0x0a, 0x42,
-	0x7a, 0x8a, 0x39, 0x8f, 0x17, 0xa8, 0xdc, 0x4c, 0x5a, 0x6a, 0x65, 0x3e, 0x85, 0xd9, 0x0f, 0xfb,
-	0x24, 0xd8, 0xb7, 0x08, 0xed, 0xbb, 0xec, 0x64, 0xad, 0x3c, 0x82, 0x6c, 0xc7, 0x61, 0x54, 0xb9,
-	0x14, 0xbf, 0xcd, 0xaf, 0x0c, 0xc8, 0xdf, 0x73, 0xfb, 0x74, 0xb4, 0x39, 0xb9, 0x7a, 0x0b, 0x4a,
-	0x09, 0xae, 0xa2, 0x69, 0xc8, 0xae, 0x3f, 0x59, 0xbf, 0x5b, 0x9e, 0x40, 0x73, 0x50, 0x78, 0x7a,
-	0xf7, 0xce, 0xd6, 0x13, 0xab, 0x59, 0x6f, 0xac, 0xdf, 0xb6, 0xb6, 0xcb, 0x36, 0x2a, 0x43, 0x5e,
-	0x89, 0xee, 0x3d, 0x7a, 0x72, 0x7b, 0xab, 0x4c, 0x56, 0xff, 0x28, 0x41, 0xe1, 0xb1, 0xc0, 0xba,
-	0x49, 0x82, 0x5d, 0xa7, 0x4d, 0x50, 0x13, 0xca, 0xc9, 0x11, 0x1e, 0xba, 0xae, 0x25, 0x6e, 0xca,
-	0xa4, 0xaf, 0x7a, 0x5c, 0x54, 0xcd, 0x09, 0xf4, 0x09, 0x14, 0xe3, 0xa3, 0x37, 0x74, 0x55, 0x6b,
-	0x5e, 0x3b, 0x9f, 0x1b, 0x64, 0xbc, 0x09, 0x85, 0xd8, 0x20, 0x0d, 0x5d, 0xd1, 0xda, 0xd6, 0x0d,
-	0xdb, 0xaa, 0x17, 0xb5, 0xaa, 0xd1, 0x49, 0x98, 0x44, 0x1f, 0x1f, 0xcc, 0xa4, 0xa0, 0xd7, 0x4e,
-	0x6f, 0x06, 0xa1, 0xc7, 0x30, 0x77, 0x64, 0xca, 0x82, 0x6e, 0x68, 0xed, 0xa7, 0x4d, 0x63, 0x06,
-	0xb9, 0xd8, 0x03, 0x74, 0x74, 0xd6, 0x85, 0x96, 0xf5, 0x19, 0x48, 0x1b, 0xd4, 0x55, 0x57, 0x86,
-	0xd6, 0x0f, 0x03, 0xb7, 0x0b, 0x8b, 0xf7, 0x09, 0x8b, 0x0f, 0x48, 0x1c, 0xca, 0x9c, 0x36, 0x45,
-	0xd7, 0xf4, 0xf4, 0xd2, 0x0e, 0x77, 0xaa, 0xd7, 0x87, 0x53, 0x0e, 0xfd, 0xba, 0x50, 0x8a, 0x8f,
-	0x29, 0x68, 0x4a, 0xc6, 0xb4, 0x23, 0x93, 0xea, 0xb5, 0xa1, 0x74, 0x43, 0x6f, 0xcf, 0xa0, 0x94,
-	0x98, 0x4c, 0xa4, 0x9d, 0x4e, 0x3b, 0xbf, 0x18, 0x94, 0xbd, 0x6d, 0x28, 0xc4, 0x06, 0x08, 0x29,
-	0xf4, 0xd6, 0x0d, 0x19, 0x06, 0x99, 0x7e, 0x06, 0xf9, 0x68, 0x97, 0x8f, 0x6a, 0x69, 0x17, 0xe7,
-	0x88, 0xe1, 0xa1, 0xee, 0xcd, 0xb6, 0xbc, 0x37, 0xe1, 0x66, 0x9a, 0xe2, 0x40, 0xd3, 0xb4, 0x0f,
-	0x42, 0xfe, 0x69, 0x78, 0x6b, 0x22, 0xd6, 0xaf, 0x1f, 0x77, 0x6b, 0xfe, 0x6b, 0x6c, 0x28, 0x2c,
-	0xdc, 0x27, 0x2c, 0xd6, 0x26, 0x2a, 0xea, 0xea, 0xa9, 0xa4, 0xed, 0x83, 0x53, 0xa8, 0xa4, 0x6f,
-	0x3e, 0xcd, 0x09, 0xe4, 0x40, 0x31, 0xd6, 0x81, 0xd1, 0x94, 0x64, 0xeb, 0x9a, 0xc6, 0xea, 0xd5,
-	0x61, 0x54, 0x43, 0x57, 0x1f, 0xc1, 0x6c, 0xa4, 0xe9, 0x42, 0x97, 0x8f, 0x61, 0x6c, 0xb4, 0x45,
-	0x19, 0x14, 0xb6, 0x0e, 0x14, 0x62, 0xd5, 0x7b, 0x1a, 0x5b, 0x35, 0xdd, 0x4f, 0xca, 0x01, 0xb4,
-	0xcd, 0x80, 0x39, 0x81, 0x36, 0x21, 0x27, 0x0b, 0x50, 0x64, 0xa6, 0x14, 0xff, 0x91, 0xfa, 0xbc,
-	0xfa, 0xe6, 0xb1, 0x3a, 0xa1, 0xd1, 0x0d, 0xc8, 0xc9, 0xc2, 0x2b, 0xc5, 0x68, 0xac, 0x2a, 0xab,
-	0x2e, 0x69, 0x75, 0x22, 0xd5, 0x87, 0x39, 0x81, 0x1a, 0x30, 0x25, 0xaa, 0x06, 0xa4, 0xbf, 0x32,
-	0xd1, 0x8a, 0x62, 0x40, 0x6c, 0xeb, 0xf5, 0x8f, 0x6f, 0xed, 0x38, 0xac, 0xd3, 0x6f, 0xf1, 0x7f,
-	0x56, 0x5e, 0x38, 0xae, 0xeb, 0xbc, 0x60, 0xa4, 0xdd, 0x59, 0x91, 0xbb, 0x6e, 0xd8, 0x0e, 0x65,
-	0x81, 0xd3, 0xea, 0x33, 0x62, 0xaf, 0x1c, 0xd4, 0x1f, 0x2b, 0xc2, 0x94, 0xd2, 0xf0, 0x5b, 0xad,
-	0x9c, 0x58, 0xdf, 0xfc, 0x37, 0x00, 0x00, 0xff, 0xff, 0x10, 0x02, 0x02, 0xfd, 0x06, 0x1c, 0x00,
-	0x00,
-}
-
-// Reference imports to suppress errors if they are not otherwise used.
-var _ context.Context
-var _ grpc.ClientConn
-
-// This is a compile-time assertion to ensure that this generated file
-// is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion4
-
-// MilvusServiceClient is the client API for MilvusService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type MilvusServiceClient interface {
-	CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	DropCollection(ctx context.Context, in *DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	HasCollection(ctx context.Context, in *HasCollectionRequest, opts ...grpc.CallOption) (*BoolResponse, error)
-	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	DescribeCollection(ctx context.Context, in *DescribeCollectionRequest, opts ...grpc.CallOption) (*DescribeCollectionResponse, error)
-	GetCollectionStatistics(ctx context.Context, in *CollectionStatsRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error)
-	ShowCollections(ctx context.Context, in *ShowCollectionRequest, opts ...grpc.CallOption) (*ShowCollectionResponse, error)
-	CreatePartition(ctx context.Context, in *CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	DropPartition(ctx context.Context, in *DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	HasPartition(ctx context.Context, in *HasPartitionRequest, opts ...grpc.CallOption) (*BoolResponse, error)
-	LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	GetPartitionStatistics(ctx context.Context, in *PartitionStatsRequest, opts ...grpc.CallOption) (*PartitionStatsResponse, error)
-	ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error)
-	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
-	Insert(ctx context.Context, in *InsertRequest, opts ...grpc.CallOption) (*InsertResponse, error)
-	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*QueryResult, error)
-	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-}
-
-type milvusServiceClient struct {
-	cc *grpc.ClientConn
-}
-
-func NewMilvusServiceClient(cc *grpc.ClientConn) MilvusServiceClient {
-	return &milvusServiceClient{cc}
-}
-
-func (c *milvusServiceClient) CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/CreateCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) DropCollection(ctx context.Context, in *DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/DropCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) HasCollection(ctx context.Context, in *HasCollectionRequest, opts ...grpc.CallOption) (*BoolResponse, error) {
-	out := new(BoolResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/HasCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/LoadCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ReleaseCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) DescribeCollection(ctx context.Context, in *DescribeCollectionRequest, opts ...grpc.CallOption) (*DescribeCollectionResponse, error) {
-	out := new(DescribeCollectionResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/DescribeCollection", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) GetCollectionStatistics(ctx context.Context, in *CollectionStatsRequest, opts ...grpc.CallOption) (*CollectionStatsResponse, error) {
-	out := new(CollectionStatsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetCollectionStatistics", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) ShowCollections(ctx context.Context, in *ShowCollectionRequest, opts ...grpc.CallOption) (*ShowCollectionResponse, error) {
-	out := new(ShowCollectionResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ShowCollections", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) CreatePartition(ctx context.Context, in *CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/CreatePartition", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) DropPartition(ctx context.Context, in *DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/DropPartition", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) HasPartition(ctx context.Context, in *HasPartitionRequest, opts ...grpc.CallOption) (*BoolResponse, error) {
-	out := new(BoolResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/HasPartition", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) LoadPartitions(ctx context.Context, in *LoadPartitonRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/LoadPartitions", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) ReleasePartitions(ctx context.Context, in *ReleasePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ReleasePartitions", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) GetPartitionStatistics(ctx context.Context, in *PartitionStatsRequest, opts ...grpc.CallOption) (*PartitionStatsResponse, error) {
-	out := new(PartitionStatsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/GetPartitionStatistics", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) ShowPartitions(ctx context.Context, in *ShowPartitionRequest, opts ...grpc.CallOption) (*ShowPartitionResponse, error) {
-	out := new(ShowPartitionResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/ShowPartitions", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/CreateIndex", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error) {
-	out := new(DescribeIndexResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/DescribeIndex", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) Insert(ctx context.Context, in *InsertRequest, opts ...grpc.CallOption) (*InsertResponse, error) {
-	out := new(InsertResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/Insert", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*QueryResult, error) {
-	out := new(QueryResult)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/Search", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *milvusServiceClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.milvus.MilvusService/Flush", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// MilvusServiceServer is the server API for MilvusService service.
-type MilvusServiceServer interface {
-	CreateCollection(context.Context, *CreateCollectionRequest) (*commonpb.Status, error)
-	DropCollection(context.Context, *DropCollectionRequest) (*commonpb.Status, error)
-	HasCollection(context.Context, *HasCollectionRequest) (*BoolResponse, error)
-	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
-	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
-	DescribeCollection(context.Context, *DescribeCollectionRequest) (*DescribeCollectionResponse, error)
-	GetCollectionStatistics(context.Context, *CollectionStatsRequest) (*CollectionStatsResponse, error)
-	ShowCollections(context.Context, *ShowCollectionRequest) (*ShowCollectionResponse, error)
-	CreatePartition(context.Context, *CreatePartitionRequest) (*commonpb.Status, error)
-	DropPartition(context.Context, *DropPartitionRequest) (*commonpb.Status, error)
-	HasPartition(context.Context, *HasPartitionRequest) (*BoolResponse, error)
-	LoadPartitions(context.Context, *LoadPartitonRequest) (*commonpb.Status, error)
-	ReleasePartitions(context.Context, *ReleasePartitionRequest) (*commonpb.Status, error)
-	GetPartitionStatistics(context.Context, *PartitionStatsRequest) (*PartitionStatsResponse, error)
-	ShowPartitions(context.Context, *ShowPartitionRequest) (*ShowPartitionResponse, error)
-	CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
-	Insert(context.Context, *InsertRequest) (*InsertResponse, error)
-	Search(context.Context, *SearchRequest) (*QueryResult, error)
-	Flush(context.Context, *FlushRequest) (*commonpb.Status, error)
-}
-
-// UnimplementedMilvusServiceServer can be embedded to have forward compatible implementations.
-type UnimplementedMilvusServiceServer struct {
-}
-
-func (*UnimplementedMilvusServiceServer) CreateCollection(ctx context.Context, req *CreateCollectionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) DropCollection(ctx context.Context, req *DropCollectionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DropCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) HasCollection(ctx context.Context, req *HasCollectionRequest) (*BoolResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method HasCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) LoadCollection(ctx context.Context, req *LoadCollectionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method LoadCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) ReleaseCollection(ctx context.Context, req *ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ReleaseCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) DescribeCollection(ctx context.Context, req *DescribeCollectionRequest) (*DescribeCollectionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DescribeCollection not implemented")
-}
-func (*UnimplementedMilvusServiceServer) GetCollectionStatistics(ctx context.Context, req *CollectionStatsRequest) (*CollectionStatsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetCollectionStatistics not implemented")
-}
-func (*UnimplementedMilvusServiceServer) ShowCollections(ctx context.Context, req *ShowCollectionRequest) (*ShowCollectionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShowCollections not implemented")
-}
-func (*UnimplementedMilvusServiceServer) CreatePartition(ctx context.Context, req *CreatePartitionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreatePartition not implemented")
-}
-func (*UnimplementedMilvusServiceServer) DropPartition(ctx context.Context, req *DropPartitionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DropPartition not implemented")
-}
-func (*UnimplementedMilvusServiceServer) HasPartition(ctx context.Context, req *HasPartitionRequest) (*BoolResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method HasPartition not implemented")
-}
-func (*UnimplementedMilvusServiceServer) LoadPartitions(ctx context.Context, req *LoadPartitonRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method LoadPartitions not implemented")
-}
-func (*UnimplementedMilvusServiceServer) ReleasePartitions(ctx context.Context, req *ReleasePartitionRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ReleasePartitions not implemented")
-}
-func (*UnimplementedMilvusServiceServer) GetPartitionStatistics(ctx context.Context, req *PartitionStatsRequest) (*PartitionStatsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetPartitionStatistics not implemented")
-}
-func (*UnimplementedMilvusServiceServer) ShowPartitions(ctx context.Context, req *ShowPartitionRequest) (*ShowPartitionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitions not implemented")
-}
-func (*UnimplementedMilvusServiceServer) CreateIndex(ctx context.Context, req *CreateIndexRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
-}
-func (*UnimplementedMilvusServiceServer) DescribeIndex(ctx context.Context, req *DescribeIndexRequest) (*DescribeIndexResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndex not implemented")
-}
-func (*UnimplementedMilvusServiceServer) Insert(ctx context.Context, req *InsertRequest) (*InsertResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Insert not implemented")
-}
-func (*UnimplementedMilvusServiceServer) Search(ctx context.Context, req *SearchRequest) (*QueryResult, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
-}
-func (*UnimplementedMilvusServiceServer) Flush(ctx context.Context, req *FlushRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
-}
-
-func RegisterMilvusServiceServer(s *grpc.Server, srv MilvusServiceServer) {
-	s.RegisterService(&_MilvusService_serviceDesc, srv)
-}
-
-func _MilvusService_CreateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).CreateCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/CreateCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).CreateCollection(ctx, req.(*CreateCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_DropCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DropCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).DropCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/DropCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).DropCollection(ctx, req.(*DropCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_HasCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HasCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).HasCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/HasCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).HasCollection(ctx, req.(*HasCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_LoadCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LoadCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).LoadCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/LoadCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).LoadCollection(ctx, req.(*LoadCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_ReleaseCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleaseCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).ReleaseCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/ReleaseCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ReleaseCollection(ctx, req.(*ReleaseCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_DescribeCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DescribeCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).DescribeCollection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/DescribeCollection",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).DescribeCollection(ctx, req.(*DescribeCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_GetCollectionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CollectionStatsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).GetCollectionStatistics(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/GetCollectionStatistics",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetCollectionStatistics(ctx, req.(*CollectionStatsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_ShowCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowCollectionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).ShowCollections(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/ShowCollections",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ShowCollections(ctx, req.(*ShowCollectionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_CreatePartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreatePartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).CreatePartition(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/CreatePartition",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).CreatePartition(ctx, req.(*CreatePartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_DropPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DropPartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).DropPartition(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/DropPartition",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).DropPartition(ctx, req.(*DropPartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_HasPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HasPartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).HasPartition(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/HasPartition",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).HasPartition(ctx, req.(*HasPartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_LoadPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LoadPartitonRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).LoadPartitions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/LoadPartitions",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).LoadPartitions(ctx, req.(*LoadPartitonRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_ReleasePartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReleasePartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).ReleasePartitions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/ReleasePartitions",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ReleasePartitions(ctx, req.(*ReleasePartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_GetPartitionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PartitionStatsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).GetPartitionStatistics(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/GetPartitionStatistics",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).GetPartitionStatistics(ctx, req.(*PartitionStatsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowPartitionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).ShowPartitions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/ShowPartitions",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).ShowPartitions(ctx, req.(*ShowPartitionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateIndexRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).CreateIndex(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/CreateIndex",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).CreateIndex(ctx, req.(*CreateIndexRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_DescribeIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DescribeIndexRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).DescribeIndex(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/DescribeIndex",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).DescribeIndex(ctx, req.(*DescribeIndexRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_Insert_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(InsertRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).Insert(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/Insert",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).Insert(ctx, req.(*InsertRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_Search_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SearchRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).Search(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/Search",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).Search(ctx, req.(*SearchRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MilvusService_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FlushRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MilvusServiceServer).Flush(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.milvus.MilvusService/Flush",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MilvusServiceServer).Flush(ctx, req.(*FlushRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-var _MilvusService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "milvus.proto.milvus.MilvusService",
-	HandlerType: (*MilvusServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "CreateCollection",
-			Handler:    _MilvusService_CreateCollection_Handler,
-		},
-		{
-			MethodName: "DropCollection",
-			Handler:    _MilvusService_DropCollection_Handler,
-		},
-		{
-			MethodName: "HasCollection",
-			Handler:    _MilvusService_HasCollection_Handler,
-		},
-		{
-			MethodName: "LoadCollection",
-			Handler:    _MilvusService_LoadCollection_Handler,
-		},
-		{
-			MethodName: "ReleaseCollection",
-			Handler:    _MilvusService_ReleaseCollection_Handler,
-		},
-		{
-			MethodName: "DescribeCollection",
-			Handler:    _MilvusService_DescribeCollection_Handler,
-		},
-		{
-			MethodName: "GetCollectionStatistics",
-			Handler:    _MilvusService_GetCollectionStatistics_Handler,
-		},
-		{
-			MethodName: "ShowCollections",
-			Handler:    _MilvusService_ShowCollections_Handler,
-		},
-		{
-			MethodName: "CreatePartition",
-			Handler:    _MilvusService_CreatePartition_Handler,
-		},
-		{
-			MethodName: "DropPartition",
-			Handler:    _MilvusService_DropPartition_Handler,
-		},
-		{
-			MethodName: "HasPartition",
-			Handler:    _MilvusService_HasPartition_Handler,
-		},
-		{
-			MethodName: "LoadPartitions",
-			Handler:    _MilvusService_LoadPartitions_Handler,
-		},
-		{
-			MethodName: "ReleasePartitions",
-			Handler:    _MilvusService_ReleasePartitions_Handler,
-		},
-		{
-			MethodName: "GetPartitionStatistics",
-			Handler:    _MilvusService_GetPartitionStatistics_Handler,
-		},
-		{
-			MethodName: "ShowPartitions",
-			Handler:    _MilvusService_ShowPartitions_Handler,
-		},
-		{
-			MethodName: "CreateIndex",
-			Handler:    _MilvusService_CreateIndex_Handler,
-		},
-		{
-			MethodName: "DescribeIndex",
-			Handler:    _MilvusService_DescribeIndex_Handler,
-		},
-		{
-			MethodName: "Insert",
-			Handler:    _MilvusService_Insert_Handler,
-		},
-		{
-			MethodName: "Search",
-			Handler:    _MilvusService_Search_Handler,
-		},
-		{
-			MethodName: "Flush",
-			Handler:    _MilvusService_Flush_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "milvus.proto",
+	// 809 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x97, 0xdf, 0x6f, 0x2a, 0x45,
+	0x14, 0xc7, 0x33, 0x85, 0xd2, 0x72, 0xf8, 0x51, 0xba, 0x2d, 0xb0, 0xad, 0x51, 0x71, 0x93, 0x5a,
+	0x8c, 0x11, 0x92, 0xda, 0xc4, 0xf8, 0xd6, 0x50, 0xd4, 0x36, 0xd5, 0xa6, 0x6e, 0x8d, 0x0f, 0xbe,
+	0x90, 0xd9, 0xdd, 0x91, 0xdd, 0xb8, 0xbb, 0xb3, 0xce, 0x0c, 0xd2, 0xf6, 0xd9, 0x47, 0x35, 0xfa,
+	0x4f, 0xf8, 0xe2, 0x9b, 0xd6, 0xc4, 0x7f, 0xca, 0xdc, 0x3f, 0xe1, 0xde, 0xcc, 0xcc, 0x42, 0x81,
+	0xcb, 0x03, 0xc9, 0x4d, 0x03, 0xbc, 0x31, 0xdf, 0x3d, 0x67, 0xe6, 0x73, 0xce, 0x19, 0xbe, 0x2c,
+	0x50, 0x8c, 0x82, 0xf0, 0xa7, 0x01, 0x6f, 0x25, 0x8c, 0x0a, 0x6a, 0xec, 0x4d, 0xae, 0x5a, 0x7a,
+	0x71, 0x58, 0x74, 0x69, 0x14, 0xd1, 0x58, 0x8b, 0x87, 0xe5, 0x20, 0x16, 0x84, 0xc5, 0x38, 0xd4,
+	0x6b, 0xeb, 0x4f, 0x04, 0xf5, 0x73, 0x46, 0xb0, 0x20, 0xe7, 0x34, 0x0c, 0x89, 0x2b, 0x02, 0x1a,
+	0xdb, 0xe4, 0xc7, 0x01, 0xe1, 0xc2, 0x38, 0x81, 0xac, 0x83, 0x39, 0x31, 0x51, 0x03, 0x35, 0x0b,
+	0x27, 0xef, 0xb4, 0xa6, 0x76, 0x1f, 0xef, 0xf3, 0x15, 0xef, 0x77, 0x30, 0x27, 0xb6, 0x8a, 0x35,
+	0xea, 0xb0, 0xe5, 0x39, 0xbd, 0x18, 0x47, 0xc4, 0xdc, 0x68, 0xa0, 0x66, 0xde, 0xce, 0x79, 0xce,
+	0x35, 0x8e, 0x88, 0xf1, 0x3e, 0x94, 0xdd, 0xf1, 0x09, 0x52, 0x31, 0x33, 0xea, 0xf9, 0x8c, 0x6a,
+	0xd4, 0x20, 0xc7, 0x5d, 0x9f, 0x44, 0xd8, 0xcc, 0x36, 0x50, 0xb3, 0x68, 0xa7, 0x2b, 0xeb, 0x17,
+	0x04, 0xd5, 0x2e, 0xa3, 0xc9, 0x6a, 0x60, 0x4a, 0x9c, 0xfd, 0x0b, 0xcc, 0x9f, 0x99, 0xe6, 0x18,
+	0x76, 0x9e, 0xce, 0xd5, 0x01, 0xf3, 0x71, 0xfe, 0x40, 0x70, 0xd0, 0x25, 0xdc, 0x65, 0x81, 0x43,
+	0x56, 0x85, 0xe9, 0x14, 0x0e, 0xe7, 0x21, 0xf1, 0x84, 0xc6, 0x7c, 0x72, 0xce, 0xa8, 0x91, 0x99,
+	0x98, 0xf3, 0xaf, 0x08, 0xaa, 0x5f, 0x52, 0xec, 0xad, 0x4a, 0x15, 0xbf, 0x23, 0x30, 0x6d, 0x12,
+	0x12, 0xcc, 0x57, 0xa6, 0xb1, 0xbf, 0x21, 0xa8, 0x3d, 0xb1, 0xdc, 0x0a, 0x2c, 0xf8, 0x72, 0x81,
+	0x6c, 0xa8, 0xbf, 0xc6, 0x93, 0x8e, 0xf9, 0x13, 0xd8, 0xe4, 0x52, 0x50, 0x53, 0x2e, 0x9c, 0xbc,
+	0x37, 0x4d, 0x94, 0x5a, 0xd3, 0x15, 0xb9, 0xff, 0x16, 0x87, 0x03, 0x72, 0x83, 0x03, 0x66, 0xeb,
+	0x78, 0xcb, 0x83, 0xea, 0xad, 0x4f, 0x87, 0xcf, 0xdb, 0x73, 0xeb, 0x1c, 0x6a, 0xb3, 0xa7, 0xa4,
+	0xe0, 0x1f, 0x40, 0x65, 0xa6, 0x78, 0x5d, 0x43, 0xde, 0xde, 0x99, 0xae, 0x9e, 0x5b, 0xff, 0xca,
+	0x79, 0x28, 0x0f, 0xbd, 0xc1, 0x4c, 0x04, 0x4b, 0xbf, 0x20, 0xc6, 0x11, 0x94, 0x93, 0x11, 0x89,
+	0x8e, 0xcb, 0xaa, 0xb8, 0xd2, 0x58, 0x55, 0xc5, 0xff, 0x83, 0x60, 0x5f, 0x5a, 0xea, 0x7a, 0x51,
+	0xff, 0x8d, 0x60, 0xef, 0x02, 0xf3, 0xf5, 0x82, 0x7e, 0x44, 0xb0, 0x27, 0x5d, 0x4d, 0x53, 0x2f,
+	0x1b, 0xfa, 0x18, 0x76, 0xa6, 0xa1, 0xb9, 0x99, 0x55, 0x57, 0xbb, 0x3c, 0x45, 0xcd, 0xad, 0xff,
+	0x10, 0xd4, 0x53, 0xf3, 0x5b, 0x91, 0x7e, 0x2f, 0x8c, 0xfe, 0x88, 0xa0, 0x3a, 0x66, 0x5e, 0xbe,
+	0x47, 0x2e, 0x7a, 0x51, 0xbe, 0x86, 0xda, 0x2c, 0xf5, 0x9b, 0x3a, 0xa9, 0x7c, 0x55, 0x91, 0x26,
+	0xb7, 0x1a, 0x13, 0xb4, 0xce, 0xb4, 0xb1, 0x4f, 0xd0, 0xa4, 0x05, 0xce, 0x19, 0x2d, 0x9a, 0x3b,
+	0xda, 0x17, 0x08, 0x0c, 0xed, 0xb7, 0x97, 0xb1, 0x47, 0xee, 0x96, 0x3b, 0xd7, 0xb7, 0x01, 0xbe,
+	0x0f, 0x48, 0xe8, 0x4d, 0xce, 0x34, 0xaf, 0x14, 0xf5, 0xb8, 0x0b, 0x45, 0x72, 0x27, 0x18, 0xee,
+	0x25, 0x98, 0xe1, 0x88, 0x9b, 0x9b, 0x8b, 0x0e, 0xaf, 0xa0, 0xd2, 0x6e, 0x54, 0x96, 0xf5, 0x97,
+	0x74, 0xea, 0xf4, 0x5d, 0x6a, 0xe5, 0x6b, 0xb6, 0x42, 0xa8, 0x28, 0x48, 0x4d, 0x9c, 0xc8, 0x34,
+	0x99, 0x12, 0x48, 0x4d, 0xa7, 0x20, 0x9d, 0xa2, 0x14, 0xb5, 0xe3, 0xa7, 0x90, 0x4b, 0x1b, 0xb4,
+	0xb1, 0x68, 0x83, 0xd2, 0x04, 0x2b, 0x82, 0xea, 0x4c, 0x6b, 0xd2, 0xfb, 0xf4, 0x0d, 0x18, 0xfa,
+	0x48, 0xef, 0x89, 0x63, 0xf4, 0xed, 0x39, 0x6a, 0xcd, 0xf9, 0xab, 0xd4, 0x9a, 0xa5, 0xb6, 0x77,
+	0x83, 0x19, 0x85, 0x5b, 0x2f, 0x11, 0x94, 0x2e, 0x63, 0x4e, 0x98, 0x58, 0x07, 0x3f, 0x31, 0x4e,
+	0x61, 0x9b, 0xd1, 0x61, 0xcf, 0xc3, 0x02, 0xa7, 0x77, 0xef, 0x60, 0x6e, 0x6b, 0x3b, 0x21, 0x75,
+	0xec, 0x2d, 0x46, 0x87, 0x5d, 0x2c, 0xb0, 0xf1, 0x16, 0xe4, 0x7d, 0xcc, 0xfd, 0xde, 0x0f, 0xe4,
+	0x9e, 0x9b, 0xb9, 0x46, 0xa6, 0x59, 0xb2, 0xb7, 0xa5, 0x70, 0x45, 0xee, 0xb9, 0x75, 0x0d, 0xe5,
+	0x51, 0x03, 0xd2, 0x4e, 0xbf, 0x0b, 0x05, 0x46, 0x87, 0x97, 0xdd, 0x9e, 0x43, 0xfa, 0x41, 0xac,
+	0x1a, 0x91, 0xb1, 0x41, 0x49, 0x1d, 0xa9, 0xc8, 0xfd, 0x74, 0x00, 0x89, 0x3d, 0x55, 0x70, 0xc6,
+	0xde, 0x56, 0xc2, 0x67, 0xb1, 0x67, 0xfd, 0x8f, 0xa0, 0x74, 0x4b, 0x30, 0x73, 0xfd, 0xf5, 0xf8,
+	0x69, 0x31, 0x2a, 0x90, 0xf1, 0x78, 0x68, 0x6e, 0xaa, 0x5d, 0xe4, 0x47, 0xe3, 0x43, 0xd8, 0x4d,
+	0x42, 0xec, 0x12, 0x9f, 0x86, 0x1e, 0x61, 0xbd, 0x3e, 0xa3, 0x83, 0x44, 0xf5, 0xad, 0x68, 0x57,
+	0x26, 0x1e, 0x7c, 0x21, 0x75, 0xeb, 0x67, 0x04, 0xc5, 0xcf, 0xc3, 0x01, 0x5f, 0x6e, 0xb9, 0x9d,
+	0xce, 0x77, 0x67, 0xfd, 0x40, 0xf8, 0x03, 0x47, 0x5e, 0x81, 0xf6, 0x43, 0x10, 0x86, 0xc1, 0x83,
+	0x20, 0xae, 0xdf, 0xd6, 0xc7, 0x7f, 0xe4, 0x05, 0x5c, 0xb0, 0xc0, 0x19, 0x08, 0xe2, 0xb5, 0x47,
+	0x10, 0x6d, 0xc5, 0x94, 0x46, 0x24, 0x8e, 0x93, 0x53, 0xeb, 0x8f, 0x5f, 0x05, 0x00, 0x00, 0xff,
+	0xff, 0x3b, 0xfd, 0x8e, 0x53, 0x87, 0x10, 0x00, 0x00,
 }

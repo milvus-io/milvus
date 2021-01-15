@@ -113,6 +113,16 @@ message FlushSegRequest {
   repeated int64 segmentIDs = 4;
 }
 
+message SegmentInfo {
+  int64 segmentID=1;
+  int64 collectionID =2;
+  int64 partitionID=3;
+  repeated string insert_channels = 4;
+  uint64 open_time=5;
+  uint64 close_time=6;
+  int64 num_rows=7;
+  int64 mem_size=8;
+}
 
 service DataService {
 

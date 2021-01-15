@@ -5,13 +5,11 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/mil
 
 import "common.proto";
 import "internal.proto";
-import "schema.proto";
 
 message CreateCollectionRequest {
   internal.MsgBase base = 1;
   string db_name = 2;
   string collectionName = 3;
-  // `schema` is the serialized `schema.CollectionSchema`
   bytes schema = 4;
 }
 
@@ -28,11 +26,6 @@ message HasCollectionRequest {
   string collection_name = 3;
 }
 
-message BoolResponse {
-  common.Status status = 1;
-  bool value = 2;
-}
-
 message DescribeCollectionRequest {
   internal.MsgBase base = 1;
   string db_name = 2;
@@ -40,8 +33,7 @@ message DescribeCollectionRequest {
 }
 
 message DescribeCollectionResponse {
-  common.Status status = 1;
-  schema.CollectionSchema schema = 2;
+  repeated bytes schema = 1;
 }
 
 message LoadCollectionRequest {
@@ -64,7 +56,6 @@ message CollectionStatsRequest {
 
 message CollectionStatsResponse {
   repeated common.KeyValuePair stats = 1;
-  common.Status status = 2;
 }
 
 
@@ -75,7 +66,6 @@ message ShowCollectionRequest {
 
 message ShowCollectionResponse {
   repeated string collection_names = 1;
-  common.Status status = 2;
 }
 
 
@@ -124,7 +114,6 @@ message PartitionStatsRequest  {
 
 message PartitionStatsResponse {
   repeated common.KeyValuePair stats = 1;
-  common.Status status = 2;
 }
 
 message ShowPartitionRequest {
@@ -135,7 +124,6 @@ message ShowPartitionRequest {
 
 message ShowPartitionResponse {
   repeated  string partition_names = 1;
-  common.Status status = 2;
 }
 
 
@@ -161,7 +149,6 @@ message IndexDescription {
 
 message DescribeIndexResponse {
   repeated IndexDescription index_descriptions = 1;
-  common.Status status = 2;
 }
 
 message InsertRequest {
@@ -176,24 +163,6 @@ message InsertRequest {
 message InsertResponse {
   int64  rowID_begin = 1;
   int64  rowID_end = 2;
-  common.Status status = 3;
-}
-
-enum PlaceholderType {
-  NONE = 0;
-  VECTOR_BINARY = 100;
-  VECTOR_FLOAT = 101;
-}
-
-message PlaceholderValue {
-  string tag = 1;
-  PlaceholderType type = 2;
-  // values is a 2d-array, every array contains a vector
-  repeated bytes values = 3;
-}
-
-message PlaceholderGroup {
-  repeated PlaceholderValue placeholders = 1;
 }
 
 message SearchRequest {
@@ -202,49 +171,11 @@ message SearchRequest {
   string collection_name = 3;
   repeated  string partition_names = 4;
   string dsl = 5;
-  // serialized `PlaceholderGroup`
-  bytes placeholder_group = 6;
-}
-
-message Hits {
-  repeated int64 IDs = 1;
-  repeated bytes row_data = 2;
-  repeated float scores = 3;
-}
-
-message QueryResult {
-  common.Status status = 1;
-  repeated bytes hits = 2;
+  repeated bytes placeholder_group = 6;
 }
 
 message FlushRequest {
   internal.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
-}
-
-service MilvusService {
-  rpc CreateCollection(CreateCollectionRequest) returns (common.Status) {}
-  rpc DropCollection(DropCollectionRequest) returns (common.Status) {}
-  rpc HasCollection(HasCollectionRequest) returns (BoolResponse) {}
-  rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
-  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
-  rpc DescribeCollection(DescribeCollectionRequest) returns (DescribeCollectionResponse) {}
-  rpc GetCollectionStatistics(CollectionStatsRequest) returns (CollectionStatsResponse) {}
-  rpc ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}
-
-  rpc CreatePartition(CreatePartitionRequest) returns (common.Status) {}
-  rpc DropPartition(DropPartitionRequest) returns (common.Status) {}
-  rpc HasPartition(HasPartitionRequest) returns (BoolResponse) {}
-  rpc LoadPartitions(LoadPartitonRequest) returns (common.Status) {}
-  rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
-  rpc GetPartitionStatistics(PartitionStatsRequest) returns (PartitionStatsResponse) {}
-  rpc ShowPartitions(ShowPartitionRequest) returns (ShowPartitionResponse) {}
-
-  rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
-  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
-
-  rpc Insert(InsertRequest) returns (InsertResponse) {}
-  rpc Search(SearchRequest) returns (QueryResult) {}
-  rpc Flush(FlushRequest) returns (common.Status) {}
 }
