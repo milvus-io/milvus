@@ -44,16 +44,16 @@ class SegmentInternalInterface : public SegmentInterface {
     get_schema() const = 0;
 
     virtual int64_t
-    get_num_chunk() const = 0;
+    get_safe_num_chunk() const = 0;
 
     template <typename T>
     Span<T>
     chunk_data(FieldOffset field_offset, int64_t chunk_id) const {
-        auto span = chunk_data_impl(field_offset, chunk_id);
-        return static_cast<Span<T>>(span);
+        return static_cast<Span<T>>(chunk_data_impl(field_offset, chunk_id));
     }
 
  protected:
+    // blob and row_count
     virtual SpanBase
     chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
 };

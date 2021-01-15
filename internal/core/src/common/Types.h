@@ -76,3 +76,5 @@ using FieldName = fluent::NamedType<std::string, struct FieldNameTag, fluent::Co
 using FieldOffset = fluent::NamedType<int64_t, struct FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 
 }  // namespace milvus
+
+#include "VectorTrait.h"
