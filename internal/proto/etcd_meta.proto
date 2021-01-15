@@ -27,6 +27,7 @@ message CollectionMeta {
   uint64 create_time=3;
   repeated int64 segmentIDs=4;
   repeated string partition_tags=5;
+  repeated int64  partitionIDs=6;
 }
 
 message FieldBinlogFiles {

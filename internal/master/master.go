@@ -12,7 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 
-	indexnodeclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
+	indexbuilderclient "github.com/zilliztech/milvus-distributed/internal/indexbuilder/client"
 
 	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
 
@@ -185,7 +185,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	buildIndexClient, err := indexnodeclient.NewBuildIndexClient(ctx, Params.IndexBuilderAddress)
+	buildIndexClient, err := indexbuilderclient.NewBuildIndexClient(ctx, Params.IndexBuilderAddress)
 	if err != nil {
 		return nil, err
 	}

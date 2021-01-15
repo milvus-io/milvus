@@ -13,7 +13,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/indexnode"
+	"github.com/zilliztech/milvus-distributed/internal/indexbuilder"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -243,7 +243,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			indexRowData = append(indexRowData, float32(n*i))
 		}
 	}
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexbuilder.NewCIndex(typeParams, indexParams)
 	assert.Nil(t, err)
 	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
 	assert.Equal(t, err, nil)
@@ -551,7 +551,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	// generator index
 	typeParams := make(map[string]string)
 	typeParams["dim"] = "128"
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexbuilder.NewCIndex(typeParams, indexParams)
 	assert.Nil(t, err)
 	err = index.BuildBinaryVecIndexWithoutIds(indexRowData)
 	assert.Equal(t, err, nil)

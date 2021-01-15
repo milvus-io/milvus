@@ -7,14 +7,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/indexnode"
+	"github.com/zilliztech/milvus-distributed/internal/indexbuilder"
 	"go.uber.org/zap"
 )
 
 func main() {
-	indexnode.Init()
+	indexbuilder.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := indexnode.CreateBuilder(ctx)
+	svr, err := indexbuilder.CreateBuilder(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

@@ -1,6 +1,8 @@
-## 8. Message Stream
+## 8. Message Stream Service
 
 
+
+#### 8.1 Overview
 
 
 
@@ -64,14 +66,6 @@ type DescribeChannelResponse struct {
 
 
 #### A.3 Message Stream
-
-* Overview
-
-
-
-<img src="./figs/msg_stream_input_output.jpeg" width=700>
-
-* Interface
 
 ``` go
 type MsgType uint32

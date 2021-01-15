@@ -17,7 +17,6 @@ set(MILVUS_TEST_FILES
         test_sealed.cpp
         test_reduce.cpp
         test_interface.cpp
-        test_span.cpp
         )
 add_executable(all_tests
         ${MILVUS_TEST_FILES}

@@ -15,9 +15,8 @@ MILVUS_DIR="${ROOT_DIR}/internal/"
 echo $MILVUS_DIR
 
 go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast
+go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover "${MILVUS_DIR}/writenode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/master/..." -failfast
-go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." -failfast

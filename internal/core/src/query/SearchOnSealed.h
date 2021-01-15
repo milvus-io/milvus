@@ -16,10 +16,6 @@
 #include "query/Search.h"
 
 namespace milvus::query {
-
-aligned_vector<uint8_t>
-AssembleNegBitmap(const BitmapSimple& bitmap_simple);
-
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
@@ -27,7 +23,7 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                Timestamp timestamp,
-               const faiss::BitsetView& view,
+               std::optional<const BitmapSimple*> bitmaps_opt,
                QueryResult& result);
 
 }  // namespace milvus::query

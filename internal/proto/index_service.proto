@@ -47,18 +47,6 @@ message BuildIndexResponse {
   int64 indexID = 2;
 }
 
-
-message BuildIndexCmd {
-  int64 indexID = 1;
-  BuildIndexRequest req = 2;
-}
-
-message BuildIndexNotification {
-  common.Status status = 1;
-  int64 indexID = 2;
-  repeated string index_file_paths = 3;
-}
-
 message IndexFilePathRequest {
   int64 indexID = 1;
 }
@@ -92,18 +80,5 @@ service IndexService {
   rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
   rpc GetIndexStates(IndexStatesRequest) returns (IndexStatesResponse) {}
   rpc GetIndexFilePaths(IndexFilePathRequest) returns (IndexFilePathsResponse){}
-  rpc NotifyBuildIndex(BuildIndexNotification) returns (common.Status) {}
-}
-
-
-service IndexNode {
-  /**
-   * @brief This method is used to create collection
-   *
-   * @param CollectionSchema, use to provide collection information to be created.
-   *
-   * @return Status
-   */
-  rpc BuildIndex(BuildIndexCmd) returns (common.Status){}
 
 }
