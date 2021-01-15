@@ -1,7 +1,7 @@
-package querynode
+package querynodeimp
 
 type deleteNode struct {
-	BaseNode
+	baseNode
 	deleteMsg deleteMsg
 }
 
@@ -17,11 +17,11 @@ func newDeleteNode() *deleteNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &deleteNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 	}
 }

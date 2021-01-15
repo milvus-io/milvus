@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 )
 
 func TestSearch_Search(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	pulsarURL := Params.PulsarAddress
@@ -204,7 +204,7 @@ func TestSearch_Search(t *testing.T) {
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
-	node := NewQueryNode(context.Background(), 0)
+	node := newQueryNode(context.Background(), 0)
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	pulsarURL := Params.PulsarAddress

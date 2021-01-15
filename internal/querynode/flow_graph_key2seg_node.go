@@ -1,7 +1,7 @@
-package querynode
+package querynodeimp
 
 type key2SegNode struct {
-	BaseNode
+	baseNode
 	key2SegMsg key2SegMsg
 }
 
@@ -17,12 +17,12 @@ func newKey2SegNode() *key2SegNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &key2SegNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 	}
 }
 

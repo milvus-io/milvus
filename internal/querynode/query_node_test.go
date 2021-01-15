@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"context"
@@ -118,7 +118,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collecti
 	assert.NoError(t, err)
 }
 
-func newQueryNode() *QueryNode {
+func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context
 
@@ -134,7 +134,7 @@ func newQueryNode() *QueryNode {
 		ctx = context.Background()
 	}
 
-	svr := NewQueryNode(ctx, 0)
+	svr := newQueryNode(ctx, 0)
 	return svr
 
 }
@@ -166,7 +166,7 @@ func TestMain(m *testing.M) {
 
 // NOTE: start pulsar and etcd before test
 func TestQueryNode_Start(t *testing.T) {
-	localNode := newQueryNode()
+	localNode := newQueryNodeMock()
 	err := localNode.Start()
 	assert.Nil(t, err)
 	localNode.Close()

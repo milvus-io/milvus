@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 )
 
 type filterDmNode struct {
-	BaseNode
+	baseNode
 	ddMsg *ddMsg
 }
 
@@ -159,11 +159,11 @@ func newFilteredDmNode() *filterDmNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &filterDmNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 	}
 }

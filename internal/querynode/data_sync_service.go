@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"context"
@@ -40,15 +40,15 @@ func (dsService *dataSyncService) initNodes() {
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx)
-	var ddStreamNode Node = newDDInputNode(dsService.ctx)
+	var dmStreamNode node = newDmInputNode(dsService.ctx)
+	var ddStreamNode node = newDDInputNode(dsService.ctx)
 
-	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.replica)
+	var filterDmNode node = newFilteredDmNode()
+	var ddNode node = newDDNode(dsService.replica)
 
-	var insertNode Node = newInsertNode(dsService.replica)
-	var serviceTimeNode Node = newServiceTimeNode(dsService.replica)
-	var gcNode Node = newGCNode(dsService.replica)
+	var insertNode node = newInsertNode(dsService.replica)
+	var serviceTimeNode node = newServiceTimeNode(dsService.replica)
+	var gcNode node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)
 	dsService.fg.AddNode(&ddStreamNode)

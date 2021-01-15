@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"math"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestMetaService_start(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	node.metaService.start()
@@ -118,7 +118,7 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 }
 
 func TestMetaService_processCollectionCreate(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -163,7 +163,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
@@ -185,7 +185,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 }
 
 func TestMetaService_processCreate(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := Params.MetaRootPath + "/collection/0"
@@ -241,7 +241,7 @@ func TestMetaService_processCreate(t *testing.T) {
 }
 
 func TestMetaService_processSegmentModify(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(0)
@@ -275,7 +275,7 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 }
 
 func TestMetaService_processCollectionModify(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -383,7 +383,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 }
 
 func TestMetaService_processModify(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := Params.MetaRootPath + "/collection/0"
@@ -516,7 +516,7 @@ func TestMetaService_processModify(t *testing.T) {
 }
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
@@ -541,7 +541,7 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 }
 
 func TestMetaService_processCollectionDelete(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	id := "0"
@@ -589,7 +589,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 }
 
 func TestMetaService_processDelete(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	key1 := Params.MetaRootPath + "/collection/0"
@@ -652,7 +652,7 @@ func TestMetaService_processDelete(t *testing.T) {
 }
 
 func TestMetaService_processResp(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	metaChan := (*node.metaService).kvBase.WatchWithPrefix("")
@@ -667,7 +667,7 @@ func TestMetaService_processResp(t *testing.T) {
 }
 
 func TestMetaService_loadCollections(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	err2 := (*node.metaService).loadCollections()
@@ -676,7 +676,7 @@ func TestMetaService_loadCollections(t *testing.T) {
 }
 
 func TestMetaService_loadSegments(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	err2 := (*node.metaService).loadSegments()

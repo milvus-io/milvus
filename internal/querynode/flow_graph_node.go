@@ -1,7 +1,7 @@
-package querynode
+package querynodeimp
 
 import "github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 
-type BaseNode = flowgraph.BaseNode
-type Node = flowgraph.Node
-type InputNode = flowgraph.InputNode
+type baseNode = flowgraph.BaseNode
+type node = flowgraph.Node
+type inputNode = flowgraph.InputNode

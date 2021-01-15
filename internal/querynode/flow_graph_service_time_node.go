@@ -1,11 +1,11 @@
-package querynode
+package querynodeimp
 
 import (
 	"log"
 )
 
 type serviceTimeNode struct {
-	BaseNode
+	baseNode
 	replica collectionReplica
 }
 
@@ -42,12 +42,12 @@ func newServiceTimeNode(replica collectionReplica) *serviceTimeNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &serviceTimeNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 		replica:  replica,
 	}
 }

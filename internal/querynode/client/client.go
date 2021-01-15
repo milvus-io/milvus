@@ -8,21 +8,29 @@ import (
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-type LoadIndexClient struct {
+type Client struct {
 	inputStream *msgstream.MsgStream
 }
 
-func NewLoadIndexClient(ctx context.Context, pulsarAddress string, loadIndexChannels []string) *LoadIndexClient {
+func NewQueryNodeClient(ctx context.Context, pulsarAddress string, loadIndexChannels []string) *Client {
 	loadIndexStream := msgstream.NewPulsarMsgStream(ctx, 0)
 	loadIndexStream.SetPulsarClient(pulsarAddress)
 	loadIndexStream.CreatePulsarProducers(loadIndexChannels)
 	var input msgstream.MsgStream = loadIndexStream
-	return &LoadIndexClient{
+	return &Client{
 		inputStream: &input,
 	}
 }
 
-func (lic *LoadIndexClient) LoadIndex(indexPaths []string, segmentID int64, fieldID int64, fieldName string, indexParams map[string]string) error {
+func (c *Client) Close() {
+	(*c.inputStream).Close()
+}
+
+func (c *Client) LoadIndex(indexPaths []string,
+	segmentID int64,
+	fieldID int64,
+	fieldName string,
+	indexParams map[string]string) error {
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -53,10 +61,6 @@ func (lic *LoadIndexClient) LoadIndex(indexPaths []string, segmentID int64, fiel
 	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, loadIndexMsg)
 
-	err := (*lic.inputStream).Produce(&msgPack)
+	err := (*c.inputStream).Produce(&msgPack)
 	return err
-}
-
-func (lic *LoadIndexClient) Close() {
-	(*lic.inputStream).Close()
 }

@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"log"
@@ -12,7 +12,7 @@ import (
 )
 
 type ddNode struct {
-	BaseNode
+	baseNode
 	ddMsg   *ddMsg
 	replica collectionReplica
 }
@@ -179,12 +179,12 @@ func newDDNode(replica collectionReplica) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
-	baseNode := BaseNode{}
+	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &ddNode{
-		BaseNode: baseNode,
+		baseNode: baseNode,
 		replica:  replica,
 	}
 }

@@ -10,16 +10,16 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/querynode"
+	querynodeimp "github.com/zilliztech/milvus-distributed/internal/querynode"
 )
 
 func main() {
 
-	querynode.Init()
-	fmt.Println("QueryNodeID is", querynode.Params.QueryNodeID)
+	querynodeimp.Init()
+	fmt.Println("QueryNodeID is", querynodeimp.Params.QueryNodeID)
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := querynode.NewQueryNode(ctx, 0)
+	svr := querynodeimp.NewQueryNode(ctx, 0)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,

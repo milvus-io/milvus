@@ -78,7 +78,7 @@ message PartitionStatesResponse {
 }
 
 
-message LoadPartitonRequest {
+message LoadPartitionRequest {
   internal.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
@@ -98,20 +98,20 @@ message CreateQueryChannelResponse {
 }
 
 
-message AddQueryChannelRequest {
+message AddQueryChannelsRequest {
   internal.MsgBase base = 1;
   string request_channelID = 2;
   string result_channelID = 3;
 }
 
 
-message RemoveQueryChannelRequest {
+message RemoveQueryChannelsRequest {
   internal.MsgBase base = 1;
   string request_channelID = 2;
   string result_channelID = 3;
 }
 
-message WatchDmChannelRequest  {
+message WatchDmChannelsRequest  {
   internal.MsgBase base = 1;
   repeated string channelIDs = 2;
 }
@@ -135,6 +135,21 @@ message ReleaseSegmentRequest {
   repeated int64 fieldIDs = 6;
 }
 
+message GetTimeTickChannelResponse {
+  common.Status status = 1;
+  string time_tick_channelID = 2;
+}
+
+message GetStatsChannelResponse {
+  common.Status status = 1;
+  string stats_channelID = 2;
+}
+
+message ServiceStatesResponse {
+  common.Status status = 1;
+  internal.ServiceStates server_states = 2;
+}
+
 service QueryService {
   /**
    * @brief This method is used to create collection
@@ -144,17 +159,27 @@ service QueryService {
    * @return Status
    */
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-  rpc  ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}
-  rpc  LoadCollection(LoadCollectionRequest) returns (common.Status) {}
-  rpc  ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+
+  rpc ShowCollections(ShowCollectionRequest) returns (ShowCollectionResponse) {}
   rpc ShowPartitions(ShowPartitionRequest) returns (ShowPartitionResponse) {}
-  rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
-  rpc LoadPartitions(LoadPartitonRequest) returns (common.Status) {}
+
+  rpc LoadPartitions(LoadPartitionRequest) returns (common.Status) {}
   rpc ReleasePartitions(ReleasePartitionRequest) returns (common.Status) {}
+  rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
+  rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+
   rpc CreateQueryChannel(common.Empty ) returns (CreateQueryChannelResponse) {}
+  rpc GetTimeTickChannel(common.Empty) returns (GetTimeTickChannelResponse) {}
+  rpc GetStatsChannel(common.Empty) returns (GetStatsChannelResponse) {}
+  rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
+  rpc GetServiceStates(common.Empty) returns (ServiceStatesResponse) {}
 }
 
-
-
-
-
+service QueryNode {
+  rpc AddQueryChannel(AddQueryChannelsRequest) returns (common.Status) {}
+  rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}
+  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc LoadSegments(LoadSegmentRequest) returns (common.Status) {}
+  rpc ReleaseSegments(ReleaseSegmentRequest) returns (common.Status) {}
+  rpc GetPartitionState(PartitionStatesRequest) returns (PartitionStatesResponse) {}
+}

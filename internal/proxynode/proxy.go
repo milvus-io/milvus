@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
 
 	"google.golang.org/grpc"
@@ -71,8 +72,11 @@ func CreateProxy(ctx context.Context) (*Proxy, error) {
 			Type:  "const",
 			Param: 1,
 		},
+		Reporter: &config.ReporterConfig{
+			LogSpans: true,
+		},
 	}
-	p.tracer, p.closer, err = cfg.NewTracer()
+	p.tracer, p.closer, err = cfg.NewTracer(config.Logger(jaeger.StdLogger))
 	if err != nil {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}

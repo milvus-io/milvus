@@ -1,4 +1,4 @@
-package querynode
+package querynodeimp
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestPartition_Segments(t *testing.T) {
-	node := newQueryNode()
+	node := newQueryNodeMock()
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionName, collectionID, 0)
