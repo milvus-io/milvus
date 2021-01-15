@@ -19,6 +19,7 @@ NewCollection(const char* schema_proto_blob) {
 
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
 
+    // TODO: delete print
     std::cout << "create collection " << collection->get_collection_name() << std::endl;
 
     return (void*)collection.release();
@@ -28,8 +29,8 @@ void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
 
+    // TODO: delete print
     std::cout << "delete collection " << col->get_collection_name() << std::endl;
-
     delete col;
 }
 

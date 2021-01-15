@@ -13,7 +13,7 @@
 
 #include "segcore/SealedIndexingRecord.h"
 #include "query/PlanNode.h"
-#include "query/SearchOnGrowing.h"
+#include "query/Search.h"
 
 namespace milvus::query {
 

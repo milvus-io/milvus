@@ -187,6 +187,7 @@ Parser::ParseTermNode(const Json& out_body) {
 std::unique_ptr<VectorPlanNode>
 Parser::ParseVecNode(const Json& out_body) {
     Assert(out_body.is_object());
+    // TODO add binary info
     Assert(out_body.size() == 1);
     auto iter = out_body.begin();
     auto field_name = FieldName(iter.key());

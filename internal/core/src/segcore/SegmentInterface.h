@@ -14,8 +14,6 @@
 #include "common/Schema.h"
 #include "query/Plan.h"
 #include "common/Span.h"
-#include "IndexingEntry.h"
-#include <knowhere/index/vector_index/VecIndex.h>
 
 namespace milvus::segcore {
 
@@ -54,30 +52,10 @@ class SegmentInternalInterface : public SegmentInterface {
         return static_cast<Span<T>>(chunk_data_impl(field_offset, chunk_id));
     }
 
-    virtual int64_t
-    num_chunk_index_safe(FieldOffset field_offset) const = 0;
-
-    template <typename T>
-    const knowhere::scalar::StructuredIndex<T>&
-    chunk_scalar_index(FieldOffset field_offset, int64_t chunk_id) const {
-        static_assert(IsScalar<T>);
-        using IndexType = knowhere::scalar::StructuredIndex<T>;
-        auto base_ptr = chunk_index_impl(field_offset, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(base_ptr);
-        AssertInfo(ptr, "entry mismatch");
-        return *ptr;
-    }
-
-    virtual int64_t
-    chunk_size() const = 0;
-
  protected:
     // blob and row_count
     virtual SpanBase
     chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
-
-    virtual const knowhere::Index*
-    chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
 };
 
 }  // namespace milvus::segcore

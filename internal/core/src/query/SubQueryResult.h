@@ -33,7 +33,7 @@ class SubQueryResult {
 
     static constexpr bool
     is_descending(MetricType metric_type) {
-        // TODO(dog): more types
+        // TODO
         if (metric_type == MetricType::METRIC_INNER_PRODUCT) {
             return true;
         } else {
