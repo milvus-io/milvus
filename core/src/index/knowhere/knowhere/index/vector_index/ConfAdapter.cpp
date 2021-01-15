@@ -208,6 +208,34 @@ IVFPQConfAdapter::CheckCPUPQParams(int64_t dimension, int64_t m) {
 }
 
 bool
+IVFHNSWConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
+    // HNSW param check
+    CheckIntByRange(knowhere::IndexParams::efConstruction, HNSW_MIN_EFCONSTRUCTION, HNSW_MAX_EFCONSTRUCTION);
+    CheckIntByRange(knowhere::IndexParams::M, HNSW_MIN_M, HNSW_MAX_M);
+
+    // IVF param check
+    CheckIntByRange(knowhere::IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+
+    // auto tune params
+    auto rows = oricfg[knowhere::meta::ROWS].get<int64_t>();
+    auto nlist = oricfg[knowhere::IndexParams::nlist].get<int64_t>();
+    oricfg[knowhere::IndexParams::nlist] = MatchNlist(rows, nlist);
+
+    return ConfAdapter::CheckTrain(oricfg, mode);
+}
+
+bool
+IVFHNSWConfAdapter::CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) {
+    // HNSW param check
+    CheckIntByRange(knowhere::IndexParams::ef, oricfg[knowhere::meta::TOPK], HNSW_MAX_EF);
+
+    // IVF param check
+    CheckIntByRange(knowhere::IndexParams::nprobe, MIN_NPROBE, MAX_NPROBE);
+
+    return ConfAdapter::CheckSearch(oricfg, type, mode);
+}
+
+bool
 NSGConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     const int64_t MIN_KNNG = 5;
     const int64_t MAX_KNNG = 300;

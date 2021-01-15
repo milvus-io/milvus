@@ -192,6 +192,7 @@ ValidateVectorIndexType(std::string& index_type, bool is_binary) {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+        knowhere::IndexEnum::INDEX_FAISS_IVFHNSW,
 #ifdef MILVUS_GPU_VERSION
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
 #endif
@@ -351,6 +352,19 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+        if (!status.ok()) {
+            return status;
+        }
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFHNSW) {
+        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+        if (!status.ok()) {
+            return status;
+        }
+        status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
+        if (!status.ok()) {
+            return status;
+        }
+        status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
         if (!status.ok()) {
             return status;
         }

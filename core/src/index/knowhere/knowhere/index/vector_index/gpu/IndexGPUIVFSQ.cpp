@@ -12,7 +12,6 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/gpu/GpuCloner.h>
-#include <faiss/index_factory.h>
 
 #include <memory>
 #include <string>

@@ -65,6 +65,7 @@ set(faiss_srcs
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVF.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFHNSW.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/OffsetBaseIndex.cpp
         ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_offset_index/IndexIVF_NM.cpp
         )
@@ -126,6 +127,14 @@ if (NOT TARGET test_ivf)
 endif ()
 target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 install(TARGETS test_ivf DESTINATION unittest)
+
+################################################################################
+#<IVFHNSW-TEST>
+if (NOT TARGET test_ivf_hnsw)
+    add_executable(test_ivf_hnsw test_ivf_hnsw.cpp ${faiss_srcs} ${util_srcs})
+endif ()
+target_link_libraries(test_ivf_hnsw ${depend_libs} ${unittest_libs} ${basic_libs})
+install(TARGETS test_ivf_hnsw DESTINATION unittest)
 
 ################################################################################
 #<IVFNM-TEST-CPU>
