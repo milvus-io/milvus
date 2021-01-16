@@ -4,7 +4,7 @@
 
 #### 8.1 Overview
 
-<img src="./figs/query_service.jpeg" width=700>
+<img src="./figs/query_service.png" width=700>
 
 
 
