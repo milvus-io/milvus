@@ -1,4 +1,4 @@
-package querynodeimp
+package querynode
 
 import (
 	"context"
@@ -20,6 +20,16 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 
 		return status, errors.New(errMsg)
 	default:
+		if node.searchService == nil || node.searchService.searchMsgStream == nil {
+			errMsg := "null search service or null search message stream"
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    errMsg,
+			}
+
+			return status, errors.New(errMsg)
+		}
+
 		searchStream, ok := node.searchService.searchMsgStream.(*msgstream.PulsarMsgStream)
 		if !ok {
 			errMsg := "type assertion failed for search message stream"
@@ -71,6 +81,16 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 
 		return status, errors.New(errMsg)
 	default:
+		if node.searchService == nil || node.searchService.searchMsgStream == nil {
+			errMsg := "null search service or null search result message stream"
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    errMsg,
+			}
+
+			return status, errors.New(errMsg)
+		}
+
 		searchStream, ok := node.searchService.searchMsgStream.(*msgstream.PulsarMsgStream)
 		if !ok {
 			errMsg := "type assertion failed for search message stream"
@@ -124,30 +144,38 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 
 		return status, errors.New(errMsg)
 	default:
-		// TODO: add dmMsgStream reference to dataSyncService
-		//fgDMMsgStream, ok := node.dataSyncService.dmMsgStream.(*msgstream.PulsarMsgStream)
-		//if !ok {
-		//	errMsg := "type assertion failed for dm message stream"
-		//	status := &commonpb.Status{
-		//		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-		//		Reason:    errMsg,
-		//	}
-		//
-		//	return status, errors.New(errMsg)
-		//}
-		//
-		//// add request channel
-		//pulsarBufSize := Params.SearchPulsarBufSize
-		//consumeChannels := in.ChannelIDs
-		//consumeSubName := Params.MsgChannelSubName
-		//unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
-		//fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
-		//
-		//status := &commonpb.Status{
-		//	ErrorCode: commonpb.ErrorCode_SUCCESS,
-		//}
-		//return status, nil
-		return nil, nil
+		if node.dataSyncService == nil || node.dataSyncService.dmStream == nil {
+			errMsg := "null data sync service or null data manipulation stream"
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    errMsg,
+			}
+
+			return status, errors.New(errMsg)
+		}
+
+		fgDMMsgStream, ok := node.dataSyncService.dmStream.(*msgstream.PulsarMsgStream)
+		if !ok {
+			errMsg := "type assertion failed for dm message stream"
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    errMsg,
+			}
+
+			return status, errors.New(errMsg)
+		}
+
+		// add request channel
+		pulsarBufSize := Params.SearchPulsarBufSize
+		consumeChannels := in.ChannelIDs
+		consumeSubName := Params.MsgChannelSubName
+		unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+		fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
+
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		}
+		return status, nil
 	}
 }
 

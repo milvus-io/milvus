@@ -1,4 +1,4 @@
-package querynodeimp
+package querynode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
