@@ -26,7 +26,6 @@ SearchOnSealed(const Schema& schema,
                const QueryInfo& query_info,
                const void* query_data,
                int64_t num_queries,
-               Timestamp timestamp,
                const faiss::BitsetView& view,
                QueryResult& result);
 

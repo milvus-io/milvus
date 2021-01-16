@@ -23,10 +23,10 @@ using BitmapSimple = std::deque<BitmapChunk>;
 template <typename VectorType>
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
+                int64_t ins_barrier,
                 const query::QueryInfo& info,
                 const EmbeddedType<VectorType>* query_data,
                 int64_t num_queries,
-                Timestamp timestamp,
                 const faiss::BitsetView& bitset,
                 QueryResult& results);
 }  // namespace milvus::query

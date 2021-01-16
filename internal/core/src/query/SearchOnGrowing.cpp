@@ -39,14 +39,13 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const query::QueryInfo& info,
             const float* query_data,
             int64_t num_queries,
-            Timestamp timestamp,
+            int64_t ins_barrier,
             const BitsetView& bitset,
             QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
-    auto ins_barrier = get_barrier(record, timestamp);
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
 #if 0
@@ -131,14 +130,14 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const query::QueryInfo& info,
              const uint8_t* query_data,
              int64_t num_queries,
-             Timestamp timestamp,
+             int64_t ins_barrier,
              const faiss::BitsetView& bitset,
              QueryResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
     // step 1: binary search to find the barrier of the snapshot
-    auto ins_barrier = get_barrier(record, timestamp);
+    // auto ins_barrier = get_barrier(record, timestamp);
     auto metric_type = GetMetricType(info.metric_type_);
     // auto del_barrier = get_barrier(deleted_record_, timestamp);
 
@@ -199,33 +198,33 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 template <typename VectorType>
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
+                int64_t ins_barrier,
                 const query::QueryInfo& info,
                 const EmbeddedType<VectorType>* query_data,
                 int64_t num_queries,
-                Timestamp timestamp,
                 const faiss::BitsetView& bitset,
                 QueryResult& results) {
     static_assert(IsVector<VectorType>);
     if constexpr (std::is_same_v<VectorType, FloatVector>) {
-        FloatSearch(segment, info, query_data, num_queries, timestamp, bitset, results);
+        FloatSearch(segment, info, query_data, num_queries, ins_barrier, bitset, results);
     } else {
-        BinarySearch(segment, info, query_data, num_queries, timestamp, bitset, results);
+        BinarySearch(segment, info, query_data, num_queries, ins_barrier, bitset, results);
     }
 }
 template void
 SearchOnGrowing<FloatVector>(const segcore::SegmentGrowingImpl& segment,
+                             int64_t ins_barrier,
                              const query::QueryInfo& info,
                              const EmbeddedType<FloatVector>* query_data,
                              int64_t num_queries,
-                             Timestamp timestamp,
                              const faiss::BitsetView& bitset,
                              QueryResult& results);
 template void
 SearchOnGrowing<BinaryVector>(const segcore::SegmentGrowingImpl& segment,
+                              int64_t ins_barrier,
                               const query::QueryInfo& info,
                               const EmbeddedType<BinaryVector>* query_data,
                               int64_t num_queries,
-                              Timestamp timestamp,
                               const faiss::BitsetView& bitset,
                               QueryResult& results);
 

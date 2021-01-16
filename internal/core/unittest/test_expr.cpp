@@ -306,7 +306,7 @@ TEST(Expr, TestRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote);
+    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count());
     for (auto [clause, ref_func] : testcases) {
         auto loc = dsl_string_tmp.find("@@@@");
         auto dsl_string = dsl_string_tmp;
@@ -390,7 +390,7 @@ TEST(Expr, TestTerm) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote);
+    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count());
     for (auto [clause, ref_func] : testcases) {
         auto loc = dsl_string_tmp.find("@@@@");
         auto dsl_string = dsl_string_tmp;
@@ -492,7 +492,7 @@ TEST(Expr, TestSimpleDsl) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote);
+    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count());
     for (auto [clause, ref_func] : testcases) {
         Json dsl;
         dsl["bool"] = clause;

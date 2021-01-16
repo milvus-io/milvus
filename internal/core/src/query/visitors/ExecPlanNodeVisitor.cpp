@@ -75,18 +75,20 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     aligned_vector<uint8_t> bitset_holder;
     BitsetView view;
+    // TODO: add API to unify row_count
+    auto row_count = segcore::get_barrier(segment->get_insert_record(), timestamp_);
+
     if (node.predicate_.has_value()) {
-        ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment).call_child(*node.predicate_.value());
+        ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment, row_count).call_child(*node.predicate_.value());
         bitset_holder = AssembleNegBitmap(expr_ret);
         view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
     }
 
     auto& sealed_indexing = segment->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(node.query_info_.field_offset_)) {
-        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, timestamp_,
-                       view, ret);
+        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, view, ret);
     } else {
-        SearchOnGrowing<VectorType>(*segment, node.query_info_, src_data, num_queries, timestamp_, view, ret);
+        SearchOnGrowing<VectorType>(*segment, row_count, node.query_info_, src_data, num_queries, view, ret);
     }
 
     ret_ = ret;
