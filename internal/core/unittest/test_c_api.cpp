@@ -23,7 +23,7 @@
 #include <index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <index/knowhere/knowhere/index/vector_index/VecIndexFactory.h>
 #include <index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h>
-#include <common/LoadIndex.h>
+#include <common/LoadInfo.h>
 #include <utils/Types.h>
 #include <segcore/Collection.h>
 #include "test_utils/DataGen.h"
