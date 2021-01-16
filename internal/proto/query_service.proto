@@ -9,7 +9,7 @@ import "internal.proto";
 
 
 message RegisterNodeRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   common.Address address = 2;
 }
 
@@ -18,7 +18,7 @@ message RegisterNodeResponse {
 }
 
 message ShowCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
 }
 
@@ -27,21 +27,21 @@ message ShowCollectionResponse  {
 }
 
 message LoadCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64 collectionID = 3;
 }
 
 
 message ReleaseCollectionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64 collectionID = 3;
 }
 
 
 message ShowPartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64  collectionID = 3;
 }
@@ -67,7 +67,7 @@ message PartitionStates {
 }
 
 message PartitionStatesRequest  {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64  dbID = 2;
   int64 collectionID = 3;
   repeated int64  partitionIDs = 4;
@@ -79,14 +79,14 @@ message PartitionStatesResponse {
 
 
 message LoadPartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
 }
 
 message ReleasePartitionRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
@@ -99,26 +99,26 @@ message CreateQueryChannelResponse {
 
 
 message AddQueryChannelsRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string request_channelID = 2;
   string result_channelID = 3;
 }
 
 
 message RemoveQueryChannelsRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string request_channelID = 2;
   string result_channelID = 3;
 }
 
 message WatchDmChannelsRequest  {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   repeated string channelIDs = 2;
 }
 
 
 message LoadSegmentRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
@@ -127,7 +127,7 @@ message LoadSegmentRequest {
 }
 
 message ReleaseSegmentRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;

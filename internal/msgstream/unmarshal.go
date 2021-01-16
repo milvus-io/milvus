@@ -2,17 +2,17 @@ package msgstream
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 type MarshalFunc func(TsMsg) ([]byte, error)
 type UnmarshalFunc func([]byte) (TsMsg, error)
 
 type UnmarshalDispatcher struct {
-	tempMap map[internalPb.MsgType]UnmarshalFunc
+	tempMap map[commonpb.MsgType]UnmarshalFunc
 }
 
-func (dispatcher *UnmarshalDispatcher) Unmarshal(input []byte, msgType internalPb.MsgType) (TsMsg, error) {
+func (dispatcher *UnmarshalDispatcher) Unmarshal(input []byte, msgType commonpb.MsgType) (TsMsg, error) {
 	unmarshalFunc, ok := dispatcher.tempMap[msgType]
 	if !ok {
 		return nil, errors.New(string("Not set unmarshalFunc for this messageType."))
@@ -20,7 +20,7 @@ func (dispatcher *UnmarshalDispatcher) Unmarshal(input []byte, msgType internalP
 	return unmarshalFunc(input)
 }
 
-func (dispatcher *UnmarshalDispatcher) AddMsgTemplate(msgType internalPb.MsgType, unmarshal UnmarshalFunc) {
+func (dispatcher *UnmarshalDispatcher) AddMsgTemplate(msgType commonpb.MsgType, unmarshal UnmarshalFunc) {
 	dispatcher.tempMap[msgType] = unmarshal
 }
 
@@ -38,19 +38,19 @@ func (dispatcher *UnmarshalDispatcher) addDefaultMsgTemplates() {
 	flushMsg := FlushMsg{}
 
 	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
-	dispatcher.tempMap = make(map[internalPb.MsgType]UnmarshalFunc)
-	dispatcher.tempMap[internalPb.MsgType_kInsert] = insertMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kDelete] = deleteMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kSearch] = searchMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kSearchResult] = searchResultMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kTimeTick] = timeTickMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kQueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kCreateCollection] = createCollectionMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kDropCollection] = dropCollectionMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kCreatePartition] = createPartitionMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kDropPartition] = dropPartitionMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kLoadIndex] = loadIndexMsg.Unmarshal
-	dispatcher.tempMap[internalPb.MsgType_kFlush] = flushMsg.Unmarshal
+	dispatcher.tempMap = make(map[commonpb.MsgType]UnmarshalFunc)
+	dispatcher.tempMap[commonpb.MsgType_kInsert] = insertMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kDelete] = deleteMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kSearch] = searchMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kSearchResult] = searchResultMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kTimeTick] = timeTickMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kQueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kCreateCollection] = createCollectionMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kDropCollection] = dropCollectionMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kCreatePartition] = createPartitionMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kDropPartition] = dropPartitionMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kLoadIndex] = loadIndexMsg.Unmarshal
+	dispatcher.tempMap[commonpb.MsgType_kFlush] = flushMsg.Unmarshal
 }
 
 func NewUnmarshalDispatcher() *UnmarshalDispatcher {

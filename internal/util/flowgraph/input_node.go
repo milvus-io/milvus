@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -38,7 +38,7 @@ func (inNode *InputNode) Operate([]*Msg) []*Msg {
 	tracer := opentracing.GlobalTracer()
 	if tracer != nil && msgPack != nil {
 		for _, msg := range msgPack.Msgs {
-			if msg.Type() == internalpb.MsgType_kInsert {
+			if msg.Type() == commonpb.MsgType_kInsert {
 				var child opentracing.Span
 				ctx := msg.GetMsgContext()
 				if parent := opentracing.SpanFromContext(ctx); parent != nil {

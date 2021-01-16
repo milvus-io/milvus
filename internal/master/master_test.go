@@ -72,7 +72,7 @@ func receiveTimeTickMsg(stream *ms.MsgStream) bool {
 func getTimeTickMsgPack(ttmsgs [][2]uint64) *ms.MsgPack {
 	msgPack := ms.MsgPack{}
 	for _, vi := range ttmsgs {
-		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(internalpb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
+		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(commonpb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
 	}
 	return &msgPack
 }
@@ -148,7 +148,7 @@ func TestMaster(t *testing.T) {
 		sc.InitFromFile(".")
 
 		configRequest := &internalpb.SysConfigRequest{
-			MsgType:     internalpb.MsgType_kGetSysConfigs,
+			MsgType:     commonpb.MsgType_kGetSysConfigs,
 			ReqID:       1,
 			Timestamp:   uint64(time.Now().Unix()),
 			ProxyID:     1,
@@ -163,7 +163,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, len(response.GetKeys()), len(response.GetValues()))
 
 		configRequest = &internalpb.SysConfigRequest{
-			MsgType:     internalpb.MsgType_kGetSysConfigs,
+			MsgType:     commonpb.MsgType_kGetSysConfigs,
 			ReqID:       1,
 			Timestamp:   uint64(time.Now().Unix()),
 			ProxyID:     1,
@@ -264,7 +264,7 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 
 		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   internalpb.MsgType_kCreateCollection,
+			MsgType:   commonpb.MsgType_kCreateCollection,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -277,7 +277,7 @@ func TestMaster(t *testing.T) {
 
 		// HasCollection
 		reqHasCollection := internalpb.HasCollectionRequest{
-			MsgType:   internalpb.MsgType_kHasCollection,
+			MsgType:   commonpb.MsgType_kHasCollection,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -309,7 +309,7 @@ func TestMaster(t *testing.T) {
 
 		// ShowCollection
 		reqShowCollection := internalpb.ShowCollectionRequest{
-			MsgType:   internalpb.MsgType_kShowCollections,
+			MsgType:   commonpb.MsgType_kShowCollections,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -375,7 +375,7 @@ func TestMaster(t *testing.T) {
 
 		// DescribeCollection Test
 		reqDescribe := &internalpb.DescribeCollectionRequest{
-			MsgType:   internalpb.MsgType_kDescribeCollection,
+			MsgType:   commonpb.MsgType_kDescribeCollection,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -436,7 +436,7 @@ func TestMaster(t *testing.T) {
 		ser := servicepb.CollectionName{CollectionName: "col1"}
 
 		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -490,7 +490,7 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 
 		createCollectionReq = internalpb.CreateCollectionRequest{
-			MsgType:   internalpb.MsgType_kCreateCollection,
+			MsgType:   commonpb.MsgType_kCreateCollection,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -512,7 +512,7 @@ func TestMaster(t *testing.T) {
 		ser = servicepb.CollectionName{CollectionName: "col1"}
 
 		reqDrop = internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -526,7 +526,7 @@ func TestMaster(t *testing.T) {
 
 		ser = servicepb.CollectionName{CollectionName: "col2"}
 		reqDrop = internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -621,7 +621,7 @@ func TestMaster(t *testing.T) {
 		assert.Nil(t, err)
 
 		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   internalpb.MsgType_kCreatePartition,
+			MsgType:   commonpb.MsgType_kCreatePartition,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -632,7 +632,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
 		createPartitionReq := internalpb.CreatePartitionRequest{
-			MsgType:       internalpb.MsgType_kCreatePartition,
+			MsgType:       commonpb.MsgType_kCreatePartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -643,7 +643,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
 		createPartitionReq = internalpb.CreatePartitionRequest{
-			MsgType:       internalpb.MsgType_kCreatePartition,
+			MsgType:       commonpb.MsgType_kCreatePartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -654,7 +654,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
 
 		createPartitionReq = internalpb.CreatePartitionRequest{
-			MsgType:       internalpb.MsgType_kCreatePartition,
+			MsgType:       commonpb.MsgType_kCreatePartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -700,7 +700,7 @@ func TestMaster(t *testing.T) {
 		assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, collMeta.PartitionTags)
 
 		showPartitionReq := internalpb.ShowPartitionRequest{
-			MsgType:        internalpb.MsgType_kShowPartitions,
+			MsgType:        commonpb.MsgType_kShowPartitions,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -712,7 +712,7 @@ func TestMaster(t *testing.T) {
 		assert.ElementsMatch(t, []string{"_default", "partition1", "partition2"}, stringList.Values)
 
 		showPartitionReq = internalpb.ShowPartitionRequest{
-			MsgType:        internalpb.MsgType_kShowPartitions,
+			MsgType:        commonpb.MsgType_kShowPartitions,
 			ReqID:          1,
 			Timestamp:      0,
 			ProxyID:        1,
@@ -724,7 +724,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
 
 		hasPartitionReq := internalpb.HasPartitionRequest{
-			MsgType:       internalpb.MsgType_kHasPartition,
+			MsgType:       commonpb.MsgType_kHasPartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -736,7 +736,7 @@ func TestMaster(t *testing.T) {
 		assert.True(t, hasPartition.Value)
 
 		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       internalpb.MsgType_kHasPartition,
+			MsgType:       commonpb.MsgType_kHasPartition,
 			ReqID:         1,
 			Timestamp:     0,
 			ProxyID:       1,
@@ -748,7 +748,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, stringList.Status.ErrorCode)
 
 		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       internalpb.MsgType_kHasPartition,
+			MsgType:       commonpb.MsgType_kHasPartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -760,7 +760,7 @@ func TestMaster(t *testing.T) {
 		assert.False(t, hasPartition.Value)
 
 		deletePartitionReq := internalpb.DropPartitionRequest{
-			MsgType:       internalpb.MsgType_kDropPartition,
+			MsgType:       commonpb.MsgType_kDropPartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -772,7 +772,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_SUCCESS, st.ErrorCode)
 
 		deletePartitionReq = internalpb.DropPartitionRequest{
-			MsgType:       internalpb.MsgType_kDropPartition,
+			MsgType:       commonpb.MsgType_kDropPartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -784,7 +784,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UNEXPECTED_ERROR, st.ErrorCode)
 
 		hasPartitionReq = internalpb.HasPartitionRequest{
-			MsgType:       internalpb.MsgType_kHasPartition,
+			MsgType:       commonpb.MsgType_kHasPartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -796,7 +796,7 @@ func TestMaster(t *testing.T) {
 		assert.False(t, hasPartition.Value)
 
 		describePartitionReq := internalpb.DescribePartitionRequest{
-			MsgType:       internalpb.MsgType_kDescribePartition,
+			MsgType:       commonpb.MsgType_kDescribePartition,
 			ReqID:         1,
 			Timestamp:     uint64(time.Now().Unix()),
 			ProxyID:       1,
@@ -808,7 +808,7 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, &servicepb.PartitionName{CollectionName: "col1", Tag: "partition1"}, describePartition.Name)
 
 		describePartitionReq = internalpb.DescribePartitionRequest{
-			MsgType:       internalpb.MsgType_kDescribePartition,
+			MsgType:       commonpb.MsgType_kDescribePartition,
 			ReqID:         1,
 			Timestamp:     0,
 			ProxyID:       1,
@@ -821,7 +821,7 @@ func TestMaster(t *testing.T) {
 		// DropCollection
 		ser := servicepb.CollectionName{CollectionName: "col1"}
 		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -913,7 +913,7 @@ func TestMaster(t *testing.T) {
 
 		////////////////////////////CreateCollection////////////////////////
 		createCollectionReq := internalpb.CreateCollectionRequest{
-			MsgType:   internalpb.MsgType_kCreateCollection,
+			MsgType:   commonpb.MsgType_kCreateCollection,
 			ReqID:     1,
 			Timestamp: Timestamp(time.Now().Unix()),
 			ProxyID:   1,
@@ -948,7 +948,7 @@ func TestMaster(t *testing.T) {
 		////////////////////////////CreatePartition////////////////////////
 		partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)
 		createPartitionReq := internalpb.CreatePartitionRequest{
-			MsgType:   internalpb.MsgType_kCreatePartition,
+			MsgType:   commonpb.MsgType_kCreatePartition,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -987,7 +987,7 @@ func TestMaster(t *testing.T) {
 
 		////////////////////////////DropPartition////////////////////////
 		dropPartitionReq := internalpb.DropPartitionRequest{
-			MsgType:   internalpb.MsgType_kDropPartition,
+			MsgType:   commonpb.MsgType_kDropPartition,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -1025,7 +1025,7 @@ func TestMaster(t *testing.T) {
 
 		////////////////////////////DropCollection////////////////////////
 		dropCollectionReq := internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,
@@ -1074,7 +1074,7 @@ func TestMaster(t *testing.T) {
 		schemaBytes, err := proto.Marshal(schema)
 		assert.Nil(t, err)
 		_, err = cli.CreateCollection(ctx, &internalpb.CreateCollectionRequest{
-			MsgType:   internalpb.MsgType_kCreateCollection,
+			MsgType:   commonpb.MsgType_kCreateCollection,
 			ReqID:     1,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -1082,7 +1082,7 @@ func TestMaster(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		_, err = cli.CreatePartition(ctx, &internalpb.CreatePartitionRequest{
-			MsgType:   internalpb.MsgType_kCreatePartition,
+			MsgType:   commonpb.MsgType_kCreatePartition,
 			ReqID:     2,
 			Timestamp: uint64(time.Now().Unix()),
 			ProxyID:   1,
@@ -1124,7 +1124,7 @@ func TestMaster(t *testing.T) {
 			Msgs: []ms.TsMsg{
 				&ms.QueryNodeStatsMsg{
 					QueryNodeStats: internalpb.QueryNodeStats{
-						MsgType: internalpb.MsgType_kQueryNodeStats,
+						MsgType: commonpb.MsgType_kQueryNodeStats,
 						PeerID:  1,
 						SegStats: []*internalpb.SegmentStats{
 							{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},
@@ -1146,7 +1146,7 @@ func TestMaster(t *testing.T) {
 
 		ser := servicepb.CollectionName{CollectionName: collName}
 		reqDrop := internalpb.DropCollectionRequest{
-			MsgType:        internalpb.MsgType_kDropCollection,
+			MsgType:        commonpb.MsgType_kDropCollection,
 			ReqID:          1,
 			Timestamp:      uint64(time.Now().Unix()),
 			ProxyID:        1,

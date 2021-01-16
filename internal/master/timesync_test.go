@@ -11,15 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
-func getTtMsg(msgType internalPb.MsgType, peerID UniqueID, timeStamp uint64) ms.TsMsg {
+func getTtMsg(msgType commonpb.MsgType, peerID UniqueID, timeStamp uint64) ms.TsMsg {
 	baseMsg := ms.BaseMsg{
 		HashValues: []uint32{uint32(peerID)},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   internalPb.MsgType_kTimeTick,
+		MsgType:   commonpb.MsgType_kTimeTick,
 		PeerID:    peerID,
 		Timestamp: timeStamp,
 	}
@@ -56,7 +58,7 @@ func initPulsarStream(pulsarAddress string,
 func getMsgPack(ttmsgs [][2]int) *ms.MsgPack {
 	msgPack := ms.MsgPack{}
 	for _, vi := range ttmsgs {
-		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(internalPb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
+		msgPack.Msgs = append(msgPack.Msgs, getTtMsg(commonpb.MsgType_kTimeTick, UniqueID(vi[0]), Timestamp(vi[1])))
 	}
 	return &msgPack
 }

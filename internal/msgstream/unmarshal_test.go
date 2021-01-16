@@ -3,10 +3,12 @@ package msgstream
 import (
 	"context"
 	"fmt"
+
 	"log"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
@@ -29,8 +31,8 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarClient(pulsarAddress)
@@ -42,7 +44,7 @@ func TestStream_unmarshal_Insert(t *testing.T) {
 	unmarshalDispatcher := NewUnmarshalDispatcher()
 
 	//add a new unmarshall func for msgType kInsert
-	unmarshalDispatcher.AddMsgTemplate(internalPb.MsgType_kInsert, newInsertMsgUnmarshal)
+	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, newInsertMsgUnmarshal)
 
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
 	outputStream.Start()

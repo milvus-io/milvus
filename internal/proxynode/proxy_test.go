@@ -352,7 +352,7 @@ func TestProxy_Search(t *testing.T) {
 							HashValues: []uint32{1},
 						},
 						SearchResult: internalpb.SearchResult{
-							MsgType: internalpb.MsgType_kSearchResult,
+							MsgType: commonpb.MsgType_kSearchResult,
 							ReqID:   int64(i % testNum),
 						},
 					}

@@ -41,7 +41,7 @@ type showPartitionTask struct {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *createPartitionTask) Type() internalpb.MsgType {
+func (t *createPartitionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -96,7 +96,7 @@ func (t *createPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *dropPartitionTask) Type() internalpb.MsgType {
+func (t *dropPartitionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -152,7 +152,7 @@ func (t *dropPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *hasPartitionTask) Type() internalpb.MsgType {
+func (t *hasPartitionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -186,7 +186,7 @@ func (t *hasPartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *describePartitionTask) Type() internalpb.MsgType {
+func (t *describePartitionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0
@@ -223,7 +223,7 @@ func (t *describePartitionTask) Execute() error {
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (t *showPartitionTask) Type() internalpb.MsgType {
+func (t *showPartitionTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0

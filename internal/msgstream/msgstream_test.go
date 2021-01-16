@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	commonPb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -43,9 +43,9 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		HashValues:     []uint32{hashValue},
 	}
 	switch msgType {
-	case internalPb.MsgType_kInsert:
+	case commonpb.MsgType_kInsert:
 		insertRequest := internalPb.InsertRequest{
-			MsgType:        internalPb.MsgType_kInsert,
+			MsgType:        commonpb.MsgType_kInsert,
 			ReqID:          reqID,
 			CollectionName: "Collection",
 			PartitionTag:   "Partition",
@@ -54,16 +54,16 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			ProxyID:        1,
 			Timestamps:     []Timestamp{1},
 			RowIDs:         []int64{1},
-			RowData:        []*commonPb.Blob{{}},
+			RowData:        []*commonpb.Blob{{}},
 		}
 		insertMsg := &InsertMsg{
 			BaseMsg:       baseMsg,
 			InsertRequest: insertRequest,
 		}
 		return insertMsg
-	case internalPb.MsgType_kDelete:
+	case commonpb.MsgType_kDelete:
 		deleteRequest := internalPb.DeleteRequest{
-			MsgType:        internalPb.MsgType_kDelete,
+			MsgType:        commonpb.MsgType_kDelete,
 			ReqID:          reqID,
 			CollectionName: "Collection",
 			ChannelID:      1,
@@ -76,9 +76,9 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			DeleteRequest: deleteRequest,
 		}
 		return deleteMsg
-	case internalPb.MsgType_kSearch:
+	case commonpb.MsgType_kSearch:
 		searchRequest := internalPb.SearchRequest{
-			MsgType:         internalPb.MsgType_kSearch,
+			MsgType:         commonpb.MsgType_kSearch,
 			ReqID:           reqID,
 			ProxyID:         1,
 			Timestamp:       1,
@@ -89,10 +89,10 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			SearchRequest: searchRequest,
 		}
 		return searchMsg
-	case internalPb.MsgType_kSearchResult:
+	case commonpb.MsgType_kSearchResult:
 		searchResult := internalPb.SearchResult{
-			MsgType:         internalPb.MsgType_kSearchResult,
-			Status:          &commonPb.Status{ErrorCode: commonPb.ErrorCode_SUCCESS},
+			MsgType:         commonpb.MsgType_kSearchResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 			ReqID:           reqID,
 			ProxyID:         1,
 			QueryNodeID:     1,
@@ -104,9 +104,9 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			SearchResult: searchResult,
 		}
 		return searchResultMsg
-	case internalPb.MsgType_kTimeTick:
+	case commonpb.MsgType_kTimeTick:
 		timeTickResult := internalPb.TimeTickMsg{
-			MsgType:   internalPb.MsgType_kTimeTick,
+			MsgType:   commonpb.MsgType_kTimeTick,
 			PeerID:    reqID,
 			Timestamp: 1,
 		}
@@ -115,9 +115,9 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			TimeTickMsg: timeTickResult,
 		}
 		return timeTickMsg
-	case internalPb.MsgType_kQueryNodeStats:
+	case commonpb.MsgType_kQueryNodeStats:
 		queryNodeSegStats := internalPb.QueryNodeStats{
-			MsgType: internalPb.MsgType_kQueryNodeStats,
+			MsgType: commonpb.MsgType_kQueryNodeStats,
 			PeerID:  reqID,
 		}
 		queryNodeSegStatsMsg := &QueryNodeStatsMsg{
@@ -136,7 +136,7 @@ func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 		HashValues:     []uint32{hashValue},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   internalPb.MsgType_kTimeTick,
+		MsgType:   commonpb.MsgType_kTimeTick,
 		PeerID:    reqID,
 		Timestamp: time,
 	}
@@ -225,8 +225,8 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -247,8 +247,8 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	consumerSubName := "subDelete"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kDelete, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -267,8 +267,8 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 	consumerSubName := "subSearch"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearch, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearch, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -287,8 +287,8 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 	consumerSubName := "subSearchResult"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearchResult, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearchResult, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -307,8 +307,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	consumerSubName := "subTimeTick"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -327,8 +327,8 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Broadcast(&msgPack)
@@ -347,8 +347,8 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, repackFunc)
 	err := (*inputStream).Produce(&msgPack)
@@ -373,7 +373,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 	}
 
 	insertRequest := internalPb.InsertRequest{
-		MsgType:        internalPb.MsgType_kInsert,
+		MsgType:        commonpb.MsgType_kInsert,
 		ReqID:          1,
 		CollectionName: "Collection",
 		PartitionTag:   "Partition",
@@ -382,7 +382,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		ProxyID:        1,
 		Timestamps:     []Timestamp{1, 1},
 		RowIDs:         []int64{1, 3},
-		RowData:        []*commonPb.Blob{{}, {}},
+		RowData:        []*commonpb.Blob{{}, {}},
 	}
 	insertMsg := &InsertMsg{
 		BaseMsg:       baseMsg,
@@ -426,7 +426,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	}
 
 	deleteRequest := internalPb.DeleteRequest{
-		MsgType:        internalPb.MsgType_kDelete,
+		MsgType:        commonpb.MsgType_kDelete,
 		ReqID:          1,
 		CollectionName: "Collection",
 		ChannelID:      1,
@@ -470,10 +470,10 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kTimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearch, 2, 2))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kSearchResult, 3, 3))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(internalPb.MsgType_kQueryNodeStats, 4, 4))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kTimeTick, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearch, 2, 2))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kSearchResult, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kQueryNodeStats, 4, 4))
 
 	inputStream := NewPulsarMsgStream(context.Background(), 100)
 	inputStream.SetPulsarClient(pulsarAddress)
@@ -506,8 +506,8 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
 
 	msgPack1 := MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(internalPb.MsgType_kInsert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(internalPb.MsgType_kInsert, 3, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
 
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))

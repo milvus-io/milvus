@@ -8,7 +8,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type filterDmNode struct {
@@ -38,7 +37,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 	tracer := opentracing.GlobalTracer()
 	if tracer != nil && msgStreamMsg != nil {
 		for _, msg := range msgStreamMsg.TsMessages() {
-			if msg.Type() == internalPb.MsgType_kInsert || msg.Type() == internalPb.MsgType_kSearch {
+			if msg.Type() == commonpb.MsgType_kInsert || msg.Type() == commonpb.MsgType_kSearch {
 				var child opentracing.Span
 				ctx := msg.GetMsgContext()
 				if parent := opentracing.SpanFromContext(ctx); parent != nil {
@@ -72,7 +71,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 	}
 	for key, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
-		case internalPb.MsgType_kInsert:
+		case commonpb.MsgType_kInsert:
 			var ctx2 context.Context
 			if childs != nil {
 				if childs[key] != nil {
@@ -86,7 +85,7 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 				resMsg.SetMsgContext(ctx2)
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
-		// case internalPb.MsgType_kDelete:
+		// case commonpb.MsgType_kDelete:
 		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:
 			log.Println("Non supporting message type:", msg.Type())

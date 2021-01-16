@@ -6,44 +6,6 @@ import "common.proto";
 import "service_msg.proto";
 
 
-enum MsgType {
-    kNone = 0;
-    /* Definition Requests: collection */
-    kCreateCollection = 100;
-    kDropCollection = 101;
-    kHasCollection = 102;
-    kDescribeCollection = 103;
-    kShowCollections = 104;
-    kGetSysConfigs = 105;
-
-    /* Definition Requests: partition */
-    kCreatePartition = 200;
-    kDropPartition = 201;
-    kHasPartition = 202;
-    kDescribePartition = 203;
-    kShowPartitions = 204;
-
-    /* Definition Requests: Index */
-    kCreateIndex = 300;
-    kDescribeIndex = 301;
-    kDescribeIndexProgress = 302;
-    
-    /* Manipulation Requests */
-    kInsert = 400;
-    kDelete = 401;
-    kFlush = 402;
-
-    /* Query */
-    kSearch = 500;
-    kSearchResult = 501;
-    
-    /* System Control */
-    kTimeTick = 1200;
-    kQueryNodeStats = 1201;
-    kLoadIndex = 1202;
-
-}
-
 enum PeerRole {
 
     Master = 0;
@@ -108,7 +70,7 @@ message AssignSegIDResponse {
 }
 
 message CreateCollectionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 collectionID = 2;
     int64 reqID = 3;
     uint64 timestamp = 4;
@@ -118,7 +80,7 @@ message CreateCollectionRequest {
 
 
 message DropCollectionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 collectionID = 2;
     int64 reqID = 3;
     uint64 timestamp = 4;
@@ -128,7 +90,7 @@ message DropCollectionRequest {
 
 
 message HasCollectionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -137,7 +99,7 @@ message HasCollectionRequest {
 
 
 message DescribeCollectionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -146,7 +108,7 @@ message DescribeCollectionRequest {
 
 
 message ShowCollectionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -154,7 +116,7 @@ message ShowCollectionRequest {
 
 
 message CreatePartitionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 collectionID = 2;
     int64 partitionID = 3;
     int64 reqID = 4;
@@ -165,7 +127,7 @@ message CreatePartitionRequest {
 
 
 message DropPartitionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 collectionID = 2;
     int64 partitionID = 3;
     int64 reqID = 4;
@@ -176,7 +138,7 @@ message DropPartitionRequest {
 
 
 message HasPartitionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -185,7 +147,7 @@ message HasPartitionRequest {
 
 
 message DescribePartitionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -194,7 +156,7 @@ message DescribePartitionRequest {
 
 
 message ShowPartitionRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -203,7 +165,7 @@ message ShowPartitionRequest {
 
 
 message InsertRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     string collection_name = 3;
     string partition_tag = 4;
@@ -217,7 +179,7 @@ message InsertRequest {
 
 
 message DeleteRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     string collection_name = 3;
     int64 channelID = 4;
@@ -228,7 +190,7 @@ message DeleteRequest {
 
 
 message SearchRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     int64 proxyID = 3;
     uint64 timestamp = 4;
@@ -241,7 +203,7 @@ message SearchRequest {
  * @brief Request of DescribePartition 
  */
 message SysConfigRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     int64 proxyID = 3;
     uint64 timestamp = 4;
@@ -251,7 +213,7 @@ message SysConfigRequest {
 
 
 message SearchResult {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     common.Status status = 2;
     int64 reqID = 3;
     int64 proxyID = 4;
@@ -263,13 +225,13 @@ message SearchResult {
 }
 
 message TimeTickMsg {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 peerID = 2;
     uint64 timestamp = 3;
 }
 
 message FlushMsg {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 segmentID = 2;
     uint64 timestamp = 3;
     int64 collectionID = 4;
@@ -292,7 +254,7 @@ message Key2SegMsg {
 }
 
 message LoadIndex {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 segmentID = 2;
     string fieldName = 3;
     int64 fieldID = 4;
@@ -319,14 +281,14 @@ message SegmentStats {
 }
 
 message QueryNodeStats {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 peerID = 2;
     repeated SegmentStats seg_stats = 3;
     repeated FieldStats field_stats = 4;
 }
 
 message CreateIndexRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -336,7 +298,7 @@ message CreateIndexRequest {
 }
 
 message DescribeIndexRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;
@@ -345,7 +307,7 @@ message DescribeIndexRequest {
 }
 
 message DescribeIndexProgressRequest {
-    MsgType msg_type = 1;
+    common.MsgType msg_type = 1;
     int64 reqID = 2;
     uint64 timestamp = 3;
     int64 proxyID = 4;

@@ -9,7 +9,7 @@ import "internal.proto";
 
 
 message RegisterNodeRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   common.Address address = 2;
 }
 

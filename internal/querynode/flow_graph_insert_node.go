@@ -9,7 +9,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type insertNode struct {
@@ -47,7 +46,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 	tracer := opentracing.GlobalTracer()
 	if tracer != nil && iMsg != nil {
 		for _, msg := range iMsg.insertMessages {
-			if msg.Type() == internalPb.MsgType_kInsert || msg.Type() == internalPb.MsgType_kSearch {
+			if msg.Type() == commonpb.MsgType_kInsert || msg.Type() == commonpb.MsgType_kSearch {
 				var child opentracing.Span
 				ctx := msg.GetMsgContext()
 				if parent := opentracing.SpanFromContext(ctx); parent != nil {

@@ -3,6 +3,8 @@ package master
 import (
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
@@ -16,7 +18,7 @@ type getSysConfigsTask struct {
 	values   []string
 }
 
-func (t *getSysConfigsTask) Type() internalpb.MsgType {
+func (t *getSysConfigsTask) Type() commonpb.MsgType {
 	if t.req == nil {
 		log.Printf("null request")
 		return 0

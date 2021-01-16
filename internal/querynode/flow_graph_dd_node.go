@@ -4,10 +4,11 @@ import (
 	"log"
 	"sort"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -60,13 +61,13 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	// do dd tasks
 	for _, msg := range tsMessages {
 		switch msg.Type() {
-		case internalPb.MsgType_kCreateCollection:
+		case commonpb.MsgType_kCreateCollection:
 			ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
-		case internalPb.MsgType_kDropCollection:
+		case commonpb.MsgType_kDropCollection:
 			ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
-		case internalPb.MsgType_kCreatePartition:
+		case commonpb.MsgType_kCreatePartition:
 			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
-		case internalPb.MsgType_kDropPartition:
+		case commonpb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
 		default:
 			log.Println("Non supporting message type:", msg.Type())

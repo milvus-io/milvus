@@ -8,7 +8,7 @@ import "internal.proto";
 
 
 message RegisterNodeRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   common.Address address = 2;
 }
 
@@ -21,7 +21,7 @@ message RegisterLinkResponse {
 }
 
 message InvalidateCollMetaCacheRequest {
-  internal.MsgBase base = 1;
+  common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
 }

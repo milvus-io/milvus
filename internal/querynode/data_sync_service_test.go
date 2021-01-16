@@ -54,7 +54,7 @@ func TestDataSyncService_Start(t *testing.T) {
 				},
 			},
 			InsertRequest: internalPb.InsertRequest{
-				MsgType:        internalPb.MsgType_kInsert,
+				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          int64(0),
 				CollectionName: "collection0",
 				PartitionTag:   "default",
@@ -86,7 +86,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   internalPb.MsgType_kTimeTick,
+		MsgType:   commonpb.MsgType_kTimeTick,
 		PeerID:    UniqueID(0),
 		Timestamp: math.MaxUint64,
 	}

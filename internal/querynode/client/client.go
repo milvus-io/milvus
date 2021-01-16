@@ -46,7 +46,7 @@ func (c *Client) LoadIndex(indexPaths []string,
 	}
 
 	loadIndexRequest := internalPb.LoadIndex{
-		MsgType:     internalPb.MsgType_kLoadIndex,
+		MsgType:     commonpb.MsgType_kLoadIndex,
 		SegmentID:   segmentID,
 		FieldName:   fieldName,
 		FieldID:     fieldID,

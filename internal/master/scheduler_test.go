@@ -75,7 +75,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 
 	////////////////////////////CreateCollection////////////////////////
 	createCollectionReq := internalpb.CreateCollectionRequest{
-		MsgType:   internalpb.MsgType_kCreateCollection,
+		MsgType:   commonpb.MsgType_kCreateCollection,
 		ReqID:     1,
 		Timestamp: 11,
 		ProxyID:   1,
@@ -119,7 +119,7 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 
 	////////////////////////////DropCollection////////////////////////
 	dropCollectionReq := internalpb.DropCollectionRequest{
-		MsgType:        internalpb.MsgType_kDropCollection,
+		MsgType:        commonpb.MsgType_kDropCollection,
 		ReqID:          1,
 		Timestamp:      13,
 		ProxyID:        1,
@@ -219,7 +219,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 
 	////////////////////////////CreateCollection////////////////////////
 	createCollectionReq := internalpb.CreateCollectionRequest{
-		MsgType:   internalpb.MsgType_kCreateCollection,
+		MsgType:   commonpb.MsgType_kCreateCollection,
 		ReqID:     1,
 		Timestamp: 11,
 		ProxyID:   1,
@@ -264,7 +264,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	////////////////////////////CreatePartition////////////////////////
 	partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)
 	createPartitionReq := internalpb.CreatePartitionRequest{
-		MsgType:   internalpb.MsgType_kCreatePartition,
+		MsgType:   commonpb.MsgType_kCreatePartition,
 		ReqID:     1,
 		Timestamp: 13,
 		ProxyID:   1,
@@ -311,7 +311,7 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 
 	////////////////////////////DropPartition////////////////////////
 	dropPartitionReq := internalpb.DropPartitionRequest{
-		MsgType:   internalpb.MsgType_kDropPartition,
+		MsgType:   commonpb.MsgType_kDropPartition,
 		ReqID:     1,
 		Timestamp: 15,
 		ProxyID:   1,
