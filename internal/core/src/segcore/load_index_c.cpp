@@ -12,7 +12,7 @@
 #include "index/knowhere/knowhere/common/BinarySet.h"
 #include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
 #include "segcore/load_index_c.h"
-#include "common/LoadInfo.h"
+#include "common/LoadIndex.h"
 #include "utils/EasyAssert.h"
 
 CStatus

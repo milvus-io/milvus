@@ -10,20 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentInterface.h"
-#include "common/LoadInfo.h"
 
-namespace milvus::segcore {
-
-class SegmentSealed {
- public:
-    virtual const Schema&
-    get_schema() = 0;
-    virtual int64_t
-    get_row_count() = 0;
-    virtual void
-    LoadIndex(const LoadIndexInfo& info) = 0;
-    virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
-};
-
-}  // namespace milvus::segcore
+// class SegmentSealed : public SegmentInternalInterface {
+//  public:
+//     const Schema& get_schema() = 0;
+//     int64_t get_num_chunk() = 0;
+//
+//     explicit SegmentSealed(SchemaPtr schema);
+//     void set_size();
+//     void load_data(FieldId field_id, void* blob, int64_t blob_size);
+//
+//
+//  private:
+//     SchemaPtr schema_;
+// }
