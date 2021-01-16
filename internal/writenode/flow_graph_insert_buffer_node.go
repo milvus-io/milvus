@@ -127,8 +127,24 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			}
 		}
 
+		// Timestamps
+		_, ok = idata.Data[1].(*storage.Int64FieldData)
+		if !ok {
+			idata.Data[1] = &storage.Int64FieldData{
+				Data:    []int64{},
+				NumRows: 0,
+			}
+		}
+		tsData := idata.Data[1].(*storage.Int64FieldData)
+		for _, ts := range msg.Timestamps {
+			tsData.Data = append(tsData.Data, int64(ts))
+		}
+		tsData.NumRows += len(msg.Timestamps)
+		span.LogFields(oplog.Int("tsData numRows", tsData.NumRows))
+
 		// 1.1 Get CollectionMeta from etcd
 		collection, err := ibNode.replica.getCollectionByName(collectionName)
+		//collSchema, err := ibNode.getCollectionSchemaByName(collectionName)
 		if err != nil {
 			// GOOSE TODO add error handler
 			log.Println("bbb, Get meta wrong:", err)
@@ -167,20 +183,18 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 
 				fieldData := idata.Data[field.FieldID].(*storage.FloatVectorFieldData)
 
-				var offset int
 				for _, blob := range msg.RowData {
-					offset = 0
 					for j := 0; j < dim; j++ {
 						var v float32
-						buf := bytes.NewBuffer(blob.GetValue()[pos+offset:])
+						buf := bytes.NewBuffer(blob.GetValue()[pos:])
 						if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 							log.Println("binary.read float32 err:", err)
 						}
 						fieldData.Data = append(fieldData.Data, v)
-						offset += int(unsafe.Sizeof(*(&v)))
+						pos += int(unsafe.Sizeof(*(&v)))
 					}
 				}
-				pos += offset
+
 				fieldData.NumRows += len(msg.RowIDs)
 
 			case schemapb.DataType_VECTOR_BINARY:
@@ -208,15 +222,13 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 				fieldData := idata.Data[field.FieldID].(*storage.BinaryVectorFieldData)
 
-				var offset int
 				for _, blob := range msg.RowData {
-					bv := blob.GetValue()[pos+offset : pos+(dim/8)]
+					bv := blob.GetValue()[pos : pos+(dim/8)]
 					fieldData.Data = append(fieldData.Data, bv...)
-					offset = len(bv)
+					pos += len(bv)
 				}
-				pos += offset
-				fieldData.NumRows += len(msg.RowData)
 
+				fieldData.NumRows += len(msg.RowData)
 			case schemapb.DataType_BOOL:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BoolFieldData{
@@ -226,18 +238,17 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.BoolFieldData)
-				var v bool
 				for _, blob := range msg.RowData {
+					var v bool
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read bool failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
-
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
-				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
 
+				fieldData.NumRows += len(msg.RowIDs)
 			case schemapb.DataType_INT8:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int8FieldData{
@@ -247,15 +258,15 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.Int8FieldData)
-				var v int8
 				for _, blob := range msg.RowData {
+					var v int8
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read int8 failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
-				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
 			case schemapb.DataType_INT16:
@@ -267,15 +278,16 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.Int16FieldData)
-				var v int16
 				for _, blob := range msg.RowData {
+					var v int16
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read int16 failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
-				pos += int(unsafe.Sizeof(*(&v)))
+
 				fieldData.NumRows += len(msg.RowIDs)
 
 			case schemapb.DataType_INT32:
@@ -287,15 +299,15 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.Int32FieldData)
-				var v int32
 				for _, blob := range msg.RowData {
+					var v int32
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read int32 failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
-				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 
 			case schemapb.DataType_INT64:
@@ -308,24 +320,27 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 
 				fieldData := idata.Data[field.FieldID].(*storage.Int64FieldData)
 				switch field.FieldID {
-				case 0: // rowIDs
+				case 0:
 					fieldData.Data = append(fieldData.Data, msg.RowIDs...)
 					fieldData.NumRows += len(msg.RowIDs)
-				case 1: // Timestamps
+				case 1:
+					// Timestamps
 					for _, ts := range msg.Timestamps {
 						fieldData.Data = append(fieldData.Data, int64(ts))
 					}
 					fieldData.NumRows += len(msg.Timestamps)
 				default:
-					var v int64
+
 					for _, blob := range msg.RowData {
+						var v int64
 						buf := bytes.NewBuffer(blob.GetValue()[pos:])
 						if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 							log.Println("binary.Read int64 failed:", err)
 						}
 						fieldData.Data = append(fieldData.Data, v)
+						pos += int(unsafe.Sizeof(*(&v)))
 					}
-					pos += int(unsafe.Sizeof(*(&v)))
+
 					fieldData.NumRows += len(msg.RowIDs)
 				}
 
@@ -338,15 +353,16 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.FloatFieldData)
-				var v float32
 				for _, blob := range msg.RowData {
+					var v float32
 					buf := bytes.NewBuffer(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read float32 failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
-				pos += int(unsafe.Sizeof(*(&v)))
+
 				fieldData.NumRows += len(msg.RowIDs)
 
 			case schemapb.DataType_DOUBLE:
@@ -358,16 +374,16 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 				}
 
 				fieldData := idata.Data[field.FieldID].(*storage.DoubleFieldData)
-				var v float64
 				for _, blob := range msg.RowData {
+					var v float64
 					buf := bytes.NewBuffer(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
 						log.Println("binary.Read float64 failed:", err)
 					}
 					fieldData.Data = append(fieldData.Data, v)
+					pos += int(unsafe.Sizeof(*(&v)))
 				}
 
-				pos += int(unsafe.Sizeof(*(&v)))
 				fieldData.NumRows += len(msg.RowIDs)
 			}
 		}

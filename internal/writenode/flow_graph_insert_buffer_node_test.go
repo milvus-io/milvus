@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -47,16 +46,11 @@ func TestFlowGraphInputBufferNode_Operate(t *testing.T) {
 	assert.Equal(t, testPath, fService.metaTable.client.(*etcdkv.EtcdKV).GetPath("."))
 	go fService.start()
 
-	collMeta := newMeta()
-	schemaBlob := proto.MarshalTextString(collMeta.Schema)
-	require.NotEqual(t, "", schemaBlob)
-
-	replica := newReplica()
-	err = replica.addCollection(collMeta.ID, schemaBlob)
-	require.NoError(t, err)
-
 	// Params.FlushInsertBufSize = 2
+	replica := newReplica()
 	iBNode := newInsertBufferNode(ctx, insertChan, replica)
+
+	newMeta()
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]*flowgraph.Msg{&iMsg})
@@ -76,12 +70,14 @@ func genInsertMsg() insertMsg {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
+	log.Println(len(rawData))
 
 	// Binary vector
 	// Dimension of binary vector is 32
 	// size := 4,  = 32 / 8
 	var bvector = []byte{255, 255, 255, 0}
 	rawData = append(rawData, bvector...)
+	log.Println(len(rawData))
 
 	// Bool
 	var fieldBool = true
@@ -91,6 +87,7 @@ func genInsertMsg() insertMsg {
 	}
 
 	rawData = append(rawData, buf.Bytes()...)
+	log.Println(len(rawData))
 
 	// int8
 	var dataInt8 int8 = 100
@@ -99,6 +96,7 @@ func genInsertMsg() insertMsg {
 		panic(err)
 	}
 	rawData = append(rawData, bint8.Bytes()...)
+	log.Println(len(rawData))
 
 	// int16
 	var dataInt16 int16 = 200
@@ -107,6 +105,7 @@ func genInsertMsg() insertMsg {
 		panic(err)
 	}
 	rawData = append(rawData, bint16.Bytes()...)
+	log.Println(len(rawData))
 
 	// int32
 	var dataInt32 int32 = 300
@@ -115,14 +114,16 @@ func genInsertMsg() insertMsg {
 		panic(err)
 	}
 	rawData = append(rawData, bint32.Bytes()...)
+	log.Println(len(rawData))
 
 	// int64
-	var dataInt64 int64 = 400
+	var dataInt64 int64 = 300
 	bint64 := new(bytes.Buffer)
 	if err := binary.Write(bint64, binary.LittleEndian, dataInt64); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint64.Bytes()...)
+	log.Println(len(rawData))
 
 	// float32
 	var datafloat float32 = 1.1
@@ -131,6 +132,7 @@ func genInsertMsg() insertMsg {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat32.Bytes()...)
+	log.Println(len(rawData))
 
 	// float64
 	var datafloat64 float64 = 2.2
@@ -139,7 +141,7 @@ func genInsertMsg() insertMsg {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
-	log.Println("Test rawdata length:", len(rawData))
+	log.Println(len(rawData))
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -168,31 +170,15 @@ func genInsertMsg() insertMsg {
 			InsertRequest: internalpb.InsertRequest{
 				MsgType:        commonpb.MsgType_kInsert,
 				ReqID:          UniqueID(0),
-				CollectionName: "col1",
+				CollectionName: "coll1",
 				PartitionTag:   "default",
 				SegmentID:      UniqueID(1),
 				ChannelID:      UniqueID(0),
 				ProxyID:        UniqueID(0),
-				Timestamps: []Timestamp{
-					Timestamp(i + 1000),
-					Timestamp(i + 1000),
-					Timestamp(i + 1000),
-					Timestamp(i + 1000),
-					Timestamp(i + 1000),
-				},
-				RowIDs: []UniqueID{
-					UniqueID(i),
-					UniqueID(i),
-					UniqueID(i),
-					UniqueID(i),
-					UniqueID(i),
-				},
+				Timestamps:     []Timestamp{Timestamp(i + 1000)},
+				RowIDs:         []UniqueID{UniqueID(i)},
 
 				RowData: []*commonpb.Blob{
-					{Value: rawData},
-					{Value: rawData},
-					{Value: rawData},
-					{Value: rawData},
 					{Value: rawData},
 				},
 			},
@@ -207,11 +193,9 @@ func genInsertMsg() insertMsg {
 			},
 		},
 		FlushMsg: internalpb.FlushMsg{
-			MsgType:      commonpb.MsgType_kFlush,
-			SegmentID:    UniqueID(1),
-			Timestamp:    Timestamp(2000),
-			CollectionID: UniqueID(1),
-			PartitionTag: "default",
+			MsgType:   commonpb.MsgType_kFlush,
+			SegmentID: UniqueID(1),
+			Timestamp: Timestamp(2000),
 		},
 	}
 	iMsg.flushMessages = append(iMsg.flushMessages, &fmsg)
