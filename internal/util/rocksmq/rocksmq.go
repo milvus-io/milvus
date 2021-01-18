@@ -16,7 +16,9 @@ import (
 type UniqueID = typeutil.UniqueID
 
 const (
-	FixedChannelNameLen = 32
+	DefaultMessageID        = "-1"
+	FixedChannelNameLen     = 32
+	RocksDBLRUCacheCapacity = 3 << 30
 )
 
 /**
@@ -83,9 +85,9 @@ type RocksMQ struct {
 	//tsoTicker *time.Ticker
 }
 
-func NewRocksMQ(name string) (*RocksMQ, error) {
+func NewRocksMQ(name string, idAllocator master.IDAllocator) (*RocksMQ, error) {
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(3 << 30))
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
 	opts.SetCreateIfMissing(true)
@@ -99,8 +101,9 @@ func NewRocksMQ(name string) (*RocksMQ, error) {
 	mkv := memkv.NewMemoryKV()
 
 	rmq := &RocksMQ{
-		store: db,
-		kv:    mkv,
+		store:       db,
+		kv:          mkv,
+		idAllocator: idAllocator,
 	}
 	return rmq, nil
 }
@@ -176,8 +179,8 @@ func NewRocksMQ(name string) (*RocksMQ, error) {
 //}
 
 func (rmq *RocksMQ) checkKeyExist(key string) bool {
-	_, err := rmq.kv.Load(key)
-	return err == nil
+	val, _ := rmq.kv.Load(key)
+	return val != ""
 }
 
 func (rmq *RocksMQ) CreateChannel(channelName string) error {
@@ -229,7 +232,7 @@ func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) er
 	if rmq.checkKeyExist(key) {
 		return errors.New("ConsumerGroup " + groupName + " already exists.")
 	}
-	err := rmq.kv.Save(key, "-1")
+	err := rmq.kv.Save(key, DefaultMessageID)
 	if err != nil {
 		return err
 	}
@@ -316,11 +319,12 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 	}
 	dataKey := fixChanName + "/" + currentID
 
-	// msgID is "-1" means this is the first consume operation
-	if currentID == "-1" {
+	// msgID is DefaultMessageID means this is the first consume operation
+	if currentID == DefaultMessageID {
 		iter.SeekToFirst()
 	} else {
 		iter.Seek([]byte(dataKey))
+		iter.Next()
 	}
 
 	offset := 0
