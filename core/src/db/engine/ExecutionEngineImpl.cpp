@@ -347,7 +347,8 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
         } else {
             switch (general_query->bin->relation) {
                 case milvus::query::QueryRelation::AND:
-                case milvus::query::QueryRelation::R1: {
+                case milvus::query::QueryRelation::R1:
+                case milvus::query::QueryRelation::R4: {
                     bitset = (*left_bitset) & (*right_bitset);
                     break;
                 }
@@ -355,10 +356,6 @@ ExecutionEngineImpl::ExecBinaryQuery(const milvus::query::GeneralQueryPtr& gener
                 case milvus::query::QueryRelation::R2:
                 case milvus::query::QueryRelation::R3: {
                     bitset = (*left_bitset) | (*right_bitset);
-                    break;
-                }
-                case milvus::query::QueryRelation::R4: {
-                    bitset = (*left_bitset) & (right_bitset->negate());
                     break;
                 }
                 default: {
