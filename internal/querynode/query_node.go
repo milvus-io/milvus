@@ -53,6 +53,8 @@ type QueryNode struct {
 	loadIndexService *loadIndexService
 	statsService     *statsService
 
+	segManager *segmentManager
+
 	//opentracing
 	tracer opentracing.Tracer
 	closer io.Closer

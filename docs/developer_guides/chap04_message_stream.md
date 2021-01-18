@@ -96,17 +96,26 @@ type TsMsg interface {
   Unmarshal([]byte) *TsMsg
 }
 
+type MsgPosition {
+  ChannelName string
+  MsgID string
+  TimestampFilter Timestamp
+}
+
 type MsgPack struct {
   BeginTs Timestamp
   EndTs Timestamp
   Msgs []TsMsg
+  StartPositions []MsgPosition
+  EndPositions []MsgPosition
 }
-
 
 type MsgStream interface {
   Produce(*MsgPack) error
   Broadcast(*MsgPack) error
   Consume() *MsgPack // message can be consumed exactly once
+  ShowChannelNames() []string
+  Seek(offset MsgPosition) error
 }
 
 type RepackFunc(msgs []* TsMsg, hashKeys [][]int32) map[int32] *MsgPack

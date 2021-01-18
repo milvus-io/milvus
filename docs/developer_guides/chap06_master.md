@@ -23,6 +23,9 @@ type Master interface {
   GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
   ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
   
+  DescribeSegment(req DescribeSegmentRequest) (DescribeSegmentResponse, error)
+  ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
+  
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
   
@@ -87,6 +90,10 @@ type DescribeCollectionRequest struct {
 }
 
 type DescribeCollectionResponse struct {
+  DbID UniqueID
+  CollectionID UniqueID
+  DefaultPartitionName string
+  DefaultPartitionID UniqueID
   Schema []bytes
 }
 ```
@@ -115,6 +122,7 @@ type ShowCollectionRequest struct {
 
 type ShowCollectionResponse struct {
   CollectionNames []string
+  CollectionIDs []UniqueID
 }
 ```
 
@@ -176,7 +184,36 @@ type ShowPartitionRequest struct {
 }
 
 type ShowPartitionResponse struct {
+  PartitionIDs []UniqueID
   PartitionNames []string
+}
+```
+
+* DescribeSegment
+
+```go
+type DescribeSegmentRequest struct {
+  MsgBase
+  CollectionID UniqueID
+  SegmentID UniqueID
+}
+
+type DescribeSegmentResponse struct {
+  IndexID UniqueID
+}
+```
+
+* ShowSegments
+
+```go
+type ShowSegmentRequest struct {
+  MsgBase
+  CollectionID UniqueID
+  PartitionID UniqueID
+}
+
+type ShowSegmentResponse struct {
+  SegmentIDs []UniqueID
 }
 ```
 
