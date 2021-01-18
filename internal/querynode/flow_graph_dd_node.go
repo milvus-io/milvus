@@ -94,10 +94,8 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 		return
 	}
 
-	schemaBlob := proto.MarshalTextString(&schema)
-
 	// add collection
-	err = ddNode.replica.addCollection(collectionID, schemaBlob)
+	err = ddNode.replica.addCollection(collectionID, &schema)
 	if err != nil {
 		log.Println(err)
 		return

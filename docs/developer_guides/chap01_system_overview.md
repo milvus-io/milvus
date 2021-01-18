@@ -77,7 +77,7 @@ In order to boost throughput, we model Milvus as a stream-driven system.
 #### 1.6 System Model
 
 ```go
-type Service interface {
+type Component interface {
   Init()
   Start()
   Stop()

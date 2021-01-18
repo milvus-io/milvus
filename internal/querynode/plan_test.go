@@ -15,10 +15,8 @@ func TestPlan_Plan(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta.ID, schemaBlob)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 
@@ -37,10 +35,8 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta.ID, schemaBlob)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 

@@ -11,17 +11,20 @@ package querynode
 
 */
 import "C"
-import "unsafe"
+import (
+	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+)
 
 type Collection struct {
 	collectionPtr C.CCollection
 	id            UniqueID
-	name          string
+	schema        *schemapb.CollectionSchema
 	partitions    []*Partition
 }
 
 func (c *Collection) Name() string {
-	return c.name
+	return c.schema.Name
 }
 
 func (c *Collection) ID() UniqueID {
@@ -32,7 +35,11 @@ func (c *Collection) Partitions() *[]*Partition {
 	return &c.partitions
 }
 
-func newCollection(collectionID UniqueID, schemaBlob string) *Collection {
+func (c *Collection) Schema() *schemapb.CollectionSchema {
+	return c.schema
+}
+
+func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -40,17 +47,15 @@ func newCollection(collectionID UniqueID, schemaBlob string) *Collection {
 		const char*
 		GetCollectionName(CCollection collection);
 	*/
+	schemaBlob := proto.MarshalTextString(schema)
+
 	cSchemaBlob := C.CString(schemaBlob)
 	collection := C.NewCollection(cSchemaBlob)
-
-	name := C.GetCollectionName(collection)
-	collectionName := C.GoString(name)
-	defer C.free(unsafe.Pointer(name))
 
 	var newCollection = &Collection{
 		collectionPtr: collection,
 		id:            collectionID,
-		name:          collectionName,
+		schema:        schema,
 	}
 
 	return newCollection

@@ -94,44 +94,7 @@ func (lis *loadIndexService) start() {
 				continue
 			}
 			for _, msg := range messages.Msgs {
-				indexMsg, ok := msg.(*msgstream.LoadIndexMsg)
-				if !ok {
-					log.Println("type assertion failed for LoadIndexMsg")
-					continue
-				}
-				// 1. use msg's index paths to get index bytes
-				fmt.Println("start load index")
-				var err error
-				ok, err = lis.checkIndexReady(indexMsg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				if ok {
-					continue
-				}
-
-				var indexBuffer [][]byte
-				fn := func() error {
-					indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
-					if err != nil {
-						return err
-					}
-					return nil
-				}
-				err = msgstream.Retry(5, time.Millisecond*200, fn)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				// 2. use index bytes and index path to update segment
-				err = lis.updateSegmentIndex(indexBuffer, indexMsg)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				//3. update segment index stats
-				err = lis.updateSegmentIndexStats(indexMsg)
+				err := lis.execute(msg)
 				if err != nil {
 					log.Println(err)
 					continue
@@ -146,6 +109,48 @@ func (lis *loadIndexService) start() {
 			}
 		}
 	}
+}
+
+func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
+	indexMsg, ok := msg.(*msgstream.LoadIndexMsg)
+	if !ok {
+		return errors.New("type assertion failed for LoadIndexMsg")
+	}
+	// 1. use msg's index paths to get index bytes
+	fmt.Println("start load index")
+	var err error
+	ok, err = lis.checkIndexReady(indexMsg)
+	if err != nil {
+		return err
+	}
+	if ok {
+		// no error
+		return errors.New("")
+	}
+
+	var indexBuffer [][]byte
+	fn := func() error {
+		indexBuffer, err = lis.loadIndex(indexMsg.IndexPaths)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err = msgstream.Retry(5, time.Millisecond*200, fn)
+	if err != nil {
+		return err
+	}
+	// 2. use index bytes and index path to update segment
+	err = lis.updateSegmentIndex(indexBuffer, indexMsg)
+	if err != nil {
+		return err
+	}
+	//3. update segment index stats
+	err = lis.updateSegmentIndexStats(indexMsg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (lis *loadIndexService) close() {

@@ -17,10 +17,8 @@ func TestReduce_AllFunc(t *testing.T) {
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
 
-	collection := newCollection(collectionMeta.ID, schemaBlob)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	segment := newSegment(collection, segmentID, Params.DefaultPartitionTag, collectionID)
 
 	const DIM = 16

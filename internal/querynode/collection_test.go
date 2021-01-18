@@ -3,7 +3,6 @@ package querynode
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,10 +24,7 @@ func TestCollection_newCollection(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
-
-	collection := newCollection(collectionMeta.ID, schemaBlob)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 }
@@ -38,10 +34,7 @@ func TestCollection_deleteCollection(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
 
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	assert.NotEqual(t, "", schemaBlob)
-
-	collection := newCollection(collectionMeta.ID, schemaBlob)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 	deleteCollection(collection)

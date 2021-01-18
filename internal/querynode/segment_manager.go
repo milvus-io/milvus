@@ -26,13 +26,12 @@ type segmentManager struct {
 	iCodec          storage.InsertCodec
 }
 
-func (s *segmentManager) loadSegment(segmentID UniqueID, hasBeenBuiltIndex bool, indexID UniqueID, vecFieldIDs []int64) error {
-	// 1. load segment
-	req := &datapb.InsertBinlogPathRequest{
+func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) error {
+	insertBinlogPathRequest := &datapb.InsertBinlogPathRequest{
 		SegmentID: segmentID,
 	}
 
-	pathResponse, err := s.dataClient.GetInsertBinlogPaths(context.TODO(), req)
+	pathResponse, err := s.dataClient.GetInsertBinlogPaths(context.TODO(), insertBinlogPathRequest)
 	if err != nil {
 		return err
 	}
@@ -41,7 +40,21 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, hasBeenBuiltIndex bool,
 		return errors.New("illegal InsertBinlogPathsResponse")
 	}
 
-	for fieldID, i := range pathResponse.FieldIDs {
+	containsFunc := func(s []int64, e int64) bool {
+		for _, a := range s {
+			if a == e {
+				return true
+			}
+		}
+		return false
+	}
+
+	for i, fieldID := range pathResponse.FieldIDs {
+		// filter out the needless fields
+		if !containsFunc(*fieldIDs, fieldID) {
+			continue
+		}
+
 		paths := pathResponse.Paths[i].Values
 		blobs := make([]*storage.Blob, 0)
 		for _, path := range paths {
@@ -83,39 +96,52 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, hasBeenBuiltIndex bool,
 				// TODO: s.replica.addSegment()
 			case storage.DoubleFieldData:
 				// TODO: s.replica.addSegment()
+			case storage.StringFieldData:
+				// TODO: s.replica.addSegment()
+			case storage.FloatVectorFieldData:
+				// segment to be loaded doesn't need vector field,
+				// so we ignore the type of vector field data
+				continue
+			case storage.BinaryVectorFieldData:
+				continue
 			default:
-				// TODO: what if the index has not been built ?
-				// does the info from hasBeenBuiltIndex is synced with the dataService?
-				return errors.New("unsupported field data type")
+				return errors.New("unexpected field data type")
 			}
 		}
 	}
 
-	// 2. load index
-	// does the info from hasBeenBuiltIndex is synced with the dataService?
-	if !hasBeenBuiltIndex {
-		req := &indexpb.IndexFilePathRequest{
-			IndexID: indexID,
+	return nil
+}
+
+func (s *segmentManager) loadIndex(segmentID UniqueID, indexID UniqueID) error {
+	indexFilePathRequest := &indexpb.IndexFilePathRequest{
+		IndexID: indexID,
+	}
+	pathResponse, err := s.indexBuilderClient.GetIndexFilePaths(context.TODO(), indexFilePathRequest)
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return err
+	}
+	targetSegment, err := s.replica.getSegmentByID(segmentID)
+	if err != nil {
+		return err
+	}
+
+	// get vector field ids from schema to load index
+	vecFieldIDs, err := s.replica.getVecFieldIDsBySegmentID(segmentID)
+	if err != nil {
+		return err
+	}
+	for _, vecFieldID := range vecFieldIDs {
+		targetIndexParam, ok := targetSegment.indexParam[vecFieldID]
+		if !ok {
+			return errors.New(fmt.Sprint("cannot found index params in segment ", segmentID, " with field = ", vecFieldID))
 		}
-		pathResponse, err := s.indexBuilderClient.GetIndexFilePaths(context.TODO(), req)
-		if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return err
-		}
-		targetSegment, err := s.replica.getSegmentByID(segmentID)
+		err := s.queryNodeClient.LoadIndex(pathResponse.IndexFilePaths, segmentID, vecFieldID, "", targetIndexParam)
 		if err != nil {
 			return err
 		}
-		for _, vecFieldID := range vecFieldIDs {
-			targetIndexParam, ok := targetSegment.indexParam[vecFieldID]
-			if !ok {
-				return errors.New(fmt.Sprint("cannot found index params in segment ", segmentID, " with field = ", vecFieldID))
-			}
-			err := s.queryNodeClient.LoadIndex(pathResponse.IndexFilePaths, segmentID, vecFieldID, "", targetIndexParam)
-			if err != nil {
-				return err
-			}
-		}
 	}
+
 	return nil
 }
 
