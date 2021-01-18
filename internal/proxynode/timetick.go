@@ -6,12 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type tickCheckFunc = func(Timestamp) bool
@@ -74,10 +75,13 @@ func (tt *timeTick) tick() error {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(Params.ProxyID())},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    tt.peerID,
-			Timestamp: tt.currentTick,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: tt.currentTick,
+				SourceID:  tt.peerID,
+			},
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)

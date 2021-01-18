@@ -2,10 +2,12 @@ package allocator
 
 import (
 	"context"
+
 	"log"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -65,10 +67,14 @@ func (ta *TimestampAllocator) pickCanDoFunc() {
 
 func (ta *TimestampAllocator) syncTs() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &internalpb.TsoRequest{
-		PeerID: ta.PeerID,
-		Role:   internalpb.PeerRole_Proxy,
-		Count:  ta.countPerRPC,
+	req := &masterpb.TsoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kRequestTSO,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  ta.PeerID,
+		},
+		Count: ta.countPerRPC,
 	}
 	resp, err := ta.masterClient.AllocTimestamp(ctx, req)
 

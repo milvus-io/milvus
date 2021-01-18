@@ -13,7 +13,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
 
@@ -79,12 +79,14 @@ func TestSearch_Search(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		SearchRequest: internalpb.SearchRequest{
-			MsgType:         commonpb.MsgType_kSearch,
-			ReqID:           int64(1),
-			ProxyID:         int64(1),
-			Timestamp:       uint64(10 + 1000),
-			ResultChannelID: int64(0),
+		SearchRequest: internalpb2.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kSearch,
+				MsgID:     1,
+				Timestamp: uint64(10 + 1000),
+				SourceID:  1,
+			},
+			ResultChannelID: "0",
 			Query:           &blob,
 		},
 	}
@@ -126,14 +128,17 @@ func TestSearch_Search(t *testing.T) {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          int64(i),
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     int64(i),
+					Timestamp: uint64(10 + 1000),
+					SourceID:  0,
+				},
 				CollectionName: "collection0",
-				PartitionTag:   "default",
+				PartitionName:  "default",
 				SegmentID:      int64(0),
-				ChannelID:      int64(0),
-				ProxyID:        int64(0),
+				ChannelID:      "0",
 				Timestamps:     []uint64{uint64(i + 1000)},
 				RowIDs:         []int64{int64(i)},
 				RowData: []*commonpb.Blob{
@@ -157,10 +162,13 @@ func TestSearch_Search(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb.TimeTickMsg{
-		MsgType:   commonpb.MsgType_kTimeTick,
-		PeerID:    UniqueID(0),
-		Timestamp: math.MaxUint64,
+	timeTickResult := internalpb2.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: math.MaxUint64,
+			SourceID:  0,
+		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg:     baseMsg,
@@ -265,12 +273,14 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
-		SearchRequest: internalpb.SearchRequest{
-			MsgType:         commonpb.MsgType_kSearch,
-			ReqID:           int64(1),
-			ProxyID:         int64(1),
-			Timestamp:       uint64(10 + 1000),
-			ResultChannelID: int64(0),
+		SearchRequest: internalpb2.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kSearch,
+				MsgID:     1,
+				Timestamp: uint64(10 + 1000),
+				SourceID:  1,
+			},
+			ResultChannelID: "0",
 			Query:           &blob,
 		},
 	}
@@ -316,14 +326,17 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          int64(i),
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     int64(i),
+					Timestamp: uint64(i + 1000),
+					SourceID:  0,
+				},
 				CollectionName: "collection0",
-				PartitionTag:   "default",
+				PartitionName:  "default",
 				SegmentID:      int64(segmentID),
-				ChannelID:      int64(0),
-				ProxyID:        int64(0),
+				ChannelID:      "0",
 				Timestamps:     []uint64{uint64(i + 1000)},
 				RowIDs:         []int64{int64(i)},
 				RowData: []*commonpb.Blob{
@@ -347,10 +360,13 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb.TimeTickMsg{
-		MsgType:   commonpb.MsgType_kTimeTick,
-		PeerID:    UniqueID(0),
-		Timestamp: math.MaxUint64,
+	timeTickResult := internalpb2.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: math.MaxUint64,
+			SourceID:  0,
+		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg:     baseMsg,

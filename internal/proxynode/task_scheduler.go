@@ -7,9 +7,10 @@ import (
 	"log"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 type TaskQueue interface {
@@ -375,7 +376,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
 
-	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResult)
+	queryResultBuf := make(map[UniqueID][]*internalpb2.SearchResults)
 
 	for {
 		select {
@@ -389,16 +390,16 @@ func (sched *TaskScheduler) queryResultLoop() {
 			}
 			for _, tsMsg := range msgPack.Msgs {
 				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
-				reqID := searchResultMsg.GetReqID()
+				reqID := searchResultMsg.Base.MsgID
 				_, ok = queryResultBuf[reqID]
 				if !ok {
-					queryResultBuf[reqID] = make([]*internalpb.SearchResult, 0)
+					queryResultBuf[reqID] = make([]*internalpb2.SearchResults, 0)
 				}
-				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResult)
+				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResults)
 				if len(queryResultBuf[reqID]) == queryNodeNum {
 					t := sched.getTaskByReqID(reqID)
 					if t != nil {
-						qt, ok := t.(*QueryTask)
+						qt, ok := t.(*SearchTask)
 						if ok {
 							log.Printf("address of query task: %p", qt)
 							qt.resultBuf <- queryResultBuf[reqID]

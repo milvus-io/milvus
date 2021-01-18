@@ -17,22 +17,13 @@ message RegisterNodeResponse {
   internal.InitParams init_params = 1;
 }
 
-
-enum IndexState {
-  NONE = 0;
-  UNISSUED = 1;
-  INPROGRESS = 2;
-  FINISHED = 3;
-  FAILED = 4;
-}
-
 message IndexStatesRequest {
   int64  indexID = 1;
 }
 
 message IndexStatesResponse {
   common.Status status = 1;
-  IndexState state = 2;
+  common.IndexState state = 2;
   int64 indexID = 3;
 }
 
@@ -70,7 +61,7 @@ message IndexFilePathsResponse {
 }
 
 message IndexMeta {
-  IndexState state = 1;
+  common.IndexState state = 1;
   int64   indexID = 2;
   int64 enque_time = 3;
   int64 schedule_time = 4;

@@ -3,6 +3,9 @@ package proxynode
 import (
 	"log"
 	"sort"
+	"strconv"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
@@ -10,7 +13,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 )
 
 func insertRepackFunc(tsMsgs []msgstream.TsMsg,
@@ -43,7 +45,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 			return nil, errors.New(string("the length of hashValue, timestamps, rowIDs, RowData are not equal"))
 		}
 
-		reqID := insertRequest.ReqID
+		reqID := insertRequest.Base.MsgID
 		if _, ok := channelCountMap[reqID]; !ok {
 			channelCountMap[reqID] = make(map[int32]uint32)
 		}
@@ -53,7 +55,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		}
 
 		if _, ok := reqSchemaMap[reqID]; !ok {
-			reqSchemaMap[reqID] = []string{insertRequest.CollectionName, insertRequest.PartitionTag}
+			reqSchemaMap[reqID] = []string{insertRequest.CollectionName, insertRequest.PartitionName}
 		}
 
 		for idx, channelID := range keys {
@@ -153,10 +155,10 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 	for i, request := range tsMsgs {
 		insertRequest := request.(*msgstream.InsertMsg)
 		keys := hashKeys[i]
-		reqID := insertRequest.ReqID
+		reqID := insertRequest.Base.MsgID
 		collectionName := insertRequest.CollectionName
-		partitionTag := insertRequest.PartitionTag
-		proxyID := insertRequest.ProxyID
+		partitionTag := insertRequest.PartitionName
+		proxyID := insertRequest.Base.SourceID
 		for index, key := range keys {
 			ts := insertRequest.Timestamps[index]
 			rowID := insertRequest.RowIDs[index]
@@ -167,14 +169,17 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				result[key] = &msgPack
 			}
 			segmentID := getSegmentID(reqID, key)
-			sliceRequest := internalpb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          reqID,
+			sliceRequest := internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     reqID,
+					Timestamp: ts,
+					SourceID:  proxyID,
+				},
 				CollectionName: collectionName,
-				PartitionTag:   partitionTag,
+				PartitionName:  partitionTag,
 				SegmentID:      segmentID,
-				ChannelID:      int64(key),
-				ProxyID:        proxyID,
+				ChannelID:      strconv.FormatInt(int64(key), 10),
 				Timestamps:     []uint64{ts},
 				RowIDs:         []int64{rowID},
 				RowData:        []*commonpb.Blob{row},

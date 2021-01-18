@@ -2,22 +2,39 @@ package master
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"go.etcd.io/etcd/clientv3"
 )
+
+func filterSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	cloneSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	// remove system field
+	var newFields []*schemapb.FieldSchema
+	for _, fieldMeta := range cloneSchema.Fields {
+		fieldID := fieldMeta.FieldID
+		// todo not hardcode
+		if fieldID < 100 {
+			continue
+		}
+		newFields = append(newFields, fieldMeta)
+	}
+	cloneSchema.Fields = newFields
+	return cloneSchema
+}
 
 func TestMaster_Scheduler_Collection(t *testing.T) {
 	Init()
@@ -74,12 +91,14 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	assert.Nil(t, err)
 
 	////////////////////////////CreateCollection////////////////////////
-	createCollectionReq := internalpb.CreateCollectionRequest{
-		MsgType:   commonpb.MsgType_kCreateCollection,
-		ReqID:     1,
-		Timestamp: 11,
-		ProxyID:   1,
-		Schema:    &commonpb.Blob{Value: schemaBytes},
+	createCollectionReq := milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kCreateCollection,
+			MsgID:     1,
+			Timestamp: 11,
+			SourceID:  1,
+		},
+		Schema: schemaBytes,
 	}
 
 	var createCollectionTask task = &createCollectionTask{
@@ -111,19 +130,33 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, createCollectionReq.MsgType, createCollectionMsg.CreateCollectionRequest.MsgType)
-	assert.Equal(t, createCollectionReq.ReqID, createCollectionMsg.CreateCollectionRequest.ReqID)
-	assert.Equal(t, createCollectionReq.Timestamp, createCollectionMsg.CreateCollectionRequest.Timestamp)
-	assert.Equal(t, createCollectionReq.ProxyID, createCollectionMsg.CreateCollectionRequest.ProxyID)
-	assert.Equal(t, createCollectionReq.Schema.Value, createCollectionMsg.CreateCollectionRequest.Schema.Value)
+	assert.Equal(t, createCollectionReq.Base.MsgType, createCollectionMsg.CreateCollectionRequest.Base.MsgType)
+	assert.Equal(t, createCollectionReq.Base.MsgID, createCollectionMsg.CreateCollectionRequest.Base.MsgID)
+	assert.Equal(t, createCollectionReq.Base.Timestamp, createCollectionMsg.CreateCollectionRequest.Base.Timestamp)
+	assert.Equal(t, createCollectionReq.Base.SourceID, createCollectionMsg.CreateCollectionRequest.Base.SourceID)
+
+	var schema1 schemapb.CollectionSchema
+	proto.UnmarshalMerge(createCollectionReq.Schema, &schema1)
+
+	var schema2 schemapb.CollectionSchema
+	proto.UnmarshalMerge(createCollectionMsg.CreateCollectionRequest.Schema, &schema2)
+	filterSchema2 := filterSchema(&schema2)
+	filterSchema2Value, _ := proto.Marshal(filterSchema2)
+	fmt.Println("aaaa")
+	fmt.Println(schema1.String())
+	fmt.Println("bbbb")
+	fmt.Println(schema2.String())
+	assert.Equal(t, createCollectionReq.Schema, filterSchema2Value)
 
 	////////////////////////////DropCollection////////////////////////
-	dropCollectionReq := internalpb.DropCollectionRequest{
-		MsgType:        commonpb.MsgType_kDropCollection,
-		ReqID:          1,
-		Timestamp:      13,
-		ProxyID:        1,
-		CollectionName: &servicepb.CollectionName{CollectionName: sch.Name},
+	dropCollectionReq := milvuspb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDropCollection,
+			MsgID:     1,
+			Timestamp: 13,
+			SourceID:  1,
+		},
+		CollectionName: sch.Name,
 	}
 
 	var dropCollectionTask task = &dropCollectionTask{
@@ -155,11 +188,11 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, dropCollectionReq.MsgType, dropCollectionMsg.DropCollectionRequest.MsgType)
-	assert.Equal(t, dropCollectionReq.ReqID, dropCollectionMsg.DropCollectionRequest.ReqID)
-	assert.Equal(t, dropCollectionReq.Timestamp, dropCollectionMsg.DropCollectionRequest.Timestamp)
-	assert.Equal(t, dropCollectionReq.ProxyID, dropCollectionMsg.DropCollectionRequest.ProxyID)
-	assert.Equal(t, dropCollectionReq.CollectionName.CollectionName, dropCollectionMsg.DropCollectionRequest.CollectionName.CollectionName)
+	assert.Equal(t, dropCollectionReq.Base.MsgType, dropCollectionMsg.DropCollectionRequest.Base.MsgType)
+	assert.Equal(t, dropCollectionReq.Base.MsgID, dropCollectionMsg.DropCollectionRequest.Base.MsgID)
+	assert.Equal(t, dropCollectionReq.Base.Timestamp, dropCollectionMsg.DropCollectionRequest.Base.Timestamp)
+	assert.Equal(t, dropCollectionReq.Base.SourceID, dropCollectionMsg.DropCollectionRequest.Base.MsgID)
+	assert.Equal(t, dropCollectionReq.CollectionName, dropCollectionMsg.DropCollectionRequest.CollectionName)
 
 }
 
@@ -218,12 +251,14 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	assert.Nil(t, err)
 
 	////////////////////////////CreateCollection////////////////////////
-	createCollectionReq := internalpb.CreateCollectionRequest{
-		MsgType:   commonpb.MsgType_kCreateCollection,
-		ReqID:     1,
-		Timestamp: 11,
-		ProxyID:   1,
-		Schema:    &commonpb.Blob{Value: schemaBytes},
+	createCollectionReq := milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kCreateCollection,
+			MsgID:     1,
+			Timestamp: 11,
+			SourceID:  1,
+		},
+		Schema: schemaBytes,
 	}
 
 	var createCollectionTask task = &createCollectionTask{
@@ -255,23 +290,36 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, createCollectionReq.MsgType, createCollectionMsg.CreateCollectionRequest.MsgType)
-	assert.Equal(t, createCollectionReq.ReqID, createCollectionMsg.CreateCollectionRequest.ReqID)
-	assert.Equal(t, createCollectionReq.Timestamp, createCollectionMsg.CreateCollectionRequest.Timestamp)
-	assert.Equal(t, createCollectionReq.ProxyID, createCollectionMsg.CreateCollectionRequest.ProxyID)
-	assert.Equal(t, createCollectionReq.Schema.Value, createCollectionMsg.CreateCollectionRequest.Schema.Value)
+	assert.Equal(t, createCollectionReq.Base.MsgType, createCollectionMsg.CreateCollectionRequest.Base.MsgType)
+	assert.Equal(t, createCollectionReq.Base.MsgID, createCollectionMsg.CreateCollectionRequest.Base.MsgID)
+	assert.Equal(t, createCollectionReq.Base.Timestamp, createCollectionMsg.CreateCollectionRequest.Base.Timestamp)
+	assert.Equal(t, createCollectionReq.Base.SourceID, createCollectionMsg.CreateCollectionRequest.Base.SourceID)
+	//assert.Equal(t, createCollectionReq.Schema, createCollectionMsg.CreateCollectionRequest.Schema)
+
+	var schema1 schemapb.CollectionSchema
+	proto.UnmarshalMerge(createCollectionReq.Schema, &schema1)
+
+	var schema2 schemapb.CollectionSchema
+	proto.UnmarshalMerge(createCollectionMsg.CreateCollectionRequest.Schema, &schema2)
+	filterSchema2 := filterSchema(&schema2)
+	filterSchema2Value, _ := proto.Marshal(filterSchema2)
+	fmt.Println("aaaa")
+	fmt.Println(schema1.String())
+	fmt.Println("bbbb")
+	fmt.Println(schema2.String())
+	assert.Equal(t, createCollectionReq.Schema, filterSchema2Value)
 
 	////////////////////////////CreatePartition////////////////////////
 	partitionName := "partitionName" + strconv.FormatUint(rand.Uint64(), 10)
-	createPartitionReq := internalpb.CreatePartitionRequest{
-		MsgType:   commonpb.MsgType_kCreatePartition,
-		ReqID:     1,
-		Timestamp: 13,
-		ProxyID:   1,
-		PartitionName: &servicepb.PartitionName{
-			CollectionName: sch.Name,
-			Tag:            partitionName,
+	createPartitionReq := milvuspb.CreatePartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kCreatePartition,
+			MsgID:     1,
+			Timestamp: 13,
+			SourceID:  1,
 		},
+		CollectionName: sch.Name,
+		PartitionName:  partitionName,
 	}
 
 	var createPartitionTask task = &createPartitionTask{
@@ -302,23 +350,23 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, createPartitionReq.MsgType, createPartitionMsg.CreatePartitionRequest.MsgType)
-	assert.Equal(t, createPartitionReq.ReqID, createPartitionMsg.CreatePartitionRequest.ReqID)
-	assert.Equal(t, createPartitionReq.Timestamp, createPartitionMsg.CreatePartitionRequest.Timestamp)
-	assert.Equal(t, createPartitionReq.ProxyID, createPartitionMsg.CreatePartitionRequest.ProxyID)
-	assert.Equal(t, createPartitionReq.PartitionName.CollectionName, createPartitionMsg.CreatePartitionRequest.PartitionName.CollectionName)
-	assert.Equal(t, createPartitionReq.PartitionName.Tag, createPartitionMsg.CreatePartitionRequest.PartitionName.Tag)
+	assert.Equal(t, createPartitionReq.Base.MsgType, createPartitionMsg.CreatePartitionRequest.Base.MsgType)
+	assert.Equal(t, createPartitionReq.Base.MsgID, createPartitionMsg.CreatePartitionRequest.Base.MsgID)
+	assert.Equal(t, createPartitionReq.Base.Timestamp, createPartitionMsg.CreatePartitionRequest.Base.Timestamp)
+	assert.Equal(t, createPartitionReq.Base.SourceID, createPartitionMsg.CreatePartitionRequest.Base.MsgID)
+	assert.Equal(t, createPartitionReq.CollectionName, createPartitionMsg.CreatePartitionRequest.CollectionName)
+	assert.Equal(t, createPartitionReq.PartitionName, createPartitionMsg.CreatePartitionRequest.PartitionName)
 
 	////////////////////////////DropPartition////////////////////////
-	dropPartitionReq := internalpb.DropPartitionRequest{
-		MsgType:   commonpb.MsgType_kDropPartition,
-		ReqID:     1,
-		Timestamp: 15,
-		ProxyID:   1,
-		PartitionName: &servicepb.PartitionName{
-			CollectionName: sch.Name,
-			Tag:            partitionName,
+	dropPartitionReq := milvuspb.DropPartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDropPartition,
+			MsgID:     1,
+			Timestamp: 15,
+			SourceID:  1,
 		},
+		CollectionName: sch.Name,
+		PartitionName:  partitionName,
 	}
 
 	var dropPartitionTask task = &dropPartitionTask{
@@ -349,10 +397,10 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, dropPartitionReq.MsgType, dropPartitionMsg.DropPartitionRequest.MsgType)
-	assert.Equal(t, dropPartitionReq.ReqID, dropPartitionMsg.DropPartitionRequest.ReqID)
-	assert.Equal(t, dropPartitionReq.Timestamp, dropPartitionMsg.DropPartitionRequest.Timestamp)
-	assert.Equal(t, dropPartitionReq.ProxyID, dropPartitionMsg.DropPartitionRequest.ProxyID)
-	assert.Equal(t, dropPartitionReq.PartitionName.CollectionName, dropPartitionMsg.DropPartitionRequest.PartitionName.CollectionName)
+	assert.Equal(t, dropPartitionReq.Base.MsgType, dropPartitionMsg.DropPartitionRequest.Base.MsgType)
+	assert.Equal(t, dropPartitionReq.Base.MsgID, dropPartitionMsg.DropPartitionRequest.Base.MsgID)
+	assert.Equal(t, dropPartitionReq.Base.Timestamp, dropPartitionMsg.DropPartitionRequest.Base.Timestamp)
+	assert.Equal(t, dropPartitionReq.Base.SourceID, dropPartitionMsg.DropPartitionRequest.Base.SourceID)
+	assert.Equal(t, dropPartitionReq.CollectionName, dropPartitionMsg.DropPartitionRequest.CollectionName)
 
 }

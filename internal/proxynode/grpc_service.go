@@ -3,13 +3,16 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"strconv"
+
 	"log"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 )
@@ -31,18 +34,21 @@ func (p *Proxy) Insert(ctx context.Context, in *servicepb.RowBatch) (*servicepb.
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: in.HashKeys,
 			},
-			InsertRequest: internalpb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_kInsert,
+					MsgID:   0,
+				},
 				CollectionName: in.CollectionName,
-				PartitionTag:   in.PartitionTag,
+				PartitionName:  in.PartitionTag,
 				RowData:        in.RowData,
 			},
 		},
 		manipulationMsgStream: p.manipulationMsgStream,
 		rowIDAllocator:        p.idAllocator,
 	}
-	if len(it.PartitionTag) <= 0 {
-		it.PartitionTag = Params.defaultPartitionTag()
+	if len(it.PartitionName) <= 0 {
+		it.PartitionName = Params.defaultPartitionTag()
 	}
 
 	var cancel func()
@@ -86,9 +92,10 @@ func (p *Proxy) CreateCollection(ctx context.Context, req *schemapb.CollectionSc
 	log.Println("create collection: ", req)
 	cct := &CreateCollectionTask{
 		Condition: NewTaskCondition(ctx),
-		CreateCollectionRequest: internalpb.CreateCollectionRequest{
-			MsgType: commonpb.MsgType_kCreateCollection,
-			Schema:  &commonpb.Blob{},
+		CreateCollectionRequest: milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_kCreateCollection,
+			},
 		},
 		masterClient: p.masterClient,
 		schema:       req,
@@ -131,15 +138,18 @@ func (p *Proxy) Search(ctx context.Context, req *servicepb.Query) (*servicepb.Qu
 	span.SetTag("partition tag", req.PartitionTags)
 	span.SetTag("dsl", req.Dsl)
 	log.Println("search: ", req.CollectionName, req.Dsl)
-	qt := &QueryTask{
+	qt := &SearchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		SearchRequest: internalpb.SearchRequest{
-			ProxyID:         Params.ProxyID(),
-			ResultChannelID: Params.ProxyID(),
+		SearchRequest: internalpb2.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kSearch,
+				SourceID: Params.ProxyID(),
+			},
+			ResultChannelID: strconv.FormatInt(Params.ProxyID(), 10),
 		},
 		queryMsgStream: p.queryMsgStream,
-		resultBuf:      make(chan []*internalpb.SearchResult),
+		resultBuf:      make(chan []*internalpb2.SearchResults),
 		query:          req,
 	}
 	var cancel func()
@@ -182,9 +192,12 @@ func (p *Proxy) DropCollection(ctx context.Context, req *servicepb.CollectionNam
 	log.Println("drop collection: ", req)
 	dct := &DropCollectionTask{
 		Condition: NewTaskCondition(ctx),
-		DropCollectionRequest: internalpb.DropCollectionRequest{
-			MsgType:        commonpb.MsgType_kDropCollection,
-			CollectionName: req,
+		DropCollectionRequest: milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kDropCollection,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: req.CollectionName,
 		},
 		masterClient: p.masterClient,
 	}
@@ -223,9 +236,12 @@ func (p *Proxy) HasCollection(ctx context.Context, req *servicepb.CollectionName
 	log.Println("has collection: ", req)
 	hct := &HasCollectionTask{
 		Condition: NewTaskCondition(ctx),
-		HasCollectionRequest: internalpb.HasCollectionRequest{
-			MsgType:        commonpb.MsgType_kHasCollection,
-			CollectionName: req,
+		HasCollectionRequest: milvuspb.HasCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kHasCollection,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: req.CollectionName,
 		},
 		masterClient: p.masterClient,
 	}
@@ -268,9 +284,11 @@ func (p *Proxy) DescribeCollection(ctx context.Context, req *servicepb.Collectio
 	log.Println("describe collection: ", req)
 	dct := &DescribeCollectionTask{
 		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: internalpb.DescribeCollectionRequest{
-			MsgType:        commonpb.MsgType_kDescribeCollection,
-			CollectionName: req,
+		DescribeCollectionRequest: milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_kDescribeCollection,
+			},
+			CollectionName: req.CollectionName,
 		},
 		masterClient: p.masterClient,
 	}
@@ -313,8 +331,11 @@ func (p *Proxy) ShowCollections(ctx context.Context, req *commonpb.Empty) (*serv
 	log.Println("show collections")
 	sct := &ShowCollectionsTask{
 		Condition: NewTaskCondition(ctx),
-		ShowCollectionRequest: internalpb.ShowCollectionRequest{
-			MsgType: commonpb.MsgType_kDescribeCollection,
+		ShowCollectionRequest: milvuspb.ShowCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kShowCollections,
+				SourceID: Params.ProxyID(),
+			},
 		},
 		masterClient: p.masterClient,
 	}
@@ -357,12 +378,13 @@ func (p *Proxy) CreatePartition(ctx context.Context, in *servicepb.PartitionName
 	log.Println("create partition", in)
 	cpt := &CreatePartitionTask{
 		Condition: NewTaskCondition(ctx),
-		CreatePartitionRequest: internalpb.CreatePartitionRequest{
-			MsgType:       commonpb.MsgType_kCreatePartition,
-			ReqID:         0,
-			Timestamp:     0,
-			ProxyID:       0,
-			PartitionName: in,
+		CreatePartitionRequest: milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kCreatePartition,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: in.CollectionName,
+			PartitionName:  in.Tag,
 			//TODO, ReqID,Timestamp,ProxyID
 		},
 		masterClient: p.masterClient,
@@ -403,12 +425,13 @@ func (p *Proxy) DropPartition(ctx context.Context, in *servicepb.PartitionName) 
 	log.Println("drop partition: ", in)
 	dpt := &DropPartitionTask{
 		Condition: NewTaskCondition(ctx),
-		DropPartitionRequest: internalpb.DropPartitionRequest{
-			MsgType:       commonpb.MsgType_kDropPartition,
-			ReqID:         0,
-			Timestamp:     0,
-			ProxyID:       0,
-			PartitionName: in,
+		DropPartitionRequest: milvuspb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kDropPartition,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: in.CollectionName,
+			PartitionName:  in.Tag,
 			//TODO, ReqID,Timestamp,ProxyID
 		},
 		masterClient: p.masterClient,
@@ -450,12 +473,13 @@ func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (
 	log.Println("has partition: ", in)
 	hpt := &HasPartitionTask{
 		Condition: NewTaskCondition(ctx),
-		HasPartitionRequest: internalpb.HasPartitionRequest{
-			MsgType:       commonpb.MsgType_kHasPartition,
-			ReqID:         0,
-			Timestamp:     0,
-			ProxyID:       0,
-			PartitionName: in,
+		HasPartitionRequest: milvuspb.HasPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kHasPartition,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: in.CollectionName,
+			PartitionName:  in.Tag,
 			//TODO, ReqID,Timestamp,ProxyID
 		},
 		masterClient: p.masterClient,
@@ -501,69 +525,83 @@ func (p *Proxy) HasPartition(ctx context.Context, in *servicepb.PartitionName) (
 
 func (p *Proxy) DescribePartition(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
 	log.Println("describe partition: ", in)
-	dpt := &DescribePartitionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribePartitionRequest: internalpb.DescribePartitionRequest{
-			MsgType:       commonpb.MsgType_kDescribePartition,
-			ReqID:         0,
-			Timestamp:     0,
-			ProxyID:       0,
-			PartitionName: in,
-			//TODO, ReqID,Timestamp,ProxyID
+
+	return &servicepb.PartitionDescription{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "Deprecated!",
 		},
-		masterClient: p.masterClient,
-		result:       nil,
-		ctx:          nil,
-	}
+		Name:       in,
+		Statistics: nil,
+	}, nil
 
-	var cancel func()
-	dpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
-	defer cancel()
-
-	err := func() error {
-		select {
-		case <-ctx.Done():
-			return errors.New("describe partion timeout")
-		default:
-			return p.sched.DdQueue.Enqueue(dpt)
-		}
-	}()
-
-	if err != nil {
-		return &servicepb.PartitionDescription{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-			Name:       in,
-			Statistics: nil,
-		}, nil
-	}
-
-	err = dpt.WaitToFinish()
-	if err != nil {
-		return &servicepb.PartitionDescription{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-			Name:       in,
-			Statistics: nil,
-		}, nil
-	}
-	return dpt.result, nil
 }
+
+//func (p *Proxy) DescribePartition2(ctx context.Context, in *servicepb.PartitionName) (*servicepb.PartitionDescription, error) {
+//	log.Println("describe partition: ", in)
+//	dpt := &DescribePartitionTask{
+//		Condition: NewTaskCondition(ctx),
+//		DescribePartitionRequest: internalpb.DescribePartitionRequest{
+//			MsgType:       commonpb.MsgType_kDescribePartition,
+//			ReqID:         0,
+//			Timestamp:     0,
+//			ProxyID:       0,
+//			PartitionName: in,
+//			//TODO, ReqID,Timestamp,ProxyID
+//		},
+//		masterClient: p.masterClient,
+//		result:       nil,
+//		ctx:          nil,
+//	}
+//
+//	var cancel func()
+//	dpt.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+//	defer cancel()
+//
+//	err := func() error {
+//		select {
+//		case <-ctx.Done():
+//			return errors.New("describe partion timeout")
+//		default:
+//			return p.sched.DdQueue.Enqueue(dpt)
+//		}
+//	}()
+//
+//	if err != nil {
+//		return &servicepb.PartitionDescription{
+//			Status: &commonpb.Status{
+//				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+//				Reason:    err.Error(),
+//			},
+//			Name:       in,
+//			Statistics: nil,
+//		}, nil
+//	}
+//
+//	err = dpt.WaitToFinish()
+//	if err != nil {
+//		return &servicepb.PartitionDescription{
+//			Status: &commonpb.Status{
+//				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+//				Reason:    err.Error(),
+//			},
+//			Name:       in,
+//			Statistics: nil,
+//		}, nil
+//	}
+//	return dpt.result, nil
+//}
 
 func (p *Proxy) ShowPartitions(ctx context.Context, req *servicepb.CollectionName) (*servicepb.StringListResponse, error) {
 	log.Println("show partitions: ", req)
 	spt := &ShowPartitionsTask{
 		Condition: NewTaskCondition(ctx),
-		ShowPartitionRequest: internalpb.ShowPartitionRequest{
-			MsgType:        commonpb.MsgType_kShowPartitions,
-			ReqID:          0,
-			Timestamp:      0,
-			ProxyID:        0,
-			CollectionName: req,
+		ShowPartitionRequest: milvuspb.ShowPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kShowPartitions,
+				SourceID: Params.ProxyID(),
+			},
+			CollectionName: req.CollectionName,
 		},
 		masterClient: p.masterClient,
 		result:       nil,
@@ -610,8 +648,11 @@ func (p *Proxy) CreateIndex(ctx context.Context, indexParam *servicepb.IndexPara
 	log.Println("create index for: ", indexParam.FieldName)
 	cit := &CreateIndexTask{
 		Condition: NewTaskCondition(ctx),
-		CreateIndexRequest: internalpb.CreateIndexRequest{
-			MsgType:        commonpb.MsgType_kCreateIndex,
+		CreateIndexRequest: milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kCreateIndex,
+				SourceID: Params.ProxyID(),
+			},
 			CollectionName: indexParam.CollectionName,
 			FieldName:      indexParam.FieldName,
 			ExtraParams:    indexParam.ExtraParams,
@@ -654,8 +695,11 @@ func (p *Proxy) DescribeIndex(ctx context.Context, req *servicepb.DescribeIndexR
 	log.Println("Describe index for: ", req.FieldName)
 	dit := &DescribeIndexTask{
 		Condition: NewTaskCondition(ctx),
-		DescribeIndexRequest: internalpb.DescribeIndexRequest{
-			MsgType:        commonpb.MsgType_kDescribeIndex,
+		DescribeIndexRequest: milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kDescribeIndex,
+				SourceID: Params.ProxyID(),
+			},
 			CollectionName: req.CollectionName,
 			FieldName:      req.FieldName,
 		},
@@ -707,8 +751,11 @@ func (p *Proxy) DescribeIndexProgress(ctx context.Context, req *servicepb.Descri
 	log.Println("Describe index progress for: ", req.FieldName)
 	dipt := &DescribeIndexProgressTask{
 		Condition: NewTaskCondition(ctx),
-		DescribeIndexProgressRequest: internalpb.DescribeIndexProgressRequest{
-			MsgType:        commonpb.MsgType_kDescribeIndexProgress,
+		IndexStateRequest: milvuspb.IndexStateRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kDescribeIndexProgress,
+				SourceID: Params.ProxyID(),
+			},
 			CollectionName: req.CollectionName,
 			FieldName:      req.FieldName,
 		},

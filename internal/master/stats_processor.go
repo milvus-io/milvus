@@ -3,7 +3,7 @@ package master
 import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type StatsProcessor struct {
@@ -29,7 +29,7 @@ func (processor *StatsProcessor) ProcessQueryNodeStats(msgPack *msgstream.MsgPac
 		}
 
 		for _, fieldStat := range statsMsg.GetFieldStats() {
-			if err := processor.processFieldStat(statsMsg.PeerID, fieldStat); err != nil {
+			if err := processor.processFieldStat(statsMsg.Base.SourceID, fieldStat); err != nil {
 				return err
 			}
 		}
@@ -39,7 +39,7 @@ func (processor *StatsProcessor) ProcessQueryNodeStats(msgPack *msgstream.MsgPac
 	return nil
 }
 
-func (processor *StatsProcessor) processSegmentStat(segStats *internalpb.SegmentStats) error {
+func (processor *StatsProcessor) processSegmentStat(segStats *internalpb2.SegmentStats) error {
 	if !segStats.GetRecentlyModified() {
 		return nil
 	}
@@ -56,7 +56,7 @@ func (processor *StatsProcessor) processSegmentStat(segStats *internalpb.Segment
 	return processor.metaTable.UpdateSegment(segMeta)
 }
 
-func (processor *StatsProcessor) processFieldStat(peerID int64, fieldStats *internalpb.FieldStats) error {
+func (processor *StatsProcessor) processFieldStat(peerID int64, fieldStats *internalpb2.FieldStats) error {
 	collID := fieldStats.CollectionID
 	fieldID := fieldStats.FieldID
 

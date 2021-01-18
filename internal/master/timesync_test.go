@@ -12,18 +12,20 @@ import (
 
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 func getTtMsg(msgType commonpb.MsgType, peerID UniqueID, timeStamp uint64) ms.TsMsg {
 	baseMsg := ms.BaseMsg{
 		HashValues: []uint32{uint32(peerID)},
 	}
-	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   commonpb.MsgType_kTimeTick,
-		PeerID:    peerID,
-		Timestamp: timeStamp,
+	timeTickResult := internalpb2.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     0,
+			Timestamp: timeStamp,
+			SourceID:  peerID,
+		},
 	}
 	timeTickMsg := &ms.TimeTickMsg{
 		BaseMsg:     baseMsg,

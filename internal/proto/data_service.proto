@@ -19,10 +19,12 @@ message RegisterNodeResponse {
 
 
 message SegIDRequest {
-  int32 count = 1;
+  uint32 count = 1;
   string channelID = 2;
   int64  collectionID = 3;
   int64 partitionID = 4;
+  string coll_name = 5;// todo remove
+  string partition_name = 6; // todo remove
 }
 
 message AssignSegIDRequest {
@@ -40,6 +42,8 @@ message SegIDAssignment {
   int64 partitionID = 5;
   uint64 expire_time = 6;
   common.Status status = 7;
+  string coll_name = 8;// todo remove
+  string partition_name = 9;// todo remove
 }
 
 message AssignSegIDResponse {
@@ -79,8 +83,9 @@ message SegmentStatesResponse {
   SegmentState state = 1;
   uint64 create_time = 2;
   uint64 sealed_time = 3;
+  repeated internal.MsgPosition start_positions = 4;
+  repeated internal.MsgPosition end_positions = 5;
 }
-
 
 message InsertBinlogPathRequest {
   common.MsgBase base = 1;

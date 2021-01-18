@@ -86,7 +86,7 @@ func (iNode *insertNode) Operate(in []*Msg) []*Msg {
 				log.Println(err)
 				continue
 			}
-			err = iNode.replica.addSegment(task.SegmentID, task.PartitionTag, collection.ID())
+			err = iNode.replica.addSegment(task.SegmentID, task.PartitionName, collection.ID())
 			if err != nil {
 				log.Println(err)
 				continue

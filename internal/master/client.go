@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	buildindexclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
 )
 
@@ -63,8 +63,8 @@ func (m *MockWriteNodeClient) GetInsertBinlogPaths(segmentID UniqueID) (map[Uniq
 }
 
 type BuildIndexClient interface {
-	BuildIndexWithoutID(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
-	DescribeIndex(indexID UniqueID) (*buildindexclient.IndexDescription, error)
+	BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
+	GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error)
 	GetIndexFilePaths(indexID UniqueID) ([]string, error)
 }
 
@@ -72,28 +72,22 @@ type MockBuildIndexClient struct {
 	buildTime time.Time
 }
 
-func (m *MockBuildIndexClient) BuildIndexWithoutID(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
+func (m *MockBuildIndexClient) BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
 	m.buildTime = time.Now()
 	return 1, nil
 }
 
-func (m *MockBuildIndexClient) DescribeIndex(indexID UniqueID) (*buildindexclient.IndexDescription, error) {
+func (m *MockBuildIndexClient) GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error) {
 	now := time.Now()
 	if now.Sub(m.buildTime).Seconds() > 2 {
-		return &buildindexclient.IndexDescription{
-			ID:                1,
-			Status:            indexbuilderpb.IndexStatus_FINISHED,
-			EnqueueTime:       time.Now(),
-			ScheduleTime:      time.Now(),
-			BuildCompleteTime: time.Now(),
+		return &indexpb.IndexStatesResponse{
+			IndexID: indexID,
+			State:   commonpb.IndexState_FINISHED,
 		}, nil
 	}
-	return &buildindexclient.IndexDescription{
-		ID:                1,
-		Status:            indexbuilderpb.IndexStatus_INPROGRESS,
-		EnqueueTime:       time.Now(),
-		ScheduleTime:      time.Now(),
-		BuildCompleteTime: time.Now(),
+	return &indexpb.IndexStatesResponse{
+		IndexID: 1,
+		State:   commonpb.IndexState_INPROGRESS,
 	}, nil
 }
 

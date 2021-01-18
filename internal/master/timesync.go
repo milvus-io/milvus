@@ -68,15 +68,15 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 				if len(ttmsgs.Msgs) > 0 {
 					for _, timetickmsg := range ttmsgs.Msgs {
 						ttmsg := timetickmsg.(*ms.TimeTickMsg)
-						oldT, ok := ttBarrier.peer2LastTt[ttmsg.PeerID]
+						oldT, ok := ttBarrier.peer2LastTt[ttmsg.Base.SourceID]
 						// log.Printf("[softTimeTickBarrier] peer(%d)=%d\n", ttmsg.PeerID, ttmsg.Timestamp)
 
 						if !ok {
-							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerID)
+							log.Printf("[softTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
 							continue
 						}
-						if ttmsg.Timestamp > oldT {
-							ttBarrier.peer2LastTt[ttmsg.PeerID] = ttmsg.Timestamp
+						if ttmsg.Base.Timestamp > oldT {
+							ttBarrier.peer2LastTt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
 							// get a legal Timestamp
 							ts := ttBarrier.minTimestamp()
@@ -164,18 +164,18 @@ func (ttBarrier *hardTimeTickBarrier) Start() error {
 						// that `ttmsg.Timestamp > oldT`
 						ttmsg := timetickmsg.(*ms.TimeTickMsg)
 
-						oldT, ok := ttBarrier.peer2Tt[ttmsg.PeerID]
+						oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
 						if !ok {
-							log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.PeerID)
+							log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
 							continue
 						}
 
 						if oldT > state {
 							log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-								ttmsg.PeerID, ttmsg.Timestamp)
+								ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
 						}
 
-						ttBarrier.peer2Tt[ttmsg.PeerID] = ttmsg.Timestamp
+						ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
 						newState := ttBarrier.minTimestamp()
 						if newState > state {

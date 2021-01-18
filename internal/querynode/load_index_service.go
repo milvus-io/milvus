@@ -13,7 +13,7 @@ import (
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type loadIndexService struct {
@@ -23,8 +23,8 @@ type loadIndexService struct {
 
 	replica collectionReplica
 
-	fieldIndexes   map[string][]*internalPb.IndexStats
-	fieldStatsChan chan []*internalPb.FieldStats
+	fieldIndexes   map[string][]*internalpb2.IndexStats
+	fieldStatsChan chan []*internalpb2.FieldStats
 
 	loadIndexMsgStream msgstream.MsgStream
 
@@ -71,8 +71,8 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 		client: MinioKV,
 
 		replica:        replica,
-		fieldIndexes:   make(map[string][]*internalPb.IndexStats),
-		fieldStatsChan: make(chan []*internalPb.FieldStats, 1),
+		fieldIndexes:   make(map[string][]*internalpb2.IndexStats),
+		fieldStatsChan: make(chan []*internalpb2.FieldStats, 1),
 
 		loadIndexMsgStream: stream,
 
@@ -216,9 +216,9 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 	// sort index params by key
 	sort.Slice(newIndexParams, func(i, j int) bool { return newIndexParams[i].Key < newIndexParams[j].Key })
 	if !ok {
-		lis.fieldIndexes[fieldStatsKey] = make([]*internalPb.IndexStats, 0)
+		lis.fieldIndexes[fieldStatsKey] = make([]*internalpb2.IndexStats, 0)
 		lis.fieldIndexes[fieldStatsKey] = append(lis.fieldIndexes[fieldStatsKey],
-			&internalPb.IndexStats{
+			&internalpb2.IndexStats{
 				IndexParams:        newIndexParams,
 				NumRelatedSegments: 1,
 			})
@@ -232,7 +232,7 @@ func (lis *loadIndexService) updateSegmentIndexStats(indexMsg *msgstream.LoadInd
 		}
 		if isNewIndex {
 			lis.fieldIndexes[fieldStatsKey] = append(lis.fieldIndexes[fieldStatsKey],
-				&internalPb.IndexStats{
+				&internalpb2.IndexStats{
 					IndexParams:        newIndexParams,
 					NumRelatedSegments: 1,
 				})
@@ -292,13 +292,13 @@ func (lis *loadIndexService) updateSegmentIndex(bytesIndex [][]byte, loadIndexMs
 }
 
 func (lis *loadIndexService) sendQueryNodeStats() error {
-	resultFieldsStats := make([]*internalPb.FieldStats, 0)
+	resultFieldsStats := make([]*internalpb2.FieldStats, 0)
 	for fieldStatsKey, indexStats := range lis.fieldIndexes {
 		colID, fieldID, err := lis.fieldsStatsKey2IDs(fieldStatsKey)
 		if err != nil {
 			return err
 		}
-		fieldStats := internalPb.FieldStats{
+		fieldStats := internalpb2.FieldStats{
 			CollectionID: colID,
 			FieldID:      fieldID,
 			IndexStats:   indexStats,

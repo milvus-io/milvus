@@ -9,7 +9,6 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
 
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -433,7 +432,7 @@ func TestMetaTable_LoadIndexMetaFromKv(t *testing.T) {
 		FieldID:        100,
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
-		Status:         indexbuilderpb.IndexStatus_FINISHED,
+		State:          commonpb.IndexState_FINISHED,
 		IndexFilePaths: []string{"path1"},
 	}
 	marshalRes := proto.MarshalTextString(&meta)
@@ -466,7 +465,7 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 		FieldID:        100,
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
-		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
+		State:          commonpb.IndexState_INPROGRESS,
 		IndexFilePaths: []string{},
 	})
 	assert.Nil(t, err)
@@ -475,7 +474,7 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 		FieldID:        100,
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
-		Status:         indexbuilderpb.IndexStatus_INPROGRESS,
+		State:          commonpb.IndexState_INPROGRESS,
 		IndexFilePaths: []string{},
 	})
 	assert.NotNil(t, err)
@@ -492,11 +491,11 @@ func TestMetaTable_IndexMeta(t *testing.T) {
 		FieldID:        100,
 		IndexID:        1000,
 		IndexParams:    []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}},
-		Status:         indexbuilderpb.IndexStatus_FINISHED,
+		State:          commonpb.IndexState_FINISHED,
 		IndexFilePaths: []string{},
 	})
 	assert.Nil(t, err)
-	assert.EqualValues(t, indexbuilderpb.IndexStatus_FINISHED, meta.segID2IndexMetas[1][0].Status)
+	assert.EqualValues(t, commonpb.IndexState_FINISHED, meta.segID2IndexMetas[1][0].State)
 	err = meta.DeleteFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})
 	assert.Nil(t, err)
 	res, err = meta.HasFieldIndexMeta(1, 100, []*commonpb.KeyValuePair{{Key: "k1", Value: "v1"}})

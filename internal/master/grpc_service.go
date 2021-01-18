@@ -3,16 +3,18 @@ package master
 import (
 	"context"
 	"fmt"
+
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 const slowThreshold = 5 * time.Millisecond
 
-func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (s *Master) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	var t task = &createCollectionTask{
 		req: in,
 		baseTask: baseTask{
@@ -42,7 +44,7 @@ func (s *Master) CreateCollection(ctx context.Context, in *internalpb.CreateColl
 	return response, nil
 }
 
-func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollectionRequest) (*commonpb.Status, error) {
+func (s *Master) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	var t task = &dropCollectionTask{
 		req: in,
 		baseTask: baseTask{
@@ -73,7 +75,7 @@ func (s *Master) DropCollection(ctx context.Context, in *internalpb.DropCollecti
 	return response, nil
 }
 
-func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollectionRequest) (*servicepb.BoolResponse, error) {
+func (s *Master) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	var t task = &hasCollectionTask{
 		req: in,
 		baseTask: baseTask{
@@ -88,7 +90,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 	}
 
-	response := &servicepb.BoolResponse{
+	response := &milvuspb.BoolResponse{
 		Status: st,
 		Value:  false,
 	}
@@ -110,7 +112,7 @@ func (s *Master) HasCollection(ctx context.Context, in *internalpb.HasCollection
 	return response, nil
 }
 
-func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error) {
+func (s *Master) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	var t task = &describeCollectionTask{
 		req: in,
 		baseTask: baseTask{
@@ -121,7 +123,7 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 		description: nil,
 	}
 
-	response := &servicepb.CollectionDescription{
+	response := &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
@@ -146,7 +148,7 @@ func (s *Master) DescribeCollection(ctx context.Context, in *internalpb.Describe
 	return response, nil
 }
 
-func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error) {
+func (s *Master) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	var t task = &showCollectionsTask{
 		req: in,
 		baseTask: baseTask{
@@ -157,12 +159,12 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 		stringListResponse: nil,
 	}
 
-	response := &servicepb.StringListResponse{
+	response := &milvuspb.ShowCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "",
 		},
-		Values: nil,
+		CollectionNames: nil,
 	}
 
 	t.(*showCollectionsTask).stringListResponse = response
@@ -184,7 +186,7 @@ func (s *Master) ShowCollections(ctx context.Context, in *internalpb.ShowCollect
 }
 
 //////////////////////////////////////////////////////////////////////////
-func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (s *Master) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	var t task = &createPartitionTask{
 		req: in,
 		baseTask: baseTask{
@@ -215,7 +217,7 @@ func (s *Master) CreatePartition(ctx context.Context, in *internalpb.CreateParti
 	}, nil
 }
 
-func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartitionRequest) (*commonpb.Status, error) {
+func (s *Master) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	var t task = &dropPartitionTask{
 		req: in,
 		baseTask: baseTask{
@@ -246,7 +248,7 @@ func (s *Master) DropPartition(ctx context.Context, in *internalpb.DropPartition
 	}, nil
 }
 
-func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRequest) (*servicepb.BoolResponse, error) {
+func (s *Master) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	var t task = &hasPartitionTask{
 		req: in,
 		baseTask: baseTask{
@@ -259,7 +261,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		return &servicepb.BoolResponse{
+		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "Enqueue failed",
@@ -270,7 +272,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		return &servicepb.BoolResponse{
+		return &milvuspb.BoolResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
@@ -279,7 +281,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 		}, nil
 	}
 
-	return &servicepb.BoolResponse{
+	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
@@ -287,45 +289,7 @@ func (s *Master) HasPartition(ctx context.Context, in *internalpb.HasPartitionRe
 	}, nil
 }
 
-func (s *Master) DescribePartition(ctx context.Context, in *internalpb.DescribePartitionRequest) (*servicepb.PartitionDescription, error) {
-	var t task = &describePartitionTask{
-		req: in,
-		baseTask: baseTask{
-			sch: s.scheduler,
-			mt:  s.metaTable,
-			cv:  make(chan error),
-		},
-		description: nil,
-	}
-
-	var err = s.scheduler.Enqueue(t)
-	if err != nil {
-		return &servicepb.PartitionDescription{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "Enqueue failed",
-			},
-			Name:       in.PartitionName,
-			Statistics: nil,
-		}, nil
-	}
-
-	err = t.WaitToFinish(ctx)
-	if err != nil {
-		return &servicepb.PartitionDescription{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    "WaitToFinish failed",
-			},
-			Name:       in.PartitionName,
-			Statistics: nil,
-		}, nil
-	}
-
-	return t.(*describePartitionTask).description, nil
-}
-
-func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error) {
+func (s *Master) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	var t task = &showPartitionTask{
 		req: in,
 		baseTask: baseTask{
@@ -333,84 +297,47 @@ func (s *Master) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitio
 			mt:  s.metaTable,
 			cv:  make(chan error),
 		},
-		stringListResponse: nil,
+		resp: nil,
 	}
 
 	var err = s.scheduler.Enqueue(t)
 	if err != nil {
-		return &servicepb.StringListResponse{
+		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "Enqueue failed",
 			},
-			Values: nil,
+			PartitionNames: nil,
 		}, nil
 	}
 
 	err = t.WaitToFinish(ctx)
 	if err != nil {
-		return &servicepb.StringListResponse{
+		return &milvuspb.ShowPartitionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    "WaitToFinish failed",
 			},
-			Values: nil,
+			PartitionNames: nil,
 		}, nil
 	}
 
-	return t.(*showPartitionTask).stringListResponse, nil
-}
-
-func (s *Master) GetSysConfigs(ctx context.Context, in *internalpb.SysConfigRequest) (*servicepb.SysConfigResponse, error) {
-	var t task = &getSysConfigsTask{
-		req:      in,
-		configkv: s.kvBase,
-		baseTask: baseTask{
-			sch: s.scheduler,
-			mt:  s.metaTable,
-			cv:  make(chan error),
-		},
-		keys:   []string{},
-		values: []string{},
-	}
-
-	response := &servicepb.SysConfigResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-		},
-	}
-
-	var err = s.scheduler.Enqueue(t)
-	if err != nil {
-		response.Status.Reason = "Enqueue failed: " + err.Error()
-		return response, nil
-	}
-
-	err = t.WaitToFinish(ctx)
-	if err != nil {
-		response.Status.Reason = "Get System Config failed: " + err.Error()
-		return response, nil
-	}
-
-	response.Keys = t.(*getSysConfigsTask).keys
-	response.Values = t.(*getSysConfigsTask).values
-	response.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	return response, nil
+	return t.(*showPartitionTask).resp, nil
 }
 
 //----------------------------------------Internal GRPC Service--------------------------------
 
-func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequest) (*internalpb.TsoResponse, error) {
+func (s *Master) AllocTimestamp(ctx context.Context, request *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {
 	count := request.GetCount()
 	ts, err := s.tsoAllocator.Alloc(count)
 
 	if err != nil {
-		return &internalpb.TsoResponse{
+		return &masterpb.TsoResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		}, nil
 	}
 
-	response := &internalpb.TsoResponse{
+	response := &masterpb.TsoResponse{
 		Status:    &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 		Timestamp: ts,
 		Count:     count,
@@ -419,17 +346,17 @@ func (s *Master) AllocTimestamp(ctx context.Context, request *internalpb.TsoRequ
 	return response, nil
 }
 
-func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*internalpb.IDResponse, error) {
+func (s *Master) AllocID(ctx context.Context, request *masterpb.IDRequest) (*masterpb.IDResponse, error) {
 	count := request.GetCount()
 	ts, err := s.idAllocator.AllocOne()
 
 	if err != nil {
-		return &internalpb.IDResponse{
+		return &masterpb.IDResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
 		}, nil
 	}
 
-	response := &internalpb.IDResponse{
+	response := &masterpb.IDResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 		ID:     ts,
 		Count:  count,
@@ -438,14 +365,14 @@ func (s *Master) AllocID(ctx context.Context, request *internalpb.IDRequest) (*i
 	return response, nil
 }
 
-func (s *Master) AssignSegmentID(ctx context.Context, request *internalpb.AssignSegIDRequest) (*internalpb.AssignSegIDResponse, error) {
-	segInfos, _ := s.segmentManager.AssignSegment(request.GetPerChannelReq())
-	return &internalpb.AssignSegIDResponse{
-		PerChannelAssignment: segInfos,
+func (s *Master) AssignSegmentID(ctx context.Context, request *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
+	segInfos, _ := s.segmentManager.AssignSegment(request.SegIDRequests)
+	return &datapb.AssignSegIDResponse{
+		SegIDAssignments: segInfos,
 	}, nil
 }
 
-func (s *Master) CreateIndex(ctx context.Context, req *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
+func (s *Master) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 	}
@@ -477,12 +404,13 @@ func (s *Master) CreateIndex(ctx context.Context, req *internalpb.CreateIndexReq
 	return ret, nil
 }
 
-func (s *Master) DescribeIndex(ctx context.Context, req *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
-	resp := &servicepb.DescribeIndexResponse{
-		Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
-		CollectionName: req.CollectionName,
-		FieldName:      req.FieldName,
+func (s *Master) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	resp := &milvuspb.DescribeIndexResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR},
+		//CollectionName: req.CollectionName,
+		//FieldName:      req.FieldName,
 	}
+	//resp.
 	task := &describeIndexTask{
 		baseTask: baseTask{
 			sch: s.scheduler,
@@ -494,28 +422,28 @@ func (s *Master) DescribeIndex(ctx context.Context, req *internalpb.DescribeInde
 	}
 
 	if err := s.scheduler.Enqueue(task); err != nil {
-		resp.Status.Reason = fmt.Sprintf("Enqueue failed: %s", err.Error())
-		return resp, nil
+		task.resp.Status.Reason = fmt.Sprintf("Enqueue failed: %s", err.Error())
+		return task.resp, nil
 	}
 
 	if err := task.WaitToFinish(ctx); err != nil {
-		resp.Status.Reason = fmt.Sprintf("Describe Index failed: %s", err.Error())
-		return resp, nil
+		task.resp.Status.Reason = fmt.Sprintf("Describe Index failed: %s", err.Error())
+		return task.resp, nil
 	}
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	return resp, nil
+	return task.resp, nil
 
 }
 
-func (s *Master) DescribeIndexProgress(ctx context.Context, req *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
-	resp := &servicepb.BoolResponse{
+func (s *Master) GetIndexState(ctx context.Context, req *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
+	resp := &milvuspb.IndexStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
-		Value: false,
+		State: commonpb.IndexState_NONE,
 	}
-	task := &describeIndexProgressTask{
+	task := &getIndexStateTask{
 		baseTask: baseTask{
 			sch: s.scheduler,
 			mt:  s.metaTable,
@@ -527,15 +455,23 @@ func (s *Master) DescribeIndexProgress(ctx context.Context, req *internalpb.Desc
 	}
 
 	if err := s.scheduler.Enqueue(task); err != nil {
-		resp.Status.Reason = "Enqueue failed :" + err.Error()
-		return resp, nil
+		task.resp.Status.Reason = "Enqueue failed :" + err.Error()
+		return task.resp, nil
 	}
 
 	if err := task.WaitToFinish(ctx); err != nil {
 		resp.Status.Reason = "Describe index progress failed:" + err.Error()
-		return resp, nil
+		return task.resp, nil
 	}
 
-	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	return resp, nil
+	task.resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return task.resp, nil
+}
+
+func (s *Master) DescribeSegment(ctx context.Context, request *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+	panic("implement me")
+}
+
+func (s *Master) ShowSegments(ctx context.Context, request *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+	panic("implement me")
 }

@@ -130,13 +130,36 @@ message ShowPartitionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
+  int64 collectionID = 4;
 }
 
 message ShowPartitionResponse {
-  repeated  string partition_names = 1;
-  common.Status status = 2;
+  repeated string partition_names = 1;
+  repeated int64 partitionIDs = 2;
+  common.Status status = 3;
 }
 
+message DescribeSegmentRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 segmentID = 3;
+}
+
+message DescribeSegmentResponse {
+  common.Status status = 1;
+  int64 indexID = 2;
+}
+
+message ShowSegmentRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message ShowSegmentResponse {
+  common.Status status = 1;
+  repeated int64 segmentIDs = 2;
+}
 
 message CreateIndexRequest {
   common.MsgBase base = 1;
@@ -151,6 +174,7 @@ message DescribeIndexRequest {
   string db_name = 2;
   string collection_name = 3;
   string field_name = 4;
+  string index_name = 5;
 }
 
 message IndexDescription {
@@ -159,8 +183,21 @@ message IndexDescription {
 }
 
 message DescribeIndexResponse {
-  repeated IndexDescription index_descriptions = 1;
-  common.Status status = 2;
+  common.Status status = 1;
+  repeated IndexDescription index_descriptions = 2;
+}
+
+message IndexStateRequest {
+  common.MsgBase base = 1;
+  string db_name = 2 ;
+  string collection_name = 3;
+  string field_name = 4;
+  string index_name = 5;
+}
+
+message IndexStateResponse {
+  common.Status status = 1;
+  common.IndexState state = 2;
 }
 
 message InsertRequest {
@@ -211,7 +248,7 @@ message Hits {
   repeated float scores = 3;
 }
 
-message QueryResult {
+message SearchResults {
   common.Status status = 1;
   repeated bytes hits = 2;
 }
@@ -242,8 +279,9 @@ service MilvusService {
 
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  rpc GetIndexState(IndexStateRequest) returns (IndexStateResponse) {}
 
   rpc Insert(InsertRequest) returns (InsertResponse) {}
-  rpc Search(SearchRequest) returns (QueryResult) {}
+  rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
 }

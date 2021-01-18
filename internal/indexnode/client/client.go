@@ -8,28 +8,19 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexbuilderpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type UniqueID = typeutil.UniqueID
 
 type Client struct {
-	client  indexbuilderpb.IndexBuildServiceClient
+	client  indexpb.IndexServiceClient
 	address string
 	ctx     context.Context
-}
-
-type IndexDescription struct {
-	ID                UniqueID
-	Status            indexbuilderpb.IndexStatus
-	EnqueueTime       time.Time
-	ScheduleTime      time.Time
-	BuildCompleteTime time.Time
 }
 
 func NewBuildIndexClient(ctx context.Context, address string) (*Client, error) {
@@ -51,11 +42,11 @@ func (c *Client) tryConnect() error {
 	if err != nil {
 		return err
 	}
-	c.client = indexbuilderpb.NewIndexBuildServiceClient(conn)
+	c.client = indexpb.NewIndexServiceClient(conn)
 	return nil
 }
 
-func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
+func (c *Client) BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error) {
 	if c.tryConnect() != nil {
 		panic("BuildIndexWithoutID: failed to connect index builder")
 	}
@@ -115,7 +106,7 @@ func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[st
 	}
 
 	ctx := context.TODO()
-	requset := &indexbuilderpb.BuildIndexRequest{
+	requset := &indexpb.BuildIndexRequest{
 		DataPaths:   columnDataPaths,
 		TypeParams:  typeParamsKV,
 		IndexParams: indexParamsKV,
@@ -129,25 +120,25 @@ func (c *Client) BuildIndexWithoutID(columnDataPaths []string, typeParams map[st
 	return indexID, err
 }
 
-func (c *Client) DescribeIndex(indexID UniqueID) (*IndexDescription, error) {
+func (c *Client) GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error) {
 	if c.tryConnect() != nil {
 		panic("DescribeIndex: failed to connect index builder")
 	}
 	ctx := context.TODO()
-	request := &indexbuilderpb.DescribleIndexRequest{
+	request := &indexpb.IndexStatesRequest{
 		IndexID: indexID,
 	}
-	response, err := c.client.DescribeIndex(ctx, request)
+	response, err := c.client.GetIndexStates(ctx, request)
 	if err != nil {
-		return &IndexDescription{}, err
+		return &indexpb.IndexStatesResponse{}, err
 	}
 
-	indexDescription := IndexDescription{
-		ID:                indexID,
-		Status:            response.IndexStatus,
-		EnqueueTime:       parseTS(response.EnqueTime),
-		ScheduleTime:      parseTS(response.ScheduleTime),
-		BuildCompleteTime: parseTS(response.BuildCompleteTime),
+	indexDescription := indexpb.IndexStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+		},
+		IndexID: indexID,
+		State:   response.State,
 	}
 	return &indexDescription, nil
 }
@@ -157,7 +148,7 @@ func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
 		panic("GetIndexFilePaths: failed to connect index builder")
 	}
 	ctx := context.TODO()
-	request := &indexbuilderpb.GetIndexFilePathsRequest{
+	request := &indexpb.IndexFilePathRequest{
 		IndexID: indexID,
 	}
 

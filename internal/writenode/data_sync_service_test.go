@@ -16,7 +16,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -127,14 +127,18 @@ func TestDataSyncService_Start(t *testing.T) {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalPb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          UniqueID(0),
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     0,
+					Timestamp: Timestamp(i + 1000),
+					SourceID:  0,
+				},
+
 				CollectionName: "col1",
-				PartitionTag:   "default",
+				PartitionName:  "default",
 				SegmentID:      UniqueID(1),
-				ChannelID:      UniqueID(0),
-				ProxyID:        UniqueID(0),
+				ChannelID:      "0",
 				Timestamps:     []Timestamp{Timestamp(i + 1000)},
 				RowIDs:         []UniqueID{UniqueID(i)},
 
@@ -161,10 +165,13 @@ func TestDataSyncService_Start(t *testing.T) {
 			EndTimestamp:   Timestamp(0),
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalPb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    UniqueID(0),
-			Timestamp: math.MaxUint64,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: math.MaxUint64,
+				SourceID:  0,
+			},
 		},
 	}
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)

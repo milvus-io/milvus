@@ -68,7 +68,7 @@ func receiveMsg(stream *ms.MsgStream) []uint64 {
 			msgs := result.Msgs
 			for _, v := range msgs {
 				timetickmsg := v.(*ms.TimeTickMsg)
-				results = append(results, timetickmsg.TimeTickMsg.Timestamp)
+				results = append(results, timetickmsg.TimeTickMsg.Base.Timestamp)
 				receiveCount++
 				if receiveCount == 10 {
 					return results

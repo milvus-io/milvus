@@ -5,12 +5,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -25,8 +26,10 @@ type segInfo struct {
 }
 
 type assignInfo struct {
+	collID         UniqueID
+	partitionID    UniqueID
 	collName       string
-	partitionTag   string
+	partitionName  string
 	channelID      int32
 	segID          UniqueID
 	segInfos       *list.List
@@ -104,7 +107,7 @@ func (info *assignInfo) IsActive(now time.Time) bool {
 type SegIDAssigner struct {
 	Allocator
 	assignInfos map[string]*list.List // collectionName -> *list.List
-	segReqs     []*internalpb.SegIDRequest
+	segReqs     []*datapb.SegIDRequest
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
 }
@@ -140,16 +143,6 @@ func (sa *SegIDAssigner) collectExpired() {
 			assign.RemoveExpired(ts)
 			if assign.Capacity(ts) == 0 {
 				info.Remove(e)
-				//if assign.IsActive(now) {
-				//	sa.segReqs = append(sa.segReqs, &internalpb.SegIDRequest{
-				//		ChannelID:    assign.channelID,
-				//		Count:        0, // intend to set zero
-				//		CollName:     assign.collName,
-				//		PartitionTag: assign.partitionTag,
-				//	})
-				//} else {
-				//	info.Remove(e)
-				//}
 			}
 		}
 	}
@@ -164,28 +157,31 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 	for _, req := range sa.toDoReqs {
 		segRequest := req.(*segRequest)
 		colName := segRequest.colName
-		partition := segRequest.partition
+		partitionName := segRequest.partitionName
 		channelID := segRequest.channelID
 
 		if _, ok := records[colName]; !ok {
 			records[colName] = make(map[string]map[int32]uint32)
 		}
-		if _, ok := records[colName][partition]; !ok {
-			records[colName][partition] = make(map[int32]uint32)
+		if _, ok := records[colName][partitionName]; !ok {
+			records[colName][partitionName] = make(map[int32]uint32)
 		}
 
-		if _, ok := records[colName][partition][channelID]; !ok {
-			records[colName][partition][channelID] = 0
+		if _, ok := records[colName][partitionName][channelID]; !ok {
+			records[colName][partitionName][channelID] = 0
 		}
 
-		records[colName][partition][channelID] += segRequest.count
-		assign := sa.getAssign(segRequest.colName, segRequest.partition, segRequest.channelID)
-		if assign == nil || assign.Capacity(segRequest.timestamp) < records[colName][partition][channelID] {
-			sa.segReqs = append(sa.segReqs, &internalpb.SegIDRequest{
-				ChannelID:    segRequest.channelID,
-				Count:        segRequest.count,
-				CollName:     segRequest.colName,
-				PartitionTag: segRequest.partition,
+		records[colName][partitionName][channelID] += segRequest.count
+		assign := sa.getAssign(segRequest.colName, segRequest.partitionName, segRequest.channelID)
+		if assign == nil || assign.Capacity(segRequest.timestamp) < records[colName][partitionName][channelID] {
+			partitionID, _ := typeutil.Hash32String(segRequest.colName)
+			sa.segReqs = append(sa.segReqs, &datapb.SegIDRequest{
+				ChannelID:     strconv.FormatUint(uint64(segRequest.channelID), 10),
+				Count:         segRequest.count,
+				CollName:      segRequest.colName,
+				PartitionName: segRequest.partitionName,
+				CollectionID:  0,
+				PartitionID:   partitionID,
 			})
 			newTodoReqs = append(newTodoReqs, req)
 		} else {
@@ -195,7 +191,7 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 	sa.toDoReqs = newTodoReqs
 }
 
-func (sa *SegIDAssigner) getAssign(colName, partition string, channelID int32) *assignInfo {
+func (sa *SegIDAssigner) getAssign(colName, partitionName string, channelID int32) *assignInfo {
 	assignInfos, ok := sa.assignInfos[colName]
 	if !ok {
 		return nil
@@ -203,7 +199,7 @@ func (sa *SegIDAssigner) getAssign(colName, partition string, channelID int32) *
 
 	for e := assignInfos.Front(); e != nil; e = e.Next() {
 		info := e.Value.(*assignInfo)
-		if info.partitionTag != partition || info.channelID != channelID {
+		if info.partitionName != partitionName || info.channelID != channelID {
 			continue
 		}
 		return info
@@ -216,7 +212,7 @@ func (sa *SegIDAssigner) checkSyncFunc(timeout bool) bool {
 	return timeout || len(sa.segReqs) != 0
 }
 
-func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *internalpb.SegIDRequest) bool {
+func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegIDRequest) bool {
 	if req1 == nil || req2 == nil {
 		return false
 	}
@@ -224,7 +220,7 @@ func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *internalpb.SegIDRequest) b
 	if req1 == req2 {
 		return true
 	}
-	return req1.CollName == req2.CollName && req1.PartitionTag == req2.PartitionTag && req1.ChannelID == req2.ChannelID
+	return req1.CollName == req2.CollName && req1.PartitionName == req2.PartitionName && req1.ChannelID == req2.ChannelID
 }
 
 func (sa *SegIDAssigner) reduceSegReqs() {
@@ -233,9 +229,9 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 		return
 	}
 
-	var newSegReqs []*internalpb.SegIDRequest
+	var newSegReqs []*datapb.SegIDRequest
 	for _, req1 := range sa.segReqs {
-		var req2 *internalpb.SegIDRequest
+		var req2 *datapb.SegIDRequest
 		for _, req3 := range newSegReqs {
 			if sa.checkSegReqEqual(req1, req3) {
 				req2 = req3
@@ -264,13 +260,13 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	sa.reduceSegReqs()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req := &internalpb.AssignSegIDRequest{
-		PeerID:        sa.PeerID,
-		Role:          internalpb.PeerRole_Proxy,
-		PerChannelReq: sa.segReqs,
+	req := &datapb.AssignSegIDRequest{
+		NodeID:        sa.PeerID,
+		PeerRole:      "ProxyNode",
+		SegIDRequests: sa.segReqs,
 	}
 
-	sa.segReqs = []*internalpb.SegIDRequest{}
+	sa.segReqs = []*datapb.SegIDRequest{}
 	resp, err := sa.masterClient.AssignSegmentID(ctx, req)
 
 	if err != nil {
@@ -280,12 +276,12 @@ func (sa *SegIDAssigner) syncSegments() bool {
 
 	now := time.Now()
 	success := false
-	for _, info := range resp.PerChannelAssignment {
+	for _, info := range resp.SegIDAssignments {
 		if info.Status.GetErrorCode() != commonpb.ErrorCode_SUCCESS {
 			log.Println("SyncSegment Error:", info.Status.Reason)
 			continue
 		}
-		assign := sa.getAssign(info.CollName, info.PartitionTag, info.ChannelID)
+		assign := sa.getAssign(info.CollName, info.PartitionName, info.ChannelID)
 		segInfo := &segInfo{
 			segID:      info.SegID,
 			count:      info.Count,
@@ -300,10 +296,12 @@ func (sa *SegIDAssigner) syncSegments() bool {
 
 			segInfos.PushBack(segInfo)
 			assign = &assignInfo{
-				collName:     info.CollName,
-				partitionTag: info.PartitionTag,
-				channelID:    info.ChannelID,
-				segInfos:     segInfos,
+				collID:        info.CollectionID,
+				partitionID:   info.PartitionID,
+				channelID:     info.ChannelID,
+				segInfos:      segInfos,
+				partitionName: info.PartitionName,
+				collName:      info.CollName,
 			}
 			colInfos.PushBack(assign)
 			sa.assignInfos[info.CollName] = colInfos
@@ -318,7 +316,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 
 func (sa *SegIDAssigner) processFunc(req request) error {
 	segRequest := req.(*segRequest)
-	assign := sa.getAssign(segRequest.colName, segRequest.partition, segRequest.channelID)
+	assign := sa.getAssign(segRequest.colName, segRequest.partitionName, segRequest.channelID)
 	if assign == nil {
 		return errors.New("Failed to GetSegmentID")
 	}
@@ -327,14 +325,14 @@ func (sa *SegIDAssigner) processFunc(req request) error {
 	return err
 }
 
-func (sa *SegIDAssigner) GetSegmentID(colName, partition string, channelID int32, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
+func (sa *SegIDAssigner) GetSegmentID(colName, partitionName string, channelID int32, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
 	req := &segRequest{
-		baseRequest: baseRequest{done: make(chan error), valid: false},
-		colName:     colName,
-		partition:   partition,
-		channelID:   channelID,
-		count:       count,
-		timestamp:   ts,
+		baseRequest:   baseRequest{done: make(chan error), valid: false},
+		colName:       colName,
+		partitionName: partitionName,
+		channelID:     channelID,
+		count:         count,
+		timestamp:     ts,
 	}
 	sa.reqs <- req
 	req.Wait()

@@ -2,6 +2,7 @@ package master
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,8 +11,9 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -44,7 +46,7 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 
 	collName := "segmgr_test_coll"
 	var collID int64 = 1001
-	partitionTag := "test_part"
+	partitionName := "test_part"
 	schema := &schemapb.CollectionSchema{
 		Name: collName,
 		Fields: []*schemapb.FieldSchema{
@@ -62,7 +64,7 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 		PartitionTags: []string{},
 	})
 	assert.Nil(t, err)
-	err = mt.AddPartition(collID, partitionTag)
+	err = mt.AddPartition(collID, partitionName)
 	assert.Nil(t, err)
 
 	var cnt int64
@@ -106,9 +108,13 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 		{maxCount, 2, false, -1, -1, int32(maxCount)},
 	}
 
-	var results = make([]*internalpb.SegIDAssignment, 0)
+	var results = make([]*datapb.SegIDAssignment, 0)
 	for _, c := range cases {
-		result, _ := segManager.AssignSegment([]*internalpb.SegIDRequest{{Count: c.Count, ChannelID: c.ChannelID, CollName: collName, PartitionTag: partitionTag}})
+		result, _ := segManager.AssignSegment([]*datapb.SegIDRequest{
+			{Count: c.Count,
+				ChannelID: strconv.FormatInt(int64(c.ChannelID), 10),
+				CollName:  collName, PartitionName: partitionName},
+		})
 		results = append(results, result...)
 		if c.Err {
 			assert.EqualValues(t, commonpb.ErrorCode_UNEXPECTED_ERROR, result[0].Status.ErrorCode)
@@ -132,7 +138,7 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 	err = mt.UpdateSegment(&pb.SegmentMeta{
 		SegmentID:    results[0].SegID,
 		CollectionID: collID,
-		PartitionTag: partitionTag,
+		PartitionTag: partitionName,
 		ChannelStart: 0,
 		ChannelEnd:   1,
 		CloseTime:    timestamp,
@@ -144,10 +150,13 @@ func TestSegmentManager_AssignSegment(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    1,
-			Timestamp: timestamp,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: timestamp,
+				SourceID:  1,
+			},
 		},
 	}
 	syncWriteChan <- tsMsg
@@ -183,7 +192,7 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 
 	collName := "segmgr_test_coll"
 	var collID int64 = 1001
-	partitionTag := "test_part"
+	partitionName := "test_part"
 	schema := &schemapb.CollectionSchema{
 		Name: collName,
 		Fields: []*schemapb.FieldSchema{
@@ -201,7 +210,7 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 		PartitionTags: []string{},
 	})
 	assert.Nil(t, err)
-	err = mt.AddPartition(collID, partitionTag)
+	err = mt.AddPartition(collID, partitionName)
 	assert.Nil(t, err)
 
 	var cnt int64
@@ -229,10 +238,10 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 	assert.Nil(t, err)
 	maxCount := uint32(Params.SegmentSize * 1024 * 1024 / float64(sizePerRecord))
 
-	req := []*internalpb.SegIDRequest{
-		{Count: maxCount, ChannelID: 1, CollName: collName, PartitionTag: partitionTag},
-		{Count: maxCount, ChannelID: 2, CollName: collName, PartitionTag: partitionTag},
-		{Count: maxCount, ChannelID: 3, CollName: collName, PartitionTag: partitionTag},
+	req := []*datapb.SegIDRequest{
+		{Count: maxCount, ChannelID: "1", CollName: collName, PartitionName: partitionName},
+		{Count: maxCount, ChannelID: "2", CollName: collName, PartitionName: partitionName},
+		{Count: maxCount, ChannelID: "3", CollName: collName, PartitionName: partitionName},
 	}
 	assignSegment, err := segManager.AssignSegment(req)
 	assert.Nil(t, err)
@@ -245,7 +254,7 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 		err = mt.UpdateSegment(&pb.SegmentMeta{
 			SegmentID:    assignSegment[i].SegID,
 			CollectionID: collID,
-			PartitionTag: partitionTag,
+			PartitionTag: partitionName,
 			ChannelStart: 0,
 			ChannelEnd:   1,
 			CloseTime:    timestamp,
@@ -263,10 +272,13 @@ func TestSegmentManager_SycnWritenode(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: timestamp, EndTimestamp: timestamp, HashValues: []uint32{},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    1,
-			Timestamp: timestamp,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: timestamp,
+				SourceID:  1,
+			},
 		},
 	}
 	syncWriteChan <- tsMsg

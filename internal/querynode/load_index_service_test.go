@@ -17,7 +17,7 @@ import (
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 )
@@ -78,14 +78,17 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: hashValues,
 		},
-		InsertRequest: internalpb.InsertRequest{
-			MsgType:        commonpb.MsgType_kInsert,
-			ReqID:          0,
+		InsertRequest: internalpb2.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert,
+				MsgID:     0,
+				Timestamp: timestamps[0],
+				SourceID:  0,
+			},
 			CollectionName: "collection0",
-			PartitionTag:   "default",
+			PartitionName:  "default",
 			SegmentID:      segmentID,
-			ChannelID:      int64(0),
-			ProxyID:        int64(0),
+			ChannelID:      "0",
 			Timestamps:     timestamps,
 			RowIDs:         rowIDs,
 			RowData:        insertRowBlob,
@@ -104,10 +107,13 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    UniqueID(0),
-			Timestamp: math.MaxUint64,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: math.MaxUint64,
+				SourceID:  0,
+			},
 		},
 	}
 	timeTickMsgPack := &msgstream.MsgPack{
@@ -181,12 +187,14 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{0},
 			},
-			SearchRequest: internalpb.SearchRequest{
-				MsgType:         commonpb.MsgType_kSearch,
-				ReqID:           n,
-				ProxyID:         int64(1),
-				Timestamp:       uint64(msgLength),
-				ResultChannelID: int64(0),
+			SearchRequest: internalpb2.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSearch,
+					MsgID:     n,
+					Timestamp: uint64(msgLength),
+					SourceID:  1,
+				},
+				ResultChannelID: "0",
 				Query:           &blob,
 			},
 		}
@@ -403,14 +411,17 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: hashValues,
 		},
-		InsertRequest: internalpb.InsertRequest{
-			MsgType:        commonpb.MsgType_kInsert,
-			ReqID:          0,
+		InsertRequest: internalpb2.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert,
+				MsgID:     0,
+				Timestamp: timestamps[0],
+				SourceID:  0,
+			},
 			CollectionName: "collection0",
-			PartitionTag:   "default",
+			PartitionName:  "default",
 			SegmentID:      segmentID,
-			ChannelID:      int64(0),
-			ProxyID:        int64(0),
+			ChannelID:      "0",
 			Timestamps:     timestamps,
 			RowIDs:         rowIDs,
 			RowData:        insertRowBlob,
@@ -429,10 +440,13 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    UniqueID(0),
-			Timestamp: math.MaxUint64,
+		TimeTickMsg: internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     0,
+				Timestamp: math.MaxUint64,
+				SourceID:  0,
+			},
 		},
 	}
 	timeTickMsgPack := &msgstream.MsgPack{
@@ -495,12 +509,14 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{0},
 			},
-			SearchRequest: internalpb.SearchRequest{
-				MsgType:         commonpb.MsgType_kSearch,
-				ReqID:           n,
-				ProxyID:         int64(1),
-				Timestamp:       uint64(msgLength),
-				ResultChannelID: int64(0),
+			SearchRequest: internalpb2.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kSearch,
+					MsgID:     n,
+					Timestamp: uint64(msgLength),
+					SourceID:  1,
+				},
+				ResultChannelID: "0",
 				Query:           &blob,
 			},
 		}

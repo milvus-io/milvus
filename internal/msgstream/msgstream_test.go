@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
 
@@ -44,14 +44,17 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 	}
 	switch msgType {
 	case commonpb.MsgType_kInsert:
-		insertRequest := internalPb.InsertRequest{
-			MsgType:        commonpb.MsgType_kInsert,
-			ReqID:          reqID,
+		insertRequest := internalpb2.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert,
+				MsgID:     reqID,
+				Timestamp: 11,
+				SourceID:  reqID,
+			},
 			CollectionName: "Collection",
-			PartitionTag:   "Partition",
+			PartitionName:  "Partition",
 			SegmentID:      1,
-			ChannelID:      0,
-			ProxyID:        1,
+			ChannelID:      "0",
 			Timestamps:     []Timestamp{1},
 			RowIDs:         []int64{1},
 			RowData:        []*commonpb.Blob{{}},
@@ -62,12 +65,15 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return insertMsg
 	case commonpb.MsgType_kDelete:
-		deleteRequest := internalPb.DeleteRequest{
-			MsgType:        commonpb.MsgType_kDelete,
-			ReqID:          reqID,
+		deleteRequest := internalpb2.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDelete,
+				MsgID:     reqID,
+				Timestamp: 11,
+				SourceID:  reqID,
+			},
 			CollectionName: "Collection",
-			ChannelID:      1,
-			ProxyID:        1,
+			ChannelID:      "1",
 			Timestamps:     []Timestamp{1},
 			PrimaryKeys:    []IntPrimaryKey{1},
 		}
@@ -77,12 +83,15 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return deleteMsg
 	case commonpb.MsgType_kSearch:
-		searchRequest := internalPb.SearchRequest{
-			MsgType:         commonpb.MsgType_kSearch,
-			ReqID:           reqID,
-			ProxyID:         1,
-			Timestamp:       1,
-			ResultChannelID: 0,
+		searchRequest := internalpb2.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kSearch,
+				MsgID:     reqID,
+				Timestamp: 11,
+				SourceID:  reqID,
+			},
+			Query:           nil,
+			ResultChannelID: "0",
 		}
 		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
@@ -90,25 +99,29 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return searchMsg
 	case commonpb.MsgType_kSearchResult:
-		searchResult := internalPb.SearchResult{
-			MsgType:         commonpb.MsgType_kSearchResult,
+		searchResult := internalpb2.SearchResults{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kSearchResult,
+				MsgID:     reqID,
+				Timestamp: 1,
+				SourceID:  reqID,
+			},
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
-			ReqID:           reqID,
-			ProxyID:         1,
-			QueryNodeID:     1,
-			Timestamp:       1,
-			ResultChannelID: 0,
+			ResultChannelID: "0",
 		}
 		searchResultMsg := &SearchResultMsg{
-			BaseMsg:      baseMsg,
-			SearchResult: searchResult,
+			BaseMsg:       baseMsg,
+			SearchResults: searchResult,
 		}
 		return searchResultMsg
 	case commonpb.MsgType_kTimeTick:
-		timeTickResult := internalPb.TimeTickMsg{
-			MsgType:   commonpb.MsgType_kTimeTick,
-			PeerID:    reqID,
-			Timestamp: 1,
+		timeTickResult := internalpb2.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kTimeTick,
+				MsgID:     reqID,
+				Timestamp: 1,
+				SourceID:  reqID,
+			},
 		}
 		timeTickMsg := &TimeTickMsg{
 			BaseMsg:     baseMsg,
@@ -116,9 +129,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 		}
 		return timeTickMsg
 	case commonpb.MsgType_kQueryNodeStats:
-		queryNodeSegStats := internalPb.QueryNodeStats{
-			MsgType: commonpb.MsgType_kQueryNodeStats,
-			PeerID:  reqID,
+		queryNodeSegStats := internalpb2.QueryNodeStats{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_kQueryNodeStats,
+				SourceID: reqID,
+			},
 		}
 		queryNodeSegStatsMsg := &QueryNodeStatsMsg{
 			BaseMsg:        baseMsg,
@@ -135,10 +150,13 @@ func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 		EndTimestamp:   0,
 		HashValues:     []uint32{hashValue},
 	}
-	timeTickResult := internalPb.TimeTickMsg{
-		MsgType:   commonpb.MsgType_kTimeTick,
-		PeerID:    reqID,
-		Timestamp: time,
+	timeTickResult := internalpb2.TimeTickMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kTimeTick,
+			MsgID:     reqID,
+			Timestamp: time,
+			SourceID:  reqID,
+		},
 	}
 	timeTickMsg := &TimeTickMsg{
 		BaseMsg:     baseMsg,
@@ -248,7 +266,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 
 	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 3, 3))
+	//msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_kDelete, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := (*inputStream).Produce(&msgPack)
@@ -372,14 +390,17 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 		HashValues:     []uint32{1, 3},
 	}
 
-	insertRequest := internalPb.InsertRequest{
-		MsgType:        commonpb.MsgType_kInsert,
-		ReqID:          1,
+	insertRequest := internalpb2.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kInsert,
+			MsgID:     1,
+			Timestamp: 1,
+			SourceID:  1,
+		},
 		CollectionName: "Collection",
-		PartitionTag:   "Partition",
+		PartitionName:  "Partition",
 		SegmentID:      1,
-		ChannelID:      1,
-		ProxyID:        1,
+		ChannelID:      "1",
 		Timestamps:     []Timestamp{1, 1},
 		RowIDs:         []int64{1, 3},
 		RowData:        []*commonpb.Blob{{}, {}},
@@ -425,12 +446,15 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 		HashValues:     []uint32{1, 3},
 	}
 
-	deleteRequest := internalPb.DeleteRequest{
-		MsgType:        commonpb.MsgType_kDelete,
-		ReqID:          1,
+	deleteRequest := internalpb2.DeleteRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDelete,
+			MsgID:     1,
+			Timestamp: 1,
+			SourceID:  1,
+		},
 		CollectionName: "Collection",
-		ChannelID:      1,
-		ProxyID:        1,
+		ChannelID:      "1",
 		Timestamps:     []Timestamp{1, 1},
 		PrimaryKeys:    []int64{1, 3},
 	}
@@ -497,6 +521,40 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	producerChannels := []string{"insert1", "insert2"}
+	consumerChannels := []string{"insert1", "insert2"}
+	consumerSubName := "subInsert"
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 1, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_kInsert, 3, 3))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+
+	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+	err := (*inputStream).Broadcast(&msgPack0)
+	if err != nil {
+		log.Fatalf("broadcast error = %v", err)
+	}
+	err = (*inputStream).Produce(&msgPack1)
+	if err != nil {
+		log.Fatalf("produce error = %v", err)
+	}
+	err = (*inputStream).Broadcast(&msgPack2)
+	if err != nil {
+		log.Fatalf("broadcast error = %v", err)
+	}
+	receiveMsg(outputStream, len(msgPack1.Msgs))
+	(*inputStream).Close()
+	(*outputStream).Close()
+}
+
+func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	producerChannels := []string{"insert1", "insert2"}
 	consumerChannels := []string{"insert1", "insert2"}

@@ -88,7 +88,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	}
 
 	var schema schemapb.CollectionSchema
-	err := proto.Unmarshal((*msg.Schema).Value, &schema)
+	err := proto.Unmarshal(msg.Schema, &schema)
 	if err != nil {
 		log.Println(err)
 		return
@@ -112,7 +112,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
 			createOrDrop: true,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 }
 
@@ -125,11 +125,11 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	//	return
 	//}
 
-	collectionName := msg.CollectionName.CollectionName
+	collectionName := msg.CollectionName
 	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
 		metaOperateRecord{
 			createOrDrop: false,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	ddNode.ddMsg.gcRecord.collections = append(ddNode.ddMsg.gcRecord.collections, collectionID)
@@ -137,24 +137,24 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 
 func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 	collectionID := msg.CollectionID
-	partitionTag := msg.PartitionName.Tag
+	partitionName := msg.PartitionName
 
-	err := ddNode.replica.addPartition(collectionID, partitionTag)
+	err := ddNode.replica.addPartition(collectionID, partitionName)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
+	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
 		metaOperateRecord{
 			createOrDrop: true,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 }
 
 func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	collectionID := msg.CollectionID
-	partitionTag := msg.PartitionName.Tag
+	partitionName := msg.PartitionName
 
 	//err := ddNode.replica.removePartition(collectionID, partitionTag)
 	//if err != nil {
@@ -162,14 +162,14 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 	//	return
 	//}
 
-	ddNode.ddMsg.partitionRecords[partitionTag] = append(ddNode.ddMsg.partitionRecords[partitionTag],
+	ddNode.ddMsg.partitionRecords[partitionName] = append(ddNode.ddMsg.partitionRecords[partitionName],
 		metaOperateRecord{
 			createOrDrop: false,
-			timestamp:    msg.Timestamp,
+			timestamp:    msg.Base.Timestamp,
 		})
 
 	ddNode.ddMsg.gcRecord.partitions = append(ddNode.ddMsg.gcRecord.partitions, partitionWithID{
-		partitionTag: partitionTag,
+		partitionTag: partitionName,
 		collectionID: collectionID,
 	})
 }

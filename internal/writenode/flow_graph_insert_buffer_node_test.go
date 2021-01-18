@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -165,14 +165,17 @@ func genInsertMsg() insertMsg {
 					uint32(i),
 				},
 			},
-			InsertRequest: internalpb.InsertRequest{
-				MsgType:        commonpb.MsgType_kInsert,
-				ReqID:          UniqueID(0),
+			InsertRequest: internalpb2.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kInsert,
+					MsgID:     0,
+					Timestamp: Timestamp(i + 1000),
+					SourceID:  0,
+				},
 				CollectionName: "col1",
-				PartitionTag:   "default",
+				PartitionName:  "default",
 				SegmentID:      UniqueID(1),
-				ChannelID:      UniqueID(0),
-				ProxyID:        UniqueID(0),
+				ChannelID:      "0",
 				Timestamps: []Timestamp{
 					Timestamp(i + 1000),
 					Timestamp(i + 1000),
@@ -187,7 +190,6 @@ func genInsertMsg() insertMsg {
 					UniqueID(i),
 					UniqueID(i),
 				},
-
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 					{Value: rawData},
@@ -200,16 +202,20 @@ func genInsertMsg() insertMsg {
 		iMsg.insertMessages = append(iMsg.insertMessages, msg)
 	}
 
-	var fmsg msgstream.FlushMsg = msgstream.FlushMsg{
+	var fmsg = msgstream.FlushMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{
 				uint32(10),
 			},
 		},
-		FlushMsg: internalpb.FlushMsg{
-			MsgType:      commonpb.MsgType_kFlush,
+		FlushMsg: internalpb2.FlushMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kFlush,
+				MsgID:     1,
+				Timestamp: 2000,
+				SourceID:  1,
+			},
 			SegmentID:    UniqueID(1),
-			Timestamp:    Timestamp(2000),
 			CollectionID: UniqueID(1),
 			PartitionTag: "default",
 		},

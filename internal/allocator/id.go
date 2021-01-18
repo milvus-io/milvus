@@ -5,7 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
@@ -46,10 +47,14 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 
 func (ia *IDAllocator) syncID() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &internalpb.IDRequest{
-		PeerID: ia.PeerID,
-		Role:   internalpb.PeerRole_Proxy,
-		Count:  ia.countPerRPC,
+	req := &masterpb.IDRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kRequestID,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  ia.PeerID,
+		},
+		Count: ia.countPerRPC,
 	}
 	resp, err := ia.masterClient.AllocID(ctx, req)
 

@@ -2,11 +2,11 @@ package msgstream
 
 import (
 	"context"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type MsgType = commonpb.MsgType
@@ -44,11 +44,11 @@ func (bm *BaseMsg) HashKeys() []uint32 {
 /////////////////////////////////////////Insert//////////////////////////////////////////
 type InsertMsg struct {
 	BaseMsg
-	internalPb.InsertRequest
+	internalpb2.InsertRequest
 }
 
 func (it *InsertMsg) Type() MsgType {
-	return it.MsgType
+	return it.Base.MsgType
 }
 
 func (it *InsertMsg) GetMsgContext() context.Context {
@@ -66,11 +66,16 @@ func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	headerMsg := commonpb.MsgHeader{}
+	err2 := proto.Unmarshal(mb, &headerMsg)
+	if err2 != nil {
+		fmt.Println(err2.Error())
+	}
 	return mb, nil
 }
 
 func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
-	insertRequest := internalPb.InsertRequest{}
+	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	if err != nil {
 		return nil, err
@@ -96,11 +101,11 @@ func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////Flush//////////////////////////////////////////
 type FlushMsg struct {
 	BaseMsg
-	internalPb.FlushMsg
+	internalpb2.FlushMsg
 }
 
 func (fl *FlushMsg) Type() MsgType {
-	return fl.GetMsgType()
+	return fl.Base.MsgType
 }
 
 func (fl *FlushMsg) GetMsgContext() context.Context {
@@ -121,14 +126,14 @@ func (fl *FlushMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (fl *FlushMsg) Unmarshal(input []byte) (TsMsg, error) {
-	flushMsg := internalPb.FlushMsg{}
+	flushMsg := internalpb2.FlushMsg{}
 	err := proto.Unmarshal(input, &flushMsg)
 	if err != nil {
 		return nil, err
 	}
 	flushMsgTask := &FlushMsg{FlushMsg: flushMsg}
-	flushMsgTask.BeginTimestamp = flushMsgTask.Timestamp
-	flushMsgTask.EndTimestamp = flushMsgTask.Timestamp
+	flushMsgTask.BeginTimestamp = flushMsgTask.Base.Timestamp
+	flushMsgTask.EndTimestamp = flushMsgTask.Base.Timestamp
 
 	return flushMsgTask, nil
 }
@@ -136,11 +141,11 @@ func (fl *FlushMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////Delete//////////////////////////////////////////
 type DeleteMsg struct {
 	BaseMsg
-	internalPb.DeleteRequest
+	internalpb2.DeleteRequest
 }
 
 func (dt *DeleteMsg) Type() MsgType {
-	return dt.MsgType
+	return dt.Base.MsgType
 }
 
 func (dt *DeleteMsg) GetMsgContext() context.Context {
@@ -152,17 +157,18 @@ func (dt *DeleteMsg) SetMsgContext(ctx context.Context) {
 }
 
 func (dt *DeleteMsg) Marshal(input TsMsg) ([]byte, error) {
-	deleteTask := input.(*DeleteMsg)
-	deleteRequest := &deleteTask.DeleteRequest
+	deleteMsg := input.(*DeleteMsg)
+	deleteRequest := &deleteMsg.DeleteRequest
 	mb, err := proto.Marshal(deleteRequest)
 	if err != nil {
 		return nil, err
 	}
+
 	return mb, nil
 }
 
 func (dt *DeleteMsg) Unmarshal(input []byte) (TsMsg, error) {
-	deleteRequest := internalPb.DeleteRequest{}
+	deleteRequest := internalpb2.DeleteRequest{}
 	err := proto.Unmarshal(input, &deleteRequest)
 	if err != nil {
 		return nil, err
@@ -188,11 +194,11 @@ func (dt *DeleteMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////Search//////////////////////////////////////////
 type SearchMsg struct {
 	BaseMsg
-	internalPb.SearchRequest
+	internalpb2.SearchRequest
 }
 
 func (st *SearchMsg) Type() MsgType {
-	return st.MsgType
+	return st.Base.MsgType
 }
 
 func (st *SearchMsg) GetMsgContext() context.Context {
@@ -214,14 +220,14 @@ func (st *SearchMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (st *SearchMsg) Unmarshal(input []byte) (TsMsg, error) {
-	searchRequest := internalPb.SearchRequest{}
+	searchRequest := internalpb2.SearchRequest{}
 	err := proto.Unmarshal(input, &searchRequest)
 	if err != nil {
 		return nil, err
 	}
 	searchMsg := &SearchMsg{SearchRequest: searchRequest}
-	searchMsg.BeginTimestamp = searchMsg.Timestamp
-	searchMsg.EndTimestamp = searchMsg.Timestamp
+	searchMsg.BeginTimestamp = searchMsg.Base.Timestamp
+	searchMsg.EndTimestamp = searchMsg.Base.Timestamp
 
 	return searchMsg, nil
 }
@@ -229,11 +235,11 @@ func (st *SearchMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////SearchResult//////////////////////////////////////////
 type SearchResultMsg struct {
 	BaseMsg
-	internalPb.SearchResult
+	internalpb2.SearchResults
 }
 
 func (srt *SearchResultMsg) Type() MsgType {
-	return srt.MsgType
+	return srt.Base.MsgType
 }
 
 func (srt *SearchResultMsg) GetMsgContext() context.Context {
@@ -246,7 +252,7 @@ func (srt *SearchResultMsg) SetMsgContext(ctx context.Context) {
 
 func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
 	searchResultTask := input.(*SearchResultMsg)
-	searchResultRequest := &searchResultTask.SearchResult
+	searchResultRequest := &searchResultTask.SearchResults
 	mb, err := proto.Marshal(searchResultRequest)
 	if err != nil {
 		return nil, err
@@ -255,14 +261,14 @@ func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (srt *SearchResultMsg) Unmarshal(input []byte) (TsMsg, error) {
-	searchResultRequest := internalPb.SearchResult{}
+	searchResultRequest := internalpb2.SearchResults{}
 	err := proto.Unmarshal(input, &searchResultRequest)
 	if err != nil {
 		return nil, err
 	}
-	searchResultMsg := &SearchResultMsg{SearchResult: searchResultRequest}
-	searchResultMsg.BeginTimestamp = searchResultMsg.Timestamp
-	searchResultMsg.EndTimestamp = searchResultMsg.Timestamp
+	searchResultMsg := &SearchResultMsg{SearchResults: searchResultRequest}
+	searchResultMsg.BeginTimestamp = searchResultMsg.Base.Timestamp
+	searchResultMsg.EndTimestamp = searchResultMsg.Base.Timestamp
 
 	return searchResultMsg, nil
 }
@@ -270,11 +276,11 @@ func (srt *SearchResultMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 type TimeTickMsg struct {
 	BaseMsg
-	internalPb.TimeTickMsg
+	internalpb2.TimeTickMsg
 }
 
 func (tst *TimeTickMsg) Type() MsgType {
-	return tst.MsgType
+	return tst.Base.MsgType
 }
 
 func (tst *TimeTickMsg) GetMsgContext() context.Context {
@@ -296,14 +302,14 @@ func (tst *TimeTickMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
-	timeTickMsg := internalPb.TimeTickMsg{}
+	timeTickMsg := internalpb2.TimeTickMsg{}
 	err := proto.Unmarshal(input, &timeTickMsg)
 	if err != nil {
 		return nil, err
 	}
 	timeTick := &TimeTickMsg{TimeTickMsg: timeTickMsg}
-	timeTick.BeginTimestamp = timeTick.Timestamp
-	timeTick.EndTimestamp = timeTick.Timestamp
+	timeTick.BeginTimestamp = timeTick.Base.Timestamp
+	timeTick.EndTimestamp = timeTick.Base.Timestamp
 
 	return timeTick, nil
 }
@@ -311,11 +317,11 @@ func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////QueryNodeStats//////////////////////////////////////////
 type QueryNodeStatsMsg struct {
 	BaseMsg
-	internalPb.QueryNodeStats
+	internalpb2.QueryNodeStats
 }
 
 func (qs *QueryNodeStatsMsg) Type() MsgType {
-	return qs.MsgType
+	return qs.Base.MsgType
 }
 
 func (qs *QueryNodeStatsMsg) GetMsgContext() context.Context {
@@ -337,7 +343,7 @@ func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
-	queryNodeSegStats := internalPb.QueryNodeStats{}
+	queryNodeSegStats := internalpb2.QueryNodeStats{}
 	err := proto.Unmarshal(input, &queryNodeSegStats)
 	if err != nil {
 		return nil, err
@@ -350,7 +356,7 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
 //type Key2SegMsg struct {
 //	BaseMsg
-//	internalPb.Key2SegMsg
+//	internalpb2.Key2SegMsg
 //}
 //
 //func (k2st *Key2SegMsg) Type() MsgType {
@@ -360,11 +366,11 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
 type CreateCollectionMsg struct {
 	BaseMsg
-	internalPb.CreateCollectionRequest
+	internalpb2.CreateCollectionRequest
 }
 
 func (cc *CreateCollectionMsg) Type() MsgType {
-	return cc.MsgType
+	return cc.Base.MsgType
 }
 
 func (cc *CreateCollectionMsg) GetMsgContext() context.Context {
@@ -382,18 +388,25 @@ func (cc *CreateCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	headerMsg := commonpb.MsgHeader{}
+	err2 := proto.Unmarshal(mb, &headerMsg)
+	if err2 != nil {
+		fmt.Println(err2.Error())
+	}
+
 	return mb, nil
 }
 
 func (cc *CreateCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	createCollectionRequest := internalPb.CreateCollectionRequest{}
+	createCollectionRequest := internalpb2.CreateCollectionRequest{}
 	err := proto.Unmarshal(input, &createCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
 	createCollectionMsg := &CreateCollectionMsg{CreateCollectionRequest: createCollectionRequest}
-	createCollectionMsg.BeginTimestamp = createCollectionMsg.Timestamp
-	createCollectionMsg.EndTimestamp = createCollectionMsg.Timestamp
+	createCollectionMsg.BeginTimestamp = createCollectionMsg.Base.Timestamp
+	createCollectionMsg.EndTimestamp = createCollectionMsg.Base.Timestamp
 
 	return createCollectionMsg, nil
 }
@@ -401,11 +414,11 @@ func (cc *CreateCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////DropCollection//////////////////////////////////////////
 type DropCollectionMsg struct {
 	BaseMsg
-	internalPb.DropCollectionRequest
+	internalpb2.DropCollectionRequest
 }
 
 func (dc *DropCollectionMsg) Type() MsgType {
-	return dc.MsgType
+	return dc.Base.MsgType
 }
 func (dc *DropCollectionMsg) GetMsgContext() context.Context {
 	return dc.MsgCtx
@@ -426,14 +439,14 @@ func (dc *DropCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (dc *DropCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	dropCollectionRequest := internalPb.DropCollectionRequest{}
+	dropCollectionRequest := internalpb2.DropCollectionRequest{}
 	err := proto.Unmarshal(input, &dropCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
 	dropCollectionMsg := &DropCollectionMsg{DropCollectionRequest: dropCollectionRequest}
-	dropCollectionMsg.BeginTimestamp = dropCollectionMsg.Timestamp
-	dropCollectionMsg.EndTimestamp = dropCollectionMsg.Timestamp
+	dropCollectionMsg.BeginTimestamp = dropCollectionMsg.Base.Timestamp
+	dropCollectionMsg.EndTimestamp = dropCollectionMsg.Base.Timestamp
 
 	return dropCollectionMsg, nil
 }
@@ -441,7 +454,7 @@ func (dc *DropCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////CreatePartition//////////////////////////////////////////
 type CreatePartitionMsg struct {
 	BaseMsg
-	internalPb.CreatePartitionRequest
+	internalpb2.CreatePartitionRequest
 }
 
 func (cc *CreatePartitionMsg) GetMsgContext() context.Context {
@@ -453,7 +466,7 @@ func (cc *CreatePartitionMsg) SetMsgContext(ctx context.Context) {
 }
 
 func (cc *CreatePartitionMsg) Type() MsgType {
-	return cc.MsgType
+	return cc.Base.MsgType
 }
 
 func (cc *CreatePartitionMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -467,14 +480,14 @@ func (cc *CreatePartitionMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (cc *CreatePartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	createPartitionRequest := internalPb.CreatePartitionRequest{}
+	createPartitionRequest := internalpb2.CreatePartitionRequest{}
 	err := proto.Unmarshal(input, &createPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
 	createPartitionMsg := &CreatePartitionMsg{CreatePartitionRequest: createPartitionRequest}
-	createPartitionMsg.BeginTimestamp = createPartitionMsg.Timestamp
-	createPartitionMsg.EndTimestamp = createPartitionMsg.Timestamp
+	createPartitionMsg.BeginTimestamp = createPartitionMsg.Base.Timestamp
+	createPartitionMsg.EndTimestamp = createPartitionMsg.Base.Timestamp
 
 	return createPartitionMsg, nil
 }
@@ -482,7 +495,7 @@ func (cc *CreatePartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////DropPartition//////////////////////////////////////////
 type DropPartitionMsg struct {
 	BaseMsg
-	internalPb.DropPartitionRequest
+	internalpb2.DropPartitionRequest
 }
 
 func (dc *DropPartitionMsg) GetMsgContext() context.Context {
@@ -494,7 +507,7 @@ func (dc *DropPartitionMsg) SetMsgContext(ctx context.Context) {
 }
 
 func (dc *DropPartitionMsg) Type() MsgType {
-	return dc.MsgType
+	return dc.Base.MsgType
 }
 
 func (dc *DropPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
@@ -508,14 +521,14 @@ func (dc *DropPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (dc *DropPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
-	dropPartitionRequest := internalPb.DropPartitionRequest{}
+	dropPartitionRequest := internalpb2.DropPartitionRequest{}
 	err := proto.Unmarshal(input, &dropPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
 	dropPartitionMsg := &DropPartitionMsg{DropPartitionRequest: dropPartitionRequest}
-	dropPartitionMsg.BeginTimestamp = dropPartitionMsg.Timestamp
-	dropPartitionMsg.EndTimestamp = dropPartitionMsg.Timestamp
+	dropPartitionMsg.BeginTimestamp = dropPartitionMsg.Base.Timestamp
+	dropPartitionMsg.EndTimestamp = dropPartitionMsg.Base.Timestamp
 
 	return dropPartitionMsg, nil
 }
@@ -523,11 +536,11 @@ func (dc *DropPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
 /////////////////////////////////////////LoadIndex//////////////////////////////////////////
 type LoadIndexMsg struct {
 	BaseMsg
-	internalPb.LoadIndex
+	internalpb2.LoadIndex
 }
 
 func (lim *LoadIndexMsg) Type() MsgType {
-	return lim.MsgType
+	return lim.Base.MsgType
 }
 
 func (lim *LoadIndexMsg) GetMsgContext() context.Context {
@@ -549,7 +562,7 @@ func (lim *LoadIndexMsg) Marshal(input TsMsg) ([]byte, error) {
 }
 
 func (lim *LoadIndexMsg) Unmarshal(input []byte) (TsMsg, error) {
-	loadIndexRequest := internalPb.LoadIndex{}
+	loadIndexRequest := internalpb2.LoadIndex{}
 	err := proto.Unmarshal(input, &loadIndexRequest)
 	if err != nil {
 		return nil, err

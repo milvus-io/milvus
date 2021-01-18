@@ -8,8 +8,8 @@ import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalpb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	servicepb "github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	datapb "github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	milvuspb "github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -27,44 +27,261 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
+type IDRequest struct {
+	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Count                uint32            `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *IDRequest) Reset()         { *m = IDRequest{} }
+func (m *IDRequest) String() string { return proto.CompactTextString(m) }
+func (*IDRequest) ProtoMessage()    {}
+func (*IDRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9c348dec43a6705, []int{0}
+}
+
+func (m *IDRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_IDRequest.Unmarshal(m, b)
+}
+func (m *IDRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_IDRequest.Marshal(b, m, deterministic)
+}
+func (m *IDRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IDRequest.Merge(m, src)
+}
+func (m *IDRequest) XXX_Size() int {
+	return xxx_messageInfo_IDRequest.Size(m)
+}
+func (m *IDRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_IDRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IDRequest proto.InternalMessageInfo
+
+func (m *IDRequest) GetBase() *commonpb.MsgBase {
+	if m != nil {
+		return m.Base
+	}
+	return nil
+}
+
+func (m *IDRequest) GetCount() uint32 {
+	if m != nil {
+		return m.Count
+	}
+	return 0
+}
+
+type IDResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ID                   int64            `protobuf:"varint,2,opt,name=ID,proto3" json:"ID,omitempty"`
+	Count                uint32           `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *IDResponse) Reset()         { *m = IDResponse{} }
+func (m *IDResponse) String() string { return proto.CompactTextString(m) }
+func (*IDResponse) ProtoMessage()    {}
+func (*IDResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9c348dec43a6705, []int{1}
+}
+
+func (m *IDResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_IDResponse.Unmarshal(m, b)
+}
+func (m *IDResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_IDResponse.Marshal(b, m, deterministic)
+}
+func (m *IDResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IDResponse.Merge(m, src)
+}
+func (m *IDResponse) XXX_Size() int {
+	return xxx_messageInfo_IDResponse.Size(m)
+}
+func (m *IDResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_IDResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IDResponse proto.InternalMessageInfo
+
+func (m *IDResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *IDResponse) GetID() int64 {
+	if m != nil {
+		return m.ID
+	}
+	return 0
+}
+
+func (m *IDResponse) GetCount() uint32 {
+	if m != nil {
+		return m.Count
+	}
+	return 0
+}
+
+type TsoRequest struct {
+	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Count                uint32            `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *TsoRequest) Reset()         { *m = TsoRequest{} }
+func (m *TsoRequest) String() string { return proto.CompactTextString(m) }
+func (*TsoRequest) ProtoMessage()    {}
+func (*TsoRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9c348dec43a6705, []int{2}
+}
+
+func (m *TsoRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_TsoRequest.Unmarshal(m, b)
+}
+func (m *TsoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_TsoRequest.Marshal(b, m, deterministic)
+}
+func (m *TsoRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_TsoRequest.Merge(m, src)
+}
+func (m *TsoRequest) XXX_Size() int {
+	return xxx_messageInfo_TsoRequest.Size(m)
+}
+func (m *TsoRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_TsoRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_TsoRequest proto.InternalMessageInfo
+
+func (m *TsoRequest) GetBase() *commonpb.MsgBase {
+	if m != nil {
+		return m.Base
+	}
+	return nil
+}
+
+func (m *TsoRequest) GetCount() uint32 {
+	if m != nil {
+		return m.Count
+	}
+	return 0
+}
+
+type TsoResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Timestamp            uint64           `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Count                uint32           `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *TsoResponse) Reset()         { *m = TsoResponse{} }
+func (m *TsoResponse) String() string { return proto.CompactTextString(m) }
+func (*TsoResponse) ProtoMessage()    {}
+func (*TsoResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9c348dec43a6705, []int{3}
+}
+
+func (m *TsoResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_TsoResponse.Unmarshal(m, b)
+}
+func (m *TsoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_TsoResponse.Marshal(b, m, deterministic)
+}
+func (m *TsoResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_TsoResponse.Merge(m, src)
+}
+func (m *TsoResponse) XXX_Size() int {
+	return xxx_messageInfo_TsoResponse.Size(m)
+}
+func (m *TsoResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_TsoResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_TsoResponse proto.InternalMessageInfo
+
+func (m *TsoResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *TsoResponse) GetTimestamp() uint64 {
+	if m != nil {
+		return m.Timestamp
+	}
+	return 0
+}
+
+func (m *TsoResponse) GetCount() uint32 {
+	if m != nil {
+		return m.Count
+	}
+	return 0
+}
+
+func init() {
+	proto.RegisterType((*IDRequest)(nil), "milvus.proto.master.IDRequest")
+	proto.RegisterType((*IDResponse)(nil), "milvus.proto.master.IDResponse")
+	proto.RegisterType((*TsoRequest)(nil), "milvus.proto.master.TsoRequest")
+	proto.RegisterType((*TsoResponse)(nil), "milvus.proto.master.TsoResponse")
+}
+
 func init() { proto.RegisterFile("master.proto", fileDescriptor_f9c348dec43a6705) }
 
 var fileDescriptor_f9c348dec43a6705 = []byte{
-	// 538 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x9c, 0x95, 0x5f, 0x6f, 0xd3, 0x3c,
-	0x14, 0x87, 0x7b, 0xb5, 0x57, 0xf2, 0xdb, 0x3f, 0xcc, 0x88, 0x9b, 0x72, 0xc3, 0x7a, 0x33, 0x68,
-	0x59, 0x82, 0xd8, 0x17, 0x60, 0x6d, 0x24, 0x56, 0x09, 0xa4, 0x6a, 0x99, 0x84, 0x00, 0xa1, 0x91,
-	0xa4, 0x87, 0xd4, 0x2c, 0xb1, 0x83, 0x8f, 0x33, 0x60, 0xdf, 0x90, 0x6f, 0x85, 0x9a, 0xd4, 0x49,
-	0xbc, 0xd6, 0x5d, 0xc6, 0x5d, 0x13, 0x3f, 0xe7, 0xf7, 0xd4, 0x3e, 0xc7, 0x2d, 0xe9, 0xa6, 0x01,
-	0x2a, 0x90, 0x4e, 0x26, 0x85, 0x12, 0xf4, 0x71, 0xca, 0x92, 0x9b, 0x1c, 0xcb, 0x27, 0xa7, 0x5c,
-	0x1a, 0x76, 0x23, 0x91, 0xa6, 0x82, 0x97, 0x2f, 0x87, 0x94, 0x71, 0x05, 0x92, 0x07, 0xc9, 0x55,
-	0x8a, 0xf1, 0xe6, 0xdd, 0x21, 0x82, 0xbc, 0x61, 0x11, 0xd4, 0xaf, 0x5e, 0xff, 0xe9, 0x91, 0x83,
-	0xf7, 0x45, 0x3d, 0x0d, 0xc8, 0xa3, 0x99, 0x84, 0x40, 0xc1, 0x4c, 0x24, 0x09, 0x44, 0x8a, 0x09,
-	0x4e, 0x1d, 0xc7, 0x30, 0xe9, 0x4c, 0xe7, 0x2e, 0x78, 0x01, 0x3f, 0x72, 0x40, 0x35, 0x7c, 0x6a,
-	0xf2, 0x9b, 0x6f, 0xe4, 0xab, 0x40, 0xe5, 0x38, 0xea, 0xd0, 0x2f, 0xa4, 0xef, 0x49, 0x91, 0x35,
-	0x04, 0x2f, 0x2d, 0x02, 0x13, 0x6b, 0x19, 0x1f, 0x92, 0xde, 0x79, 0x80, 0x8d, 0xf4, 0x89, 0x25,
-	0xdd, 0xa0, 0x74, 0xf8, 0xc8, 0x84, 0x37, 0x67, 0xe5, 0x4c, 0x85, 0x48, 0x2e, 0x00, 0x33, 0xc1,
-	0x11, 0x46, 0x1d, 0x9a, 0x13, 0xea, 0x01, 0x46, 0x92, 0x85, 0xcd, 0x73, 0x7a, 0x65, 0xdb, 0xc6,
-	0x16, 0xaa, 0x6d, 0x93, 0xdd, 0xb6, 0x1a, 0x2c, 0x4b, 0xb3, 0xf5, 0xc7, 0x51, 0x87, 0x5e, 0x93,
-	0x81, 0xbf, 0x12, 0x3f, 0xeb, 0x65, 0xb4, 0x1e, 0x9d, 0xc9, 0x69, 0xdf, 0xf3, 0xdd, 0x3e, 0x5f,
-	0x49, 0xc6, 0xe3, 0x77, 0x0c, 0x55, 0x63, 0x8f, 0x57, 0x64, 0x50, 0x36, 0x78, 0x11, 0x48, 0xc5,
-	0x8a, 0x0d, 0x9e, 0xec, 0x1d, 0x84, 0x8a, 0x6b, 0xd9, 0xa8, 0xcf, 0xa4, 0xb7, 0x6e, 0x70, 0x1d,
-	0x3f, 0xd9, 0x33, 0x06, 0x0f, 0x0d, 0xff, 0x4a, 0xba, 0xe7, 0x01, 0xd6, 0xd9, 0x63, 0xfb, 0x10,
-	0x6c, 0x45, 0xb7, 0x9b, 0x01, 0x49, 0x0e, 0x75, 0x63, 0x6b, 0x8d, 0x7b, 0xcf, 0x08, 0x6c, 0xb9,
-	0xc6, 0xbb, 0x5d, 0x15, 0x67, 0x0e, 0x00, 0x23, 0xfd, 0x75, 0x63, 0xab, 0x55, 0xb4, 0x9e, 0x99,
-	0x81, 0xfd, 0x4b, 0xfb, 0x23, 0xd2, 0x7b, 0x0b, 0xca, 0xff, 0x8d, 0x33, 0xc1, 0xbf, 0xb1, 0x18,
-	0xe9, 0xb1, 0xcd, 0xa4, 0x11, 0x6d, 0x39, 0xb6, 0x58, 0x6a, 0xae, 0x92, 0x7c, 0x24, 0xfd, 0xb3,
-	0x24, 0x11, 0xd1, 0x25, 0x4b, 0x01, 0x55, 0x90, 0x66, 0xf4, 0xc8, 0x62, 0xb9, 0x44, 0x61, 0x69,
-	0x8f, 0x89, 0x54, 0xd1, 0x0b, 0xf2, 0x5f, 0x11, 0x3d, 0xf7, 0xe8, 0x33, 0x4b, 0xc1, 0xdc, 0xd3,
-	0x91, 0x47, 0x7b, 0x88, 0x2a, 0xf1, 0x3b, 0x19, 0x9c, 0x21, 0xb2, 0x98, 0xfb, 0x10, 0xa7, 0xc0,
-	0xd5, 0xdc, 0xa3, 0x2f, 0x2c, 0x75, 0x15, 0x57, 0x2b, 0xc6, 0x6d, 0xd0, 0xca, 0xf5, 0x81, 0xfc,
-	0x5f, 0x5e, 0xaa, 0x39, 0x5f, 0xc2, 0x2f, 0xab, 0xa7, 0xc1, 0xb4, 0xbc, 0x17, 0xd7, 0xa4, 0xa7,
-	0x67, 0xb1, 0x8c, 0x9e, 0xdc, 0x33, 0xb1, 0x46, 0xb8, 0xe5, 0xf7, 0xea, 0x0e, 0xdb, 0xb8, 0x22,
-	0x4f, 0x8c, 0xa5, 0x85, 0x14, 0xb1, 0x04, 0x44, 0x7a, 0xda, 0x46, 0xaa, 0xe9, 0x07, 0x5d, 0xcb,
-	0xe9, 0xf4, 0xd3, 0x9b, 0x98, 0xa9, 0x55, 0x1e, 0xae, 0xb7, 0xee, 0xde, 0xb2, 0x24, 0x61, 0xb7,
-	0x0a, 0xa2, 0x95, 0x5b, 0x16, 0x9f, 0x2c, 0x19, 0x2a, 0xc9, 0xc2, 0x5c, 0xc1, 0xd2, 0xd5, 0x5e,
-	0xb7, 0x48, 0x74, 0xcb, 0xbf, 0xd0, 0x2c, 0x0c, 0x0f, 0x8a, 0xe7, 0xd3, 0xbf, 0x01, 0x00, 0x00,
-	0xff, 0xff, 0x42, 0xb7, 0x2a, 0xc4, 0x70, 0x07, 0x00, 0x00,
+	// 630 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xac, 0x95, 0xdd, 0x6e, 0xd3, 0x30,
+	0x14, 0xc7, 0xf7, 0xc5, 0xd0, 0xce, 0x9a, 0x16, 0x19, 0x2e, 0xa6, 0x30, 0xb1, 0x51, 0x89, 0xad,
+	0xeb, 0x46, 0x82, 0xb6, 0x17, 0x60, 0x5d, 0x24, 0x16, 0x89, 0x49, 0x28, 0x2d, 0x17, 0x80, 0xa6,
+	0xca, 0x49, 0xad, 0xd6, 0x52, 0x12, 0x97, 0xd8, 0xe9, 0xd0, 0x9e, 0x85, 0x87, 0x45, 0xf9, 0x72,
+	0x92, 0x2e, 0x69, 0x83, 0xe0, 0xd2, 0xf6, 0x2f, 0xbf, 0xff, 0xb1, 0x8f, 0x15, 0x43, 0xcb, 0xc3,
+	0x5c, 0x90, 0x40, 0x9b, 0x07, 0x4c, 0x30, 0xf4, 0xd2, 0xa3, 0xee, 0x22, 0xe4, 0xc9, 0x48, 0x4b,
+	0x96, 0xd4, 0x96, 0xc3, 0x3c, 0x8f, 0xf9, 0xc9, 0xa4, 0xda, 0x2a, 0x22, 0x2a, 0x9a, 0x60, 0x81,
+	0xc7, 0x9c, 0x04, 0x0b, 0xea, 0x90, 0x64, 0xae, 0x3b, 0x84, 0x3d, 0xd3, 0xb0, 0xc8, 0xcf, 0x90,
+	0x70, 0x81, 0x3e, 0xc0, 0x8e, 0x8d, 0x39, 0x39, 0xd8, 0x3c, 0xde, 0xec, 0xed, 0x5f, 0x1e, 0x6a,
+	0xa5, 0x80, 0x54, 0x7c, 0xc7, 0xa7, 0x03, 0xcc, 0x89, 0x15, 0x93, 0xe8, 0x15, 0x3c, 0x73, 0x58,
+	0xe8, 0x8b, 0x83, 0xad, 0xe3, 0xcd, 0x9e, 0x62, 0x25, 0x83, 0xee, 0x14, 0x20, 0x92, 0xf2, 0x39,
+	0xf3, 0x39, 0x41, 0x57, 0xb0, 0xcb, 0x05, 0x16, 0x21, 0x4f, 0xbd, 0xaf, 0x2b, 0xbd, 0xc3, 0x18,
+	0xb1, 0x52, 0x14, 0xb5, 0x61, 0xcb, 0x34, 0x62, 0xeb, 0xb6, 0xb5, 0x65, 0x1a, 0x79, 0xd0, 0x76,
+	0x31, 0x68, 0x04, 0x30, 0xe2, 0xec, 0x3f, 0x94, 0x5f, 0xb2, 0x2e, 0x60, 0x3f, 0xb6, 0xfe, 0x4b,
+	0xfd, 0x87, 0xb0, 0x27, 0xa8, 0x47, 0xb8, 0xc0, 0xde, 0x3c, 0xde, 0xc6, 0x8e, 0x95, 0x4f, 0x54,
+	0xe7, 0x5e, 0xfe, 0x56, 0x40, 0xb9, 0x8b, 0xdb, 0x38, 0x4c, 0x7a, 0x84, 0xc6, 0xf0, 0xe2, 0x26,
+	0x20, 0x58, 0x90, 0x1b, 0xe6, 0xba, 0xc4, 0x11, 0x94, 0xf9, 0xe8, 0xa2, 0x1c, 0x9f, 0x0e, 0x96,
+	0xb1, 0xf4, 0x4c, 0xd4, 0x55, 0xc5, 0x76, 0x37, 0xd0, 0x0f, 0x68, 0x1b, 0x01, 0x9b, 0x17, 0xf4,
+	0xfd, 0x4a, 0x7d, 0x19, 0x6a, 0x28, 0x1f, 0x83, 0x72, 0x8b, 0x79, 0xc1, 0x7d, 0x56, 0xe9, 0x2e,
+	0x31, 0x99, 0xfa, 0x6d, 0x25, 0x3a, 0x60, 0xcc, 0xcd, 0xfa, 0xd2, 0xdd, 0x40, 0x0f, 0x80, 0x0c,
+	0xc2, 0x9d, 0x80, 0xda, 0xc5, 0x03, 0xd2, 0xaa, 0x77, 0xf0, 0x04, 0xcc, 0xa2, 0xf4, 0xc6, 0xbc,
+	0x0c, 0x76, 0xa1, 0x33, 0x9c, 0xb1, 0x87, 0x7c, 0x8d, 0xd7, 0x9c, 0x5b, 0x99, 0xca, 0x12, 0xcf,
+	0x1b, 0xb1, 0x32, 0xed, 0x1e, 0x3a, 0x49, 0x7b, 0xbf, 0xe0, 0x40, 0xd0, 0x78, 0x8f, 0xe7, 0x2b,
+	0x2e, 0x81, 0xa4, 0x1a, 0xb6, 0xe9, 0x1b, 0x28, 0x51, 0x7b, 0x73, 0xf9, 0x59, 0xed, 0x15, 0xf8,
+	0x5b, 0xf5, 0x3d, 0xb4, 0x6e, 0x31, 0xcf, 0xcd, 0xbd, 0xba, 0x0b, 0xf0, 0x44, 0xdc, 0xa8, 0xff,
+	0x14, 0xda, 0xd1, 0xa1, 0xc9, 0x8f, 0x79, 0x4d, 0xe9, 0x25, 0x28, 0x4b, 0xe8, 0x37, 0x41, 0x65,
+	0x94, 0x0f, 0x9d, 0xec, 0x46, 0x0c, 0xc9, 0xd4, 0x23, 0xbe, 0xa8, 0xe9, 0xc1, 0x12, 0x95, 0xa5,
+	0x5d, 0x34, 0x83, 0x65, 0x9e, 0x03, 0xad, 0xa8, 0x94, 0x74, 0x81, 0xa3, 0xd3, 0xda, 0x6a, 0x97,
+	0x82, 0x7a, 0xeb, 0x41, 0x19, 0xf2, 0x15, 0xf6, 0x93, 0x2b, 0x63, 0xfa, 0x13, 0xf2, 0xab, 0x26,
+	0xa3, 0x40, 0x34, 0xec, 0xfa, 0x0c, 0x94, 0x6c, 0x63, 0x89, 0xf8, 0x6c, 0xe5, 0xe6, 0x4b, 0xea,
+	0x7e, 0x13, 0x54, 0x6e, 0xc0, 0x06, 0xe5, 0x13, 0x11, 0xf1, 0x6c, 0x94, 0x4e, 0xd0, 0x49, 0xe5,
+	0xe7, 0x39, 0x90, 0xc5, 0x9c, 0xae, 0xe5, 0x0a, 0x87, 0xd4, 0xbe, 0x76, 0x5d, 0xe6, 0x8c, 0xe4,
+	0xdf, 0xfb, 0x48, 0xab, 0x78, 0x79, 0xb5, 0xfc, 0x21, 0x52, 0x8f, 0xeb, 0x01, 0xa9, 0xfd, 0x0c,
+	0xcf, 0x63, 0xad, 0x69, 0xa0, 0x37, 0x95, 0xb8, 0x7c, 0x96, 0xd5, 0xa3, 0xda, 0xf5, 0xc2, 0x41,
+	0x74, 0xae, 0x39, 0xa7, 0x53, 0x3f, 0x6d, 0xb2, 0x69, 0xa0, 0x77, 0xe5, 0xaf, 0xa2, 0xb7, 0x5f,
+	0x93, 0x4c, 0x2e, 0x3f, 0x59, 0x87, 0x65, 0x19, 0x83, 0xc1, 0xf7, 0x8f, 0x53, 0x2a, 0x66, 0xa1,
+	0x1d, 0x35, 0x5c, 0x7f, 0xa4, 0xae, 0x4b, 0x1f, 0x05, 0x71, 0x66, 0x7a, 0x22, 0x78, 0x3f, 0xa1,
+	0x5c, 0x04, 0xd4, 0x0e, 0x05, 0x99, 0xe8, 0xd4, 0x17, 0x24, 0xf0, 0xb1, 0xab, 0xc7, 0x56, 0x3d,
+	0x29, 0x79, 0x6e, 0xdb, 0xbb, 0xf1, 0xf8, 0xea, 0x4f, 0x00, 0x00, 0x00, 0xff, 0xff, 0x73, 0x1a,
+	0x8c, 0x11, 0xca, 0x08, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -75,760 +292,742 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// MasterClient is the client API for Master service.
+// MasterServiceClient is the client API for MasterService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type MasterClient interface {
+type MasterServiceClient interface {
 	//*
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
-	CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
-	DropCollection(ctx context.Context, in *internalpb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
-	HasCollection(ctx context.Context, in *internalpb.HasCollectionRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error)
+	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
 	//*
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
 	//
 	// @return CollectionSchema
-	DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest, opts ...grpc.CallOption) (*servicepb.CollectionDescription, error)
+	DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 	//*
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
-	ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest, opts ...grpc.CallOption) (*servicepb.StringListResponse, error)
+	ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionResponse, error)
 	//*
 	// @brief This method is used to create partition
 	//
 	// @return Status
-	CreatePartition(ctx context.Context, in *internalpb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to drop partition
 	//
 	// @return Status
-	DropPartition(ctx context.Context, in *internalpb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
-	HasPartition(ctx context.Context, in *internalpb.HasPartitionRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error)
-	//*
-	// @brief This method is used to get basic partition infomation.
-	//
-	// @return PartitionDescription
-	DescribePartition(ctx context.Context, in *internalpb.DescribePartitionRequest, opts ...grpc.CallOption) (*servicepb.PartitionDescription, error)
+	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
 	//*
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.
 	//
 	// @return StringListResponse
-	ShowPartitions(ctx context.Context, in *internalpb.ShowPartitionRequest, opts ...grpc.CallOption) (*servicepb.StringListResponse, error)
-	//*
-	// @brief This method is used to get system configs
-	//
-	// @param SysConfigRequest, keys or key_prefixes of the configs.
-	//
-	// @return SysConfigResponse
-	GetSysConfigs(ctx context.Context, in *internalpb.SysConfigRequest, opts ...grpc.CallOption) (*servicepb.SysConfigResponse, error)
-	AllocTimestamp(ctx context.Context, in *internalpb.TsoRequest, opts ...grpc.CallOption) (*internalpb.TsoResponse, error)
-	AllocID(ctx context.Context, in *internalpb.IDRequest, opts ...grpc.CallOption) (*internalpb.IDResponse, error)
-	AssignSegmentID(ctx context.Context, in *internalpb.AssignSegIDRequest, opts ...grpc.CallOption) (*internalpb.AssignSegIDResponse, error)
-	CreateIndex(ctx context.Context, in *internalpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	DescribeIndex(ctx context.Context, in *internalpb.DescribeIndexRequest, opts ...grpc.CallOption) (*servicepb.DescribeIndexResponse, error)
-	DescribeIndexProgress(ctx context.Context, in *internalpb.DescribeIndexProgressRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error)
+	ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionResponse, error)
+	DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest, opts ...grpc.CallOption) (*milvuspb.DescribeSegmentResponse, error)
+	ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentResponse, error)
+	CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest, opts ...grpc.CallOption) (*milvuspb.DescribeIndexResponse, error)
+	GetIndexState(ctx context.Context, in *milvuspb.IndexStateRequest, opts ...grpc.CallOption) (*milvuspb.IndexStateResponse, error)
+	AllocTimestamp(ctx context.Context, in *TsoRequest, opts ...grpc.CallOption) (*TsoResponse, error)
+	AllocID(ctx context.Context, in *IDRequest, opts ...grpc.CallOption) (*IDResponse, error)
+	// todo move to data service
+	AssignSegmentID(ctx context.Context, in *datapb.AssignSegIDRequest, opts ...grpc.CallOption) (*datapb.AssignSegIDResponse, error)
 }
 
-type masterClient struct {
+type masterServiceClient struct {
 	cc *grpc.ClientConn
 }
 
-func NewMasterClient(cc *grpc.ClientConn) MasterClient {
-	return &masterClient{cc}
+func NewMasterServiceClient(cc *grpc.ClientConn) MasterServiceClient {
+	return &masterServiceClient{cc}
 }
 
-func (c *masterClient) CreateCollection(ctx context.Context, in *internalpb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *masterServiceClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/CreateCollection", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/CreateCollection", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DropCollection(ctx context.Context, in *internalpb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *masterServiceClient) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DropCollection", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/DropCollection", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) HasCollection(ctx context.Context, in *internalpb.HasCollectionRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error) {
-	out := new(servicepb.BoolResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/HasCollection", in, out, opts...)
+func (c *masterServiceClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
+	out := new(milvuspb.BoolResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/HasCollection", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DescribeCollection(ctx context.Context, in *internalpb.DescribeCollectionRequest, opts ...grpc.CallOption) (*servicepb.CollectionDescription, error) {
-	out := new(servicepb.CollectionDescription)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DescribeCollection", in, out, opts...)
+func (c *masterServiceClient) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	out := new(milvuspb.DescribeCollectionResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/DescribeCollection", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) ShowCollections(ctx context.Context, in *internalpb.ShowCollectionRequest, opts ...grpc.CallOption) (*servicepb.StringListResponse, error) {
-	out := new(servicepb.StringListResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/ShowCollections", in, out, opts...)
+func (c *masterServiceClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionResponse, error) {
+	out := new(milvuspb.ShowCollectionResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/ShowCollections", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) CreatePartition(ctx context.Context, in *internalpb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *masterServiceClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/CreatePartition", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/CreatePartition", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DropPartition(ctx context.Context, in *internalpb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *masterServiceClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DropPartition", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/DropPartition", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) HasPartition(ctx context.Context, in *internalpb.HasPartitionRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error) {
-	out := new(servicepb.BoolResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/HasPartition", in, out, opts...)
+func (c *masterServiceClient) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
+	out := new(milvuspb.BoolResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/HasPartition", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DescribePartition(ctx context.Context, in *internalpb.DescribePartitionRequest, opts ...grpc.CallOption) (*servicepb.PartitionDescription, error) {
-	out := new(servicepb.PartitionDescription)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DescribePartition", in, out, opts...)
+func (c *masterServiceClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionResponse, error) {
+	out := new(milvuspb.ShowPartitionResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/ShowPartitions", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) ShowPartitions(ctx context.Context, in *internalpb.ShowPartitionRequest, opts ...grpc.CallOption) (*servicepb.StringListResponse, error) {
-	out := new(servicepb.StringListResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/ShowPartitions", in, out, opts...)
+func (c *masterServiceClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest, opts ...grpc.CallOption) (*milvuspb.DescribeSegmentResponse, error) {
+	out := new(milvuspb.DescribeSegmentResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/DescribeSegment", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) GetSysConfigs(ctx context.Context, in *internalpb.SysConfigRequest, opts ...grpc.CallOption) (*servicepb.SysConfigResponse, error) {
-	out := new(servicepb.SysConfigResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/GetSysConfigs", in, out, opts...)
+func (c *masterServiceClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentResponse, error) {
+	out := new(milvuspb.ShowSegmentResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/ShowSegments", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) AllocTimestamp(ctx context.Context, in *internalpb.TsoRequest, opts ...grpc.CallOption) (*internalpb.TsoResponse, error) {
-	out := new(internalpb.TsoResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/AllocTimestamp", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *masterClient) AllocID(ctx context.Context, in *internalpb.IDRequest, opts ...grpc.CallOption) (*internalpb.IDResponse, error) {
-	out := new(internalpb.IDResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/AllocID", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *masterClient) AssignSegmentID(ctx context.Context, in *internalpb.AssignSegIDRequest, opts ...grpc.CallOption) (*internalpb.AssignSegIDResponse, error) {
-	out := new(internalpb.AssignSegIDResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/AssignSegmentID", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *masterClient) CreateIndex(ctx context.Context, in *internalpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *masterServiceClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/CreateIndex", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/CreateIndex", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DescribeIndex(ctx context.Context, in *internalpb.DescribeIndexRequest, opts ...grpc.CallOption) (*servicepb.DescribeIndexResponse, error) {
-	out := new(servicepb.DescribeIndexResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DescribeIndex", in, out, opts...)
+func (c *masterServiceClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest, opts ...grpc.CallOption) (*milvuspb.DescribeIndexResponse, error) {
+	out := new(milvuspb.DescribeIndexResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/DescribeIndex", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *masterClient) DescribeIndexProgress(ctx context.Context, in *internalpb.DescribeIndexProgressRequest, opts ...grpc.CallOption) (*servicepb.BoolResponse, error) {
-	out := new(servicepb.BoolResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.master.Master/DescribeIndexProgress", in, out, opts...)
+func (c *masterServiceClient) GetIndexState(ctx context.Context, in *milvuspb.IndexStateRequest, opts ...grpc.CallOption) (*milvuspb.IndexStateResponse, error) {
+	out := new(milvuspb.IndexStateResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/GetIndexState", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// MasterServer is the server API for Master service.
-type MasterServer interface {
+func (c *masterServiceClient) AllocTimestamp(ctx context.Context, in *TsoRequest, opts ...grpc.CallOption) (*TsoResponse, error) {
+	out := new(TsoResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/AllocTimestamp", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *masterServiceClient) AllocID(ctx context.Context, in *IDRequest, opts ...grpc.CallOption) (*IDResponse, error) {
+	out := new(IDResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/AllocID", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *masterServiceClient) AssignSegmentID(ctx context.Context, in *datapb.AssignSegIDRequest, opts ...grpc.CallOption) (*datapb.AssignSegIDResponse, error) {
+	out := new(datapb.AssignSegIDResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.master.MasterService/AssignSegmentID", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MasterServiceServer is the server API for MasterService service.
+type MasterServiceServer interface {
 	//*
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
-	CreateCollection(context.Context, *internalpb.CreateCollectionRequest) (*commonpb.Status, error)
+	CreateCollection(context.Context, *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
-	DropCollection(context.Context, *internalpb.DropCollectionRequest) (*commonpb.Status, error)
+	DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
-	HasCollection(context.Context, *internalpb.HasCollectionRequest) (*servicepb.BoolResponse, error)
+	HasCollection(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
 	//*
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
 	//
 	// @return CollectionSchema
-	DescribeCollection(context.Context, *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error)
+	DescribeCollection(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 	//*
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
-	ShowCollections(context.Context, *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error)
+	ShowCollections(context.Context, *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 	//*
 	// @brief This method is used to create partition
 	//
 	// @return Status
-	CreatePartition(context.Context, *internalpb.CreatePartitionRequest) (*commonpb.Status, error)
+	CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to drop partition
 	//
 	// @return Status
-	DropPartition(context.Context, *internalpb.DropPartitionRequest) (*commonpb.Status, error)
+	DropPartition(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
 	//*
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
-	HasPartition(context.Context, *internalpb.HasPartitionRequest) (*servicepb.BoolResponse, error)
-	//*
-	// @brief This method is used to get basic partition infomation.
-	//
-	// @return PartitionDescription
-	DescribePartition(context.Context, *internalpb.DescribePartitionRequest) (*servicepb.PartitionDescription, error)
+	HasPartition(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
 	//*
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.
 	//
 	// @return StringListResponse
-	ShowPartitions(context.Context, *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error)
-	//*
-	// @brief This method is used to get system configs
-	//
-	// @param SysConfigRequest, keys or key_prefixes of the configs.
-	//
-	// @return SysConfigResponse
-	GetSysConfigs(context.Context, *internalpb.SysConfigRequest) (*servicepb.SysConfigResponse, error)
-	AllocTimestamp(context.Context, *internalpb.TsoRequest) (*internalpb.TsoResponse, error)
-	AllocID(context.Context, *internalpb.IDRequest) (*internalpb.IDResponse, error)
-	AssignSegmentID(context.Context, *internalpb.AssignSegIDRequest) (*internalpb.AssignSegIDResponse, error)
-	CreateIndex(context.Context, *internalpb.CreateIndexRequest) (*commonpb.Status, error)
-	DescribeIndex(context.Context, *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error)
-	DescribeIndexProgress(context.Context, *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error)
+	ShowPartitions(context.Context, *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error)
+	DescribeSegment(context.Context, *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	ShowSegments(context.Context, *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	CreateIndex(context.Context, *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(context.Context, *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	GetIndexState(context.Context, *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error)
+	AllocTimestamp(context.Context, *TsoRequest) (*TsoResponse, error)
+	AllocID(context.Context, *IDRequest) (*IDResponse, error)
+	// todo move to data service
+	AssignSegmentID(context.Context, *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
 }
 
-// UnimplementedMasterServer can be embedded to have forward compatible implementations.
-type UnimplementedMasterServer struct {
+// UnimplementedMasterServiceServer can be embedded to have forward compatible implementations.
+type UnimplementedMasterServiceServer struct {
 }
 
-func (*UnimplementedMasterServer) CreateCollection(ctx context.Context, req *internalpb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (*UnimplementedMasterServiceServer) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateCollection not implemented")
 }
-func (*UnimplementedMasterServer) DropCollection(ctx context.Context, req *internalpb.DropCollectionRequest) (*commonpb.Status, error) {
+func (*UnimplementedMasterServiceServer) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropCollection not implemented")
 }
-func (*UnimplementedMasterServer) HasCollection(ctx context.Context, req *internalpb.HasCollectionRequest) (*servicepb.BoolResponse, error) {
+func (*UnimplementedMasterServiceServer) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HasCollection not implemented")
 }
-func (*UnimplementedMasterServer) DescribeCollection(ctx context.Context, req *internalpb.DescribeCollectionRequest) (*servicepb.CollectionDescription, error) {
+func (*UnimplementedMasterServiceServer) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeCollection not implemented")
 }
-func (*UnimplementedMasterServer) ShowCollections(ctx context.Context, req *internalpb.ShowCollectionRequest) (*servicepb.StringListResponse, error) {
+func (*UnimplementedMasterServiceServer) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowCollections not implemented")
 }
-func (*UnimplementedMasterServer) CreatePartition(ctx context.Context, req *internalpb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (*UnimplementedMasterServiceServer) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePartition not implemented")
 }
-func (*UnimplementedMasterServer) DropPartition(ctx context.Context, req *internalpb.DropPartitionRequest) (*commonpb.Status, error) {
+func (*UnimplementedMasterServiceServer) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropPartition not implemented")
 }
-func (*UnimplementedMasterServer) HasPartition(ctx context.Context, req *internalpb.HasPartitionRequest) (*servicepb.BoolResponse, error) {
+func (*UnimplementedMasterServiceServer) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HasPartition not implemented")
 }
-func (*UnimplementedMasterServer) DescribePartition(ctx context.Context, req *internalpb.DescribePartitionRequest) (*servicepb.PartitionDescription, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DescribePartition not implemented")
-}
-func (*UnimplementedMasterServer) ShowPartitions(ctx context.Context, req *internalpb.ShowPartitionRequest) (*servicepb.StringListResponse, error) {
+func (*UnimplementedMasterServiceServer) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowPartitions not implemented")
 }
-func (*UnimplementedMasterServer) GetSysConfigs(ctx context.Context, req *internalpb.SysConfigRequest) (*servicepb.SysConfigResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetSysConfigs not implemented")
+func (*UnimplementedMasterServiceServer) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeSegment not implemented")
 }
-func (*UnimplementedMasterServer) AllocTimestamp(ctx context.Context, req *internalpb.TsoRequest) (*internalpb.TsoResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AllocTimestamp not implemented")
+func (*UnimplementedMasterServiceServer) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShowSegments not implemented")
 }
-func (*UnimplementedMasterServer) AllocID(ctx context.Context, req *internalpb.IDRequest) (*internalpb.IDResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AllocID not implemented")
-}
-func (*UnimplementedMasterServer) AssignSegmentID(ctx context.Context, req *internalpb.AssignSegIDRequest) (*internalpb.AssignSegIDResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AssignSegmentID not implemented")
-}
-func (*UnimplementedMasterServer) CreateIndex(ctx context.Context, req *internalpb.CreateIndexRequest) (*commonpb.Status, error) {
+func (*UnimplementedMasterServiceServer) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
 }
-func (*UnimplementedMasterServer) DescribeIndex(ctx context.Context, req *internalpb.DescribeIndexRequest) (*servicepb.DescribeIndexResponse, error) {
+func (*UnimplementedMasterServiceServer) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndex not implemented")
 }
-func (*UnimplementedMasterServer) DescribeIndexProgress(ctx context.Context, req *internalpb.DescribeIndexProgressRequest) (*servicepb.BoolResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndexProgress not implemented")
+func (*UnimplementedMasterServiceServer) GetIndexState(ctx context.Context, req *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetIndexState not implemented")
+}
+func (*UnimplementedMasterServiceServer) AllocTimestamp(ctx context.Context, req *TsoRequest) (*TsoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AllocTimestamp not implemented")
+}
+func (*UnimplementedMasterServiceServer) AllocID(ctx context.Context, req *IDRequest) (*IDResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AllocID not implemented")
+}
+func (*UnimplementedMasterServiceServer) AssignSegmentID(ctx context.Context, req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AssignSegmentID not implemented")
 }
 
-func RegisterMasterServer(s *grpc.Server, srv MasterServer) {
-	s.RegisterService(&_Master_serviceDesc, srv)
+func RegisterMasterServiceServer(s *grpc.Server, srv MasterServiceServer) {
+	s.RegisterService(&_MasterService_serviceDesc, srv)
 }
 
-func _Master_CreateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.CreateCollectionRequest)
+func _MasterService_CreateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreateCollectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).CreateCollection(ctx, in)
+		return srv.(MasterServiceServer).CreateCollection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/CreateCollection",
+		FullMethod: "/milvus.proto.master.MasterService/CreateCollection",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).CreateCollection(ctx, req.(*internalpb.CreateCollectionRequest))
+		return srv.(MasterServiceServer).CreateCollection(ctx, req.(*milvuspb.CreateCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DropCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DropCollectionRequest)
+func _MasterService_DropCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DropCollectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DropCollection(ctx, in)
+		return srv.(MasterServiceServer).DropCollection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DropCollection",
+		FullMethod: "/milvus.proto.master.MasterService/DropCollection",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DropCollection(ctx, req.(*internalpb.DropCollectionRequest))
+		return srv.(MasterServiceServer).DropCollection(ctx, req.(*milvuspb.DropCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_HasCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.HasCollectionRequest)
+func _MasterService_HasCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.HasCollectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).HasCollection(ctx, in)
+		return srv.(MasterServiceServer).HasCollection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/HasCollection",
+		FullMethod: "/milvus.proto.master.MasterService/HasCollection",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).HasCollection(ctx, req.(*internalpb.HasCollectionRequest))
+		return srv.(MasterServiceServer).HasCollection(ctx, req.(*milvuspb.HasCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DescribeCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DescribeCollectionRequest)
+func _MasterService_DescribeCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DescribeCollectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DescribeCollection(ctx, in)
+		return srv.(MasterServiceServer).DescribeCollection(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DescribeCollection",
+		FullMethod: "/milvus.proto.master.MasterService/DescribeCollection",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DescribeCollection(ctx, req.(*internalpb.DescribeCollectionRequest))
+		return srv.(MasterServiceServer).DescribeCollection(ctx, req.(*milvuspb.DescribeCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_ShowCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.ShowCollectionRequest)
+func _MasterService_ShowCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ShowCollectionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).ShowCollections(ctx, in)
+		return srv.(MasterServiceServer).ShowCollections(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/ShowCollections",
+		FullMethod: "/milvus.proto.master.MasterService/ShowCollections",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).ShowCollections(ctx, req.(*internalpb.ShowCollectionRequest))
+		return srv.(MasterServiceServer).ShowCollections(ctx, req.(*milvuspb.ShowCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_CreatePartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.CreatePartitionRequest)
+func _MasterService_CreatePartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreatePartitionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).CreatePartition(ctx, in)
+		return srv.(MasterServiceServer).CreatePartition(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/CreatePartition",
+		FullMethod: "/milvus.proto.master.MasterService/CreatePartition",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).CreatePartition(ctx, req.(*internalpb.CreatePartitionRequest))
+		return srv.(MasterServiceServer).CreatePartition(ctx, req.(*milvuspb.CreatePartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DropPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DropPartitionRequest)
+func _MasterService_DropPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DropPartitionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DropPartition(ctx, in)
+		return srv.(MasterServiceServer).DropPartition(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DropPartition",
+		FullMethod: "/milvus.proto.master.MasterService/DropPartition",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DropPartition(ctx, req.(*internalpb.DropPartitionRequest))
+		return srv.(MasterServiceServer).DropPartition(ctx, req.(*milvuspb.DropPartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_HasPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.HasPartitionRequest)
+func _MasterService_HasPartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.HasPartitionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).HasPartition(ctx, in)
+		return srv.(MasterServiceServer).HasPartition(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/HasPartition",
+		FullMethod: "/milvus.proto.master.MasterService/HasPartition",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).HasPartition(ctx, req.(*internalpb.HasPartitionRequest))
+		return srv.(MasterServiceServer).HasPartition(ctx, req.(*milvuspb.HasPartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DescribePartition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DescribePartitionRequest)
+func _MasterService_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ShowPartitionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DescribePartition(ctx, in)
+		return srv.(MasterServiceServer).ShowPartitions(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DescribePartition",
+		FullMethod: "/milvus.proto.master.MasterService/ShowPartitions",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DescribePartition(ctx, req.(*internalpb.DescribePartitionRequest))
+		return srv.(MasterServiceServer).ShowPartitions(ctx, req.(*milvuspb.ShowPartitionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_ShowPartitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.ShowPartitionRequest)
+func _MasterService_DescribeSegment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DescribeSegmentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).ShowPartitions(ctx, in)
+		return srv.(MasterServiceServer).DescribeSegment(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/ShowPartitions",
+		FullMethod: "/milvus.proto.master.MasterService/DescribeSegment",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).ShowPartitions(ctx, req.(*internalpb.ShowPartitionRequest))
+		return srv.(MasterServiceServer).DescribeSegment(ctx, req.(*milvuspb.DescribeSegmentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_GetSysConfigs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.SysConfigRequest)
+func _MasterService_ShowSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ShowSegmentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).GetSysConfigs(ctx, in)
+		return srv.(MasterServiceServer).ShowSegments(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/GetSysConfigs",
+		FullMethod: "/milvus.proto.master.MasterService/ShowSegments",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).GetSysConfigs(ctx, req.(*internalpb.SysConfigRequest))
+		return srv.(MasterServiceServer).ShowSegments(ctx, req.(*milvuspb.ShowSegmentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_AllocTimestamp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.TsoRequest)
+func _MasterService_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreateIndexRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).AllocTimestamp(ctx, in)
+		return srv.(MasterServiceServer).CreateIndex(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/AllocTimestamp",
+		FullMethod: "/milvus.proto.master.MasterService/CreateIndex",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).AllocTimestamp(ctx, req.(*internalpb.TsoRequest))
+		return srv.(MasterServiceServer).CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_AllocID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.IDRequest)
+func _MasterService_DescribeIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DescribeIndexRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).AllocID(ctx, in)
+		return srv.(MasterServiceServer).DescribeIndex(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/AllocID",
+		FullMethod: "/milvus.proto.master.MasterService/DescribeIndex",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).AllocID(ctx, req.(*internalpb.IDRequest))
+		return srv.(MasterServiceServer).DescribeIndex(ctx, req.(*milvuspb.DescribeIndexRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_AssignSegmentID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.AssignSegIDRequest)
+func _MasterService_GetIndexState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.IndexStateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).AssignSegmentID(ctx, in)
+		return srv.(MasterServiceServer).GetIndexState(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/AssignSegmentID",
+		FullMethod: "/milvus.proto.master.MasterService/GetIndexState",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).AssignSegmentID(ctx, req.(*internalpb.AssignSegIDRequest))
+		return srv.(MasterServiceServer).GetIndexState(ctx, req.(*milvuspb.IndexStateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.CreateIndexRequest)
+func _MasterService_AllocTimestamp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TsoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).CreateIndex(ctx, in)
+		return srv.(MasterServiceServer).AllocTimestamp(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/CreateIndex",
+		FullMethod: "/milvus.proto.master.MasterService/AllocTimestamp",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).CreateIndex(ctx, req.(*internalpb.CreateIndexRequest))
+		return srv.(MasterServiceServer).AllocTimestamp(ctx, req.(*TsoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DescribeIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DescribeIndexRequest)
+func _MasterService_AllocID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IDRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DescribeIndex(ctx, in)
+		return srv.(MasterServiceServer).AllocID(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DescribeIndex",
+		FullMethod: "/milvus.proto.master.MasterService/AllocID",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DescribeIndex(ctx, req.(*internalpb.DescribeIndexRequest))
+		return srv.(MasterServiceServer).AllocID(ctx, req.(*IDRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Master_DescribeIndexProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.DescribeIndexProgressRequest)
+func _MasterService_AssignSegmentID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(datapb.AssignSegIDRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MasterServer).DescribeIndexProgress(ctx, in)
+		return srv.(MasterServiceServer).AssignSegmentID(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.master.Master/DescribeIndexProgress",
+		FullMethod: "/milvus.proto.master.MasterService/AssignSegmentID",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MasterServer).DescribeIndexProgress(ctx, req.(*internalpb.DescribeIndexProgressRequest))
+		return srv.(MasterServiceServer).AssignSegmentID(ctx, req.(*datapb.AssignSegIDRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-var _Master_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "milvus.proto.master.Master",
-	HandlerType: (*MasterServer)(nil),
+var _MasterService_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.master.MasterService",
+	HandlerType: (*MasterServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "CreateCollection",
-			Handler:    _Master_CreateCollection_Handler,
+			Handler:    _MasterService_CreateCollection_Handler,
 		},
 		{
 			MethodName: "DropCollection",
-			Handler:    _Master_DropCollection_Handler,
+			Handler:    _MasterService_DropCollection_Handler,
 		},
 		{
 			MethodName: "HasCollection",
-			Handler:    _Master_HasCollection_Handler,
+			Handler:    _MasterService_HasCollection_Handler,
 		},
 		{
 			MethodName: "DescribeCollection",
-			Handler:    _Master_DescribeCollection_Handler,
+			Handler:    _MasterService_DescribeCollection_Handler,
 		},
 		{
 			MethodName: "ShowCollections",
-			Handler:    _Master_ShowCollections_Handler,
+			Handler:    _MasterService_ShowCollections_Handler,
 		},
 		{
 			MethodName: "CreatePartition",
-			Handler:    _Master_CreatePartition_Handler,
+			Handler:    _MasterService_CreatePartition_Handler,
 		},
 		{
 			MethodName: "DropPartition",
-			Handler:    _Master_DropPartition_Handler,
+			Handler:    _MasterService_DropPartition_Handler,
 		},
 		{
 			MethodName: "HasPartition",
-			Handler:    _Master_HasPartition_Handler,
-		},
-		{
-			MethodName: "DescribePartition",
-			Handler:    _Master_DescribePartition_Handler,
+			Handler:    _MasterService_HasPartition_Handler,
 		},
 		{
 			MethodName: "ShowPartitions",
-			Handler:    _Master_ShowPartitions_Handler,
+			Handler:    _MasterService_ShowPartitions_Handler,
 		},
 		{
-			MethodName: "GetSysConfigs",
-			Handler:    _Master_GetSysConfigs_Handler,
+			MethodName: "DescribeSegment",
+			Handler:    _MasterService_DescribeSegment_Handler,
 		},
 		{
-			MethodName: "AllocTimestamp",
-			Handler:    _Master_AllocTimestamp_Handler,
-		},
-		{
-			MethodName: "AllocID",
-			Handler:    _Master_AllocID_Handler,
-		},
-		{
-			MethodName: "AssignSegmentID",
-			Handler:    _Master_AssignSegmentID_Handler,
+			MethodName: "ShowSegments",
+			Handler:    _MasterService_ShowSegments_Handler,
 		},
 		{
 			MethodName: "CreateIndex",
-			Handler:    _Master_CreateIndex_Handler,
+			Handler:    _MasterService_CreateIndex_Handler,
 		},
 		{
 			MethodName: "DescribeIndex",
-			Handler:    _Master_DescribeIndex_Handler,
+			Handler:    _MasterService_DescribeIndex_Handler,
 		},
 		{
-			MethodName: "DescribeIndexProgress",
-			Handler:    _Master_DescribeIndexProgress_Handler,
+			MethodName: "GetIndexState",
+			Handler:    _MasterService_GetIndexState_Handler,
+		},
+		{
+			MethodName: "AllocTimestamp",
+			Handler:    _MasterService_AllocTimestamp_Handler,
+		},
+		{
+			MethodName: "AllocID",
+			Handler:    _MasterService_AllocID_Handler,
+		},
+		{
+			MethodName: "AssignSegmentID",
+			Handler:    _MasterService_AssignSegmentID_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

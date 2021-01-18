@@ -9,11 +9,11 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
-	insertRequest := internalPb.InsertRequest{}
+	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 	fmt.Println("use func newInsertMsgUnmarshal unmarshal")

@@ -17,7 +17,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 func TestStatsProcess(t *testing.T) {
@@ -72,17 +72,19 @@ func TestStatsProcess(t *testing.T) {
 		OpenTime:     ts,
 	})
 	assert.Nil(t, err)
-	stats := internalpb.QueryNodeStats{
-		MsgType: commonpb.MsgType_kQueryNodeStats,
-		PeerID:  1,
-		SegStats: []*internalpb.SegmentStats{
+	stats := internalpb2.QueryNodeStats{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_kQueryNodeStats,
+			SourceID: 1,
+		},
+		SegStats: []*internalpb2.SegmentStats{
 			{SegmentID: 100, MemorySize: 2500000, NumRows: 25000, RecentlyModified: true},
 		},
-		FieldStats: []*internalpb.FieldStats{
-			{CollectionID: 1, FieldID: 100, IndexStats: []*internalpb.IndexStats{
+		FieldStats: []*internalpb2.FieldStats{
+			{CollectionID: 1, FieldID: 100, IndexStats: []*internalpb2.IndexStats{
 				{IndexParams: []*commonpb.KeyValuePair{}, NumRelatedSegments: 100},
 			}},
-			{CollectionID: 2, FieldID: 100, IndexStats: []*internalpb.IndexStats{
+			{CollectionID: 2, FieldID: 100, IndexStats: []*internalpb2.IndexStats{
 				{IndexParams: []*commonpb.KeyValuePair{}, NumRelatedSegments: 200},
 			}},
 		},

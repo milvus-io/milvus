@@ -4,10 +4,32 @@ package milvus.proto.master;
 option go_package="github.com/zilliztech/milvus-distributed/internal/proto/masterpb";
 
 import "common.proto";
-import "internal_msg.proto";
-import "service_msg.proto";
+import "milvus.proto";
+import "data_service.proto";
 
-service Master {
+message IDRequest {
+    common.MsgBase base = 1;
+    uint32 count = 2;
+}
+
+message IDResponse {
+    common.Status status = 1;
+    int64 ID = 2;
+    uint32 count = 3;
+}
+
+message TsoRequest {
+    common.MsgBase base = 1;
+    uint32 count = 3;
+}
+
+message TsoResponse {
+    common.Status status = 1;
+    uint64 timestamp = 2;
+    uint32 count = 3;
+}
+
+service MasterService {
     /**
      * @brief This method is used to create collection
      *
@@ -15,7 +37,7 @@ service Master {
      *
      * @return Status
      */
-    rpc CreateCollection(internal.CreateCollectionRequest) returns (common.Status){}
+    rpc CreateCollection(milvus.CreateCollectionRequest) returns (common.Status){}
     
     /**
      * @brief This method is used to delete collection.
@@ -24,7 +46,7 @@ service Master {
      *
      * @return Status
      */
-    rpc DropCollection(internal.DropCollectionRequest) returns (common.Status) {}
+    rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
 
     /**
      * @brief This method is used to test collection existence.
@@ -33,7 +55,7 @@ service Master {
      *
      * @return BoolResponse
      */
-    rpc HasCollection(internal.HasCollectionRequest) returns (service.BoolResponse) {}
+    rpc HasCollection(milvus.HasCollectionRequest) returns (milvus.BoolResponse) {}
 
     /**
      * @brief This method is used to get collection schema.
@@ -42,42 +64,40 @@ service Master {
      *
      * @return CollectionSchema
      */
-    rpc DescribeCollection(internal.DescribeCollectionRequest) returns (service.CollectionDescription) {}
+    rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+
+//    rpc GetCollectionStatistics(milvus.CollectionStatsRequest) returns (milvus.CollectionStatsResponse) {}
+
 
     /**
      * @brief This method is used to list all collections.
      *
      * @return StringListResponse, collection name list
      */
-    rpc ShowCollections(internal.ShowCollectionRequest) returns (service.StringListResponse) {}
+    rpc ShowCollections(milvus.ShowCollectionRequest) returns (milvus.ShowCollectionResponse) {}
 
     /**
      * @brief This method is used to create partition
      *
      * @return Status
      */
-    rpc CreatePartition(internal.CreatePartitionRequest) returns (common.Status) {}
+    rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
 
     /**
      * @brief This method is used to drop partition
      *
      * @return Status
      */
-    rpc DropPartition(internal.DropPartitionRequest) returns (common.Status) {}
+    rpc DropPartition(milvus.DropPartitionRequest) returns (common.Status) {}
 
     /**
      * @brief This method is used to test partition existence.
      *
      * @return BoolResponse
      */
-    rpc HasPartition(internal.HasPartitionRequest) returns (service.BoolResponse) {}
+    rpc HasPartition(milvus.HasPartitionRequest) returns (milvus.BoolResponse) {}
 
-    /**
-     * @brief This method is used to get basic partition infomation.
-     *
-     * @return PartitionDescription
-     */
-    rpc DescribePartition(internal.DescribePartitionRequest) returns (service.PartitionDescription) {}
+//    rpc GetPartitionStatistics(milvus.PartitionStatsRequest) returns (milvus.PartitionStatsResponse) {}
 
     /**
      * @brief This method is used to show partition information
@@ -86,24 +106,19 @@ service Master {
      *
      * @return StringListResponse
      */
-    rpc ShowPartitions(internal.ShowPartitionRequest) returns (service.StringListResponse) {}
+    rpc ShowPartitions(milvus.ShowPartitionRequest) returns (milvus.ShowPartitionResponse) {}
 
+    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
+    rpc ShowSegments(milvus.ShowSegmentRequest) returns (milvus.ShowSegmentResponse) {}
 
-    /**
-     * @brief This method is used to get system configs
-     *
-     * @param SysConfigRequest, keys or key_prefixes of the configs.
-     *
-     * @return SysConfigResponse
-     */
-    rpc GetSysConfigs(internal.SysConfigRequest) returns (service.SysConfigResponse) {}
+    rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
+    rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
+    rpc GetIndexState(milvus.IndexStateRequest) returns (milvus.IndexStateResponse) {}
 
-    rpc AllocTimestamp(internal.TsoRequest) returns (internal.TsoResponse) {}
-    rpc AllocID(internal.IDRequest) returns (internal.IDResponse) {}
+    rpc AllocTimestamp(TsoRequest) returns (TsoResponse) {}
+    rpc AllocID(IDRequest) returns (IDResponse) {}
 
-    rpc AssignSegmentID(internal.AssignSegIDRequest) returns (internal.AssignSegIDResponse) {}
+    // todo move to data service
+    rpc AssignSegmentID(data.AssignSegIDRequest) returns (data.AssignSegIDResponse) {}
 
-    rpc CreateIndex(internal.CreateIndexRequest) returns (common.Status) {}
-    rpc DescribeIndex(internal.DescribeIndexRequest) returns (service.DescribeIndexResponse) {}
-    rpc DescribeIndexProgress(internal.DescribeIndexProgressRequest) returns (service.BoolResponse) {}
 }

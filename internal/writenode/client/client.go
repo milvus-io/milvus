@@ -12,7 +12,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/writerpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -57,12 +57,14 @@ func (c *Client) FlushSegment(segmentID UniqueID, collectionID UniqueID, partiti
 		HashValues:     []uint32{0},
 	}
 
-	flushMsg := internalPb.FlushMsg{
-		MsgType:      commonpb.MsgType_kFlush,
+	flushMsg := internalpb2.FlushMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kFlush,
+			Timestamp: timestamp,
+		},
 		SegmentID:    segmentID,
 		CollectionID: collectionID,
 		PartitionTag: partitionTag,
-		Timestamp:    timestamp,
 	}
 
 	fMsg := &msgstream.FlushMsg{

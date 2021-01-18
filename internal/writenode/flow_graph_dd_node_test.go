@@ -11,8 +11,7 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
@@ -51,13 +50,15 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	colID := UniqueID(0)
 	colName := "col-test-0"
 	// create collection
-	createColReq := internalpb.CreateCollectionRequest{
-		MsgType:      commonpb.MsgType_kCreateCollection,
+	createColReq := internalpb2.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kCreateCollection,
+			MsgID:     1,
+			Timestamp: 1,
+			SourceID:  1,
+		},
 		CollectionID: colID,
-		ReqID:        1,
-		Timestamp:    1,
-		ProxyID:      1,
-		Schema:       &commonpb.Blob{},
+		Schema:       make([]byte, 0),
 	}
 	createColMsg := msgstream.CreateCollectionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -69,13 +70,15 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	// drop collection
-	dropColReq := internalpb.DropCollectionRequest{
-		MsgType:        commonpb.MsgType_kDropCollection,
+	dropColReq := internalpb2.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDropCollection,
+			MsgID:     2,
+			Timestamp: 2,
+			SourceID:  2,
+		},
 		CollectionID:   colID,
-		ReqID:          2,
-		Timestamp:      2,
-		ProxyID:        2,
-		CollectionName: &servicepb.CollectionName{CollectionName: colName},
+		CollectionName: colName,
 	}
 	dropColMsg := msgstream.DropCollectionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -89,17 +92,17 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	partitionID := UniqueID(100)
 	partitionTag := "partition-test-0"
 	// create partition
-	createPartitionReq := internalpb.CreatePartitionRequest{
-		MsgType:      commonpb.MsgType_kCreatePartition,
-		CollectionID: colID,
-		PartitionID:  partitionID,
-		ReqID:        3,
-		Timestamp:    3,
-		ProxyID:      3,
-		PartitionName: &servicepb.PartitionName{
-			CollectionName: colName,
-			Tag:            partitionTag,
+	createPartitionReq := internalpb2.CreatePartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kCreatePartition,
+			MsgID:     3,
+			Timestamp: 3,
+			SourceID:  3,
 		},
+		CollectionID:   colID,
+		PartitionID:    partitionID,
+		CollectionName: colName,
+		PartitionName:  partitionTag,
 	}
 	createPartitionMsg := msgstream.CreatePartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -111,17 +114,17 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	// drop partition
-	dropPartitionReq := internalpb.DropPartitionRequest{
-		MsgType:      commonpb.MsgType_kDropPartition,
-		CollectionID: colID,
-		PartitionID:  partitionID,
-		ReqID:        4,
-		Timestamp:    4,
-		ProxyID:      4,
-		PartitionName: &servicepb.PartitionName{
-			CollectionName: colName,
-			Tag:            partitionTag,
+	dropPartitionReq := internalpb2.DropPartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDropPartition,
+			MsgID:     4,
+			Timestamp: 4,
+			SourceID:  4,
 		},
+		CollectionID:   colID,
+		PartitionID:    partitionID,
+		CollectionName: colName,
+		PartitionName:  partitionTag,
 	}
 	dropPartitionMsg := msgstream.DropPartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -138,10 +141,14 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 			EndTimestamp:   Timestamp(5),
 			HashValues:     []uint32{uint32(0)},
 		},
-		FlushMsg: internalpb.FlushMsg{
-			MsgType:   commonpb.MsgType_kFlush,
+		FlushMsg: internalpb2.FlushMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kFlush,
+				MsgID:     1,
+				Timestamp: 6,
+				SourceID:  1,
+			},
 			SegmentID: 1,
-			Timestamp: Timestamp(6),
 		},
 	}
 

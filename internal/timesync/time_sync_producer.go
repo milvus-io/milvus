@@ -7,7 +7,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type timeSyncMsgProducer struct {
@@ -78,10 +78,13 @@ func (syncMsgProducer *timeSyncMsgProducer) broadcastMsg(barrier TimeTickBarrier
 				EndTimestamp:   timetick,
 				HashValues:     []uint32{0},
 			}
-			timeTickResult := internalPb.TimeTickMsg{
-				MsgType:   commonpb.MsgType_kTimeTick,
-				PeerID:    0,
-				Timestamp: timetick,
+			timeTickResult := internalpb2.TimeTickMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_kTimeTick,
+					MsgID:     0,
+					Timestamp: timetick,
+					SourceID:  0,
+				},
 			}
 			timeTickMsg := &ms.TimeTickMsg{
 				BaseMsg:     baseMsg,
