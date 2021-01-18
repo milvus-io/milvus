@@ -2,7 +2,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -65,11 +64,6 @@ func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
 	mb, err := proto.Marshal(insertRequest)
 	if err != nil {
 		return nil, err
-	}
-	headerMsg := commonpb.MsgHeader{}
-	err2 := proto.Unmarshal(mb, &headerMsg)
-	if err2 != nil {
-		fmt.Println(err2.Error())
 	}
 	return mb, nil
 }
@@ -388,13 +382,6 @@ func (cc *CreateCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	headerMsg := commonpb.MsgHeader{}
-	err2 := proto.Unmarshal(mb, &headerMsg)
-	if err2 != nil {
-		fmt.Println(err2.Error())
-	}
-
 	return mb, nil
 }
 

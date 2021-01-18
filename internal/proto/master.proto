@@ -5,6 +5,7 @@ option go_package="github.com/zilliztech/milvus-distributed/internal/proto/maste
 
 import "common.proto";
 import "milvus.proto";
+import "internal.proto";
 import "data_service.proto";
 
 message IDRequest {
@@ -66,8 +67,7 @@ service MasterService {
      */
     rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
 
-//    rpc GetCollectionStatistics(milvus.CollectionStatsRequest) returns (milvus.CollectionStatsResponse) {}
-
+    rpc GetCollectionStatistics(milvus.CollectionStatsRequest) returns (milvus.CollectionStatsResponse) {}
 
     /**
      * @brief This method is used to list all collections.
@@ -97,7 +97,7 @@ service MasterService {
      */
     rpc HasPartition(milvus.HasPartitionRequest) returns (milvus.BoolResponse) {}
 
-//    rpc GetPartitionStatistics(milvus.PartitionStatsRequest) returns (milvus.PartitionStatsResponse) {}
+    rpc GetPartitionStatistics(milvus.PartitionStatsRequest) returns (milvus.PartitionStatsResponse) {}
 
     /**
      * @brief This method is used to show partition information
@@ -120,5 +120,11 @@ service MasterService {
 
     // todo move to data service
     rpc AssignSegmentID(data.AssignSegIDRequest) returns (data.AssignSegIDResponse) {}
+
+    rpc GetServiceStates(common.Empty) returns (internal.ServiceStates) {}
+
+    rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
+
+    rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
 
 }

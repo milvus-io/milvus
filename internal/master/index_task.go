@@ -155,7 +155,7 @@ type getIndexStateTask struct {
 }
 
 func (task *getIndexStateTask) Type() commonpb.MsgType {
-	return commonpb.MsgType_kDescribeIndexProgress
+	return commonpb.MsgType_kGetIndexState
 }
 
 func (task *getIndexStateTask) Ts() (Timestamp, error) {

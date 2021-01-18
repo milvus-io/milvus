@@ -753,7 +753,7 @@ func (p *Proxy) DescribeIndexProgress(ctx context.Context, req *servicepb.Descri
 		Condition: NewTaskCondition(ctx),
 		IndexStateRequest: milvuspb.IndexStateRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_kDescribeIndexProgress,
+				MsgType:  commonpb.MsgType_kGetIndexState,
 				SourceID: Params.ProxyID(),
 			},
 			CollectionName: req.CollectionName,
