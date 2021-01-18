@@ -32,7 +32,15 @@ ThrowWithTrace(const std::exception& exception);
 
 }  // namespace milvus::impl
 
-#define AssertInfo(expr, info) milvus::impl::EasyAssertInfo(bool(expr), #expr, __FILE__, __LINE__, (info))
+#define AssertInfo(expr, info)                                                          \
+    do {                                                                                \
+        auto _expr_res = bool(expr);                                                    \
+        /* call func only when needed */                                                \
+        if (!_expr_res) {                                                               \
+            milvus::impl::EasyAssertInfo(_expr_res, #expr, __FILE__, __LINE__, (info)); \
+        }                                                                               \
+    } while (0)
+
 #define Assert(expr) AssertInfo((expr), "")
 #define PanicInfo(info)                                                      \
     do {                                                                     \

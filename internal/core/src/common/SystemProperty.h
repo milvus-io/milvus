@@ -10,22 +10,30 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <string>
-#include <map>
+#include "common/Types.h"
 
-#include "knowhere/index/vector_index/VecIndex.h"
+namespace milvus {
 
-struct LoadIndexInfo {
-    std::string field_name;
-    int64_t field_id;
-    std::map<std::string, std::string> index_params;
-    milvus::knowhere::VecIndexPtr index;
+enum class SystemFieldType {
+    Invalid = 0,
+    RowId = 1,
+    Timestamp = 2,
 };
 
-// NOTE: field_id can be system field
-// NOTE: Refer to common/SystemProperty.cpp for details
-struct LoadFieldDataInfo {
-    int64_t field_id;
-    void* blob;
-    int64_t row_count;
+class SystemProperty {
+ public:
+    static const SystemProperty&
+    Instance();
+
+ public:
+    virtual bool
+    SystemFieldVerify(const FieldName& field_name, FieldId field_id) const = 0;
+
+    virtual SystemFieldType
+    GetSystemFieldType(FieldId field_id) const = 0;
+
+    virtual SystemFieldType
+    GetSystemFieldType(FieldName field_name) const = 0;
 };
+
+}  // namespace milvus
