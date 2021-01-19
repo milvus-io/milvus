@@ -98,6 +98,36 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::B
     return ret_ds;
 }
 
+void
+IDMAP::SingleQueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
+                             const milvus::knowhere::Config& config,
+                             std::vector<milvus::knowhere::RangeSearchPartialResult*>& result,
+                             const faiss::BitsetView &bitset) {
+    if (!index_) {
+        KNOWHERE_THROW_MSG("index not initialize");
+    }
+    static int cnt = 0;
+    GET_TENSOR_DATA(dataset)
+
+    auto default_type = index_->metric_type;
+    if (config.contains(Metric::TYPE))
+        index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    std::vector<faiss::RangeSearchPartialResult*> res;
+    auto dim = config[meta::DIM].get<int64_t>();
+    auto radius = config[IndexParams::range_search_radius].get<float>();
+    auto buffer_size = config[IndexParams::range_search_buffer_size].get<size_t>();
+    auto real_idx = dynamic_cast<faiss::IndexFlat*>(index_.get());
+    if (real_idx == nullptr) {
+        KNOWHERE_THROW_MSG("Cannot dynamic_cast the index to faiss::IndexFlat type!");
+    }
+    if (index_->metric_type == faiss::MetricType::METRIC_L2)
+        radius *= radius;
+    real_idx->range_search(1, reinterpret_cast<const float*>(p_data) + (cnt % rows) * dim, radius, res, buffer_size, bitset);
+    ExchangeDataset(result, res);
+    index_->metric_type = default_type;
+    cnt ++;
+}
+
 int64_t
 IDMAP::Count() {
     if (!index_) {

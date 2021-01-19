@@ -106,6 +106,25 @@ void IndexFlat::range_search (idx_t n, const float *x, float radius,
     }
 }
 
+void IndexFlat::range_search(faiss::Index::idx_t n,
+                             const float* x,
+                             float radius,
+                             std::vector<faiss::RangeSearchPartialResult*>& result,
+                             size_t buffer_size,
+                             const faiss::BitsetView& bitset) {
+
+    switch (metric_type) {
+        case METRIC_INNER_PRODUCT:
+            range_search_inner_product (x, xb.data(), d, n, ntotal,
+                                        radius, result, buffer_size, bitset);
+            break;
+        case METRIC_L2:
+            range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result, buffer_size, bitset);
+            break;
+        default:
+            FAISS_THROW_MSG("metric type not supported");
+    }
+}
 
 void IndexFlat::compute_distance_subset (
             idx_t n,

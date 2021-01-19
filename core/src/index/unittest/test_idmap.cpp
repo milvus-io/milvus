@@ -63,6 +63,7 @@ INSTANTIATE_TEST_CASE_P(IDMAPParameters, IDMAPTest,
 #endif
                             milvus::knowhere::IndexMode::MODE_CPU));
 
+/*
 TEST_P(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
@@ -124,7 +125,9 @@ TEST_P(IDMAPTest, idmap_basic) {
     AssertVec(result_bs_3, base_dataset, xid_dataset, 1, dim, CheckMode::CHECK_NOT_EQUAL);
 #endif
 }
+*/
 
+/*
 TEST_P(IDMAPTest, idmap_serialize) {
     auto serialize = [](const std::string& filename, milvus::knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
@@ -174,7 +177,9 @@ TEST_P(IDMAPTest, idmap_serialize) {
         //        PrintResult(result, nq, k);
     }
 }
+*/
 
+/*
 TEST_P(IDMAPTest, idmap_slice) {
     milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
                                   {milvus::knowhere::meta::TOPK, k},
@@ -208,6 +213,114 @@ TEST_P(IDMAPTest, idmap_slice) {
         //        PrintResult(result, nq, k);
     }
 }
+*/
+
+TEST_P(IDMAPTest, idmap_range_search_l2) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::IndexParams::range_search_radius, radius},
+                                  {milvus::knowhere::IndexParams::range_search_buffer_size, buffer_size},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+
+    auto l2dis = [](const float *pa, const float *pb, size_t dim) -> float {
+        float ret = 0;
+        for (auto i = 0; i < dim; ++ i) {
+            auto dif = (pa[i] - pb[i]);
+            ret += dif * dif;
+        }
+        return ret;
+    };
+
+    std::vector<std::vector<bool>> idmap(nq, std::vector<bool>(nb, false));
+    std::vector<size_t> bf_cnt(nq, 0);
+
+    auto bruteforce = [&] () {
+        auto rds = radius * radius;
+        for (auto i = 0; i < nq; ++ i) {
+            std::cout << "top10 ans of query " << i << " :";
+            const float *pq = xq.data() + i * dim;
+            for (auto j = 0; j < nb; ++ j) {
+                const float *pb = xb.data() + j * dim;
+                auto dist = l2dis(pq, pb, dim);
+                if (dist < rds) {
+                    idmap[i][j] = true;
+                    bf_cnt[i] ++;
+                    std::cout << j << " ";
+                }
+            }
+            std::cout << std::endl;
+            std::cout << "query " << i << " has " << bf_cnt[i] << " answers." << std::endl;
+        }
+    };
+
+    bruteforce();
+    std::cout << "--------------------------------------------------------------------------------" << std::endl;
+
+    auto compare_res = [&] (std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> &results, std::vector<size_t> &index_cnt) {
+        { // compare the result
+            for (auto i = 0; i < nq; ++ i) {
+                std::cout << "answers of query " << i << " has " << results[i].size() << " result_spaces:" << std::endl;
+                int query_i_cnt = 0;
+                for (auto &res_space: results[i]) {
+                    query_i_cnt += res_space->query.qnr;
+                    std::cout << "res_space->query.qnr = " << res_space->query.qnr << std::endl;
+                    for (auto j = 0; j < res_space->query.qnr; ++ j) {
+                        auto bno = j / res_space->buffer_size;
+                        auto pos = j % res_space->buffer_size;
+                        std::cout << "i = " << i << ", j = " << j << ", bno = " << bno << ", pos = " << pos << " ";
+                        if (idmap[i][res_space->buffers[bno].ids[pos]]) {
+                            index_cnt[i] ++;
+                        }
+                        std::cout << idmap[i][res_space->buffers[bno].ids[pos]] << std::endl;
+                    }
+                }
+                if (index_cnt[i] != bf_cnt[i]) {
+                    std::cout << "the " << i << "th query, bfcnt = " << bf_cnt[i] << " while flatcnt = " << index_cnt[i] << std::endl;
+                }
+                std::cout << std::endl;
+                std::cout << "query " << i << " has " << query_i_cnt << " answers, index_cnt[i] = " << index_cnt[i] << std::endl;
+            }
+        }
+    };
+
+    {
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+
+        std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> results;
+        results.resize(nq);
+        std::vector<size_t> index_cnt(nq, 0);
+        for (auto i = 0; i < nq; ++ i)
+            index_->SingleQueryByDistance(query_dataset, conf, results[i], nullptr);
+
+        compare_res(results, index_cnt);
+
+        auto binaryset = index_->Serialize(conf);
+        index_->Load(binaryset);
+
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        { // query again and compare the result
+            std::cout << "after Serialize and Load, test again." << std::endl;
+            std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> rresults;
+            rresults.resize(nq);
+            std::vector<size_t> rindex_cnt(nq, 0);
+            for (auto i = 0; i < nq; ++ i)
+                index_->SingleQueryByDistance(query_dataset, conf, rresults[i], nullptr);
+
+            compare_res(rresults, rindex_cnt);
+        }
+    }
+}
+
+/*
+TEST_P(IDMAPTest, idmap_range_search_ip) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::meta::TOPK, k},
+                                  {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+
+}
+*/
 
 #ifdef MILVUS_GPU_VERSION
 TEST_P(IDMAPTest, idmap_copy) {
