@@ -11,6 +11,7 @@
 
 #include <string>
 #include <cstring>
+#include <iostream>
 #include <src/index/thirdparty/faiss/impl/AuxIndexStructures.h>
 #include "DynamicResultSet.h"
 

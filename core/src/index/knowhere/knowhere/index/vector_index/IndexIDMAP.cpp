@@ -99,7 +99,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::B
 }
 
 void
-IDMAP::SingleQueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
+IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
                              const milvus::knowhere::Config& config,
                              std::vector<milvus::knowhere::RangeSearchPartialResult*>& result,
                              const faiss::BitsetView &bitset) {

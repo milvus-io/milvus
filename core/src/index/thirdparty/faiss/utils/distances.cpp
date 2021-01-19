@@ -952,7 +952,6 @@ static void range_search_sse_sq (const float * x,
                 size_t buffer_size,
                 const BitsetView &bitset)
 {
-    // TODO: multithread on ny
 
 #pragma omp parallel
     {

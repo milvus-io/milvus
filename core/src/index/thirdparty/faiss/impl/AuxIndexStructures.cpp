@@ -126,7 +126,6 @@ void BufferList::copy_range (size_t ofs, size_t n,
 
 void RangeQueryResult::add (float dis, idx_t id) {
     nres++;
-    printf("%d ", id);
     pres->add (id, dis);
 }
 
