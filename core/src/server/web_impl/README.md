@@ -1496,7 +1496,8 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 <tr><td>Body</td><td><pre><code>
 {
   "load": {
-     "collection_name": $string
+     "collection_name": $string,
+     "partition_tags": [$string, $string]
   }
 }
 </code></pre> </td></tr>
@@ -1515,7 +1516,7 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 ###### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\"}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\", \"partition_tags\": [\"part_1\", \"part_2\"]}}"
 ```
 
 ###### Response
