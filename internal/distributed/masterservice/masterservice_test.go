@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -33,10 +33,9 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
 	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
 	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
 	cms.Params.MaxPartitionNum = 64
-	cms.Params.DefaultPartitionName = "_default"
+	cms.Params.DefaultPartitionTag = "_default"
 
 	t.Logf("master service port = %d", cms.Params.Port)
 
@@ -44,9 +43,6 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 
 	core := svr.core.(*cms.Core)
-
-	err = svr.Init(&cms.InitParams{ProxyTimeTickChannel: fmt.Sprintf("proxyTimeTick%d", randVal)})
-	assert.Nil(t, err)
 
 	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
 
@@ -56,34 +52,56 @@ func TestGrpcService(t *testing.T) {
 		timeTickArray = append(timeTickArray, ts)
 		return nil
 	}
-	createCollectionArray := make([]*internalpb2.CreateCollectionRequest, 0, 16)
-	core.DdCreateCollectionReq = func(req *internalpb2.CreateCollectionRequest) error {
-		t.Logf("Create Colllection %s", req.CollectionName)
+	createCollectionArray := make([]*cms.CreateCollectionReqTask, 0, 16)
+	core.DdCreateCollectionReq = func(req *cms.CreateCollectionReqTask) error {
+		t.Logf("Create Colllection %s", req.Req.CollectionName)
 		createCollectionArray = append(createCollectionArray, req)
 		return nil
 	}
 
-	dropCollectionArray := make([]*internalpb2.DropCollectionRequest, 0, 16)
-	core.DdDropCollectionReq = func(req *internalpb2.DropCollectionRequest) error {
-		t.Logf("Drop Collection %s", req.CollectionName)
+	dropCollectionArray := make([]*cms.DropCollectionReqTask, 0, 16)
+	core.DdDropCollectionReq = func(req *cms.DropCollectionReqTask) error {
+		t.Logf("Drop Collection %s", req.Req.CollectionName)
 		dropCollectionArray = append(dropCollectionArray, req)
 		return nil
 	}
 
-	createPartitionArray := make([]*internalpb2.CreatePartitionRequest, 0, 16)
-	core.DdCreatePartitionReq = func(req *internalpb2.CreatePartitionRequest) error {
-		t.Logf("Create Partition %s", req.PartitionName)
+	createPartitionArray := make([]*cms.CreatePartitionReqTask, 0, 16)
+	core.DdCreatePartitionReq = func(req *cms.CreatePartitionReqTask) error {
+		t.Logf("Create Partition %s", req.Req.PartitionName)
 		createPartitionArray = append(createPartitionArray, req)
 		return nil
 	}
 
-	dropPartitionArray := make([]*internalpb2.DropPartitionRequest, 0, 16)
-	core.DdDropPartitionReq = func(req *internalpb2.DropPartitionRequest) error {
-		t.Logf("Drop Partition %s", req.PartitionName)
+	dropPartitionArray := make([]*cms.DropPartitionReqTask, 0, 16)
+	core.DdDropPartitionReq = func(req *cms.DropPartitionReqTask) error {
+		t.Logf("Drop Partition %s", req.Req.PartitionName)
 		dropPartitionArray = append(dropPartitionArray, req)
 		return nil
 	}
 
+	core.GetSegmentMeta = func(id typeutil.UniqueID) (*etcdpb.SegmentMeta, error) {
+		return &etcdpb.SegmentMeta{
+			SegmentID:    20,
+			CollectionID: 10,
+			PartitionTag: "_default",
+			ChannelStart: 50,
+			ChannelEnd:   100,
+			OpenTime:     1000,
+			CloseTime:    2000,
+			NumRows:      16,
+			MemSize:      1024,
+			BinlogFilePaths: []*etcdpb.FieldBinlogFiles{
+				{
+					FieldID:     101,
+					BinlogFiles: []string{"/test/binlog/file"},
+				},
+			},
+		}, nil
+	}
+
+	err = svr.Init(&cms.InitParams{ProxyTimeTickChannel: fmt.Sprintf("proxyTimeTick%d", randVal)})
+	assert.Nil(t, err)
 	err = svr.Start()
 	assert.Nil(t, err)
 
@@ -133,8 +151,8 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(createCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)
-		assert.Equal(t, createCollectionArray[0].CollectionName, "testColl")
+		assert.Equal(t, createCollectionArray[0].Req.Base.MsgType, commonpb.MsgType_kCreateCollection)
+		assert.Equal(t, createCollectionArray[0].Req.CollectionName, "testColl")
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -201,6 +219,57 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, rsp.Schema.Name, "testColl")
 	})
 
+	t.Run("get collection statistics", func(t *testing.T) {
+		req := &milvuspb.CollectionStatsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO,miss msg type
+				MsgID:     104,
+				Timestamp: 104,
+				SourceID:  104,
+			},
+			DbName:         "testDb",
+			CollectionName: "testColl",
+		}
+		rsp, err := cli.GetCollectionStatistics(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, len(rsp.Stats), 2)
+		assert.Equal(t, rsp.Stats[0].Key, "row_count")
+		assert.Equal(t, rsp.Stats[0].Value, "0")
+		assert.Equal(t, rsp.Stats[1].Key, "data_size")
+		assert.Equal(t, rsp.Stats[1].Value, "0")
+
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		seg := &etcdpb.SegmentMeta{
+			SegmentID:    101,
+			CollectionID: collMeta.ID,
+			PartitionTag: cms.Params.DefaultPartitionTag,
+		}
+		err = core.MetaTable.AddSegment(seg)
+		assert.Nil(t, err)
+
+		req = &milvuspb.CollectionStatsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO,miss msg type
+				MsgID:     105,
+				Timestamp: 105,
+				SourceID:  105,
+			},
+			DbName:         "testDb",
+			CollectionName: "testColl",
+		}
+		rsp, err = cli.GetCollectionStatistics(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, len(rsp.Stats), 2)
+		assert.Equal(t, rsp.Stats[0].Key, "row_count")
+		assert.Equal(t, rsp.Stats[0].Value, "16")
+		assert.Equal(t, rsp.Stats[1].Key, "data_size")
+		assert.Equal(t, rsp.Stats[1].Value, "1024")
+
+	})
+
 	t.Run("show collection", func(t *testing.T) {
 		req := &milvuspb.ShowCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -236,9 +305,7 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 2)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[1])
-		assert.Nil(t, err)
-		assert.Equal(t, partMeta.PartitionName, "testPartition")
+		assert.Equal(t, collMeta.PartitionTags[1], "testPartition")
 
 	})
 
@@ -258,6 +325,28 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, true)
+	})
+
+	t.Run("get partition statistics", func(t *testing.T) {
+		req := &milvuspb.PartitionStatsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msg type
+				MsgID:     109,
+				Timestamp: 109,
+				SourceID:  109,
+			},
+			DbName:         "testDb",
+			CollectionName: "testColl",
+			PartitionName:  cms.Params.DefaultPartitionTag,
+		}
+		rsp, err := cli.GetPartitionStatistics(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, len(rsp.Stats), 2)
+		assert.Equal(t, rsp.Stats[0].Key, "row_count")
+		assert.Equal(t, rsp.Stats[0].Value, "16")
+		assert.Equal(t, rsp.Stats[1].Key, "data_size")
+		assert.Equal(t, rsp.Stats[1].Value, "1024")
 	})
 
 	t.Run("show partition", func(t *testing.T) {
@@ -295,9 +384,7 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, len(collMeta.PartitionIDs), 1)
-		partMeta, err := core.MetaTable.GetPartitionByID(collMeta.PartitionIDs[0])
-		assert.Nil(t, err)
-		assert.Equal(t, partMeta.PartitionName, cms.Params.DefaultPartitionName)
+		assert.Equal(t, collMeta.PartitionTags[0], cms.Params.DefaultPartitionTag)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -316,8 +403,8 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, len(dropCollectionArray), 1)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_kDropCollection)
-		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
+		assert.Equal(t, dropCollectionArray[0].Req.Base.MsgType, commonpb.MsgType_kDropCollection)
+		assert.Equal(t, dropCollectionArray[0].Req.CollectionName, "testColl")
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{

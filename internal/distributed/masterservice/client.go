@@ -74,23 +74,24 @@ func (c *GrpcClient) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb
 func (c *GrpcClient) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return c.grpcClient.DescribeCollection(context.Background(), in)
 }
-
+func (c *GrpcClient) GetCollectionStatistics(in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+	return c.grpcClient.GetCollectionStatistics(context.Background(), in)
+}
 func (c *GrpcClient) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	return c.grpcClient.ShowCollections(context.Background(), in)
 }
-
 func (c *GrpcClient) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return c.grpcClient.CreatePartition(context.Background(), in)
 }
-
 func (c *GrpcClient) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return c.grpcClient.DropPartition(context.Background(), in)
 }
-
 func (c *GrpcClient) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return c.grpcClient.HasPartition(context.Background(), in)
 }
-
+func (c *GrpcClient) GetPartitionStatistics(in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+	return c.grpcClient.GetPartitionStatistics(context.Background(), in)
+}
 func (c *GrpcClient) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	return c.grpcClient.ShowPartitions(context.Background(), in)
 }

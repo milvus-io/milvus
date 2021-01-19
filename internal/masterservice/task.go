@@ -1,11 +1,12 @@
 package masterservice
 
 import (
+	"fmt"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -90,37 +91,19 @@ func (t *CreateCollectionReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	collMeta := etcdpb.CollectionInfo{
-		ID:           collID,
-		Schema:       &schema,
-		CreateTime:   collTs,
-		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
+	coll := etcdpb.CollectionMeta{
+		ID:            collID,
+		Schema:        &schema,
+		CreateTime:    collTs,
+		SegmentIDs:    make([]typeutil.UniqueID, 0),
+		PartitionTags: []string{Params.DefaultPartitionTag},
+		PartitionIDs:  []typeutil.UniqueID{partitionID},
 	}
-	partMeta := etcdpb.PartitionInfo{
-		PartitionName: Params.DefaultPartitionName,
-		PartitionID:   partitionID,
-		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
-	}
-
-	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta)
+	err = t.core.MetaTable.AddCollection(&coll)
 	if err != nil {
 		return err
 	}
-	schemaBytes, err := proto.Marshal(&schema)
-	if err != nil {
-		return err
-	}
-
-	ddReq := internalpb2.CreateCollectionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		DbID:           0, //TODO,not used
-		CollectionID:   collID,
-		Schema:         schemaBytes,
-	}
-
-	err = t.core.DdCreateCollectionReq(&ddReq)
+	err = t.core.DdCreateCollectionReq(t)
 	if err != nil {
 		return err
 	}
@@ -153,15 +136,7 @@ func (t *DropCollectionReqTask) Execute() error {
 
 	//data service should drop segments , which belong to this collection, from the segment manager
 
-	ddReq := internalpb2.DropCollectionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		DbID:           0, //not used
-		CollectionID:   collMeta.ID,
-	}
-
-	err = t.core.DdDropCollectionReq(&ddReq)
+	err = t.core.DdDropCollectionReq(t)
 	if err != nil {
 		return err
 	}
@@ -222,6 +197,50 @@ func (t *DescribeCollectionReqTask) Execute() error {
 	return nil
 }
 
+type CollectionStatsReqTask struct {
+	baseReqTask
+	Req *milvuspb.CollectionStatsRequest
+	Rsp *milvuspb.CollectionStatsResponse
+}
+
+func (t *CollectionStatsReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *CollectionStatsReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+//row_count
+//data_size
+func (t *CollectionStatsReqTask) Execute() error {
+	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	if err != nil {
+		return err
+	}
+	var rowCount int64 = 0
+	var dataSize int64 = 0
+	for _, seg := range coll.SegmentIDs {
+		m, e := t.core.GetSegmentMeta(seg)
+		if e != nil {
+			return e
+		}
+		rowCount += m.NumRows
+		dataSize += m.MemSize
+	}
+	t.Rsp.Stats = append(t.Rsp.Stats,
+		&commonpb.KeyValuePair{
+			Key:   "row_count",
+			Value: fmt.Sprintf("%d", rowCount),
+		})
+	t.Rsp.Stats = append(t.Rsp.Stats,
+		&commonpb.KeyValuePair{
+			Key:   "data_size",
+			Value: fmt.Sprintf("%d", dataSize),
+		})
+	return nil
+}
+
 type ShowCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowCollectionRequest
@@ -272,17 +291,7 @@ func (t *CreatePartitionReqTask) Execute() error {
 		return err
 	}
 
-	ddReq := internalpb2.CreatePartitionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		PartitionName:  t.Req.PartitionName,
-		DbID:           0, // todo, not used
-		CollectionID:   collMeta.ID,
-		PartitionID:    partitionID,
-	}
-
-	err = t.core.DdCreatePartitionReq(&ddReq)
+	err = t.core.DdCreatePartitionReq(t)
 	if err != nil {
 		return err
 	}
@@ -308,22 +317,12 @@ func (t *DropPartitionReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	partID, err := t.core.MetaTable.DeletePartition(coll.ID, t.Req.PartitionName)
+	err = t.core.MetaTable.DeletePartition(coll.ID, t.Req.PartitionName)
 	if err != nil {
 		return err
 	}
 
-	ddReq := internalpb2.DropPartitionRequest{
-		Base:           t.Req.Base,
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		PartitionName:  t.Req.PartitionName,
-		DbID:           0, //todo,not used
-		CollectionID:   coll.ID,
-		PartitionID:    partID,
-	}
-
-	err = t.core.DdDropPartitionReq(&ddReq)
+	err = t.core.DdDropPartitionReq(t)
 	if err != nil {
 		return err
 	}
@@ -353,6 +352,50 @@ func (t *HasPartitionReqTask) Execute() error {
 	return nil
 }
 
+type PartitionStatsReqTask struct {
+	baseReqTask
+	Req *milvuspb.PartitionStatsRequest
+	Rsp *milvuspb.PartitionStatsResponse
+}
+
+func (t *PartitionStatsReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *PartitionStatsReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *PartitionStatsReqTask) Execute() error {
+	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
+	if err != nil {
+		return err
+	}
+	var rowCount int64 = 0
+	var dataSize int64 = 0
+	for _, seg := range coll.SegmentIDs {
+		m, e := t.core.GetSegmentMeta(seg)
+		if e != nil {
+			return e
+		}
+		if m.PartitionTag == t.Req.PartitionName {
+			rowCount += m.NumRows
+			dataSize += m.MemSize
+		}
+	}
+	t.Rsp.Stats = append(t.Rsp.Stats,
+		&commonpb.KeyValuePair{
+			Key:   "row_count",
+			Value: fmt.Sprintf("%d", rowCount),
+		})
+	t.Rsp.Stats = append(t.Rsp.Stats,
+		&commonpb.KeyValuePair{
+			Key:   "data_size",
+			Value: fmt.Sprintf("%d", dataSize),
+		})
+	return nil
+}
+
 type ShowPartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowPartitionRequest
@@ -367,18 +410,12 @@ func (t *ShowPartitionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+//TODO,list partition ids and partition tags
 func (t *ShowPartitionReqTask) Execute() error {
 	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
 	}
-	for _, partID := range coll.PartitionIDs {
-		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
-		if err != nil {
-			return err
-		}
-		t.Rsp.PartitionIDs = append(t.Rsp.PartitionIDs, partMeta.PartitionID)
-		t.Rsp.PartitionNames = append(t.Rsp.PartitionNames, partMeta.PartitionName)
-	}
+	t.Rsp.PartitionNames = append(t.Rsp.PartitionNames, coll.PartitionTags...)
 	return nil
 }

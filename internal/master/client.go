@@ -64,7 +64,7 @@ func (m *MockWriteNodeClient) GetInsertBinlogPaths(segmentID UniqueID) (map[Uniq
 
 type BuildIndexClient interface {
 	BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
-	GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error)
+	GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error)
 	GetIndexFilePaths(indexID UniqueID) ([]string, error)
 }
 
@@ -77,18 +77,34 @@ func (m *MockBuildIndexClient) BuildIndex(columnDataPaths []string, typeParams m
 	return 1, nil
 }
 
-func (m *MockBuildIndexClient) GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error) {
+func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error) {
 	now := time.Now()
-	if now.Sub(m.buildTime).Seconds() > 2 {
-		return &indexpb.IndexStatesResponse{
-			IndexID: indexID,
-			State:   commonpb.IndexState_FINISHED,
-		}, nil
+	ret := &indexpb.IndexStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
 	}
-	return &indexpb.IndexStatesResponse{
-		IndexID: 1,
-		State:   commonpb.IndexState_INPROGRESS,
-	}, nil
+	var indexStates []*indexpb.IndexInfo
+	if now.Sub(m.buildTime).Seconds() > 2 {
+		for _, indexID := range indexIDs {
+			indexState := &indexpb.IndexInfo{
+				State:   commonpb.IndexState_FINISHED,
+				IndexID: indexID,
+			}
+			indexStates = append(indexStates, indexState)
+		}
+		ret.States = indexStates
+		return ret, nil
+	}
+	for _, indexID := range indexIDs {
+		indexState := &indexpb.IndexInfo{
+			State:   commonpb.IndexState_INPROGRESS,
+			IndexID: indexID,
+		}
+		indexStates = append(indexStates, indexState)
+	}
+	ret.States = indexStates
+	return ret, nil
 }
 
 func (m *MockBuildIndexClient) GetIndexFilePaths(indexID UniqueID) ([]string, error) {

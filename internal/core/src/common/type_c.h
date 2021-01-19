@@ -21,8 +21,6 @@ enum SegmentType {
     Sealed = 2,
 };
 
-typedef enum SegmentType SegmentType;
-
 enum ErrorCode {
     Success = 0,
     UnexpectedException = 1,
@@ -32,12 +30,6 @@ typedef struct CStatus {
     int error_code;
     const char* error_msg;
 } CStatus;
-
-typedef struct CLoadFieldDataInfo {
-    int64_t field_id;
-    void* blob;
-    int64_t row_count;
-} CLoadFieldDataInfo;
 
 #ifdef __cplusplus
 }

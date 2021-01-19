@@ -1,4 +1,15 @@
-package indexnode
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
+package indexservice
 
 import (
 	"fmt"
@@ -6,17 +17,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	pb "github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
 type metaTable struct {
 	client       kv.TxnBase                // client of a reliable kv service, i.e. etcd client
 	indexID2Meta map[UniqueID]pb.IndexMeta // index id to index meta
+
+	nodeID2Address map[int64]*commonpb.Address
 
 	lock sync.RWMutex
 }
@@ -30,6 +42,8 @@ func NewMetaTable(kv kv.TxnBase) (*metaTable, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	mt.nodeID2Address = make(map[int64]*commonpb.Address)
 	return mt, nil
 }
 
@@ -69,24 +83,22 @@ func (mt *metaTable) AddIndex(indexID UniqueID, req *pb.BuildIndexRequest) error
 		return errors.Errorf("index already exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
 	meta := &pb.IndexMeta{
-		State:   commonpb.IndexState_UNISSUED,
+		State:   commonpb.IndexState_INPROGRESS,
 		IndexID: indexID,
 		Req:     req,
 	}
-	mt.saveIndexMeta(meta)
-	return nil
+	return mt.saveIndexMeta(meta)
 }
 
-func (mt *metaTable) UpdateIndexState(indexID UniqueID, state commonpb.IndexState) error {
+func (mt *metaTable) UpdateIndexStatus(indexID UniqueID, status commonpb.IndexState) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexID2Meta[indexID]
 	if !ok {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	meta.State = state
-	mt.saveIndexMeta(&meta)
-	return nil
+	meta.State = status
+	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) UpdateIndexEnqueTime(indexID UniqueID, t time.Time) error {
@@ -97,8 +109,7 @@ func (mt *metaTable) UpdateIndexEnqueTime(indexID UniqueID, t time.Time) error {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
 	meta.EnqueTime = t.UnixNano()
-	mt.saveIndexMeta(&meta)
-	return nil
+	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) UpdateIndexScheduleTime(indexID UniqueID, t time.Time) error {
@@ -109,40 +120,21 @@ func (mt *metaTable) UpdateIndexScheduleTime(indexID UniqueID, t time.Time) erro
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
 	meta.ScheduleTime = t.UnixNano()
-	mt.saveIndexMeta(&meta)
-	return nil
+	return mt.saveIndexMeta(&meta)
 }
 
-func (mt *metaTable) CompleteIndex(indexID UniqueID, dataPaths []string) error {
+func (mt *metaTable) NotifyBuildIndex(indexID UniqueID, dataPaths []string, state commonpb.IndexState) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+
 	meta, ok := mt.indexID2Meta[indexID]
 	if !ok {
 		return errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
 	}
-	meta.State = commonpb.IndexState_FINISHED
+
+	meta.State = state
 	meta.IndexFilePaths = dataPaths
-	meta.BuildCompleteTime = time.Now().UnixNano()
-	mt.saveIndexMeta(&meta)
-	return nil
-}
-
-func (mt *metaTable) GetIndexStates(indexID UniqueID) (*pb.IndexInfo, error) {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-	ret := &pb.IndexInfo{
-		IndexID: indexID,
-		Reason:  "",
-	}
-	meta, ok := mt.indexID2Meta[indexID]
-	if !ok {
-		ret.Reason = "index not exists with ID = " + strconv.FormatInt(indexID, 10)
-		ret.State = commonpb.IndexState_NONE
-		return ret, nil
-	}
-
-	ret.State = meta.State
-	return ret, nil
+	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
@@ -167,5 +159,4 @@ func (mt *metaTable) DeleteIndex(indexID UniqueID) error {
 	fmt.Print(indexMeta)
 
 	return nil
-
 }
