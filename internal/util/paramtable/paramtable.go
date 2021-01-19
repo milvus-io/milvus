@@ -264,8 +264,26 @@ func (gp *BaseTable) ParseInt(key string) int {
 	return value
 }
 
+// GOOSE TODO: remove writenode
 func (gp *BaseTable) WriteNodeIDList() []UniqueID {
 	proxyIDStr, err := gp.Load("nodeID.writeNodeIDList")
+	if err != nil {
+		panic(err)
+	}
+	var ret []UniqueID
+	proxyIDs := strings.Split(proxyIDStr, ",")
+	for _, i := range proxyIDs {
+		v, err := strconv.Atoi(i)
+		if err != nil {
+			log.Panicf("load write node id list error, %s", err.Error())
+		}
+		ret = append(ret, UniqueID(v))
+	}
+	return ret
+}
+
+func (gp *BaseTable) DataNodeIDList() []UniqueID {
+	proxyIDStr, err := gp.Load("nodeID.dataNodeIDList")
 	if err != nil {
 		panic(err)
 	}

@@ -15,6 +15,12 @@
 extern "C" {
 #endif
 
+enum SegmentType {
+    Invalid = 0,
+    Growing = 1,
+    Sealed = 2,
+};
+
 enum ErrorCode {
     Success = 0,
     UnexpectedException = 1,

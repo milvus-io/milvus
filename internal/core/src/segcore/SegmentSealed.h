@@ -9,12 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <memory>
+
 #include "SegmentInterface.h"
 #include "common/LoadInfo.h"
 
 namespace milvus::segcore {
 
-class SegmentSealed {
+class SegmentSealed : public SegmentInterface {
  public:
     virtual const Schema&
     get_schema() = 0;
@@ -25,5 +27,12 @@ class SegmentSealed {
     virtual void
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
 };
+
+using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
+
+SegmentSealedPtr
+CreateSealedSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024) {
+    return nullptr;
+}
 
 }  // namespace milvus::segcore
