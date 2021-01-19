@@ -77,9 +77,9 @@ class SegmentGrowing : public SegmentInternalInterface {
     get_deleted_count() const = 0;
 };
 
-using SegmentGrowingPtr = std::unique_ptr<SegmentGrowing>;
+using SegmentBasePtr = std::unique_ptr<SegmentGrowing>;
 
-SegmentGrowingPtr
+SegmentBasePtr
 CreateGrowingSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
 
 }  // namespace segcore

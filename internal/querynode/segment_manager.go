@@ -6,56 +6,24 @@ import (
 	"fmt"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
+	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
 type segmentManager struct {
 	replica collectionReplica
 
-	loadIndexReqChan chan []msgstream.TsMsg
-
 	// TODO: replace by client instead of grpc client
 	dataClient         datapb.DataServiceClient
 	indexBuilderClient indexpb.IndexServiceClient
 
-	kv     kv.Base // minio kv
-	iCodec *storage.InsertCodec
-}
-
-func newSegmentManager(ctx context.Context, replica collectionReplica, loadIndexReqChan chan []msgstream.TsMsg) *segmentManager {
-	bucketName := Params.MinioBucketName
-	option := &miniokv.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-
-	minioKV, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-
-	return &segmentManager{
-		replica:          replica,
-		loadIndexReqChan: loadIndexReqChan,
-
-		// TODO: init clients
-		dataClient:         nil,
-		indexBuilderClient: nil,
-
-		kv:     minioKV,
-		iCodec: &storage.InsertCodec{},
-	}
+	queryNodeClient *client.Client
+	kv              kv.Base // minio kv
+	iCodec          storage.InsertCodec
 }
 
 func (s *segmentManager) loadSegment(segmentID UniqueID, fieldIDs *[]int64) error {
@@ -168,43 +136,13 @@ func (s *segmentManager) loadIndex(segmentID UniqueID, indexID UniqueID) error {
 		if !ok {
 			return errors.New(fmt.Sprint("cannot found index params in segment ", segmentID, " with field = ", vecFieldID))
 		}
-		// non-blocking send
-		go s.sendLoadIndex(pathResponse.IndexFilePaths, segmentID, vecFieldID, "", targetIndexParam)
+		err := s.queryNodeClient.LoadIndex(pathResponse.IndexFilePaths, segmentID, vecFieldID, "", targetIndexParam)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
-}
-
-func (s *segmentManager) sendLoadIndex(indexPaths []string,
-	segmentID int64,
-	fieldID int64,
-	fieldName string,
-	indexParams map[string]string) {
-	var indexParamsKV []*commonpb.KeyValuePair
-	for key, value := range indexParams {
-		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	loadIndexRequest := internalPb.LoadIndex{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_kSearchResult,
-		},
-		SegmentID:   segmentID,
-		FieldName:   fieldName,
-		FieldID:     fieldID,
-		IndexPaths:  indexPaths,
-		IndexParams: indexParamsKV,
-	}
-
-	loadIndexMsg := &msgstream.LoadIndexMsg{
-		LoadIndex: loadIndexRequest,
-	}
-
-	messages := []msgstream.TsMsg{loadIndexMsg}
-	s.loadIndexReqChan <- messages
 }
 
 func (s *segmentManager) releaseSegment(in *queryPb.ReleaseSegmentRequest) error {

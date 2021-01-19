@@ -495,3 +495,7 @@ func (s *Master) DescribeSegment(ctx context.Context, request *milvuspb.Describe
 func (s *Master) ShowSegments(ctx context.Context, request *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
 	panic("implement me")
 }
+
+func (s *Master) GetDdChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	panic("implement me")
+}

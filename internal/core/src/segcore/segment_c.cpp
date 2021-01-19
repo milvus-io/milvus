@@ -10,42 +10,29 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <cstring>
-#include <cstdint>
 
 #include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
 #include "segcore/Collection.h"
 #include "segcore/segment_c.h"
-#include "common/LoadInfo.h"
-#include "common/type_c.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <cstdint>
+#include <boost/concept_check.hpp>
+#include "common/LoadInfo.h"
 
-CSegmentInterface
-NewSegment(CCollection collection, uint64_t segment_id, int seg_type) {
+CSegmentBase
+NewSegment(CCollection collection, uint64_t segment_id) {
     auto col = (milvus::segcore::Collection*)collection;
 
-    std::unique_ptr<milvus::segcore::SegmentInterface> segment;
-    switch (seg_type) {
-        case Invalid:
-            std::cout << "invalid segment type" << std::endl;
-            break;
-        case Growing:
-            segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
-            break;
-        case Sealed:
-            segment = milvus::segcore::CreateSealedSegment(col->get_schema());
-            break;
-        default:
-            std::cout << "invalid segment type" << std::endl;
-    }
+    auto segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
 
     std::cout << "create segment " << segment_id << std::endl;
     return (void*)segment.release();
 }
 
 void
-DeleteSegment(CSegmentInterface segment) {
+DeleteSegment(CSegmentBase segment) {
     auto s = (milvus::segcore::SegmentGrowing*)segment;
 
     std::cout << "delete segment " << std::endl;
@@ -61,7 +48,7 @@ DeleteQueryResult(CQueryResult query_result) {
 //////////////////////////////////////////////////////////////////
 
 CStatus
-Insert(CSegmentInterface c_segment,
+Insert(CSegmentBase c_segment,
        int64_t reserved_offset,
        int64_t size,
        const int64_t* row_ids,
@@ -92,18 +79,15 @@ Insert(CSegmentInterface c_segment,
 }
 
 int64_t
-PreInsert(CSegmentInterface c_segment, int64_t size) {
+PreInsert(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     return segment->PreInsert(size);
 }
 
 CStatus
-Delete(CSegmentInterface c_segment,
-       int64_t reserved_offset,
-       int64_t size,
-       const int64_t* row_ids,
-       const uint64_t* timestamps) {
+Delete(
+    CSegmentBase c_segment, int64_t reserved_offset, int64_t size, const int64_t* row_ids, const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     try {
@@ -122,15 +106,14 @@ Delete(CSegmentInterface c_segment,
 }
 
 int64_t
-PreDelete(CSegmentInterface c_segment, int64_t size) {
-    // TODO: use dynamic cast, and return c status
+PreDelete(CSegmentBase c_segment, int64_t size) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
 
     return segment->PreDelete(size);
 }
 
 CStatus
-Search(CSegmentInterface c_segment,
+Search(CSegmentBase c_segment,
        CPlan c_plan,
        CPlaceholderGroup* c_placeholder_groups,
        uint64_t* timestamps,
@@ -170,7 +153,7 @@ Search(CSegmentInterface c_segment,
 }
 
 CStatus
-FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result) {
+FillTargetEntry(CSegmentBase c_segment, CPlan c_plan, CQueryResult c_result) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
     auto result = (milvus::QueryResult*)c_result;
@@ -188,7 +171,7 @@ FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result
 }
 
 CStatus
-UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info) {
+UpdateSegmentIndex(CSegmentBase c_segment, CLoadIndexInfo c_load_index_info) {
     auto status = CStatus();
     try {
         auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
@@ -206,26 +189,26 @@ UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info
 //////////////////////////////////////////////////////////////////
 
 int
-Close(CSegmentInterface c_segment) {
+Close(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto status = segment->Close();
     return status.code();
 }
 
 int
-BuildIndex(CCollection c_collection, CSegmentInterface c_segment) {
+BuildIndex(CCollection c_collection, CSegmentBase c_segment) {
     PanicInfo("unimplemented");
 }
 
 bool
-IsOpened(CSegmentInterface c_segment) {
+IsOpened(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto status = segment->get_state();
     return status == milvus::segcore::SegmentGrowing::SegmentState::Open;
 }
 
 int64_t
-GetMemoryUsageInBytes(CSegmentInterface c_segment) {
+GetMemoryUsageInBytes(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto mem_size = segment->GetMemoryUsageInBytes();
     return mem_size;
@@ -234,14 +217,14 @@ GetMemoryUsageInBytes(CSegmentInterface c_segment) {
 //////////////////////////////////////////////////////////////////
 
 int64_t
-GetRowCount(CSegmentInterface c_segment) {
+GetRowCount(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto row_count = segment->get_row_count();
     return row_count;
 }
 
 int64_t
-GetDeletedCount(CSegmentInterface c_segment) {
+GetDeletedCount(CSegmentBase c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto deleted_count = segment->get_deleted_count();
     return deleted_count;
