@@ -227,15 +227,15 @@ func (s *segmentManager) loadSegmentFieldsData(segmentID UniqueID, targetFields 
 }
 
 func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
-	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
-		IndexIDs: []UniqueID{indexID},
+	indexFilePathRequest := &indexpb.IndexFilePathRequest{
+		IndexID: indexID,
 	}
 	pathResponse, err := s.indexBuilderClient.GetIndexFilePaths(context.TODO(), indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, err
 	}
 
-	return pathResponse.FilePaths[0].IndexFilePaths, nil
+	return pathResponse.IndexFilePaths, nil
 }
 
 func (s *segmentManager) getIndexParam() (indexParam, error) {

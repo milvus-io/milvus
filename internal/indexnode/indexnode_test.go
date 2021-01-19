@@ -124,7 +124,8 @@ func TestBuilder_GRPC(t *testing.T) {
 	assert.Equal(t, commonpb.IndexState_INPROGRESS, description.States[0].State)
 	assert.Equal(t, indexID, description.States[0].IndexID)
 
-	indexDataPaths, err := buildClient.GetIndexFilePaths([]UniqueID{indexID})
+	indexDataPaths, err := buildClient.GetIndexFilePaths(indexID)
 	assert.Nil(t, err)
-	assert.Nil(t, indexDataPaths[0])
+	assert.Nil(t, indexDataPaths)
+
 }

@@ -13,15 +13,15 @@ type Client struct {
 	grpcClient querypb.QueryNodeClient
 }
 
-func (c *Client) Init() {
+func (c *Client) Init() error {
 	panic("implement me")
 }
 
-func (c *Client) Start() {
+func (c *Client) Start() error {
 	panic("implement me")
 }
 
-func (c *Client) Stop() {
+func (c *Client) Stop() error {
 	panic("implement me")
 }
 

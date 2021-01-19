@@ -116,11 +116,10 @@ func (scheduler *IndexBuildScheduler) describe() error {
 				}
 				if description.States[0].State == commonpb.IndexState_FINISHED {
 					log.Printf("build index for segment %d field %d is finished", indexBuildInfo.segmentID, indexBuildInfo.fieldID)
-					filesPaths, err := scheduler.client.GetIndexFilePaths([]UniqueID{indexID})
+					filePaths, err := scheduler.client.GetIndexFilePaths(indexID)
 					if err != nil {
 						return err
 					}
-					filePaths := filesPaths[0]
 
 					//TODO: remove fileName
 					var fieldName string

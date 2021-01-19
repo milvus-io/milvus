@@ -65,7 +65,7 @@ func (m *MockWriteNodeClient) GetInsertBinlogPaths(segmentID UniqueID) (map[Uniq
 type BuildIndexClient interface {
 	BuildIndex(columnDataPaths []string, typeParams map[string]string, indexParams map[string]string) (UniqueID, error)
 	GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error)
-	GetIndexFilePaths(indexID []UniqueID) ([][]string, error)
+	GetIndexFilePaths(indexID UniqueID) ([]string, error)
 }
 
 type MockBuildIndexClient struct {
@@ -107,8 +107,8 @@ func (m *MockBuildIndexClient) GetIndexStates(indexIDs []UniqueID) (*indexpb.Ind
 	return ret, nil
 }
 
-func (m *MockBuildIndexClient) GetIndexFilePaths(indexIDs []UniqueID) ([][]string, error) {
-	return [][]string{{"/binlog/index/file_1", "/binlog/index/file_2", "/binlog/index/file_3"}}, nil
+func (m *MockBuildIndexClient) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
+	return []string{"/binlog/index/file_1", "/binlog/index/file_2", "/binlog/index/file_3"}, nil
 }
 
 type LoadIndexClient interface {
