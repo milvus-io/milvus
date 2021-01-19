@@ -77,7 +77,7 @@ func (manager *SegmentManagerImpl) AssignSegment(segIDReq []*datapb.SegIDRequest
 		collName := req.CollName
 		paritionName := req.PartitionName
 		count := req.Count
-		channelID := req.ChannelID
+		channelID := req.ChannelName
 
 		collMeta, err := manager.metaTable.GetCollectionByName(collName)
 		if err != nil {
@@ -141,7 +141,7 @@ func (manager *SegmentManagerImpl) assignSegment(
 
 		return &datapb.SegIDAssignment{
 			SegID:         segStatus.segmentID,
-			ChannelID:     channelID,
+			ChannelName:   strconv.Itoa(int(channelID)),
 			Count:         count,
 			CollName:      collName,
 			PartitionName: paritionName,
@@ -176,7 +176,7 @@ func (manager *SegmentManagerImpl) assignSegment(
 	}
 	return &datapb.SegIDAssignment{
 		SegID:         id,
-		ChannelID:     channelID,
+		ChannelName:   strconv.Itoa(int(channelID)),
 		Count:         count,
 		CollName:      collName,
 		PartitionName: paritionName,
