@@ -744,6 +744,7 @@ void hammings_knn_mc(
         }
     }
 }
+
 template <class HammingComputer>
 static
 void hamming_range_search_template (
@@ -753,7 +754,49 @@ void hamming_range_search_template (
     size_t nb,
     int radius,
     size_t code_size,
-    RangeSearchResult *res)
+    std::vector<RangeSearchPartialResult*> &result,
+    size_t buffer_size,
+    const BitsetView &bitset)
+{
+
+#pragma omp parallel
+    {
+        RangeSearchResult *tmp_res = new RangeSearchResult(na);
+        tmp_res->buffer_size = buffer_size;
+        auto pres = new RangeSearchPartialResult(tmp_res);
+
+#pragma omp for
+        for (size_t i = 0; i < na; i++) {
+             HammingComputer hc (a + i * code_size, code_size);
+            const uint8_t * yi = b;
+            RangeQueryResult & qres = pres->new_result (i);
+
+            for (size_t j = 0; j < nb; j++) {
+                if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
+                    int dis = hc.hamming (yi);
+                    if (dis < radius) {
+                        qres.add(dis, j);
+                    }
+                }
+                yi += code_size;
+            }
+        }
+#pragma omp critical
+        result.push_back(pres);
+    }
+}
+
+template <class HammingComputer>
+static
+void hamming_range_search_template (
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t code_size,
+    RangeSearchResult *res,
+    const BitsetView &bitset)
 {
 
 #pragma omp parallel
@@ -767,9 +810,11 @@ void hamming_range_search_template (
             RangeQueryResult & qres = pres.new_result (i);
 
             for (size_t j = 0; j < nb; j++) {
-                int dis = hc.hamming (yi);
-                if (dis < radius) {
-                    qres.add(dis, j);
+                if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
+                    int dis = hc.hamming (yi);
+                    if (dis < radius) {
+                        qres.add(dis, j);
+                    }
                 }
                 yi += code_size;
             }
@@ -785,10 +830,11 @@ void hamming_range_search (
     size_t nb,
     int radius,
     size_t code_size,
-    RangeSearchResult *result)
+    RangeSearchResult *result,
+    const BitsetView& bitset)
 {
 
-#define HC(name) hamming_range_search_template<name> (a, b, na, nb, radius, code_size, result)
+#define HC(name) hamming_range_search_template<name> (a, b, na, nb, radius, code_size, result, bitset)
 
     switch(code_size) {
     case 4: HC(HammingComputer4); break;
@@ -805,7 +851,34 @@ void hamming_range_search (
 #undef HC
 }
 
+void hamming_range_search (
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t code_size,
+    std::vector<faiss::RangeSearchPartialResult*>& result,
+    size_t buffer_size,
+    const BitsetView& bitset)
+{
 
+#define HC(name) hamming_range_search_template<name> (a, b, na, nb, radius, code_size, result, buffer_size, bitset)
+
+    switch(code_size) {
+    case 4: HC(HammingComputer4); break;
+    case 8: HC(HammingComputer8); break;
+    case 16: HC(HammingComputer16); break;
+    case 32: HC(HammingComputer32); break;
+    default:
+        if (code_size % 8 == 0) {
+            HC(HammingComputerM8);
+        } else {
+            HC(HammingComputerDefault);
+        }
+    }
+#undef HC
+}
 
 /* Count number of matches given a max threshold            */
 void hamming_count_thres (
