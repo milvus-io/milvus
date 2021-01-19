@@ -25,6 +25,7 @@ Please mark all changes in change log and use the issue from GitHub
 -   \#4488 get_entity_by_id() performance is poor in 0.11.0
 -   \#4511 Insert should be failed if field type not matched
 -   \#4536 restful api /collections/{collection_name}/partitions (DELETE) didn't work
+-   \#4619 Terms of must and must_not together are not working
 
 ## Feature
 -   \#4163 Update C++ sdk search interface
