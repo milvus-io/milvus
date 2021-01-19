@@ -51,16 +51,18 @@ type collectionReplica interface {
 	addPartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
 	removePartitionsByCollectionMeta(colMeta *etcdpb.CollectionMeta) error
 	getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error)
+	getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error)
 	hasPartition(collectionID UniqueID, partitionTag string) bool
 
 	// segment
 	getSegmentNum() int
 	getSegmentStatistics() []*internalpb2.SegmentStats
-	addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error
+	addSegment2(segmentID UniqueID, partitionTag string, collectionID UniqueID, segType segmentType) error
+	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
-	getVecFieldIDsBySegmentID(segmentID UniqueID) ([]int64, error)
+	getVecFieldsBySegmentID(segmentID UniqueID) (map[int64]string, error)
 
 	freeAll()
 }
@@ -288,6 +290,13 @@ func (colReplica *collectionReplicaImpl) getPartitionByTag(collectionID UniqueID
 	return colReplica.getPartitionByTagPrivate(collectionID, partitionTag)
 }
 
+func (colReplica *collectionReplicaImpl) getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	return colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+}
+
 func (colReplica *collectionReplicaImpl) getPartitionByTagPrivate(collectionID UniqueID, partitionTag string) (*Partition, error) {
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
@@ -301,6 +310,21 @@ func (colReplica *collectionReplicaImpl) getPartitionByTagPrivate(collectionID U
 	}
 
 	return nil, errors.New("cannot find partition, tag = " + partitionTag)
+}
+
+func (colReplica *collectionReplicaImpl) getPartitionByIDPrivate(collectionID UniqueID, partitionID UniqueID) (*Partition, error) {
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, p := range *collection.Partitions() {
+		if p.ID() == partitionID {
+			return p, nil
+		}
+	}
+
+	return nil, errors.New("cannot find partition, id = " + strconv.FormatInt(partitionID, 10))
 }
 
 func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, partitionTag string) bool {
@@ -355,7 +379,7 @@ func (colReplica *collectionReplicaImpl) getSegmentStatistics() []*internalpb2.S
 	return statisticData
 }
 
-func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionTag string, collectionID UniqueID) error {
+func (colReplica *collectionReplicaImpl) addSegment2(segmentID UniqueID, partitionTag string, collectionID UniqueID, segType segmentType) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -369,7 +393,29 @@ func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitio
 		return err2
 	}
 
-	var newSegment = newSegment(collection, segmentID, partitionTag, collectionID)
+	var newSegment = newSegment2(collection, segmentID, partitionTag, collectionID, segType)
+
+	colReplica.segments[segmentID] = newSegment
+	*partition.Segments() = append(*partition.Segments(), newSegment)
+
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	if err != nil {
+		return err
+	}
+
+	partition, err2 := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	if err2 != nil {
+		return err2
+	}
+
+	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
 
 	colReplica.segments[segmentID] = newSegment
 	*partition.Segments() = append(*partition.Segments(), newSegment)
@@ -430,7 +476,7 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	return ok
 }
 
-func (colReplica *collectionReplicaImpl) getVecFieldIDsBySegmentID(segmentID UniqueID) ([]int64, error) {
+func (colReplica *collectionReplicaImpl) getVecFieldsBySegmentID(segmentID UniqueID) (map[int64]string, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -443,16 +489,18 @@ func (colReplica *collectionReplicaImpl) getVecFieldIDsBySegmentID(segmentID Uni
 		return nil, err2
 	}
 
-	vecFields := make([]int64, 0)
+	vecFields := make(map[int64]string)
 	for _, field := range col.Schema().Fields {
 		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
-			vecFields = append(vecFields, field.FieldID)
+			vecFields[field.FieldID] = field.Name
 		}
 	}
 
 	if len(vecFields) <= 0 {
 		return nil, errors.New("no vector field in segment " + strconv.FormatInt(segmentID, 10))
 	}
+
+	// return map[fieldID]fieldName
 	return vecFields, nil
 }
 

@@ -125,6 +125,8 @@ service MasterService {
 
     rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
 
+    rpc GetDdChannel(common.Empty) returns (milvus.StringResponse) {}
+
     rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
 
 }
