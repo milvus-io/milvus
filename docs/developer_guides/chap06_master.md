@@ -98,20 +98,6 @@ type DescribeCollectionResponse struct {
 }
 ```
 
-* *GetCollectionStatistics*
-
-```go
-type CollectionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-}
-
-type CollectionStatsResponse struct {
-  Stats []KeyValuePair
-}
-```
-
 * *ShowCollections*
 
 ```go
@@ -156,21 +142,6 @@ type HasPartitionRequest struct {
   DbName string
   CollectionName string
   PartitionName string
-}
-```
-
-* *GetPartitionStatistics*
-
-```go
-type PartitionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-  PartitionName string
-}
-
-type PartitionStatsResponse struct {
-  Stats []KeyValuePair
 }
 ```
 
