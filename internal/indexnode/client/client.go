@@ -120,27 +120,17 @@ func (c *Client) BuildIndex(columnDataPaths []string, typeParams map[string]stri
 	return indexID, err
 }
 
-func (c *Client) GetIndexStates(indexID UniqueID) (*indexpb.IndexStatesResponse, error) {
+func (c *Client) GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesResponse, error) {
 	if c.tryConnect() != nil {
 		panic("DescribeIndex: failed to connect index builder")
 	}
 	ctx := context.TODO()
 	request := &indexpb.IndexStatesRequest{
-		IndexID: indexID,
-	}
-	response, err := c.client.GetIndexStates(ctx, request)
-	if err != nil {
-		return &indexpb.IndexStatesResponse{}, err
+		IndexID: indexIDs,
 	}
 
-	indexDescription := indexpb.IndexStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-		},
-		IndexID: indexID,
-		State:   response.State,
-	}
-	return &indexDescription, nil
+	response, err := c.client.GetIndexStates(ctx, request)
+	return response, err
 }
 
 func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {

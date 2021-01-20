@@ -127,14 +127,20 @@ func (mt *metaTable) CompleteIndex(indexID UniqueID, dataPaths []string) error {
 	return nil
 }
 
-func (mt *metaTable) GetIndexStates(indexID UniqueID) (*pb.IndexStatesResponse, error) {
+func (mt *metaTable) GetIndexStates(indexID UniqueID) (*pb.IndexInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	ret := &pb.IndexStatesResponse{}
+	ret := &pb.IndexInfo{
+		IndexID: indexID,
+		Reason:  "",
+	}
 	meta, ok := mt.indexID2Meta[indexID]
 	if !ok {
-		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+		ret.Reason = "index not exists with ID = " + strconv.FormatInt(indexID, 10)
+		ret.State = commonpb.IndexState_NONE
+		return ret, nil
 	}
+
 	ret.State = meta.State
 	return ret, nil
 }
