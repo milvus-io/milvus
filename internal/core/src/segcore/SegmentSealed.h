@@ -16,12 +16,8 @@
 
 namespace milvus::segcore {
 
-class SegmentSealed : public SegmentInterface {
+class SegmentSealed : public SegmentInternalInterface {
  public:
-    virtual const Schema&
-    get_schema() = 0;
-    virtual int64_t
-    get_row_count() = 0;
     virtual void
     LoadIndex(const LoadIndexInfo& info) = 0;
     virtual void
@@ -31,8 +27,6 @@ class SegmentSealed : public SegmentInterface {
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
 
 SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024) {
-    return nullptr;
-}
+CreateSealedSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
 
 }  // namespace milvus::segcore

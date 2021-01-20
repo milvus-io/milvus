@@ -18,6 +18,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <knowhere/index/vector_index/IndexIVF.h>
+#include "segcore/SegmentSealedImpl.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -213,4 +214,45 @@ TEST(Sealed, with_predicate) {
         ASSERT_EQ(post_qr.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(post_qr.result_distances_[offset], 0.0);
     }
+}
+
+TEST(Sealed, LoadFieldData) {
+    auto dim = 16;
+    auto topK = 5;
+    int64_t N = 1000 * 1000;
+    auto metric_type = MetricType::METRIC_L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(0);
+
+    auto counter = dataset.get_col<int64_t>(1);
+    auto indexing = std::make_shared<knowhere::IVF>();
+
+    auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
+                                 {knowhere::meta::TOPK, topK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+    auto database = knowhere::GenDataset(N, dim, fakevec.data());
+    indexing->Train(database, conf);
+    indexing->AddWithoutIds(database, conf);
+
+    auto segment = CreateSealedSegment(schema);
+    LoadFieldDataInfo field_info;
+    field_info.field_id = counter_id.get();
+    field_info.row_count = N;
+    field_info.blob = counter.data();
+    segment->LoadFieldData(field_info);
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.field_name = "fakevec";
+    vec_info.index = indexing;
+    vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
+    segment->LoadIndex(vec_info);
+    int i = 1 + 1;
 }

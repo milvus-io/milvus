@@ -31,7 +31,10 @@ using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    add_entry(FieldOffset field_offset, SealedIndexingEntryPtr&& ptr) {
+    add_entry(FieldOffset field_offset, MetricType metric_type, knowhere::VecIndexPtr indexing) {
+        auto ptr = std::make_unique<SealedIndexingEntry>();
+        ptr->indexing_ = indexing;
+        ptr->metric_type_ = metric_type;
         std::unique_lock lck(mutex_);
         entries_[field_offset] = std::move(ptr);
     }

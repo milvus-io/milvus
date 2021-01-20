@@ -23,20 +23,24 @@ namespace milvus {
 
 class Schema {
  public:
-    void
+    FieldId
     AddDebugField(const std::string& name, DataType data_type) {
         static int64_t debug_id = 1000;
-        this->AddField(FieldName(name), FieldId(debug_id), data_type);
-        debug_id++;
+        auto field_id = FieldId(debug_id);
+        debug_id += 2;
+        this->AddField(FieldName(name), field_id, data_type);
+        return field_id;
     }
 
     // auto gen field_id for convenience
-    void
+    FieldId
     AddDebugField(const std::string& name, DataType data_type, int64_t dim, MetricType metric_type) {
-        static int64_t debug_id = 2000;
-        auto field_meta = FieldMeta(FieldName(name), FieldId(debug_id), data_type, dim, metric_type);
-        debug_id++;
+        static int64_t debug_id = 2001;
+        auto field_id = FieldId(debug_id);
+        debug_id += 2;
+        auto field_meta = FieldMeta(FieldName(name), field_id, data_type, dim, metric_type);
         this->AddField(std::move(field_meta));
+        return field_id;
     }
 
     // scalar type
@@ -141,13 +145,14 @@ class Schema {
     void
     AddField(FieldMeta&& field_meta) {
         auto offset = fields_.size();
-        fields_.emplace_back(field_meta);
         AssertInfo(!name_offsets_.count(field_meta.get_name()), "duplicated field name");
         name_offsets_.emplace(field_meta.get_name(), offset);
         AssertInfo(!id_offsets_.count(field_meta.get_id()), "duplicated field id");
         id_offsets_.emplace(field_meta.get_id(), offset);
+
         auto field_sizeof = field_meta.get_sizeof();
         sizeof_infos_.push_back(std::move(field_sizeof));
+        fields_.emplace_back(std::move(field_meta));
         total_sizeof_ += field_sizeof;
     }
 

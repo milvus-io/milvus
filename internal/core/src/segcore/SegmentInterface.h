@@ -36,26 +36,20 @@ class SegmentInterface {
     virtual int64_t
     get_row_count() const = 0;
 
+    virtual const Schema&
+    get_schema() const = 0;
+
     virtual ~SegmentInterface() = default;
 };
 
 // internal API for DSL calculation
 class SegmentInternalInterface : public SegmentInterface {
  public:
-    virtual const Schema&
-    get_schema() const = 0;
-
-    virtual int64_t
-    get_safe_num_chunk() const = 0;
-
     template <typename T>
     Span<T>
     chunk_data(FieldOffset field_offset, int64_t chunk_id) const {
         return static_cast<Span<T>>(chunk_data_impl(field_offset, chunk_id));
     }
-
-    virtual int64_t
-    num_chunk_index_safe(FieldOffset field_offset) const = 0;
 
     template <typename T>
     const knowhere::scalar::StructuredIndex<T>&
@@ -68,8 +62,16 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
+ public:
     virtual int64_t
-    chunk_size() const = 0;
+    num_chunk_index_safe(FieldOffset field_offset) const = 0;
+
+    virtual int64_t
+    num_chunk_data() const = 0;
+
+    // return chunk_size for each chunk, renaming against confusion
+    virtual int64_t
+    size_per_chunk() const = 0;
 
  protected:
     // blob and row_count

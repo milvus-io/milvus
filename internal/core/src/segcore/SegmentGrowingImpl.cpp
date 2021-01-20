@@ -270,7 +270,7 @@ SegmentGrowingImpl::FillTargetEntry(const query::Plan* plan, QueryResult& result
         auto key_offset_opt = schema_->get_primary_key_offset();
         Assert(key_offset_opt.has_value());
         auto key_offset = key_offset_opt.value();
-        auto field_meta = schema_->operator[](key_offset);
+        auto& field_meta = schema_->operator[](key_offset);
         Assert(field_meta.get_data_type() == DataType::INT64);
         auto uids = record_.get_entity<int64_t>(key_offset);
         for (int64_t i = 0; i < size; ++i) {
@@ -290,12 +290,8 @@ SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
 
     Assert(info.index_params.count("metric_type"));
     auto metric_type_str = info.index_params.at("metric_type");
-    auto entry = std::make_unique<SealedIndexingEntry>();
 
-    entry->metric_type_ = GetMetricType(metric_type_str);
-    entry->indexing_ = info.index;
-
-    sealed_indexing_record_.add_entry(field_offset, std::move(entry));
+    sealed_indexing_record_.add_entry(field_offset, GetMetricType(metric_type_str), info.index);
     return Status::OK();
 }
 
@@ -306,7 +302,7 @@ SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) 
 }
 
 int64_t
-SegmentGrowingImpl::get_safe_num_chunk() const {
+SegmentGrowingImpl::num_chunk_data() const {
     auto size = get_insert_record().ack_responder_.GetAck();
     return upper_div(size, chunk_size_);
 }

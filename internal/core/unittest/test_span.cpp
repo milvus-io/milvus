@@ -33,7 +33,7 @@ TEST(Span, Naive) {
     auto age_ptr = dataset.get_col<float>(1);
     auto float_ptr = dataset.get_col<float>(2);
     SegmentInternalInterface& interface = *segment;
-    auto num_chunk = interface.get_safe_num_chunk();
+    auto num_chunk = interface.num_chunk_data();
     ASSERT_EQ(num_chunk, upper_div(N, chunk_size));
     auto row_count = interface.get_row_count();
     ASSERT_EQ(N, row_count);

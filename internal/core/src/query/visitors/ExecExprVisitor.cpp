@@ -130,7 +130,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_fu
 
     // RetType results(vec.num_chunk());
     auto indexing_barrier = segment_.num_chunk_index_safe(field_offset);
-    auto chunk_size = segment_.chunk_size();
+    auto chunk_size = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, chunk_size);
     RetType results;
 
@@ -290,7 +290,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     auto& field_meta = schema[field_offset];
     // auto vec_ptr = records.get_entity<T>(field_offset);
     // auto& vec = *vec_ptr;
-    auto chunk_size = segment_.chunk_size();
+    auto chunk_size = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, chunk_size);
     RetType bitsets;
 
