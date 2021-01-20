@@ -94,10 +94,6 @@ func (s *GrpcServer) DescribeCollection(ctx context.Context, in *milvuspb.Descri
 	return s.core.DescribeCollection(in)
 }
 
-func (s *GrpcServer) GetCollectionStatistics(ctx context.Context, in *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
-	return s.core.GetCollectionStatistics(in)
-}
-
 func (s *GrpcServer) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	return s.core.ShowCollections(in)
 }
@@ -112,10 +108,6 @@ func (s *GrpcServer) DropPartition(ctx context.Context, in *milvuspb.DropPartiti
 
 func (s *GrpcServer) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return s.core.HasPartition(in)
-}
-
-func (s *GrpcServer) GetPartitionStatistics(ctx context.Context, in *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
-	return s.core.GetPartitionStatistics(in)
 }
 
 func (s *GrpcServer) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {

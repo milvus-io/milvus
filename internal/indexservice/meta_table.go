@@ -137,6 +137,18 @@ func (mt *metaTable) NotifyBuildIndex(indexID UniqueID, dataPaths []string, stat
 	return mt.saveIndexMeta(&meta)
 }
 
+func (mt *metaTable) GetIndexDescription(indexID UniqueID) (*pb.IndexStatesResponse, error) {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+	ret := &pb.IndexStatesResponse{}
+	meta, ok := mt.indexID2Meta[indexID]
+	if !ok {
+		return ret, errors.Errorf("index not exists with ID = " + strconv.FormatInt(indexID, 10))
+	}
+	ret.State = meta.State
+	return ret, nil
+}
+
 func (mt *metaTable) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()

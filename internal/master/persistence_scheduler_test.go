@@ -96,15 +96,15 @@ func TestPersistenceScheduler(t *testing.T) {
 
 	//wait flush segment request sent to build index node
 	time.Sleep(100 * time.Microsecond)
-	idxDes, err := buildIndexClient.GetIndexStates([]UniqueID{UniqueID(1)})
+	idxDes, err := buildIndexClient.GetIndexStates(UniqueID(1))
 	assert.Nil(t, err)
-	assert.Equal(t, commonpb.IndexState_INPROGRESS, idxDes.States[0].State)
+	assert.Equal(t, commonpb.IndexState_INPROGRESS, idxDes.State)
 
 	//wait build index to finish
 	time.Sleep(3 * time.Second)
 
-	idxDes, err = buildIndexClient.GetIndexStates([]UniqueID{UniqueID(1)})
+	idxDes, err = buildIndexClient.GetIndexStates(UniqueID(1))
 	assert.Nil(t, err)
-	assert.Equal(t, commonpb.IndexState_FINISHED, idxDes.States[0].State)
+	assert.Equal(t, commonpb.IndexState_FINISHED, idxDes.State)
 
 }
