@@ -19,19 +19,8 @@ namespace milvus {
 namespace knowhere {
 
 /***********************************************************************
- * RangeSearchResult
+ * DynamicResultSet
  ***********************************************************************/
-
-RangeSearchSet::RangeSearchSet () {
-    labels = nullptr;
-    distances = nullptr;
-    buffer_size = 1024 * 256;
-}
-
-RangeSearchSet::~RangeSearchSet () {
-    delete [] labels;
-    delete [] distances;
-}
 
 /***********************************************************************
  * BufferPool
@@ -90,71 +79,25 @@ void BufferPool::copy_range (size_t ofs, size_t n,
     }
 }
 
-
-/***********************************************************************
- * RangeSearchPartialResult
- ***********************************************************************/
-
-void RangeQueryResult::add (float dis, idx_t id) {
-    qnr++;
-    pdr->add (id, dis);
-}
-
-
-
-RangeSearchPartialResult::RangeSearchPartialResult (size_t buffer_size):
-    BufferPool(buffer_size)
-{}
-
-
-/// begin a new result
-RangeQueryResult &
-RangeSearchPartialResult::get_result (size_t qnr)
-{
-    query.pdr = this;
-    query.qnr = qnr;
-    return query;
-}
-
-/// called by range_search after do_allocation
-void RangeSearchPartialResult::copy_result (size_t ofs, RangeSearchSet *res)
-{
-    copy_range (0, query.qnr,
-                res->labels + ofs,
-                res->distances + ofs);
-}
-
-DynamicResultSet::DynamicResultSet(size_t seg_nums, milvus::knowhere::RangeSearchSet* res_in): ns(seg_nums), res(res_in) {}
-
-void DynamicResultSet::finalize ()
-{
-    set_lims ();
-
-    allocation ();
-
-    merge ();
-}
-
-
-/// called by range_search before do_allocation
-void DynamicResultSet::set_lims ()
-{
-    base_boundaries.resize(ns + 1, 0);
-    for (auto i = 0; i < ns; ++ i) {
-        auto res_slice = seg_res[i];
-        for (auto &prspr : res_slice) {
-            base_boundaries[i] += prspr->query.qnr;
+DynamicResultSet DynamicResultCollector::Merge(size_t limit, bool need_sort) {
+    auto seg_num = seg_results.size();
+    std::vector<size_t> boundaries(seg_num + 1, 0);
+#pragma omp parallel for
+    for (auto i = 0; i < seg_num; ++ i) {
+        for (auto &pseg : seg_results[i]) {
+            boundaries[i] += (pseg->buffer_size * pseg->buffers.size() - pseg->buffer_size + pseg->wp);
         }
-        base_boundaries[i + 1] += base_boundaries[i];
     }
-}
-
-void DynamicResultSet::allocation() {
-    res->labels = new idx_t[base_boundaries[ns]];
-    res->distances = new float[base_boundaries[ns]];
-}
-
-void DynamicResultSet::merge() {
+    for (auto i = 1; i < boundaries.size(); ++ i)
+        boundaries[i] += boundaries[i - 1];
+    if (boundaries[seg_num] <= limit) {
+        // do merge
+        if (need_sort) {
+            // do sort
+        }
+    } else {
+        if (need_sort) {}
+    }
 #pragma omp parallel for
     for (auto i = 0; i < ns; ++ i) {
         auto seg = seg_res[i];
@@ -164,12 +107,15 @@ void DynamicResultSet::merge() {
     }
 }
 
-void ExchangeDataset(std::vector<RangeSearchPartialResult*> &milvus_dataset,
+void DynamicResultCollector::Append(milvus::knowhere::DynamicResultSegment&& seg_result) {
+    seg_results.push_back(std::move(seg_result));
+}
+
+void ExchangeDataset(DynamicResultSegment &milvus_dataset,
                      std::vector<faiss::RangeSearchPartialResult*> &faiss_dataset) {
     for (auto &prspr: faiss_dataset) {
-        auto mrspr = new RangeSearchPartialResult(prspr->res->buffer_size);
+        auto mrspr = new DynamicResultFragment(prspr->res->buffer_size);
         mrspr->wp = prspr->wp;
-        auto qres = mrspr->get_result(prspr->queries[0].nres);
         mrspr->buffers.resize(prspr->buffers.size());
         for (auto i = 0; i < prspr->buffers.size(); ++ i) {
             mrspr->buffers[i].ids = prspr->buffers[i].ids;
@@ -182,7 +128,7 @@ void ExchangeDataset(std::vector<RangeSearchPartialResult*> &milvus_dataset,
     }
 }
 
-void MapUids(std::vector<RangeSearchPartialResult*> &milvus_dataset, std::shared_ptr<std::vector<IDType>> uids) {
+void MapUids(DynamicResultSegment &milvus_dataset, std::shared_ptr<std::vector<IDType>> uids) {
     if (uids) {
         for (auto &mrspr : milvus_dataset) {
             for (auto j = 0; j < mrspr->buffers.size() - 1; ++ j) {
