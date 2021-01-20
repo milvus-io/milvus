@@ -38,7 +38,7 @@ type Service interface {
 	Init(params *InitParams) error
 	Start() error
 	Stop() error
-	GetServiceStates() (*internalpb2.ServiceStates, error)
+	GetComponentStates() (*internalpb2.ComponentStates, error)
 	GetTimeTickChannel() (string, error)
 	GetStatesChannel() (string, error)
 }
@@ -48,7 +48,7 @@ type Interface interface {
 	Init(params *InitParams) error
 	Start() error
 	Stop() error
-	GetServiceStates(empty *commonpb.Empty) (*internalpb2.ServiceStates, error)
+	GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error)
 
 	//DDL request
 	CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
@@ -485,19 +485,15 @@ func (c *Core) Stop() error {
 	return nil
 }
 
-func (c *Core) GetServiceStates(empty *commonpb.Empty) (*internalpb2.ServiceStates, error) {
+func (c *Core) GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
-	return &internalpb2.ServiceStates{
-		StateCode: code,
-		NodeStates: []*internalpb2.NodeStates{
-			{
-				NodeID:    int64(Params.NodeID),
-				Role:      "master",
-				StateCode: code,
-				ExtraInfo: nil,
-			},
+	return &internalpb2.ComponentStates{
+		State: &internalpb2.ComponentInfo{
+			NodeID:    int64(Params.NodeID),
+			Role:      "master",
+			StateCode: code,
+			ExtraInfo: nil,
 		},
-		ExtraInfo: nil,
 	}, nil
 }
 

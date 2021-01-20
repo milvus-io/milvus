@@ -25,7 +25,7 @@ func (s ProxyService) Stop() {
 	panic("implement me")
 }
 
-func (s ProxyService) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (s ProxyService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

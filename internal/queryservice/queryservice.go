@@ -21,7 +21,7 @@ func (qs *QueryService) Stop() {
 	panic("implement me")
 }
 
-func (qs *QueryService) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

@@ -43,7 +43,7 @@ func (s *Server) Stop() {
 	s.loopWg.Wait()
 }
 
-func (s *Server) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 

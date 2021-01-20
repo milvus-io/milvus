@@ -145,7 +145,7 @@ message GetStatsChannelResponse {
 
 message ServiceStatesResponse {
   common.Status status = 1;
-  internal.ServiceStates server_states = 2;
+  internal.ComponentStates server_states = 2;
 }
 
 service QueryService {
@@ -163,7 +163,7 @@ service QueryService {
   rpc GetTimeTickChannel(common.Empty) returns (GetTimeTickChannelResponse) {}
   rpc GetStatsChannel(common.Empty) returns (GetStatsChannelResponse) {}
   rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
-  rpc GetServiceStates(common.Empty) returns (ServiceStatesResponse) {}
+  rpc GetComponentStates(common.Empty) returns (ServiceStatesResponse) {}
 }
 
 service QueryNode {

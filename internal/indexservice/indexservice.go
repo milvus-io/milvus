@@ -56,7 +56,7 @@ func (i *IndexService) Stop() {
 	panic("implement me")
 }
 
-func (i *IndexService) GetServiceStates() (internalpb2.ServiceStates, error) {
+func (i *IndexService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 
