@@ -765,21 +765,19 @@ void hamming_range_search_template (
         tmp_res->buffer_size = buffer_size;
         auto pres = new RangeSearchPartialResult(tmp_res);
 
-#pragma omp for
-        for (size_t i = 0; i < na; i++) {
-             HammingComputer hc (a + i * code_size, code_size);
-            const uint8_t * yi = b;
-            RangeQueryResult & qres = pres->new_result (i);
+        HammingComputer hc (a, code_size);
+        const uint8_t * yi = b;
+        RangeQueryResult & qres = pres->new_result (0);
 
-            for (size_t j = 0; j < nb; j++) {
-                if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
-                    int dis = hc.hamming (yi);
-                    if (dis < radius) {
-                        qres.add(dis, j);
-                    }
+#pragma omp for
+        for (size_t j = 0; j < nb; j++) {
+            if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
+                int dis = hc.hamming (yi + j * code_size);
+                if (dis < radius) {
+                    qres.add(dis, j);
                 }
-                yi += code_size;
             }
+//            yi += code_size;
         }
 #pragma omp critical
         result.push_back(pres);

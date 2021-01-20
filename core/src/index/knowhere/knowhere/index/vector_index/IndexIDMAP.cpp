@@ -123,7 +123,7 @@ IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
     }
     if (index_->metric_type == faiss::MetricType::METRIC_L2)
         radius *= radius;
-    real_idx->range_search(1, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
+    real_idx->range_search(rows, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
     ExchangeDataset(result, res);
     index_->metric_type = default_type;
 }

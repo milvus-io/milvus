@@ -90,7 +90,7 @@ BinaryIDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
     }
     if (index_->metric_type == faiss::MetricType::METRIC_L2)
         radius *= radius;
-    real_idx->range_search(1, (uint8_t*)p_data, radius, res, buffer_size, bitset);
+    real_idx->range_search(rows, (uint8_t*)p_data, radius, res, buffer_size, bitset);
     ExchangeDataset(result, res);
     index_->metric_type = default_type;
 }
