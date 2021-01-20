@@ -20,7 +20,7 @@ message ComponentInfo {
 
 message ComponentStates {
   ComponentInfo state = 1;
-  repeated common.KeyValuePair subcomponent_states = 2;
+  repeated ComponentInfo subcomponent_states = 2;
 }
 
 message  NodeInfo {
