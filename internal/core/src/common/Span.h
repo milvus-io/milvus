@@ -78,6 +78,11 @@ class Span<T, typename std::enable_if_t<std::is_fundamental_v<T>>> {
         return data_;
     }
 
+    const T&
+    operator[](int64_t offset) const {
+        return data_[offset];
+    }
+
     int64_t
     row_count() const {
         return row_count_;

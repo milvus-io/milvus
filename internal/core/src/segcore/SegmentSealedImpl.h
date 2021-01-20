@@ -26,9 +26,6 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadFieldData(const LoadFieldDataInfo& info) override;
 
  public:
-    void
-    FillTargetEntry(const query::Plan* Plan, QueryResult& results) const override;
-
     QueryResult
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
@@ -63,10 +60,55 @@ class SegmentSealedImpl : public SegmentSealed {
     const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const override;
 
+    // Calculate: output[i] = Vec[seg_offset[i]],
+    // where Vec is determined from field_offset
+    void
+    bulk_subscript(SystemFieldType system_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* output) const override {
+        Assert(is_all_ready());
+        Assert(system_type == SystemFieldType::RowId);
+        bulk_subscript_impl<int64_t>(row_ids_.data(), seg_offsets, count, output);
+    }
+
+    // Calculate: output[i] = Vec[seg_offset[i]]
+    // where Vec is determined from field_offset
+    void
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
+        Assert(is_all_ready());
+        auto& field_meta = schema_->operator[](field_offset);
+        Assert(field_meta.get_data_type() == DataType::INT64);
+        bulk_subscript_impl<int64_t>(columns_data_[field_offset.get()].data(), seg_offsets, count, output);
+    }
+
  private:
+    template <typename T>
+    static void
+    bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw) {
+        static_assert(IsScalar<T>);
+        auto src = reinterpret_cast<const T*>(src_raw);
+        auto dst = reinterpret_cast<T*>(dst_raw);
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            dst[i] = offset == -1 ? -1 : src[offset];
+        }
+    }
+
+    void
+    update_row_count(int64_t row_count) {
+        if (row_count_opt_.has_value()) {
+            AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+        } else {
+            row_count_opt_ = row_count;
+        }
+    }
+
     bool
     is_all_ready() const {
-        return ready_count_ == schema_->size();
+        // TODO: optimize here
+        // NOTE: including row_ids
+        return ready_count_ == schema_->size() + 1;
     }
 
     mutable std::shared_mutex mutex_;

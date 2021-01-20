@@ -34,6 +34,12 @@ class SystemProperty {
 
     virtual SystemFieldType
     GetSystemFieldType(FieldName field_name) const = 0;
+
+    virtual bool
+    IsSystem(FieldId field_id) const = 0;
+
+    virtual bool
+    IsSystem(FieldName field_name) const = 0;
 };
 
 }  // namespace milvus

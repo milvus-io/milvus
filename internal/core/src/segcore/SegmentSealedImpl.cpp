@@ -37,22 +37,42 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     // TODO
     Assert(info.row_count > 0);
     auto field_id = FieldId(info.field_id);
-    auto field_offset = schema_->get_offset(field_id);
-    auto& field_meta = schema_->operator[](field_offset);
-    Assert(!field_meta.is_vector());
-    auto element_sizeof = field_meta.get_sizeof();
-    auto length_in_bytes = element_sizeof * info.row_count;
-    aligned_vector<char> vecdata(length_in_bytes);
-    memcpy(vecdata.data(), info.blob, length_in_bytes);
-    std::unique_lock lck(mutex_);
-    if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == info.row_count, "load data has different row count from other columns");
+    Assert(info.blob);
+    Assert(info.row_count > 0);
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
+        Assert(system_field_type == SystemFieldType::RowId);
+        auto src_ptr = reinterpret_cast<const idx_t*>(info.blob);
+
+        // prepare data
+        aligned_vector<idx_t> vec_data(info.row_count);
+        std::copy_n(src_ptr, info.row_count, vec_data.data());
+
+        // write data under lock
+        std::unique_lock lck(mutex_);
+        update_row_count(info.row_count);
+        AssertInfo(row_ids_.empty(), "already exists");
+        row_ids_ = std::move(vec_data);
+
+        ++ready_count_;
     } else {
-        row_count_opt_ = info.row_count;
+        // prepare data
+        auto field_offset = schema_->get_offset(field_id);
+        auto& field_meta = schema_->operator[](field_offset);
+        Assert(!field_meta.is_vector());
+        auto element_sizeof = field_meta.get_sizeof();
+        auto length_in_bytes = element_sizeof * info.row_count;
+        aligned_vector<char> vec_data(length_in_bytes);
+        memcpy(vec_data.data(), info.blob, length_in_bytes);
+
+        // write data under lock
+        std::unique_lock lck(mutex_);
+        update_row_count(info.row_count);
+        AssertInfo(columns_data_[field_offset.get()].empty(), "already exists");
+        columns_data_[field_offset.get()] = std::move(vec_data);
+
+        ++ready_count_;
     }
-    AssertInfo(columns_data_[field_offset.get()].empty(), "already exists");
-    columns_data_[field_offset.get()] = std::move(vecdata);
-    ++ready_count_;
 }
 
 int64_t
@@ -63,27 +83,28 @@ SegmentSealedImpl::num_chunk_index_safe(FieldOffset field_offset) const {
 
 int64_t
 SegmentSealedImpl::num_chunk_data() const {
-    PanicInfo("unimplemented");
+    return 1;
 }
 
 int64_t
 SegmentSealedImpl::size_per_chunk() const {
-    PanicInfo("unimplemented");
+    return get_row_count();
 }
 
 SpanBase
 SegmentSealedImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const {
-    PanicInfo("unimplemented");
+    std::shared_lock lck(mutex_);
+    auto& field_meta = schema_->operator[](field_offset);
+    auto element_sizeof = field_meta.get_sizeof();
+    Assert(is_all_ready());
+    SpanBase base(columns_data_[field_offset.get()].data(), row_count_opt_.value(), element_sizeof);
+    return base;
 }
 
 const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const {
-    PanicInfo("unimplemented");
-}
-
-void
-SegmentSealedImpl::FillTargetEntry(const query::Plan* Plan, QueryResult& results) const {
-    PanicInfo("unimplemented");
+    // TODO: support scalar index
+    return nullptr;
 }
 
 QueryResult
@@ -96,7 +117,9 @@ SegmentSealedImpl::Search(const query::Plan* Plan,
 
 int64_t
 SegmentSealedImpl::GetMemoryUsageInBytes() const {
-    PanicInfo("unimplemented");
+    // TODO: add estimate for index
+    auto row_count = row_count_opt_.value_or(0);
+    return schema_->get_total_sizeof() * row_count;
 }
 
 int64_t

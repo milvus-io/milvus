@@ -26,6 +26,6 @@ struct LoadIndexInfo {
 // NOTE: Refer to common/SystemProperty.cpp for details
 struct LoadFieldDataInfo {
     int64_t field_id;
-    void* blob = nullptr;
+    const void* blob = nullptr;
     int64_t row_count = -1;
 };
