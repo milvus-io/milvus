@@ -74,7 +74,15 @@ type RocksMQ struct {
 	channels    map[string]*Channel
 	cgCtxs      map[string]ConsumerGroupContext
 	idAllocator master.IDAllocator
-	mu          sync.Mutex
+	produceMu   sync.Mutex
+	consumeMu   sync.Mutex
+	//ctx              context.Context
+	//serverLoopWg     sync.WaitGroup
+	//serverLoopCtx    context.Context
+	//serverLoopCancel func()
+
+	//// tso ticker
+	//tsoTicker *time.Ticker
 }
 
 func NewRocksMQ(name string, idAllocator master.IDAllocator) (*RocksMQ, error) {
@@ -97,6 +105,7 @@ func NewRocksMQ(name string, idAllocator master.IDAllocator) (*RocksMQ, error) {
 		kv:          mkv,
 		idAllocator: idAllocator,
 	}
+	rmq.channels = make(map[string]*Channel)
 	return rmq, nil
 }
 
@@ -174,6 +183,8 @@ func (rmq *RocksMQ) DestroyConsumerGroup(groupName string, channelName string) e
 }
 
 func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) error {
+	rmq.produceMu.Lock()
+	defer rmq.produceMu.Unlock()
 	msgLen := len(messages)
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
 
@@ -222,6 +233,8 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 }
 
 func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error) {
+	rmq.consumeMu.Lock()
+	defer rmq.consumeMu.Unlock()
 	metaKey := groupName + "/" + channelName + "/current_id"
 	currentID, err := rmq.kv.Load(metaKey)
 	if err != nil {

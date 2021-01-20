@@ -1,4 +1,4 @@
-package indexnode
+package grpcindexnode
 
 import (
 	"net"
@@ -10,8 +10,12 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	Address string
-	Port    int
+	Address        string
+	Port           int
+	ServiceAddress string
+	ServicePort    int
+
+	NodeID int64
 
 	MasterAddress string
 
@@ -31,6 +35,8 @@ func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 	pt.initAddress()
 	pt.initPort()
+	pt.initIndexServerAddr()
+	pt.initIndexServerPort()
 	pt.initEtcdAddress()
 	pt.initMasterAddress()
 	pt.initMetaRootPath()
@@ -42,7 +48,7 @@ func (pt *ParamTable) Init() {
 }
 
 func (pt *ParamTable) initAddress() {
-	addr, err := pt.Load("indexBuilder.address")
+	addr, err := pt.Load("indexNode.address")
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +60,7 @@ func (pt *ParamTable) initAddress() {
 		}
 	}
 
-	port, err := pt.Load("indexBuilder.port")
+	port, err := pt.Load("indexNode.port")
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +73,36 @@ func (pt *ParamTable) initAddress() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("indexBuilder.port")
+	pt.Port = pt.ParseInt("indexNode.port")
+}
+
+func (pt *ParamTable) initIndexServerAddr() {
+	addr, err := pt.Load("indexServer.address")
+	if err != nil {
+		panic(err)
+	}
+
+	hostName, _ := net.LookupHost(addr)
+	if len(hostName) <= 0 {
+		if ip := net.ParseIP(addr); ip == nil {
+			panic("invalid ip indexBuilder.address")
+		}
+	}
+
+	port, err := pt.Load("indexServer.port")
+	if err != nil {
+		panic(err)
+	}
+	_, err = strconv.Atoi(port)
+	if err != nil {
+		panic(err)
+	}
+
+	pt.ServiceAddress = addr + ":" + port
+}
+
+func (pt ParamTable) initIndexServerPort() {
+	pt.ServicePort = pt.ParseInt("indexServer.port")
 }
 
 func (pt *ParamTable) initEtcdAddress() {

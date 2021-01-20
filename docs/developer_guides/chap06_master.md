@@ -14,13 +14,11 @@ type Master interface {
   DropCollection(req DropCollectionRequest) error
   HasCollection(req HasCollectionRequest) (bool, error)
   DescribeCollection(req DescribeCollectionRequest) (DescribeCollectionResponse, error)
-  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
   ShowCollections(req ShowCollectionRequest) (ShowCollectionResponse, error)
   
   CreatePartition(req CreatePartitionRequest) error
   DropPartition(req DropPartitionRequest) error
   HasPartition(req HasPartitionRequest) (bool, error)
-  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
   ShowPartitions(req ShowPartitionRequest) (ShowPartitionResponse, error)
   
   DescribeSegment(req DescribeSegmentRequest) (DescribeSegmentResponse, error)

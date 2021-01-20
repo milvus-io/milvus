@@ -1,4 +1,4 @@
-package grpcindexserviceclient
+package grpcindexservice
 
 import (
 	"context"
@@ -6,12 +6,39 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+
 	"google.golang.org/grpc"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type Client struct {
 	grpcClient indexpb.IndexServiceClient
+}
+
+func (g Client) Init() {
+	panic("implement me")
+}
+
+func (g Client) Start() {
+	panic("implement me")
+}
+
+func (g Client) Stop() {
+	panic("implement me")
+}
+
+func (g Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	panic("implement me")
+}
+
+func (g Client) GetTimeTickChannel() (string, error) {
+	panic("implement me")
+}
+
+func (g Client) GetStatisticsChannel() (string, error) {
+	panic("implement me")
 }
 
 func (g Client) RegisterNode(req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
@@ -53,9 +80,9 @@ func NewClient(address string) *Client {
 	defer cancel()
 	conn, err := grpc.DialContext(ctx1, address, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Printf("Connect to IndexService failed, error= %v", err)
+		log.Printf("IndexNode connect to IndexService failed, error= %v", err)
 	}
-	log.Printf("Connected to IndexService, IndexService=%s", address)
+	log.Printf("IndexNode connected to IndexService, IndexService=%s", Params.Address)
 
 	return &Client{
 		grpcClient: indexpb.NewIndexServiceClient(conn),
