@@ -1,4 +1,4 @@
-package msgstream
+package pulsarms
 
 import (
 	"context"
@@ -9,16 +9,18 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type InsertTask struct {
 	Tag string
-	InsertMsg
+	msgstream.InsertMsg
 }
 
-func (tt *InsertTask) Marshal(input TsMsg) ([]byte, error) {
+func (tt *InsertTask) Marshal(input msgstream.TsMsg) ([]byte, error) {
 	testMsg := input.(*InsertTask)
 	insertRequest := &testMsg.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
@@ -28,10 +30,10 @@ func (tt *InsertTask) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (tt *InsertTask) Unmarshal(input []byte) (TsMsg, error) {
+func (tt *InsertTask) Unmarshal(input []byte) (msgstream.TsMsg, error) {
 	insertRequest := internalpb2.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
-	testMsg := &InsertTask{InsertMsg: InsertMsg{InsertRequest: insertRequest}}
+	testMsg := &InsertTask{InsertMsg: msgstream.InsertMsg{InsertRequest: insertRequest}}
 	testMsg.Tag = testMsg.InsertRequest.PartitionName
 	if err != nil {
 		return nil, err
@@ -40,8 +42,8 @@ func (tt *InsertTask) Unmarshal(input []byte) (TsMsg, error) {
 	return testMsg, nil
 }
 
-func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
-	result := make(map[int32]*MsgPack)
+func newRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+	result := make(map[int32]*msgstream.MsgPack)
 	for i, request := range tsMsgs {
 		if request.Type() != commonpb.MsgType_kInsert {
 			return nil, errors.New(string("msg's must be Insert"))
@@ -60,7 +62,7 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 		for index, key := range keys {
 			_, ok := result[key]
 			if !ok {
-				msgPack := MsgPack{}
+				msgPack := msgstream.MsgPack{}
 				result[key] = &msgPack
 			}
 
@@ -75,13 +77,13 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 				PartitionName:  insertRequest.PartitionName,
 				SegmentID:      insertRequest.SegmentID,
 				ChannelID:      insertRequest.ChannelID,
-				Timestamps:     []Timestamp{insertRequest.Timestamps[index]},
+				Timestamps:     []msgstream.Timestamp{insertRequest.Timestamps[index]},
 				RowIDs:         []int64{insertRequest.RowIDs[index]},
 				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
 			}
 
 			insertMsg := &InsertTask{
-				InsertMsg: InsertMsg{InsertRequest: sliceRequest},
+				InsertMsg: msgstream.InsertMsg{InsertRequest: sliceRequest},
 			}
 
 			result[key].Msgs = append(result[key].Msgs, insertMsg)
@@ -90,8 +92,8 @@ func newRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 	return result, nil
 }
 
-func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
-	baseMsg := BaseMsg{
+func getInsertTask(reqID msgstream.UniqueID, hashValue uint32) msgstream.TsMsg {
+	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
 		HashValues:     []uint32{hashValue},
@@ -107,11 +109,11 @@ func getInsertTask(reqID UniqueID, hashValue uint32) TsMsg {
 		PartitionName:  "Partition",
 		SegmentID:      1,
 		ChannelID:      "1",
-		Timestamps:     []Timestamp{1},
+		Timestamps:     []msgstream.Timestamp{1},
 		RowIDs:         []int64{1},
 		RowData:        []*commonpb.Blob{{}},
 	}
-	insertMsg := InsertMsg{
+	insertMsg := msgstream.InsertMsg{
 		BaseMsg:       baseMsg,
 		InsertRequest: insertRequest,
 	}
@@ -129,7 +131,7 @@ func TestStream_task_Insert(t *testing.T) {
 	consumerChannels := []string{"insert1", "insert2"}
 	consumerSubName := "subInsert"
 
-	msgPack := MsgPack{}
+	msgPack := msgstream.MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(3, 3))
 
@@ -141,7 +143,7 @@ func TestStream_task_Insert(t *testing.T) {
 
 	outputStream := NewPulsarMsgStream(context.Background(), 100)
 	outputStream.SetPulsarClient(pulsarAddress)
-	unmarshalDispatcher := NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	testTask := InsertTask{}
 	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
 	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)

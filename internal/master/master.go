@@ -18,6 +18,8 @@ import (
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -113,33 +115,33 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	pulsarProxyStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
+	pulsarProxyStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //output stream
 	pulsarProxyStream.SetPulsarClient(pulsarAddr)
-	pulsarProxyStream.CreatePulsarConsumers(Params.ProxyTimeTickChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarProxyStream.CreatePulsarConsumers(Params.ProxyTimeTickChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	pulsarProxyStream.Start()
 	var proxyStream ms.MsgStream = pulsarProxyStream
 	proxyTimeTickBarrier := newSoftTimeTickBarrier(ctx, &proxyStream, Params.ProxyIDList, Params.SoftTimeTickBarrierInterval)
 	tsMsgProducer.SetProxyTtBarrier(proxyTimeTickBarrier)
 
-	pulsarWriteStream := ms.NewPulsarMsgStream(ctx, 1024) //output stream
+	pulsarWriteStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //output stream
 	pulsarWriteStream.SetPulsarClient(pulsarAddr)
-	pulsarWriteStream.CreatePulsarConsumers(Params.WriteNodeTimeTickChannelNames, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	pulsarWriteStream.CreatePulsarConsumers(Params.WriteNodeTimeTickChannelNames, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	pulsarWriteStream.Start()
 	var writeStream ms.MsgStream = pulsarWriteStream
 	writeTimeTickBarrier := newHardTimeTickBarrier(ctx, &writeStream, Params.WriteNodeIDList)
 	tsMsgProducer.SetWriteNodeTtBarrier(writeTimeTickBarrier)
 
-	pulsarDDStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarDDStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDDStream.SetPulsarClient(pulsarAddr)
 	pulsarDDStream.CreatePulsarProducers(Params.DDChannelNames)
 	tsMsgProducer.SetDDSyncStream(pulsarDDStream)
 
-	pulsarDMStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarDMStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDMStream.SetPulsarClient(pulsarAddr)
 	pulsarDMStream.CreatePulsarProducers(Params.InsertChannelNames)
 	tsMsgProducer.SetDMSyncStream(pulsarDMStream)
 
-	pulsarK2SStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarK2SStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarK2SStream.SetPulsarClient(pulsarAddr)
 	pulsarK2SStream.CreatePulsarProducers(Params.K2SChannelNames)
 	tsMsgProducer.SetK2sSyncStream(pulsarK2SStream)
@@ -150,9 +152,9 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	tsMsgProducer.WatchWriteNodeTtBarrier(writeNodeTtBarrierWatcher)
 
 	// stats msg stream
-	statsMs := ms.NewPulsarMsgStream(ctx, 1024)
+	statsMs := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	statsMs.SetPulsarClient(pulsarAddr)
-	statsMs.CreatePulsarConsumers([]string{Params.QueryNodeStatsChannelName}, Params.MsgChannelSubName, ms.NewUnmarshalDispatcher(), 1024)
+	statsMs.CreatePulsarConsumers([]string{Params.QueryNodeStatsChannelName}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	statsMs.Start()
 
 	m := &Master{

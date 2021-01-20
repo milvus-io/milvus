@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -94,7 +95,7 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
@@ -180,11 +181,11 @@ func TestSearch_Search(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 
@@ -288,7 +289,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
@@ -378,11 +379,11 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := msgstream.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 

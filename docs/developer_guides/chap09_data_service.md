@@ -23,9 +23,6 @@ type DataService interface {
   GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
   
   GetInsertChannels(req InsertChannelRequest) ([]string, error)
-
-  GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
-  GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
 }
 ```
 
@@ -167,35 +164,6 @@ type InsertChannelRequest struct {
 ```
 
 
-* *GetCollectionStatistics*
-
-```go
-type CollectionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-}
-type CollectionStatsResponse struct {
-  Stats []KeyValuePair
-}
-```
-
-
-
-* *GetPartitionStatistics*
-
-```go
-type PartitionStatsRequest struct {
-  MsgBase
-  DbName string
-  CollectionName string
-  PartitionName string
-}
-type PartitionStatsResponse struct {
-  Stats []KeyValuePair
-}
-```
-
 
 #### 8.2 Insert Channel
 
@@ -229,6 +197,7 @@ type DataNode interface {
   FlushSegments(req FlushSegRequest) error
 }
 ```
+
 
 
 * *WatchDmChannels*

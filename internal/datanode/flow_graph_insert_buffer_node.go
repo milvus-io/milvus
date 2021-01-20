@@ -19,6 +19,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -42,7 +43,7 @@ type (
 		minioPrifex                  string
 		idAllocator                  *allocator.IDAllocator
 		outCh                        chan *insertFlushSyncMsg
-		pulsarDataNodeTimeTickStream *msgstream.PulsarMsgStream
+		pulsarDataNodeTimeTickStream *pulsarms.PulsarMsgStream
 		replica                      collectionReplica
 	}
 
@@ -643,7 +644,7 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 		panic(err)
 	}
 
-	wTt := msgstream.NewPulsarMsgStream(ctx, 1024) //input stream, data node time tick
+	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream, data node time tick
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
 

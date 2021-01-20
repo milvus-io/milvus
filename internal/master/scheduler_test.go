@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
@@ -57,15 +59,15 @@ func TestMaster_Scheduler_Collection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pulsarDDStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarDDStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDDStream.SetPulsarClient(pulsarAddr)
 	pulsarDDStream.CreatePulsarProducers(producerChannels)
 	pulsarDDStream.Start()
 	defer pulsarDDStream.Close()
 
-	consumeMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+	consumeMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 	consumeMs.SetPulsarClient(pulsarAddr)
-	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, ms.NewUnmarshalDispatcher(), 1024)
+	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, util.NewUnmarshalDispatcher(), 1024)
 	consumeMs.Start()
 	defer consumeMs.Close()
 
@@ -217,15 +219,15 @@ func TestMaster_Scheduler_Partition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pulsarDDStream := ms.NewPulsarMsgStream(ctx, 1024) //input stream
+	pulsarDDStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 	pulsarDDStream.SetPulsarClient(pulsarAddr)
 	pulsarDDStream.CreatePulsarProducers(producerChannels)
 	pulsarDDStream.Start()
 	defer pulsarDDStream.Close()
 
-	consumeMs := ms.NewPulsarTtMsgStream(ctx, 1024)
+	consumeMs := pulsarms.NewPulsarTtMsgStream(ctx, 1024)
 	consumeMs.SetPulsarClient(pulsarAddr)
-	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, ms.NewUnmarshalDispatcher(), 1024)
+	consumeMs.CreatePulsarConsumers(consumerChannels, consumerSubName, util.NewUnmarshalDispatcher(), 1024)
 	consumeMs.Start()
 	defer consumeMs.Close()
 

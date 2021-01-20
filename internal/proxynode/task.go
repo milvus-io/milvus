@@ -13,6 +13,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
@@ -42,7 +43,7 @@ type InsertTask struct {
 	BaseInsertTask
 	Condition
 	result                *servicepb.IntegerRangeResponse
-	manipulationMsgStream *msgstream.PulsarMsgStream
+	manipulationMsgStream *pulsarms.PulsarMsgStream
 	ctx                   context.Context
 	rowIDAllocator        *allocator.IDAllocator
 }
@@ -352,7 +353,7 @@ func (dct *DropCollectionTask) PostExecute() error {
 type SearchTask struct {
 	Condition
 	internalpb2.SearchRequest
-	queryMsgStream *msgstream.PulsarMsgStream
+	queryMsgStream *pulsarms.PulsarMsgStream
 	resultBuf      chan []*internalpb2.SearchResults
 	result         *servicepb.QueryResult
 	ctx            context.Context

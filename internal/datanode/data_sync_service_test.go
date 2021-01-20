@@ -14,6 +14,7 @@ import (
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -180,11 +181,11 @@ func TestDataSyncService_Start(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 

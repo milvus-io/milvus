@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -13,7 +14,7 @@ type Client struct {
 }
 
 func NewQueryNodeClient(ctx context.Context, pulsarAddress string, loadIndexChannels []string) *Client {
-	loadIndexStream := msgstream.NewPulsarMsgStream(ctx, 0)
+	loadIndexStream := pulsarms.NewPulsarMsgStream(ctx, 0)
 	loadIndexStream.SetPulsarClient(pulsarAddress)
 	loadIndexStream.CreatePulsarProducers(loadIndexChannels)
 	var input msgstream.MsgStream = loadIndexStream

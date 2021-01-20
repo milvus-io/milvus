@@ -12,6 +12,8 @@ import (
 
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -59,9 +61,9 @@ func newLoadIndexService(ctx context.Context, replica collectionReplica) *loadIn
 	consumeChannels := Params.LoadIndexChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	loadIndexStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	loadIndexStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
 	loadIndexStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	loadIndexStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 
 	var stream msgstream.MsgStream = loadIndexStream
@@ -153,7 +155,7 @@ func (lis *loadIndexService) execute(msg msgstream.TsMsg) error {
 		}
 		return nil
 	}
-	err = msgstream.Retry(5, time.Millisecond*200, fn)
+	err = util.Retry(5, time.Millisecond*200, fn)
 	if err != nil {
 		return err
 	}

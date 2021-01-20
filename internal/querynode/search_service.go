@@ -16,6 +16,8 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
@@ -49,14 +51,14 @@ func newSearchService(ctx context.Context, replica collectionReplica) *searchSer
 
 	consumeChannels := Params.SearchChannelNames
 	consumeSubName := Params.MsgChannelSubName
-	searchStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchStream.SetPulsarClient(msgStreamURL)
-	unmarshalDispatcher := msgstream.NewUnmarshalDispatcher()
+	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName, unmarshalDispatcher, pulsarBufSize)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := Params.SearchResultChannelNames
-	searchResultStream := msgstream.NewPulsarMsgStream(ctx, receiveBufSize)
+	searchResultStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
 	searchResultStream.SetPulsarClient(msgStreamURL)
 	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
