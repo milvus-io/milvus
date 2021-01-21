@@ -8,157 +8,23 @@
 #include <assert.h>
 #include <limits.h>
 #include <omp.h>
+#include <typeinfo>
+
 
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/utils.h>
+#include <faiss/FaissHook.h>
+#include <faiss/utils/distances.h>
+#include <faiss/utils/distances_avx.h>
+#include <faiss/utils/distances_avx512.h>
+#include <faiss/utils/hamming.h>
 
 namespace faiss {
 
 static const size_t size_1M = 1 * 1024 * 1024;
 static const size_t batch_size = 65536;
 
-template <class T>
-static
-void binary_distence_knn_hc(
-        int bytes_per_code,
-        float_maxheap_array_t * ha,
-        const uint8_t * bs1,
-        const uint8_t * bs2,
-        size_t n2,
-        bool order = true,
-        bool init_heap = true,
-        const BitsetView& bitset = nullptr)
-{
-    size_t k = ha->k;
-
-    if ((bytes_per_code + k * (sizeof(float) + sizeof(int64_t))) * ha->nh < size_1M) {
-        int thread_max_num = omp_get_max_threads();
-        // init heap
-        size_t thread_heap_size = ha->nh * k;
-        size_t all_heap_size = thread_heap_size * thread_max_num;
-        float *value = new float[all_heap_size];
-        int64_t *labels = new int64_t[all_heap_size];
-        for (int i = 0; i < all_heap_size; i++) {
-            value[i] = 1.0 / 0.0;
-            labels[i] = -1;
-        }
-
-        T *hc = new T[ha->nh];
-        for (size_t i = 0; i < ha->nh; i++) {
-            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
-        }
-
-#pragma omp parallel for
-        for (size_t j = 0; j < n2; j++) {
-            if(!bitset || !bitset.test(j)) {
-                int thread_no = omp_get_thread_num();
-
-                const uint8_t * bs2_ = bs2 + j * bytes_per_code;
-                for (size_t i = 0; i < ha->nh; i++) {
-                    tadis_t dis = hc[i].compute (bs2_);
-
-                    float * val_ = value + thread_no * thread_heap_size + i * k;
-                    int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
-                    if (dis < val_[0]) {
-                        faiss::maxheap_swap_top<tadis_t> (k, val_, ids_, dis, j);
-                    }
-                }
-            }
-        }
-
-        for (size_t t = 1; t < thread_max_num; t++) {
-            // merge heap
-            for (size_t i = 0; i < ha->nh; i++) {
-                float * __restrict value_x = value + i * k;
-                int64_t * __restrict labels_x = labels + i * k;
-                float *value_x_t = value_x + t * thread_heap_size;
-                int64_t *labels_x_t = labels_x + t * thread_heap_size;
-                for (size_t j = 0; j < k; j++) {
-                    if (value_x_t[j] < value_x[0]) {
-                        faiss::maxheap_swap_top<tadis_t> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
-                    }
-                }
-            }
-        }
-
-        // copy result
-        memcpy(ha->val, value, thread_heap_size * sizeof(float));
-        memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
-
-        delete[] hc;
-        delete[] value;
-        delete[] labels;
-
-    } else {
-        if (init_heap) ha->heapify ();
-
-        const size_t block_size = batch_size;
-        for (size_t j0 = 0; j0 < n2; j0 += block_size) {
-            const size_t j1 = std::min(j0 + block_size, n2);
-#pragma omp parallel for
-            for (size_t i = 0; i < ha->nh; i++) {
-                T hc (bs1 + i * bytes_per_code, bytes_per_code);
-
-                const uint8_t * bs2_ = bs2 + j0 * bytes_per_code;
-                tadis_t dis;
-                tadis_t * __restrict bh_val_ = ha->val + i * k;
-                int64_t * __restrict bh_ids_ = ha->ids + i * k;
-                size_t j;
-                for (j = j0; j < j1; j++, bs2_+= bytes_per_code) {
-                    if(!bitset || !bitset.test(j)){
-                        dis = hc.compute (bs2_);
-                        if (dis < bh_val_[0]) {
-                            faiss::maxheap_swap_top<tadis_t> (k, bh_val_, bh_ids_, dis, j);
-                        }
-                    }
-                }
-
-            }
-        }
-    }
-
-    if (order) ha->reorder ();
-}
-
-void binary_distence_knn_hc (
-        MetricType metric_type,
-        float_maxheap_array_t * ha,
-        const uint8_t * a,
-        const uint8_t * b,
-        size_t nb,
-        size_t ncodes,
-        int order,
-        const BitsetView& bitset)
-{
-    switch (metric_type) {
-    case METRIC_Jaccard:
-    case METRIC_Tanimoto:
-        switch (ncodes) {
-#define binary_distence_knn_hc_jaccard(ncodes) \
-        case ncodes: \
-            binary_distence_knn_hc<faiss::JaccardComputer ## ncodes> \
-                (ncodes, ha, a, b, nb, order, true, bitset); \
-        break;
-        binary_distence_knn_hc_jaccard(8);
-        binary_distence_knn_hc_jaccard(16);
-        binary_distence_knn_hc_jaccard(32);
-        binary_distence_knn_hc_jaccard(64);
-        binary_distence_knn_hc_jaccard(128);
-        binary_distence_knn_hc_jaccard(256);
-        binary_distence_knn_hc_jaccard(512);
-#undef binary_distence_knn_hc_jaccard
-        default:
-            binary_distence_knn_hc<faiss::JaccardComputerDefault>
-                    (ncodes, ha, a, b, nb, order, true, bitset);
-            break;
-        }
-        break;
-
-    default:
-        break;
-    }
-}
 
 template <class T>
 static
@@ -333,5 +199,181 @@ void binary_distence_knn_mc (
         break;
     }
 }
+
+/** Return the k smallest distances for a set of binary query vectors,
+ * using a max heap.
+ * @param a       queries, size ha->nh * ncodes
+ * @param b       database, size nb * ncodes
+ * @param nb      number of database vectors
+ * @param ncodes  size of the binary codes (bytes)
+ * @param ordered if != 0: order the results by decreasing distance
+ *                (may be bottleneck for k/n > 0.01) */
+
+
+template <class T2, class Computer>
+void binary_distence_knn_hc (
+        int bytes_per_code,
+        T2 * ha,
+        const uint8_t * bs1,
+        const uint8_t * bs2,
+        size_t n2,
+        const BitsetView& bitset =nullptr)
+{
+    typedef typename T2::T T1;
+    size_t k = ha->k;
+
+    if ((bytes_per_code + k * (sizeof(T1) + sizeof(int64_t))) * ha->nh < size_1M) {
+        int thread_max_num = omp_get_max_threads();
+        // init heap
+        size_t thread_heap_size = ha->nh * k;
+        size_t all_heap_size = thread_heap_size * thread_max_num;
+        T1 *value = new T1[all_heap_size];
+        int64_t *labels = new int64_t[all_heap_size];
+        T1 init_value = typeid(T1) == typeid(float)? 1.0 / 0.0:0x7fffffff;
+        for (int i = 0; i < all_heap_size; i++) {
+            value[i] = init_value;
+            labels[i] = -1;
+        }
+
+        Computer *hc = new Computer[ha->nh];
+        for (size_t i = 0; i < ha->nh; i++) {
+            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
+        }
+
+#pragma omp parallel for
+        for (size_t j = 0; j < n2; j++) {
+            if(!bitset || !bitset.test(j)) {
+                int thread_no = omp_get_thread_num();
+
+                const uint8_t * bs2_ = bs2 + j * bytes_per_code;
+                for (size_t i = 0; i < ha->nh; i++) {
+                    T1 dis = hc[i].compute (bs2_);
+
+                    T1 * val_ = value + thread_no * thread_heap_size + i * k;
+                    int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
+                    if (  dis < val_[0]) {
+                        faiss::maxheap_swap_top<T1> (k, val_, ids_, dis, j);
+                    }
+                }
+            }
+        }
+
+        for (size_t t = 1; t < thread_max_num; t++) {
+            // merge heap
+            for (size_t i = 0; i < ha->nh; i++) {
+                T1 * __restrict value_x = value + i * k;
+                int64_t * __restrict labels_x = labels + i * k;
+                T1 *value_x_t = value_x + t * thread_heap_size;
+                int64_t *labels_x_t = labels_x + t * thread_heap_size;
+                for (size_t j = 0; j < k; j++) {
+                    if (value_x_t[j] < value_x[0]) {
+                        faiss::maxheap_swap_top<T1> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                    }
+                }
+            }
+        }
+
+        // copy result
+        memcpy(ha->val, value, thread_heap_size * sizeof(T1));
+        memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
+
+        delete[] hc;
+        delete[] value;
+        delete[] labels;
+
+    } else {
+        ha->heapify ();
+
+        const size_t block_size = batch_size;
+        for (size_t j0 = 0; j0 < n2; j0 += block_size) {
+            const size_t j1 = std::min(j0 + block_size, n2);
+#pragma omp parallel for
+            for (size_t i = 0; i < ha->nh; i++) {
+                Computer hc(bs1 + i * bytes_per_code, bytes_per_code);
+
+                const uint8_t *bs2_ = bs2 + j0 * bytes_per_code;
+                T1 dis;
+                T1 *__restrict bh_val_ = ha->val + i * k;
+                int64_t *__restrict bh_ids_ = ha->ids + i * k;
+                size_t j;
+                for (j = j0; j < j1; j++, bs2_ += bytes_per_code) {
+                    if (!bitset || !bitset.test(j)) {
+                        dis = hc.compute(bs2_);
+                        if (dis < bh_val_[0]) {
+                            faiss::maxheap_swap_top<T1>(k, bh_val_, bh_ids_, dis, j);
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+    ha->reorder ();
+}
+
+
+
+template <class T1>
+void binary_distence_knn_hc (
+        MetricType metric_type,
+        T1 * ha,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t nb,
+        size_t ncodes,
+        const BitsetView& bitset)
+{
+    size_t dim = ncodes * 8;
+    switch (metric_type) {
+        case METRIC_Jaccard:
+        case METRIC_Tanimoto:
+            if (support_avx512() && dim > 1024) {
+                vec_or_popcnt = OR_popcnt_AVX512VBMI_lookup;
+                vec_and_popcnt = AND_popcnt_AVX512VBMI_lookup;
+
+            } else if (support_avx2() && dim > 512) {
+                vec_or_popcnt = OR_popcnt_AVX2_lookup;
+                vec_and_popcnt = AND_popcnt_AVX2_lookup;
+            } else {
+                vec_or_popcnt = OR_popcnt_SSE;
+                vec_and_popcnt = AND_popcnt_SSE;
+            }
+            binary_distence_knn_hc<T1, JaccardComputerDefault>(ncodes, ha, a, b, nb, bitset);
+            break;
+        case METRIC_Hamming:
+            if (support_avx512() && dim > 1024) {
+                vec_xor_popcnt = XOR_popcnt_AVX512VBMI_lookup;
+            } else if(support_avx2() && dim > 512) {
+                vec_xor_popcnt = XOR_popcnt_AVX2_lookup;
+            } else {
+                vec_xor_popcnt = XOR_popcnt_SSE;
+            }
+            binary_distence_knn_hc<T1, HammingComputerDefault>(ncodes, ha, a, b, nb, bitset);
+            break;
+        default:
+            break;
+    }
+}
+
+template
+void binary_distence_knn_hc<int_maxheap_array_t>(
+        MetricType metric_type,
+        int_maxheap_array_t * ha,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t nb,
+        size_t ncodes,
+        const BitsetView& bitset);
+
+template
+void binary_distence_knn_hc<float_maxheap_array_t>(
+        MetricType metric_type,
+        float_maxheap_array_t * ha,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t nb,
+        size_t ncodes,
+        const BitsetView& bitset);
+
 
 } // namespace faiss

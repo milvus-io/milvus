@@ -20,6 +20,8 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/BinaryDistance.h>
+#include <faiss/utils/Heap.h>
 
 namespace faiss {
 
@@ -198,11 +200,6 @@ DistanceComputer * IndexPQ::get_distance_computer() const {
 /*****************************************
  * IndexPQ polysemous search routines
  ******************************************/
-
-
-
-
-
 void IndexPQ::search (idx_t n, const float *x, idx_t k,
                       float *distances, idx_t *labels,
                       const BitsetView& bitset) const
@@ -264,8 +261,8 @@ void IndexPQ::search (idx_t n, const float *x, idx_t k,
 
             if (search_type == ST_HE) {
 
-                hammings_knn_hc (&res, q_codes, codes.data(),
-                                 ntotal, pq.code_size, true);
+                binary_distence_knn_hc<int_maxheap_array_t>(faiss::METRIC_Hamming, &res, (const uint8_t *)q_codes, codes.data(),
+                                                            ntotal, pq.code_size, bitset);
 
             } else if (search_type == ST_generalized_HE) {
 

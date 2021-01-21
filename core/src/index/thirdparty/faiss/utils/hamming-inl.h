@@ -5,7 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-
+#include <faiss/BuilderSuspend.h>
+#include<faiss/FaissHook.h>
+#include <faiss/impl/AuxIndexStructures.h>
+#include <faiss/impl/FaissAssert.h>
 
 namespace faiss {
 
@@ -232,12 +235,18 @@ struct HammingComputerDefault {
         n = code_size;
     }
 
-    int hamming (const uint8_t *b8) const {
+    int hamming (const uint8_t *b8) const  {
         int accu = 0;
-        for (int i = 0; i < n; i++)
-            accu += popcount64 (a[i] ^ b8[i]);
-        return accu;
+
+        accu = vec_xor_popcnt(a, b8, n);
+
+       return accu;
     }
+
+    int compute (const uint8_t *b8) const  {
+       return hamming(b8);
+    }
+
 
 };
 
@@ -258,6 +267,7 @@ struct HammingComputerM8 {
     }
 
     int hamming (const uint8_t *b8) const {
+       // printf("m8\n");
         const uint64_t *b = (uint64_t *)b8;
         int accu = 0;
         for (int i = 0; i < n; i++)

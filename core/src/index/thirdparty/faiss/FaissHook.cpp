@@ -25,6 +25,10 @@ fvec_func_ptr fvec_inner_product = fvec_inner_product_avx;
 fvec_func_ptr fvec_L2sqr = fvec_L2sqr_avx;
 fvec_func_ptr fvec_L1 = fvec_L1_avx;
 fvec_func_ptr fvec_Linf = fvec_Linf_avx;
+popcnt_func_ptr vec_popcnt = popcnt_SSE;
+xor_popcnt_func_ptr vec_xor_popcnt = XOR_popcnt_AVX2_lookup;
+or_popcnt_func_ptr vec_or_popcnt = OR_popcnt_AVX2_lookup;
+and_popcnt_func_ptr vec_and_popcnt = AND_popcnt_AVX2_lookup;
 
 sq_get_distance_computer_func_ptr sq_get_distance_computer = sq_get_distance_computer_avx;
 sq_sel_quantizer_func_ptr sq_sel_quantizer = sq_select_quantizer_avx;
@@ -71,6 +75,8 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_quantizer = sq_select_quantizer_avx512;
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx512;
 
+
+
         cpu_flag = "AVX512";
     } else if (support_avx2()) {
         /* for IVFFLAT */
@@ -84,6 +90,12 @@ bool hook_init(std::string& cpu_flag) {
         sq_sel_quantizer = sq_select_quantizer_avx;
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_avx;
 
+        /* for binary */
+        vec_popcnt = popcnt_AVX2_lookup;
+        vec_xor_popcnt = XOR_popcnt_AVX2_lookup;
+        vec_or_popcnt = OR_popcnt_AVX2_lookup;
+        vec_and_popcnt = AND_popcnt_AVX2_lookup;
+
         cpu_flag = "AVX2";
     } else if (support_sse()) {
         /* for IVFFLAT */
@@ -96,6 +108,12 @@ bool hook_init(std::string& cpu_flag) {
         sq_get_distance_computer = sq_get_distance_computer_ref;
         sq_sel_quantizer = sq_select_quantizer_ref;
         sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_ref;
+
+        /* for binary popcnt */
+        vec_popcnt = popcnt_SSE;
+        vec_xor_popcnt = XOR_popcnt_SSE;
+        vec_or_popcnt = OR_popcnt_SSE;
+        vec_and_popcnt = AND_popcnt_SSE;
 
         cpu_flag = "SSE42";
     } else {

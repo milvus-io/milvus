@@ -17,6 +17,8 @@
 #include <faiss/utils/utils.h>
 #include <faiss/utils/hamming.h>
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/BinaryDistance.h>
+#include <faiss/utils/Heap.h>
 
 
 namespace faiss {
@@ -147,8 +149,8 @@ void IndexLSH::search (
 
     int_maxheap_array_t res = { size_t(n), size_t(k), labels, idistances};
 
-    hammings_knn_hc (&res, qcodes, codes.data(),
-                     ntotal, bytes_per_vec, true);
+    binary_distence_knn_hc<int_maxheap_array_t>(faiss::METRIC_Hamming, &res, (const uint8_t*)&qcodes, codes.data(), ntotal,
+            bytes_per_vec, bitset);
 
 
     // convert distances to floats

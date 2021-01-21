@@ -337,6 +337,7 @@ struct JaccardComputer256 {
         const uint8_t *a;
         int n;
 
+
         JaccardComputerDefault () {}
 
         JaccardComputerDefault (const uint8_t *a8, int code_size) {
@@ -351,10 +352,9 @@ struct JaccardComputer256 {
         float compute (const uint8_t *b8) const {
             int accu_num = 0;
             int accu_den = 0;
-            for (int i = 0; i < n; i++) {
-                accu_num += popcount64(a[i] & b8[i]);
-                accu_den += popcount64(a[i] | b8[i]);
-            }
+
+            accu_num = vec_and_popcnt(a,b8,n);
+            accu_num = vec_or_popcnt(a,b8,n);
             if (accu_num == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);

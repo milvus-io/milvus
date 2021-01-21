@@ -45,12 +45,32 @@ float fvec_Linf_sse (
         const float * x,
         const float * y,
         size_t d);
+
+int popcnt_SSE(
+        const uint8_t* data,
+        const size_t n);
+
+int XOR_popcnt_SSE(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
+
+int OR_popcnt_SSE(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
+
+int AND_popcnt_SSE(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
 #endif
 
 float fvec_jaccard (
         const float * x,
         const float * y,
         size_t d);
+
 
 /** Compute pairwise distances between sets of vectors
  *

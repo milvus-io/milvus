@@ -13,6 +13,11 @@
 namespace faiss {
 
 typedef float (*fvec_func_ptr)(const float*, const float*, size_t);
+typedef int (*popcnt_func_ptr)(const uint8_t*, const size_t);
+typedef int (*xor_popcnt_func_ptr)(const uint8_t*, const uint8_t*, const size_t);
+typedef int (*or_popcnt_func_ptr)(const uint8_t*, const uint8_t*, const size_t);
+typedef int (*and_popcnt_func_ptr)(const uint8_t*, const uint8_t*, const size_t);
+
 
 typedef SQDistanceComputer* (*sq_get_distance_computer_func_ptr)(MetricType, QuantizerType, size_t, const std::vector<float>&);
 typedef Quantizer* (*sq_sel_quantizer_func_ptr)(QuantizerType, size_t, const std::vector<float>&);
@@ -26,6 +31,11 @@ extern fvec_func_ptr fvec_inner_product;
 extern fvec_func_ptr fvec_L2sqr;
 extern fvec_func_ptr fvec_L1;
 extern fvec_func_ptr fvec_Linf;
+extern popcnt_func_ptr vec_popcnt;
+extern xor_popcnt_func_ptr vec_xor_popcnt;
+extern or_popcnt_func_ptr vec_or_popcnt;
+extern and_popcnt_func_ptr vec_and_popcnt;
+
 
 extern sq_get_distance_computer_func_ptr sq_get_distance_computer;
 extern sq_sel_quantizer_func_ptr sq_sel_quantizer;
