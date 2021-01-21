@@ -194,13 +194,13 @@ TEST_P(BinaryIDMAPTest, binaryidmap_range_search) {
 
     bruteforce();
 
-    auto compare_res = [&] (std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> &results) {
+    auto compare_res = [&] (std::vector<milvus::knowhere::DynamicResultSegment> &results) {
         for (auto i = 0; i < nq; ++ i) {
             int query_i_cnt = 0;
             int correct_cnt = 0;
             for (auto &res_space: results[i]) {
-                query_i_cnt += res_space->query.qnr;
-                for (auto j = 0; j < res_space->query.qnr; ++ j) {
+                auto qnr = res_space->buffer_size * res_space->buffers.size() - res_space->buffer_size + res_space->wp;
+                for (auto j = 0; j < qnr; ++ j) {
                     auto bno = j / res_space->buffer_size;
                     auto pos = j % res_space->buffer_size;
                     ASSERT_EQ(idmap[i][res_space->buffers[bno].ids[pos]], true);
@@ -220,11 +220,10 @@ TEST_P(BinaryIDMAPTest, binaryidmap_range_search) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
 
-        std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> results;
-        results.resize(nq);
+        std::vector<milvus::knowhere::DynamicResultSegment> results;
         for (auto i = 0; i < nq; ++ i) {
             auto qd = milvus::knowhere::GenDataset(1, dim, xq_bin.data() + i * dim / 8);
-            index_->QueryByDistance(qd, conf, results[i], nullptr);
+            results.push_back(index_->QueryByDistance(qd, conf, nullptr));
         }
 
         compare_res(results);
@@ -235,11 +234,10 @@ TEST_P(BinaryIDMAPTest, binaryidmap_range_search) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
         {
-            std::vector<std::vector<milvus::knowhere::RangeSearchPartialResult*>> rresults;
-            rresults.resize(nq);
+            std::vector<milvus::knowhere::DynamicResultSegment> rresults;
             for (auto i = 0; i < nq; ++ i) {
                 auto qd = milvus::knowhere::GenDataset(1, dim, xq_bin.data() + i * dim / 8);
-                index_->QueryByDistance(qd, conf, rresults[i], nullptr);
+                rresults.push_back(index_->QueryByDistance(qd, conf, nullptr));
             }
 
             compare_res(rresults);
