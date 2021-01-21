@@ -98,10 +98,9 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::B
     return ret_ds;
 }
 
-void
+DynamicResultSegment
 IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
                              const milvus::knowhere::Config& config,
-                             std::vector<milvus::knowhere::RangeSearchPartialResult*>& result,
                              const faiss::BitsetView &bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
@@ -115,6 +114,7 @@ IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
     if (config.contains(Metric::TYPE))
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     std::vector<faiss::RangeSearchPartialResult*> res;
+    DynamicResultSegment result;
     auto radius = config[IndexParams::range_search_radius].get<float>();
     auto buffer_size = config[IndexParams::range_search_buffer_size].get<size_t>();
     auto real_idx = dynamic_cast<faiss::IndexFlat*>(index_.get());

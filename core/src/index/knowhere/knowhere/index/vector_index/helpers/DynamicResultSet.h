@@ -20,11 +20,22 @@
 namespace milvus {
 namespace knowhere {
 
+enum class ResultSetPostProcessType {
+    None = 0,
+    SortDesc,
+    SortAsc
+};
+
 using idx_t = int64_t;
 struct DynamicResultSet {
     std::shared_ptr<idx_t[]> labels; /// result for query i is labels[lims[i]:lims[i + 1]]
     std::shared_ptr<float[]> distances; /// corresponding distances, not sorted
     size_t count; /// size of the result buffer's size, when reaches this size, auto start a new buffer
+    void do_alloction();
+    void do_sort(ResultSetPostProcessType postProcessType = ResultSetPostProcessType::SortAsc);
+ private:
+    template <bool asc>
+    void quick_sort(size_t lp, size_t rp);
 };
 
 struct BufferPool {
@@ -56,7 +67,7 @@ typedef std::vector<DynamicResultFragmentPtr> DynamicResultSegment;
 
 struct DynamicResultCollector {
  public:
-    DynamicResultSet Merge(size_t limit = 10000, bool need_sort = false);
+    DynamicResultSet Merge(size_t limit = 10000, ResultSetPostProcessType postProcessType = ResultSetPostProcessType::None);
     void Append(DynamicResultSegment &&seg_result);
 
  private:
