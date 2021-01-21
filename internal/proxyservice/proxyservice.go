@@ -13,15 +13,15 @@ type ProxyService struct {
 
 }
 
-func (s ProxyService) Init() error {
+func (s ProxyService) Init() {
 	panic("implement me")
 }
 
-func (s ProxyService) Start() error {
+func (s ProxyService) Start() {
 	panic("implement me")
 }
 
-func (s ProxyService) Stop() error {
+func (s ProxyService) Stop() {
 	panic("implement me")
 }
 

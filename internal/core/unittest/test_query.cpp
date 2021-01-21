@@ -20,51 +20,12 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "pb/schema.pb.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
-TEST(Query, Naive) {
-    SUCCEED();
-    using namespace milvus::wtf;
-    std::string dsl_string = R"(
-{
-    "bool": {
-        "must": [
-            {
-                "term": {
-                    "A": [
-                        1,
-                        2,
-                        5
-                    ]
-                }
-            },
-            {
-                "range": {
-                    "B": {
-                        "GT": 1,
-                        "LT": 100
-                    }
-                }
-            },
-            {
-                "vector": {
-                    "Vec": {
-                        "metric_type": "L2",
-                        "params": {
-                            "nprobe": 10
-                        },
-                        "query": "$0",
-                        "topk": 10
-                    }
-                }
-            }
-        ]
-    }
-})";
-}
 
 TEST(Query, ShowExecutor) {
     using namespace milvus::query;
@@ -76,7 +37,7 @@ TEST(Query, ShowExecutor) {
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->query_info_;
-    info.metric_type_ = "L2";
+    info.metric_type_ = MetricType::METRIC_L2;
     info.topK_ = 20;
     info.field_offset_ = FieldOffset(1000);
     node->predicate_ = std::nullopt;
@@ -258,6 +219,7 @@ TEST(Query, ExecWithPredicate) {
 ])");
     ASSERT_EQ(json.dump(2), ref.dump(2));
 }
+
 TEST(Query, ExecTerm) {
     using namespace milvus::query;
     using namespace milvus::segcore;

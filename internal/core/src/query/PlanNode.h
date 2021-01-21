@@ -41,7 +41,8 @@ using PlanNodePtr = std::unique_ptr<PlanNode>;
 struct QueryInfo {
     int64_t topK_;
     FieldOffset field_offset_;
-    std::string metric_type_;  // TODO: use enum
+    MetricType metric_type_;
+    std::string deprecated_metric_type_;  // TODO: use enum
     nlohmann::json search_params_;
 };
 

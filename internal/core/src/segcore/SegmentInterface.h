@@ -17,6 +17,7 @@
 #include "IndexingEntry.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include "common/SystemProperty.h"
+#include "query/PlanNode.h"
 
 namespace milvus::segcore {
 
@@ -25,11 +26,11 @@ class SegmentInterface {
     void
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const;
 
-    virtual QueryResult
+    QueryResult
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_groups[],
            const Timestamp timestamps[],
-           int64_t num_groups) const = 0;
+           int64_t num_groups) const;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -71,6 +72,14 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
  public:
+    virtual void
+    vector_search(int64_t vec_count,
+                  query::QueryInfo query_info,
+                  const void* query_data,
+                  int64_t query_count,
+                  const BitsetView& bitset,
+                  QueryResult& output) const = 0;
+
     virtual int64_t
     num_chunk_index_safe(FieldOffset field_offset) const = 0;
 

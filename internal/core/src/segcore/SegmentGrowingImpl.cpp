@@ -19,6 +19,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
+#include <query/SearchOnSealed.h>
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "query/PlanNode.h"
@@ -237,17 +238,6 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     return total_bytes;
 }
 
-QueryResult
-SegmentGrowingImpl::Search(const query::Plan* plan,
-                           const query::PlaceholderGroup** placeholder_groups,
-                           const Timestamp* timestamps,
-                           int64_t num_groups) const {
-    Assert(num_groups == 1);
-    query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
-    auto results = visitor.get_moved_result(*plan->plan_node_);
-    return results;
-}
-
 Status
 SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
     auto field_offset = schema_->get_offset(FieldName(info.field_name));
@@ -269,6 +259,20 @@ int64_t
 SegmentGrowingImpl::num_chunk_data() const {
     auto size = get_insert_record().ack_responder_.GetAck();
     return upper_div(size, chunk_size_);
+}
+void
+SegmentGrowingImpl::vector_search(int64_t vec_count,
+                                  query::QueryInfo query_info,
+                                  const void* query_data,
+                                  int64_t query_count,
+                                  const BitsetView& bitset,
+                                  QueryResult& output) const {
+    auto& sealed_indexing = this->get_sealed_indexing_record();
+    if (sealed_indexing.is_ready(query_info.field_offset_)) {
+        query::SearchOnSealed(this->get_schema(), sealed_indexing, query_info, query_data, query_count, bitset, output);
+    } else {
+        SearchOnGrowing(*this, vec_count, query_info, query_data, query_count, bitset, output);
+    }
 }
 
 }  // namespace milvus::segcore

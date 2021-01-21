@@ -20,6 +20,7 @@
 #include "common/type_c.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include "common/Types.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -79,7 +80,7 @@ Search(CSegmentInterface c_segment,
     auto status = CStatus();
     try {
         *query_result = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups);
-        if (plan->plan_node_->query_info_.metric_type_ != "IP") {
+        if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
             for (auto& dis : query_result->result_distances_) {
                 dis *= -1;
             }

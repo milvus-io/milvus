@@ -20,12 +20,11 @@ namespace milvus::query {
 using BitmapChunk = boost::dynamic_bitset<>;
 using BitmapSimple = std::deque<BitmapChunk>;
 
-template <typename VectorType>
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t ins_barrier,
                 const query::QueryInfo& info,
-                const EmbeddedType<VectorType>* query_data,
+                const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,
                 QueryResult& results);

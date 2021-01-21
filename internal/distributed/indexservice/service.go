@@ -28,9 +28,8 @@ type Server struct {
 	loopWg     sync.WaitGroup
 }
 
-func (s *Server) Init() error {
+func (s *Server) Init() {
 	indexservice.Params.Init()
-	return nil
 }
 
 func (s *Server) Start() error {
@@ -38,9 +37,8 @@ func (s *Server) Start() error {
 	return s.startIndexServer()
 }
 
-func (s *Server) Stop() error {
+func (s *Server) Stop() {
 	s.loopWg.Wait()
-	return nil
 }
 
 func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {

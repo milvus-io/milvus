@@ -63,9 +63,7 @@ SearchOnSealed(const Schema& schema,
 
     Assert(record.is_ready(field_offset));
     auto indexing_entry = record.get_entry(field_offset);
-    std::cout << " SearchOnSealed, indexing_entry->metric:" << indexing_entry->metric_type_ << std::endl;
-    std::cout << " SearchOnSealed, query_info.metric_type_:" << query_info.metric_type_ << std::endl;
-    Assert(indexing_entry->metric_type_ == GetMetricType(query_info.metric_type_));
+    Assert(indexing_entry->metric_type_ == query_info.metric_type_);
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);

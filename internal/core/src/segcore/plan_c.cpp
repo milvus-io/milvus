@@ -78,7 +78,8 @@ GetTopK(CPlan plan) {
 const char*
 GetMetricType(CPlan plan) {
     auto query_plan = static_cast<milvus::query::Plan*>(plan);
-    return strdup(query_plan->plan_node_->query_info_.metric_type_.c_str());
+    auto metric_str = milvus::MetricTypeToName(query_plan->plan_node_->query_info_.metric_type_);
+    return strdup(metric_str.c_str());
 }
 
 void

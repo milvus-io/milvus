@@ -28,7 +28,7 @@ namespace impl {
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
     using RetType = QueryResult;
-    ExecPlanNodeVisitor(const segcore::SegmentGrowing& segment,
+    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
@@ -52,7 +52,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    const segcore::SegmentGrowing& segment_;
+    const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
@@ -66,7 +66,7 @@ void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     // TODO: optimize here, remove the dynamic cast
     assert(!ret_.has_value());
-    auto segment = dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment_);
+    auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     RetType ret;
     auto& ph = placeholder_group_.at(0);
@@ -76,7 +76,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     aligned_vector<uint8_t> bitset_holder;
     BitsetView view;
     // TODO: add API to unify row_count
-    auto row_count = segcore::get_barrier(segment->get_insert_record(), timestamp_);
+    auto row_count = segment->get_row_count();
 
     if (node.predicate_.has_value()) {
         ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment, row_count).call_child(*node.predicate_.value());
@@ -84,12 +84,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
     }
 
-    auto& sealed_indexing = segment->get_sealed_indexing_record();
-    if (sealed_indexing.is_ready(node.query_info_.field_offset_)) {
-        SearchOnSealed(segment->get_schema(), sealed_indexing, node.query_info_, src_data, num_queries, view, ret);
-    } else {
-        SearchOnGrowing<VectorType>(*segment, row_count, node.query_info_, src_data, num_queries, view, ret);
-    }
+    segment->vector_search(row_count, node.query_info_, src_data, num_queries, view, ret);
 
     ret_ = ret;
 }

@@ -29,7 +29,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  public:
     using RetType = QueryResult;
-    ExecPlanNodeVisitor(const segcore::SegmentGrowing& segment,
+    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
@@ -53,7 +53,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
  private:
     // std::optional<RetType> ret_;
-    const segcore::SegmentGrowing& segment_;
+    const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 

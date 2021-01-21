@@ -45,15 +45,15 @@ type IndexNode struct {
 	//serviceClient indexservice.Interface // method factory
 }
 
-func (i *IndexNode) Init() error {
+func (i *IndexNode) Init() {
 	panic("implement me")
 }
 
-func (i *IndexNode) Start() error {
+func (i *IndexNode) Start() {
 	panic("implement me")
 }
 
-func (i *IndexNode) Stop() error {
+func (i *IndexNode) Stop() {
 	panic("implement me")
 }
 

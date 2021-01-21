@@ -13,15 +13,15 @@ type Server struct {
 	queryService queryServiceImpl.Interface
 }
 
-func (s *Server) Init() error {
+func (s *Server) Init() {
 	panic("implement me")
 }
 
-func (s *Server) Start() error {
+func (s *Server) Start() {
 	panic("implement me")
 }
 
-func (s *Server) Stop() error {
+func (s *Server) Stop() {
 	panic("implement me")
 }
 

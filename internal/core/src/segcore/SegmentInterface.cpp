@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/SegmentInterface.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
 namespace milvus::segcore {
 class Naive;
 
@@ -39,4 +40,16 @@ SegmentInterface::FillTargetEntry(const query::Plan* plan, QueryResult& results)
         results.row_data_.emplace_back(std::move(blob));
     }
 }
+
+QueryResult
+SegmentInterface::Search(const query::Plan* plan,
+                         const query::PlaceholderGroup** placeholder_groups,
+                         const Timestamp* timestamps,
+                         int64_t num_groups) const {
+    Assert(num_groups == 1);
+    query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
+    auto results = visitor.get_moved_result(*plan->plan_node_);
+    return results;
+}
+
 }  // namespace milvus::segcore
