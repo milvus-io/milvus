@@ -162,6 +162,17 @@ message LoadIndex {
   repeated common.KeyValuePair index_params = 6;
 }
 
+message SegmentStatisticsUpdates {
+  int64 SegmentID = 1;
+  int64 MemorySize = 2;
+  int64 NumRows = 3;
+}
+
+message SegmentStatistics {
+  common.MsgBase base = 1;
+  repeated SegmentStatisticsUpdates SegStats = 2;
+}
+
 
 message IndexStats {
   repeated common.KeyValuePair index_params = 1;

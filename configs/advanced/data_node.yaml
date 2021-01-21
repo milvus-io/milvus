@@ -34,7 +34,7 @@ dataNode:
 
     segStatistics:
       recvBufSize: 64
-      publishInterval: 1000 # milliseconds
+      updateInterval: 1000 # milliseconds
 
   flush:
     # max buffer size to flush

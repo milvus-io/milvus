@@ -43,7 +43,8 @@ type (
 		minioPrifex                  string
 		idAllocator                  *allocator.IDAllocator
 		outCh                        chan *insertFlushSyncMsg
-		pulsarDataNodeTimeTickStream *pulsarms.PulsarMsgStream
+		pulsarDataNodeTimeTickStream msgstream.MsgStream
+		segmentStatisticsStream      msgstream.MsgStream
 		replica                      collectionReplica
 	}
 
@@ -98,6 +99,33 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	if !ok {
 		log.Println("Error: type assertion failed for insertMsg")
 		// TODO: add error handling
+	}
+
+	uniqueSeg := make(map[UniqueID]bool)
+	for _, msg := range iMsg.insertMessages {
+		currentSegID := msg.GetSegmentID()
+		if !ibNode.replica.hasSegment(currentSegID) {
+			err := ibNode.replica.addSegment(currentSegID)
+			if err != nil {
+				log.Println("Error: add segment error")
+			}
+		}
+		err := ibNode.replica.updateSegmentRowNums(currentSegID, int64(len(msg.RowIDs)))
+		if err != nil {
+			log.Println("Error: update Segment Row number wrong, ", err)
+		}
+
+		if _, ok := uniqueSeg[currentSegID]; !ok {
+			uniqueSeg[currentSegID] = true
+		}
+	}
+	segIDs := make([]UniqueID, 0, len(uniqueSeg))
+	for id := range uniqueSeg {
+		segIDs = append(segIDs, id)
+	}
+	err := ibNode.updateSegStatistics(segIDs)
+	if err != nil {
+		log.Println("Error: update segment statistics error, ", err)
 	}
 
 	// iMsg is insertMsg
@@ -567,22 +595,6 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	return []*Msg{&res}
 }
 
-func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return nil, err
-	}
-	return ret.schema, nil
-}
-
-func (ibNode *insertBufferNode) getCollectionSchemaByName(collectionName string) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByName(collectionName)
-	if err != nil {
-		return nil, err
-	}
-	return ret.schema, nil
-}
-
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.TimeTickMsg{
@@ -604,6 +616,61 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.pulsarDataNodeTimeTickStream.Produce(&msgPack)
 }
 
+func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
+	log.Println("Updating segments statistics...")
+	statsUpdates := make([]*internalpb2.SegmentStatisticsUpdates, 0, len(segIDs))
+	for _, segID := range segIDs {
+		updates, err := ibNode.replica.getSegmentStatisticsUpdates(segID)
+		if err != nil {
+			log.Println("Error get segment", segID, "statistics updates", err)
+			continue
+		}
+		statsUpdates = append(statsUpdates, updates)
+	}
+
+	segStats := internalpb2.SegmentStatistics{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kSegmentStatistics,
+			MsgID:     UniqueID(0),  // GOOSE TODO
+			Timestamp: Timestamp(0), // GOOSE TODO
+			SourceID:  Params.DataNodeID,
+		},
+		SegStats: statsUpdates,
+	}
+
+	var msg msgstream.TsMsg = &msgstream.SegmentStatisticsMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		SegmentStatistics: segStats,
+	}
+
+	var msgPack = msgstream.MsgPack{
+		Msgs: []msgstream.TsMsg{msg},
+	}
+	err := ibNode.segmentStatisticsStream.Produce(&msgPack)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
+	ret, err := ibNode.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return ret.schema, nil
+}
+
+func (ibNode *insertBufferNode) getCollectionSchemaByName(collectionName string) (*schemapb.CollectionSchema, error) {
+	ret, err := ibNode.replica.getCollectionByName(collectionName)
+	if err != nil {
+		return nil, err
+	}
+	return ret.schema, nil
+}
+
 func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, replica collectionReplica) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -619,7 +686,6 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 	}
 
 	// MinIO
-
 	option := &miniokv.Option{
 		Address:           Params.MinioAddress,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -644,9 +710,24 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 		panic(err)
 	}
 
-	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream, data node time tick
+	// GOOSE TODO: Pulsar stream Start() ???
+	//input stream, data node time tick
+	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024)
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
+	var wTtMsgStream msgstream.MsgStream = wTt
+	// var wTtMsgStream pulsarms.PulsarMsgStream = *wTt
+	wTtMsgStream.Start()
+	// wTt.Start()
+
+	// update statistics channel
+	segS := pulsarms.NewPulsarMsgStream(ctx, Params.SegmentStatisticsBufSize)
+	segS.SetPulsarClient(Params.PulsarAddress)
+	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
+	var segStatisticsMsgStream msgstream.MsgStream = segS
+	// var segStatisticsMsgStream pulsarms.PulsarMsgStream = segS
+	segStatisticsMsgStream.Start()
+	// segS.Start()
 
 	return &insertBufferNode{
 		BaseNode:                     baseNode,
@@ -655,7 +736,10 @@ func newInsertBufferNode(ctx context.Context, outCh chan *insertFlushSyncMsg, re
 		minioPrifex:                  minioPrefix,
 		idAllocator:                  idAllocator,
 		outCh:                        outCh,
-		pulsarDataNodeTimeTickStream: wTt,
-		replica:                      replica,
+		pulsarDataNodeTimeTickStream: wTtMsgStream,
+		segmentStatisticsStream:      segStatisticsMsgStream,
+		// pulsarDataNodeTimeTickStream: wTt,
+		// segmentStatisticsStream:      segS,
+		replica: replica,
 	}
 }

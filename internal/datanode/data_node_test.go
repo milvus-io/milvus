@@ -10,12 +10,15 @@ import (
 	"testing"
 	"time"
 
-	// "github.com/stretchr/testify/assert"
-	// "github.com/stretchr/testify/require"
+	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/zilliztech/milvus-distributed/internal/master"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 func makeNewChannelNames(names []string, suffix string) []string {
@@ -77,8 +80,6 @@ func TestMain(m *testing.M) {
 	}
 
 	startMaster(ctx)
-	// p := Params
-	// fmt.Println(p)
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -106,96 +107,90 @@ func newDataNode() *DataNode {
 
 }
 
-// func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
-//     var fieldVec schemapb.FieldSchema
-//     if isBinary {
-//         fieldVec = schemapb.FieldSchema{
-//             FieldID:      UniqueID(100),
-//             Name:         "vec",
-//             IsPrimaryKey: false,
-//             DataType:     schemapb.DataType_VECTOR_BINARY,
-//             TypeParams: []*commonpb.KeyValuePair{
-//                 {
-//                     Key:   "dim",
-//                     Value: "128",
-//                 },
-//             },
-//             IndexParams: []*commonpb.KeyValuePair{
-//                 {
-//                     Key:   "metric_type",
-//                     Value: "JACCARD",
-//                 },
-//             },
-//         }
-//     } else {
-//         fieldVec = schemapb.FieldSchema{
-//             FieldID:      UniqueID(100),
-//             Name:         "vec",
-//             IsPrimaryKey: false,
-//             DataType:     schemapb.DataType_VECTOR_FLOAT,
-//             TypeParams: []*commonpb.KeyValuePair{
-//                 {
-//                     Key:   "dim",
-//                     Value: "16",
-//                 },
-//             },
-//             IndexParams: []*commonpb.KeyValuePair{
-//                 {
-//                     Key:   "metric_type",
-//                     Value: "L2",
-//                 },
-//             },
-//         }
-//     }
-//
-//     fieldInt := schemapb.FieldSchema{
-//         FieldID:      UniqueID(101),
-//         Name:         "age",
-//         IsPrimaryKey: false,
-//         DataType:     schemapb.DataType_INT32,
-//     }
-//
-//     schema := schemapb.CollectionSchema{
-//         Name:   collectionName,
-//         AutoID: true,
-//         Fields: []*schemapb.FieldSchema{
-//             &fieldVec, &fieldInt,
-//         },
-//     }
-//
-//     collectionMeta := etcdpb.CollectionMeta{
-//         ID:            collectionID,
-//         Schema:        &schema,
-//         CreateTime:    Timestamp(0),
-//         SegmentIDs:    []UniqueID{0},
-//         PartitionTags: []string{"default"},
-//     }
-//
-//     return &collectionMeta
-// }
+func genTestDataNodeCollectionMeta(collectionName string, collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
+	var fieldVec schemapb.FieldSchema
+	if isBinary {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_BINARY,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "JACCARD",
+				},
+			},
+		}
+	} else {
+		fieldVec = schemapb.FieldSchema{
+			FieldID:      UniqueID(100),
+			Name:         "vec",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_VECTOR_FLOAT,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "16",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "metric_type",
+					Value: "L2",
+				},
+			},
+		}
+	}
 
-// func initTestMeta(t *testing.T, node *DataNode, collectionName string, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
-//     isBinary := false
-//     if len(optional) > 0 {
-//         isBinary = optional[0]
-//     }
-//     collectionMeta := genTestCollectionMeta(collectionName, collectionID, isBinary)
-//
-//     schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-//     require.NotEqual(t, "", schemaBlob)
-//
-//     var err = node.replica.addCollection(collectionMeta.ID, schemaBlob)
-//     require.NoError(t, err)
-//
-//     collection, err := node.replica.getCollectionByName(collectionName)
-//     require.NoError(t, err)
-//     require.Equal(t, collection.Name(), collectionName)
-//     require.Equal(t, collection.ID(), collectionID)
-//     require.Equal(t, node.replica.getCollectionNum(), 1)
-//
-//     err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionTags[0])
-//     require.NoError(t, err)
-//
-//     err = node.replica.addSegment(segmentID, collectionMeta.PartitionTags[0], collectionID)
-//     require.NoError(t, err)
-// }
+	fieldInt := schemapb.FieldSchema{
+		FieldID:      UniqueID(101),
+		Name:         "age",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_INT32,
+	}
+
+	schema := schemapb.CollectionSchema{
+		Name:   collectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			&fieldVec, &fieldInt,
+		},
+	}
+
+	collectionMeta := etcdpb.CollectionMeta{
+		ID:            collectionID,
+		Schema:        &schema,
+		CreateTime:    Timestamp(0),
+		SegmentIDs:    []UniqueID{0},
+		PartitionTags: []string{"default"},
+	}
+
+	return &collectionMeta
+}
+
+func initTestMeta(t *testing.T, node *DataNode, collectionName string, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
+	isBinary := false
+	if len(optional) > 0 {
+		isBinary = optional[0]
+	}
+	collectionMeta := genTestDataNodeCollectionMeta(collectionName, collectionID, isBinary)
+
+	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
+	require.NotEqual(t, "", schemaBlob)
+
+	var err = node.replica.addCollection(collectionMeta.ID, schemaBlob)
+	require.NoError(t, err)
+
+	collection, err := node.replica.getCollectionByName(collectionName)
+	require.NoError(t, err)
+	require.Equal(t, collection.Name(), collectionName)
+	require.Equal(t, collection.ID(), collectionID)
+	require.Equal(t, node.replica.getCollectionNum(), 1)
+}

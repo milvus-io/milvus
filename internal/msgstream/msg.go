@@ -321,6 +321,7 @@ func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
 }
 
 /////////////////////////////////////////QueryNodeStats//////////////////////////////////////////
+// GOOSE TODO: remove QueryNodeStats
 type QueryNodeStatsMsg struct {
 	BaseMsg
 	internalpb2.QueryNodeStats
@@ -357,6 +358,45 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
 	queryNodeSegStatsMsg := &QueryNodeStatsMsg{QueryNodeStats: queryNodeSegStats}
 
 	return queryNodeSegStatsMsg, nil
+}
+
+/////////////////////////////////////////SegmentStatisticsMsg//////////////////////////////////////////
+type SegmentStatisticsMsg struct {
+	BaseMsg
+	internalpb2.SegmentStatistics
+}
+
+func (ss *SegmentStatisticsMsg) Type() MsgType {
+	return ss.Base.MsgType
+}
+
+func (ss *SegmentStatisticsMsg) GetMsgContext() context.Context {
+	return ss.MsgCtx
+}
+
+func (ss *SegmentStatisticsMsg) SetMsgContext(ctx context.Context) {
+	ss.MsgCtx = ctx
+}
+
+func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) ([]byte, error) {
+	segStatsTask := input.(*SegmentStatisticsMsg)
+	segStats := &segStatsTask.SegmentStatistics
+	mb, err := proto.Marshal(segStats)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (ss *SegmentStatisticsMsg) Unmarshal(input []byte) (TsMsg, error) {
+	segStats := internalpb2.SegmentStatistics{}
+	err := proto.Unmarshal(input, &segStats)
+	if err != nil {
+		return nil, err
+	}
+	segStatsMsg := &SegmentStatisticsMsg{SegmentStatistics: segStats}
+
+	return segStatsMsg, nil
 }
 
 ///////////////////////////////////////////Key2Seg//////////////////////////////////////////
