@@ -38,9 +38,7 @@ func (s *Server) StartGrpcServer() {
 
 func (s *Server) Start() {
 	go s.StartGrpcServer()
-	if err := s.node.Start(); err != nil {
-		panic(err)
-	}
+	s.node.Start()
 }
 
 func (s *Server) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {

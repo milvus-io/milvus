@@ -107,7 +107,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collecti
 	assert.Equal(t, collection.ID(), collectionID)
 	assert.Equal(t, node.replica.getCollectionNum(), 1)
 
-	err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionTags[0])
+	err = node.replica.addPartition2(collection.ID(), collectionMeta.PartitionTags[0])
 	assert.NoError(t, err)
 
 	err = node.replica.addSegment2(segmentID, collectionMeta.PartitionTags[0], collectionID, segTypeGrowing)
@@ -163,7 +163,6 @@ func TestMain(m *testing.M) {
 // NOTE: start pulsar and etcd before test
 func TestQueryNode_Start(t *testing.T) {
 	localNode := newQueryNodeMock()
-	err := localNode.Start()
-	assert.Nil(t, err)
-	localNode.Close()
+	localNode.Start()
+	localNode.Stop()
 }

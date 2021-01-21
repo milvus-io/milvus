@@ -136,5 +136,5 @@ func TestDataSyncService_Start(t *testing.T) {
 	go node.dataSyncService.start()
 
 	<-node.queryNodeLoopCtx.Done()
-	node.Close()
+	node.Stop()
 }

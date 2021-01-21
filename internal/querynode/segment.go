@@ -78,6 +78,7 @@ func newSegment2(collection *Collection, segmentID int64, partitionTag string, c
 	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
+		segmentType:  segType,
 		segmentID:    segmentID,
 		partitionTag: partitionTag,
 		collectionID: collectionID,
@@ -96,6 +97,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	segmentPtr := C.NewSegment(collection.collectionPtr, C.ulong(segmentID), segType)
 	var newSegment = &Segment{
 		segmentPtr:   segmentPtr,
+		segmentType:  segType,
 		segmentID:    segmentID,
 		partitionID:  partitionID,
 		collectionID: collectionID,
@@ -195,7 +197,16 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 
 // segment, err := loadIndexService.replica.getSegmentByID(segmentID)
 func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
-	status := C.UpdateSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
+	var status C.CStatus
+
+	if s.segmentType == segTypeGrowing {
+		status = C.UpdateSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
+	} else if s.segmentType == segTypeSealed {
+		status = C.UpdateSealedSegmentIndex(s.segmentPtr, loadIndexInfo.cLoadIndexInfo)
+	} else {
+		return errors.New("illegal segment type")
+	}
+
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -345,7 +356,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 }
 
 //-------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data unsafe.Pointer) error {
+func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interface{}) error {
 	/*
 		CStatus
 		LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
@@ -354,16 +365,62 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data unsafe.
 		return errors.New("illegal segment type when loading field data")
 	}
 
+	// data interface check
+	var dataPointer unsafe.Pointer
+	emptyErr := errors.New("null field data to be loaded")
+	switch d := data.(type) {
+	case []bool:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []int8:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []int16:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []int32:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []int64:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []float32:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []float64:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
+	case []string:
+		// TODO: support string type
+		return errors.New("we cannot support string type now")
+	default:
+		return errors.New("illegal field data type")
+	}
+
 	/*
-		struct CLoadFieldDataInfo {
+		typedef struct CLoadFieldDataInfo {
 		    int64_t field_id;
 		    void* blob;
 		    int64_t row_count;
-		};
+		} CLoadFieldDataInfo;
 	*/
 	loadInfo := C.CLoadFieldDataInfo{
 		field_id:  C.int64_t(fieldID),
-		blob:      data,
+		blob:      dataPointer,
 		row_count: C.int64_t(rowCount),
 	}
 

@@ -3,7 +3,7 @@ package querynode
 import (
 	"context"
 	"errors"
-	"unsafe"
+	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
@@ -12,7 +12,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
@@ -58,25 +57,77 @@ func newSegmentManager(ctx context.Context, replica collectionReplica, loadIndex
 	}
 }
 
-func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, fieldIDs *[]int64) error {
+func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
+	// TODO: interim solution
+	if len(fieldIDs) == 0 {
+		collection, err := s.replica.getCollectionByID(collectionID)
+		if err != nil {
+			return err
+		}
+		fieldIDs = make([]int64, 0)
+		for _, field := range collection.Schema().Fields {
+			fieldIDs = append(fieldIDs, field.FieldID)
+		}
+	}
+	for _, segmentID := range segmentIDs {
+		indexID := UniqueID(0) // TODO: get index id from master
+		paths, srcFieldIDs, err := s.getInsertBinlogPaths(segmentID)
+		if err != nil {
+			return err
+		}
+
+		targetFields := s.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
+		// create segment
+		err = s.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
+		if err != nil {
+			return err
+		}
+		err = s.loadSegmentFieldsData(segmentID, targetFields)
+		if err != nil {
+			return err
+		}
+		indexPaths, err := s.getIndexPaths(indexID)
+		if err != nil {
+			return err
+		}
+		iParam, err := s.getIndexParam()
+		if err != nil {
+			return err
+		}
+		err = s.loadIndex(segmentID, indexPaths, iParam)
+		if err != nil {
+			// TODO: return or continue?
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *segmentManager) releaseSegment(segmentID UniqueID) error {
+	err := s.replica.removeSegment(segmentID)
+	return err
+}
+
+//------------------------------------------------------------------------------------------------- internal functions
+func (s *segmentManager) getInsertBinlogPaths(segmentID UniqueID) ([]*internalPb.StringList, []int64, error) {
 	insertBinlogPathRequest := &datapb.InsertBinlogPathRequest{
 		SegmentID: segmentID,
 	}
 
 	pathResponse, err := s.dataClient.GetInsertBinlogPaths(context.TODO(), insertBinlogPathRequest)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) {
-		return errors.New("illegal InsertBinlogPathsResponse")
+		return nil, nil, errors.New("illegal InsertBinlogPathsResponse")
 	}
 
-	// create segment
-	err = s.replica.addSegment(segmentID, partitionID, collectionID, segTypeSealed)
-	if err != nil {
-		return err
-	}
+	return pathResponse.Paths, pathResponse.FieldIDs, nil
+}
+
+func (s *segmentManager) filterOutNeedlessFields(paths []*internalPb.StringList, srcFieldIDS []int64, dstFields []int64) map[int64]*internalPb.StringList {
+	targetFields := make(map[int64]*internalPb.StringList)
 
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
@@ -87,13 +138,18 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, c
 		return false
 	}
 
-	for i, fieldID := range pathResponse.FieldIDs {
-		// filter out the needless fields
-		if !containsFunc(*fieldIDs, fieldID) {
-			continue
+	for i, fieldID := range srcFieldIDS {
+		if containsFunc(dstFields, fieldID) {
+			targetFields[fieldID] = paths[i]
 		}
+	}
 
-		paths := pathResponse.Paths[i].Values
+	return targetFields
+}
+
+func (s *segmentManager) loadSegmentFieldsData(segmentID UniqueID, targetFields map[int64]*internalPb.StringList) error {
+	for id, p := range targetFields {
+		paths := p.Values
 		blobs := make([]*storage.Blob, 0)
 		for _, path := range paths {
 			binLog, err := s.kv.Load(path)
@@ -102,7 +158,7 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, c
 				return err
 			}
 			blobs = append(blobs, &storage.Blob{
-				Key:   "", // TODO: key???
+				Key:   strconv.FormatInt(id, 10), // TODO: key???
 				Value: []byte(binLog),
 			})
 		}
@@ -120,35 +176,35 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, c
 			var data interface{}
 
 			switch fieldData := value.(type) {
-			case storage.BoolFieldData:
+			case *storage.BoolFieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.Int8FieldData:
+			case *storage.Int8FieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.Int16FieldData:
+			case *storage.Int16FieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.Int32FieldData:
+			case *storage.Int32FieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.Int64FieldData:
+			case *storage.Int64FieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.FloatFieldData:
+			case *storage.FloatFieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.DoubleFieldData:
+			case *storage.DoubleFieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
 			case storage.StringFieldData:
 				numRows = fieldData.NumRows
 				data = fieldData.Data
-			case storage.FloatVectorFieldData:
+			case *storage.FloatVectorFieldData:
 				// segment to be loaded doesn't need vector field,
 				// so we ignore the type of vector field data
 				continue
-			case storage.BinaryVectorFieldData:
+			case *storage.BinaryVectorFieldData:
 				continue
 			default:
 				return errors.New("unexpected field data type")
@@ -159,7 +215,7 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, c
 				// TODO: return or continue?
 				return err
 			}
-			err = segment.segmentLoadFieldData(fieldID, numRows, unsafe.Pointer(&data))
+			err = segment.segmentLoadFieldData(id, numRows, data)
 			if err != nil {
 				// TODO: return or continue?
 				return err
@@ -170,25 +226,33 @@ func (s *segmentManager) loadSegment(segmentID UniqueID, partitionID UniqueID, c
 	return nil
 }
 
-func (s *segmentManager) loadIndex(segmentID UniqueID, indexID UniqueID) error {
-	indexFilePathRequest := &indexpb.IndexFilePathRequest{
-		IndexID: indexID,
+func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
+	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
+		IndexIDs: []UniqueID{indexID},
 	}
 	pathResponse, err := s.indexBuilderClient.GetIndexFilePaths(context.TODO(), indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return err
+		return nil, err
 	}
 
+	return pathResponse.FilePaths[0].IndexFilePaths, nil
+}
+
+func (s *segmentManager) getIndexParam() (indexParam, error) {
+	var targetIndexParam indexParam
+	// TODO: get index param from master
+	return targetIndexParam, nil
+}
+
+func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string, indexParam indexParam) error {
 	// get vector field ids from schema to load index
 	vecFieldIDs, err := s.replica.getVecFieldsBySegmentID(segmentID)
 	if err != nil {
 		return err
 	}
 	for id, name := range vecFieldIDs {
-		var targetIndexParam indexParam
-		// TODO: get index param from master
 		// non-blocking send
-		go s.sendLoadIndex(pathResponse.IndexFilePaths, segmentID, id, name, targetIndexParam)
+		go s.sendLoadIndex(indexPaths, segmentID, id, name, indexParam)
 	}
 
 	return nil
@@ -224,10 +288,4 @@ func (s *segmentManager) sendLoadIndex(indexPaths []string,
 
 	messages := []msgstream.TsMsg{loadIndexMsg}
 	s.loadIndexReqChan <- messages
-}
-
-func (s *segmentManager) releaseSegment(in *queryPb.ReleaseSegmentRequest) error {
-	// TODO: implement
-	// TODO: release specific field, we need segCore supply relevant interface
-	return nil
 }

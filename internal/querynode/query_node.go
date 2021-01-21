@@ -16,19 +16,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	queryserviceimpl "github.com/zilliztech/milvus-distributed/internal/queryservice"
 	"io"
+	"sync/atomic"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go/config"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
 type Node interface {
-	Start() error
-	Close()
+	Init()
+	Start()
+	Stop()
+
+	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetTimeTickChannel() (string, error)
+	GetStatisticsChannel() (string, error)
 
 	AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error)
 	RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
@@ -43,6 +52,7 @@ type QueryNode struct {
 	queryNodeLoopCancel context.CancelFunc
 
 	QueryNodeID uint64
+	stateCode   atomic.Value
 
 	replica collectionReplica
 
@@ -60,10 +70,6 @@ type QueryNode struct {
 	closer io.Closer
 }
 
-func Init() {
-	Params.Init()
-}
-
 func NewQueryNode(ctx context.Context, queryNodeID uint64) Node {
 	var node Node = newQueryNode(ctx, queryNodeID)
 	return node
@@ -71,7 +77,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) Node {
 
 func newQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
-	q := &QueryNode{
+	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
@@ -91,28 +97,53 @@ func newQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 			Param: 1,
 		},
 	}
-	q.tracer, q.closer, err = cfg.NewTracer()
+	node.tracer, node.closer, err = cfg.NewTracer()
 	if err != nil {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}
-	opentracing.SetGlobalTracer(q.tracer)
+	opentracing.SetGlobalTracer(node.tracer)
 
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
 
 	tSafe := newTSafe()
 
-	q.replica = &collectionReplicaImpl{
+	node.replica = &collectionReplicaImpl{
 		collections: collections,
 		segments:    segmentsMap,
 
 		tSafe: tSafe,
 	}
-
-	return q
+	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
+	return node
 }
 
-func (node *QueryNode) Start() error {
+// TODO: delete this and call node.Init()
+func Init() {
+	Params.Init()
+}
+
+func (node *QueryNode) Init() {
+	registerReq := queryPb.RegisterNodeRequest{
+		Address: &commonpb.Address{
+			Ip:   Params.QueryNodeIP,
+			Port: Params.QueryNodePort,
+		},
+	}
+	var client queryserviceimpl.Interface // TODO: init interface
+	response, err := client.RegisterNode(registerReq)
+	if err != nil {
+		panic(err)
+	}
+	if response.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		panic(response.Status.Reason)
+	}
+	// TODO: use response.initParams
+
+	Params.Init()
+}
+
+func (node *QueryNode) Start() {
 	// todo add connectMaster logic
 	// init services and manager
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
@@ -129,11 +160,12 @@ func (node *QueryNode) Start() error {
 	go node.loadIndexService.start()
 	go node.statsService.start()
 
+	node.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	<-node.queryNodeLoopCtx.Done()
-	return nil
 }
 
-func (node *QueryNode) Close() {
+func (node *QueryNode) Stop() {
+	node.stateCode.Store(internalpb2.StateCode_ABNORMAL)
 	node.queryNodeLoopCancel()
 
 	// free collectionReplica
@@ -155,6 +187,30 @@ func (node *QueryNode) Close() {
 	if node.closer != nil {
 		node.closer.Close()
 	}
+}
+
+func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	code, ok := node.stateCode.Load().(internalpb2.StateCode)
+	if !ok {
+		return nil, errors.New("unexpected error in type assertion")
+	}
+	info := &internalpb2.ComponentInfo{
+		NodeID:    Params.QueryNodeID,
+		Role:      "query-node",
+		StateCode: code,
+	}
+	stats := &internalpb2.ComponentStates{
+		State: info,
+	}
+	return stats, nil
+}
+
+func (node *QueryNode) GetTimeTickChannel() (string, error) {
+	return Params.QueryNodeTimeTickChannelName, nil
+}
+
+func (node *QueryNode) GetStatisticsChannel() (string, error) {
+	return Params.StatsChannelName, nil
 }
 
 func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*commonpb.Status, error) {
@@ -296,51 +352,33 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 
 func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error) {
 	// TODO: support db
-	partitionID := in.PartitionID
 	collectionID := in.CollectionID
+	partitionID := in.PartitionID
+	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
-	// TODO: interim solution
-	if len(fieldIDs) == 0 {
-		collection, err := node.replica.getCollectionByID(collectionID)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
+	err := node.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
 		}
-		fieldIDs = make([]int64, 0)
-		for _, field := range collection.Schema().Fields {
-			fieldIDs = append(fieldIDs, field.FieldID)
-		}
+		return status, err
 	}
-	for _, segmentID := range in.SegmentIDs {
-		indexID := UniqueID(0) // TODO: get index id from master
-		err := node.segManager.loadSegment(segmentID, partitionID, collectionID, &fieldIDs)
-		if err != nil {
-			// TODO: return or continue?
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
-		err = node.segManager.loadIndex(segmentID, indexID)
-		if err != nil {
-			// TODO: return or continue?
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}
-			return status, err
-		}
-	}
-
 	return nil, nil
 }
 
 func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
-	// TODO: implement
+	// release all fields in the segments
+	for _, id := range in.SegmentIDs {
+		err := node.segManager.releaseSegment(id)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
+	}
 	return nil, nil
 }
 

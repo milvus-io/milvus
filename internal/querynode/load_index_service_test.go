@@ -347,7 +347,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 
 	defer assert.Equal(t, findFiledStats, true)
 	<-node.queryNodeLoopCtx.Done()
-	node.Close()
+	node.Stop()
 }
 
 func TestLoadIndexService_BinaryVector(t *testing.T) {
@@ -663,5 +663,5 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 
 	defer assert.Equal(t, findFiledStats, true)
 	<-node.queryNodeLoopCtx.Done()
-	node.Close()
+	node.Stop()
 }

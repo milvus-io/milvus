@@ -15,8 +15,12 @@ type ParamTable struct {
 	ETCDAddress   string
 	MetaRootPath  string
 
-	QueryNodeID  UniqueID
-	QueryNodeNum int
+	QueryNodeIP                     string
+	QueryNodePort                   int64
+	QueryNodeID                     UniqueID
+	QueryNodeNum                    int
+	QueryNodeTimeTickChannelName    string
+	QueryNodeTimeTickReceiveBufSize int64
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -95,6 +99,13 @@ func (p *ParamTable) Init() {
 		panic(err)
 	}
 
+	p.initQueryNodeIP()
+	p.initQueryNodePort()
+	p.initQueryNodeID()
+	p.initQueryNodeNum()
+	p.initQueryNodeTimeTickChannelName()
+	p.initQueryNodeTimeTickReceiveBufSize()
+
 	p.initMinioEndPoint()
 	p.initMinioAccessKeyID()
 	p.initMinioSecretAccessKey()
@@ -104,9 +115,6 @@ func (p *ParamTable) Init() {
 	p.initPulsarAddress()
 	p.initETCDAddress()
 	p.initMetaRootPath()
-
-	p.initQueryNodeID()
-	p.initQueryNodeNum()
 
 	p.initGracefulTime()
 	p.initMsgChannelSubName()
@@ -140,6 +148,55 @@ func (p *ParamTable) Init() {
 	p.initLoadIndexPulsarBufSize()
 }
 
+// ---------------------------------------------------------- query node
+func (p *ParamTable) initQueryNodeIP() {
+	ip, err := p.Load("queryNode.ip")
+	if err != nil {
+		panic(err)
+	}
+	p.QueryNodeIP = ip
+}
+
+func (p *ParamTable) initQueryNodePort() {
+	port, err := p.Load("queryNode.port")
+	if err != nil {
+		panic(err)
+	}
+	p.QueryNodePort, err = strconv.ParseInt(port, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (p *ParamTable) initQueryNodeID() {
+	queryNodeID, err := p.Load("_queryNodeID")
+	if err != nil {
+		panic(err)
+	}
+	id, err := strconv.Atoi(queryNodeID)
+	if err != nil {
+		panic(err)
+	}
+	p.QueryNodeID = UniqueID(id)
+}
+
+func (p *ParamTable) initQueryNodeNum() {
+	p.QueryNodeNum = len(p.QueryNodeIDList())
+}
+
+func (p *ParamTable) initQueryNodeTimeTickChannelName() {
+	ch, err := p.Load("msgChannel.chanNamePrefix.queryNodeTimeTick")
+	if err != nil {
+		log.Fatal(err)
+	}
+	p.QueryNodeTimeTickChannelName = ch
+}
+
+func (p *ParamTable) initQueryNodeTimeTickReceiveBufSize() {
+	p.QueryNodeTimeTickReceiveBufSize = p.ParseInt64("queryNode.msgStream.timeTick.recvBufSize")
+}
+
+// ---------------------------------------------------------- minio
 func (p *ParamTable) initMinioEndPoint() {
 	url, err := p.Load("_MinioAddress")
 	if err != nil {
@@ -190,18 +247,6 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = url
-}
-
-func (p *ParamTable) initQueryNodeID() {
-	queryNodeID, err := p.Load("_queryNodeID")
-	if err != nil {
-		panic(err)
-	}
-	id, err := strconv.Atoi(queryNodeID)
-	if err != nil {
-		panic(err)
-	}
-	p.QueryNodeID = UniqueID(id)
 }
 
 func (p *ParamTable) initInsertChannelRange() {
@@ -424,10 +469,6 @@ func (p *ParamTable) initSliceIndex() {
 		}
 	}
 	p.SliceIndex = -1
-}
-
-func (p *ParamTable) initQueryNodeNum() {
-	p.QueryNodeNum = len(p.QueryNodeIDList())
 }
 
 func (p *ParamTable) initLoadIndexChannelNames() {

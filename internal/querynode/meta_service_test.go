@@ -14,7 +14,7 @@ func TestMetaService_start(t *testing.T) {
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 
 	node.metaService.start()
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_getCollectionObjId(t *testing.T) {
@@ -159,7 +159,7 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 	collection, err := node.replica.getCollectionByName("test")
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processSegmentCreate(t *testing.T) {
@@ -181,7 +181,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	s, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processCreate(t *testing.T) {
@@ -237,7 +237,7 @@ func TestMetaService_processCreate(t *testing.T) {
 	s, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processSegmentModify(t *testing.T) {
@@ -271,7 +271,7 @@ func TestMetaService_processSegmentModify(t *testing.T) {
 	seg, err := node.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, segmentID)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processCollectionModify(t *testing.T) {
@@ -379,7 +379,7 @@ func TestMetaService_processCollectionModify(t *testing.T) {
 	assert.Equal(t, hasPartition, true)
 	hasPartition = node.replica.hasPartition(UniqueID(0), "p3")
 	assert.Equal(t, hasPartition, true)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processModify(t *testing.T) {
@@ -512,7 +512,7 @@ func TestMetaService_processModify(t *testing.T) {
 	seg, err := node.replica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, seg.segmentID, UniqueID(0))
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processSegmentDelete(t *testing.T) {
@@ -537,7 +537,7 @@ func TestMetaService_processSegmentDelete(t *testing.T) {
 	(*node.metaService).processSegmentDelete("0")
 	mapSize := node.replica.getSegmentNum()
 	assert.Equal(t, mapSize, 0)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processCollectionDelete(t *testing.T) {
@@ -585,7 +585,7 @@ func TestMetaService_processCollectionDelete(t *testing.T) {
 	(*node.metaService).processCollectionDelete(id)
 	collectionNum = node.replica.getCollectionNum()
 	assert.Equal(t, collectionNum, 0)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processDelete(t *testing.T) {
@@ -648,7 +648,7 @@ func TestMetaService_processDelete(t *testing.T) {
 
 	mapSize := node.replica.getSegmentNum()
 	assert.Equal(t, mapSize, 0)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_processResp(t *testing.T) {
@@ -663,7 +663,7 @@ func TestMetaService_processResp(t *testing.T) {
 	case resp := <-metaChan:
 		_ = (*node.metaService).processResp(resp)
 	}
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_loadCollections(t *testing.T) {
@@ -672,7 +672,7 @@ func TestMetaService_loadCollections(t *testing.T) {
 
 	err2 := (*node.metaService).loadCollections()
 	assert.Nil(t, err2)
-	node.Close()
+	node.Stop()
 }
 
 func TestMetaService_loadSegments(t *testing.T) {
@@ -681,5 +681,5 @@ func TestMetaService_loadSegments(t *testing.T) {
 
 	err2 := (*node.metaService).loadSegments()
 	assert.Nil(t, err2)
-	node.Close()
+	node.Stop()
 }

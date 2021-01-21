@@ -34,14 +34,12 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Start(); err != nil {
-		log.Fatal("run server failed", zap.Error(err))
-	}
+	svr.Start()
 
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Close()
+	svr.Stop()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

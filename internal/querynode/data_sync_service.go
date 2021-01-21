@@ -51,7 +51,7 @@ func (dsService *dataSyncService) initNodes() {
 	var ddNode node = newDDNode(dsService.replica)
 
 	var insertNode node = newInsertNode(dsService.replica)
-	var serviceTimeNode node = newServiceTimeNode(dsService.replica)
+	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica)
 	var gcNode node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)

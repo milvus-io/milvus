@@ -141,7 +141,7 @@ func (mService *metaService) processCollectionCreate(id string, value string) {
 			log.Println(err)
 		}
 		for _, partitionTag := range col.PartitionTags {
-			err = mService.replica.addPartition(col.ID, partitionTag)
+			err = mService.replica.addPartition2(col.ID, partitionTag)
 			if err != nil {
 				log.Println(err)
 			}

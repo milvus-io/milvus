@@ -468,3 +468,27 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	deleteSegment(segment)
 	deleteCollection(collection)
 }
+
+func TestSegment_segmentLoadFieldData(t *testing.T) {
+	collectionName := "collection0"
+	collectionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.Equal(t, collection.Name(), collectionName)
+	assert.Equal(t, collection.ID(), collectionID)
+
+	segmentID := UniqueID(0)
+	partitionID := UniqueID(0)
+	segment := newSegment(collection, segmentID, partitionID, collectionID, segTypeSealed)
+	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Equal(t, partitionID, segment.partitionID)
+
+	const N = 16
+	var ages = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	err := segment.segmentLoadFieldData(101, N, ages)
+	assert.NoError(t, err)
+
+	deleteSegment(segment)
+	deleteCollection(collection)
+}

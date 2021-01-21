@@ -209,7 +209,7 @@ func TestSearch_Search(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	node.Close()
+	node.Stop()
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
@@ -407,5 +407,5 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	node.Close()
+	node.Stop()
 }

@@ -15,6 +15,38 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 	assert.Equal(t, "6650", split[len(split)-1])
 }
 
+func TestParamTable_QueryNode(t *testing.T) {
+	t.Run("Test ip", func(t *testing.T) {
+		ip := Params.QueryNodeIP
+		assert.Equal(t, ip, "localhost")
+	})
+
+	t.Run("Test port", func(t *testing.T) {
+		port := Params.QueryNodePort
+		assert.Equal(t, port, int64(20010))
+	})
+
+	t.Run("Test id", func(t *testing.T) {
+		id := Params.QueryNodeID
+		assert.Contains(t, Params.QueryNodeIDList(), id)
+	})
+
+	t.Run("Test num", func(t *testing.T) {
+		num := Params.QueryNodeNum
+		assert.Equal(t, num, 2)
+	})
+
+	t.Run("Test time tick channel", func(t *testing.T) {
+		ch := Params.QueryNodeTimeTickChannelName
+		assert.Equal(t, ch, "queryNodeTimeTick")
+	})
+
+	t.Run("Test time tick ReceiveBufSize", func(t *testing.T) {
+		size := Params.QueryNodeTimeTickReceiveBufSize
+		assert.Equal(t, size, int64(64))
+	})
+}
+
 func TestParamTable_minio(t *testing.T) {
 	t.Run("Test endPoint", func(t *testing.T) {
 		endPoint := Params.MinioEndPoint
@@ -54,11 +86,6 @@ func TestParamTable_LoadIndex(t *testing.T) {
 		size := Params.LoadIndexPulsarBufSize
 		assert.Equal(t, size, int64(512))
 	})
-}
-
-func TestParamTable_QueryNodeID(t *testing.T) {
-	id := Params.QueryNodeID
-	assert.Contains(t, Params.QueryNodeIDList(), id)
 }
 
 func TestParamTable_insertChannelRange(t *testing.T) {

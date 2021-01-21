@@ -21,6 +21,7 @@ msgChannel:
     proxyTimeTick: "proxyTimeTick"
     writeNodeTimeTick: "writeNodeTimeTick" # GOOSE TODO: remove this
     dataNodeTimeTick: "dataNodeTimeTick"
+    queryNodeTimeTick: "queryNodeTimeTick"
     dataNodeSegStatistics: "dataNodeSegStatistics"
     # old name: statsChannels: "statistic"
     queryNodeStats: "query-node-stats"
