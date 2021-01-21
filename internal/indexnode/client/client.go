@@ -133,13 +133,13 @@ func (c *Client) GetIndexStates(indexIDs []UniqueID) (*indexpb.IndexStatesRespon
 	return response, err
 }
 
-func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
+func (c *Client) GetIndexFilePaths(indexIDs []UniqueID) ([][]string, error) {
 	if c.tryConnect() != nil {
 		panic("GetIndexFilePaths: failed to connect index builder")
 	}
 	ctx := context.TODO()
-	request := &indexpb.IndexFilePathRequest{
-		IndexID: indexID,
+	request := &indexpb.IndexFilePathsRequest{
+		IndexIDs: indexIDs,
 	}
 
 	response, err := c.client.GetIndexFilePaths(ctx, request)
@@ -147,5 +147,15 @@ func (c *Client) GetIndexFilePaths(indexID UniqueID) ([]string, error) {
 		return nil, err
 	}
 
-	return response.IndexFilePaths, nil
+	var filePaths [][]string
+	for _, indexID := range indexIDs {
+		for _, filePathInfo := range response.FilePaths {
+			if indexID == filePathInfo.IndexID {
+				filePaths = append(filePaths, filePathInfo.IndexFilePaths)
+				break
+			}
+		}
+	}
+
+	return filePaths, nil
 }

@@ -28,8 +28,9 @@ type Server struct {
 	loopWg     sync.WaitGroup
 }
 
-func (s *Server) Init() {
+func (s *Server) Init() error {
 	indexservice.Params.Init()
+	return nil
 }
 
 func (s *Server) Start() error {
@@ -37,8 +38,9 @@ func (s *Server) Start() error {
 	return s.startIndexServer()
 }
 
-func (s *Server) Stop() {
+func (s *Server) Stop() error {
 	s.loopWg.Wait()
+	return nil
 }
 
 func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
@@ -69,7 +71,7 @@ func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.IndexStatesReq
 	return s.server.GetIndexStates(req)
 }
 
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 
 	return s.server.GetIndexFilePaths(req)
 }

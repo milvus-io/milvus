@@ -382,3 +382,189 @@ func (t *ShowPartitionReqTask) Execute() error {
 	}
 	return nil
 }
+
+type DescribeSegmentReqTask struct {
+	baseReqTask
+	Req *milvuspb.DescribeSegmentRequest
+	Rsp *milvuspb.DescribeSegmentResponse //TODO,return repeated segment id in the future
+}
+
+func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *DescribeSegmentReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DescribeSegmentReqTask) Execute() error {
+	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	if err != nil {
+		return err
+	}
+	exist := false
+	for _, partID := range coll.PartitionIDs {
+		if exist {
+			break
+		}
+		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
+		if err != nil {
+			return err
+		}
+		for _, e := range partMeta.SegmentIDs {
+			if e == t.Req.SegmentID {
+				exist = true
+				break
+			}
+		}
+	}
+	if !exist {
+		return errors.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
+	}
+	//TODO, get filed_id and index_name from request
+	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
+	if err != nil {
+		return err
+	}
+	t.Rsp.IndexID = segIdxInfo.IndexID
+	return nil
+}
+
+type ShowSegmentReqTask struct {
+	baseReqTask
+	Req *milvuspb.ShowSegmentRequest
+	Rsp *milvuspb.ShowSegmentResponse
+}
+
+func (t *ShowSegmentReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *ShowSegmentReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *ShowSegmentReqTask) Execute() error {
+	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	if err != nil {
+		return err
+	}
+	for _, partID := range coll.PartitionIDs {
+		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
+		if err != nil {
+			return err
+		}
+		t.Rsp.SegmentIDs = append(t.Rsp.SegmentIDs, partMeta.SegmentIDs...)
+	}
+	return nil
+}
+
+type CreateIndexReqTask struct {
+	baseReqTask
+	Req *milvuspb.CreateIndexRequest
+}
+
+func (t *CreateIndexReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *CreateIndexReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *CreateIndexReqTask) Execute() error {
+	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, t.Req.ExtraParams)
+	if err != nil {
+		return err
+	}
+	for _, seg := range segIDs {
+		task := CreateIndexTask{
+			core:        t.core,
+			segmentID:   seg,
+			indexName:   Params.DefaultIndexName, //TODO, get name from request
+			fieldSchema: &field,
+			indexParams: t.Req.ExtraParams,
+		}
+		t.core.indexTaskQueue <- &task
+	}
+	return nil
+}
+
+type DescribeIndexReqTask struct {
+	baseReqTask
+	Req *milvuspb.DescribeIndexRequest
+	Rsp *milvuspb.DescribeIndexResponse
+}
+
+func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *DescribeIndexReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DescribeIndexReqTask) Execute() error {
+	idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	if err != nil {
+		return err
+	}
+	for _, i := range idx {
+		desc := &milvuspb.IndexDescription{
+			IndexName: i.IndexName,
+			Params:    i.IndexParams,
+		}
+		t.Rsp.IndexDescriptions = append(t.Rsp.IndexDescriptions, desc)
+	}
+	return nil
+}
+
+type CreateIndexTask struct {
+	core        *Core
+	segmentID   typeutil.UniqueID
+	indexName   string
+	fieldSchema *schemapb.FieldSchema
+	indexParams []*commonpb.KeyValuePair
+}
+
+func (t *CreateIndexTask) BuildIndex() error {
+	if t.core.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
+		return nil
+	}
+	idxID, err := t.core.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
+	if err != nil {
+		return err
+	}
+	var bldID typeutil.UniqueID
+
+	if len(t.indexParams) == 0 {
+		t.indexParams = make([]*commonpb.KeyValuePair, 0, len(t.fieldSchema.IndexParams))
+		for _, p := range t.fieldSchema.IndexParams {
+			t.indexParams = append(t.indexParams, &commonpb.KeyValuePair{
+				Key:   p.Key,
+				Value: p.Value,
+			})
+		}
+	}
+	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams)
+	if err != nil {
+		return err
+	}
+	seg := etcdpb.SegmentIndexInfo{
+		SegmentID: t.segmentID,
+		FieldID:   t.fieldSchema.FieldID,
+		IndexID:   idxID,
+		BuildID:   bldID,
+	}
+	idx := etcdpb.IndexInfo{
+		IndexName:   t.indexName,
+		IndexID:     idxID,
+		IndexParams: t.indexParams,
+	}
+	err = t.core.MetaTable.AddIndex(&seg, &idx)
+	return err
+}

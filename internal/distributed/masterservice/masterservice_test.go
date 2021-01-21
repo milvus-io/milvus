@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -37,6 +38,7 @@ func TestGrpcService(t *testing.T) {
 
 	cms.Params.MaxPartitionNum = 64
 	cms.Params.DefaultPartitionName = "_default"
+	cms.Params.DefaultIndexName = "_default"
 
 	t.Logf("master service port = %d", cms.Params.Port)
 
@@ -82,6 +84,18 @@ func TestGrpcService(t *testing.T) {
 		t.Logf("Drop Partition %s", req.PartitionName)
 		dropPartitionArray = append(dropPartitionArray, req)
 		return nil
+	}
+
+	core.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
+
+	core.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+		return []string{"file1", "file2", "file3"}, nil
+	}
+
+	binlogPathArray := make([]string, 0, 16)
+	core.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
+		binlogPathArray = append(binlogPathArray, binlog...)
+		return 2000, nil
 	}
 
 	err = svr.Start()
@@ -275,6 +289,107 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.PartitionNames), 2)
+		assert.Equal(t, len(rsp.PartitionIDs), 2)
+	})
+
+	t.Run("show segment", func(t *testing.T) {
+		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		partID := coll.PartitionIDs[1]
+		part, err := core.MetaTable.GetPartitionByID(partID)
+		assert.Nil(t, err)
+		assert.Zero(t, len(part.SegmentIDs))
+		seg := &datapb.SegmentInfo{
+			SegmentID:    1000,
+			CollectionID: coll.ID,
+			PartitionID:  part.PartitionID,
+		}
+		core.DataServiceSegmentChan <- seg
+		time.Sleep(time.Millisecond * 100)
+		part, err = core.MetaTable.GetPartitionByID(partID)
+		assert.Nil(t, err)
+		assert.Equal(t, len(part.SegmentIDs), 1)
+
+		req := &milvuspb.ShowSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   111, //TODO show segment request msg type
+				MsgID:     111,
+				Timestamp: 111,
+				SourceID:  111,
+			},
+			CollectionID: coll.ID,
+			PartitionID:  partID,
+		}
+		rsp, err := cli.ShowSegments(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.SegmentIDs[0], int64(1000))
+		assert.Equal(t, len(rsp.SegmentIDs), 1)
+	})
+
+	t.Run("create index", func(t *testing.T) {
+		req := &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kCreateIndex,
+				MsgID:     112,
+				Timestamp: 112,
+				SourceID:  112,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			ExtraParams:    nil,
+		}
+		rsp, err := cli.CreateIndex(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, 3, len(binlogPathArray))
+		assert.ElementsMatch(t, binlogPathArray, []string{"file1", "file2", "file3"})
+
+		req.FieldName = "no field"
+		rsp, err = cli.CreateIndex(req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+	})
+
+	t.Run("describe segment", func(t *testing.T) {
+		coll, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+
+		req := &milvuspb.DescribeSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   113, //TODO, describe segment request msg type
+				MsgID:     113,
+				Timestamp: 113,
+				SourceID:  113,
+			},
+			CollectionID: coll.ID,
+			SegmentID:    1000,
+		}
+		rsp, err := cli.DescribeSegment(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		t.Logf("index id = %d", rsp.IndexID)
+	})
+
+	t.Run("describe index", func(t *testing.T) {
+		req := &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kDescribeIndex,
+				MsgID:     114,
+				Timestamp: 114,
+				SourceID:  114,
+			},
+			DbName:         "",
+			CollectionName: "testColl",
+			FieldName:      "vector",
+			IndexName:      "",
+		}
+		rsp, err := cli.DescribeIndex(req)
+		assert.Nil(t, err)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, len(rsp.IndexDescriptions), 1)
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -134,6 +135,18 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	DdDropPartitionReq func(req *internalpb2.DropPartitionRequest) error
 
+	//setMsgStreams segment channel, receive segment info from data service, if master create segment
+	DataServiceSegmentChan chan *datapb.SegmentInfo
+
+	//TODO,get binlog file path from data service,
+	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+
+	//TODO, call index builder's client to build index, return build id
+	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error)
+
+	// put create index task into this chan
+	indexTaskQueue chan *CreateIndexTask
+
 	//dd request scheduler
 	ddReqQueue      chan reqTask //dd request will be push into this chan
 	lastDdTimeStamp typeutil.Timestamp
@@ -202,6 +215,18 @@ func (c *Core) checkInit() error {
 	if c.DdDropPartitionReq == nil {
 		return errors.Errorf("DdDropPartitionReq is nil")
 	}
+	if c.DataServiceSegmentChan == nil {
+		return errors.Errorf("DataServiceSegmentChan is nil")
+	}
+	if c.GetBinlogFilePathsFromDataServiceReq == nil {
+		return errors.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
+	}
+	if c.BuildIndexReq == nil {
+		return errors.Errorf("BuildIndexReq is nil")
+	}
+	if c.indexTaskQueue == nil {
+		return errors.Errorf("indexTaskQueue is nil")
+	}
 	log.Printf("master node id = %d\n", Params.NodeID)
 	return nil
 }
@@ -251,6 +276,47 @@ func (c *Core) startTimeTickLoop() {
 				log.Printf("master send time tick into dd and time_tick channel failed: %s", err.Error())
 			}
 			c.lastTimeTick = tt
+		}
+	}
+}
+
+//data service send segment info to master when create segment
+func (c *Core) startDataServiceSegmentLoop() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Printf("close data service segment loop")
+			return
+		case seg, ok := <-c.DataServiceSegmentChan:
+			if !ok {
+				log.Printf("data service segment is closed, exit loop")
+				return
+			}
+			if seg == nil {
+				log.Printf("segment from data service is nill")
+			} else if err := c.MetaTable.AddSegment(seg); err != nil {
+				//what if master add segment failed, but data service success?
+				log.Printf("add segment info meta table failed ")
+			}
+		}
+	}
+}
+
+//create index loop
+func (c *Core) startCreateIndexLoop() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Printf("close create index loop")
+			return
+		case t, ok := <-c.indexTaskQueue:
+			if !ok {
+				log.Printf("index task chan is close, exit loop")
+				return
+			}
+			if err := t.BuildIndex(); err != nil {
+				log.Printf("create index failed, error = %s", err.Error())
+			}
 		}
 	}
 }
@@ -405,6 +471,7 @@ func (c *Core) setMsgStreams() error {
 	dataServiceStream.SetPulsarClient(Params.PulsarAddress)
 	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	dataServiceStream.Start()
+	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
 
 	// receive segment info from msg stream
 	go func() {
@@ -420,9 +487,7 @@ func (c *Core) setMsgStreams() error {
 					for _, segm := range segMsg.Msgs {
 						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
 						if ok {
-							if err := c.MetaTable.AddSegment(segInfoMsg.Segment); err != nil {
-								log.Printf("create segment failed, segmentid = %d,colleciont id = %d, error = %s", segInfoMsg.Segment.SegmentID, segInfoMsg.Segment.CollectionID, err.Error())
-							}
+							c.DataServiceSegmentChan <- segInfoMsg.Segment
 						}
 						//TODO, if data node flush
 					}
@@ -457,6 +522,7 @@ func (c *Core) Init(params *InitParams) error {
 			return
 		}
 		c.ddReqQueue = make(chan reqTask, 1024)
+		c.indexTaskQueue = make(chan *CreateIndexTask, 1024)
 		initError = c.setMsgStreams()
 		c.isInit.Store(true)
 	})
@@ -474,6 +540,8 @@ func (c *Core) Start() error {
 	c.startOnce.Do(func() {
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
+		go c.startDataServiceSegmentLoop()
+		go c.startCreateIndexLoop()
 		c.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	})
 	return nil
@@ -760,24 +828,116 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 	return t.Rsp, nil
 }
 
-//TODO
 func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return nil, nil
+	t := &CreateIndexReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    "CreateIndex failed, error = " + err.Error(),
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
 }
 
-//TODO
 func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return nil, nil
+	t := &DescribeIndexReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.DescribeIndexResponse{
+			Status:            nil,
+			IndexDescriptions: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "DescribeIndex failed, error = " + err.Error(),
+			},
+			IndexDescriptions: nil,
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
 }
 
-//TODO
 func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	return nil, nil
+	t := &DescribeSegmentReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.DescribeSegmentResponse{
+			Status:  nil,
+			IndexID: 0,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.DescribeSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "DescribeSegment failed, error = " + err.Error(),
+			},
+			IndexID: 0,
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
 }
 
-//TODO
 func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
-	return nil, nil
+	t := &ShowSegmentReqTask{
+		baseReqTask: baseReqTask{
+			cv:   make(chan error),
+			core: c,
+		},
+		Req: in,
+		Rsp: &milvuspb.ShowSegmentResponse{
+			Status:     nil,
+			SegmentIDs: nil,
+		},
+	}
+	c.ddReqQueue <- t
+	err := t.WaitToFinish()
+	if err != nil {
+		return &milvuspb.ShowSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    "ShowSegments failed, error: " + err.Error(),
+			},
+			SegmentIDs: nil,
+		}, nil
+	}
+	t.Rsp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}
+	return t.Rsp, nil
 }
 
 func (c *Core) AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error) {

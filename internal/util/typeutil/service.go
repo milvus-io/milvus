@@ -5,9 +5,9 @@ import (
 )
 
 type Service interface {
-	Init()
-	Start()
-	Stop()
+	Init() error
+	Start() error
+	Stop() error
 }
 
 type Component interface {

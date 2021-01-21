@@ -26,4 +26,5 @@ type ParamTable struct {
 
 	MaxPartitionNum      int64
 	DefaultPartitionName string
+	DefaultIndexName     string
 }
