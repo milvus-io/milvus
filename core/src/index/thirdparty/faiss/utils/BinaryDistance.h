@@ -30,7 +30,7 @@ namespace faiss {
 
 
  /** Return the k matched distances for a set of binary query vectors,
-  * using a max heap.
+  * using an array.
   * @param a       queries, size ha->nh * ncodes
   * @param b       database, size nb * ncodes
   * @param na      number of queries vectors
@@ -38,7 +38,7 @@ namespace faiss {
   * @param k       number of the matched vectors to return
   * @param ncodes  size of the binary codes (bytes)
  */
-    void binary_distence_knn_mc (
+    void binary_distance_knn_mc (
             MetricType metric_type,
             const uint8_t * a,
             const uint8_t * b,
@@ -50,9 +50,17 @@ namespace faiss {
             int64_t *labels,
             const BitsetView& bitset);
 
-
+/** Return the k smallest distances for a set of binary query vectors,
+ * using a heap.
+ * @param a       queries, size ha->nh * ncodes
+ * @param b       database, size nb * ncodes
+ * @param nb      number of database vectors
+ * @param ncodes  size of the binary codes (bytes)
+ * @param ordered if != 0: order the results by decreasing distance
+ *                (may be bottleneck for k/n > 0.01)
+ */
     template <class T1>
-    void binary_distence_knn_hc (
+    void binary_distance_knn_hc (
             MetricType metric_type,
             T1 * ha,
             const uint8_t * a,
@@ -63,7 +71,7 @@ namespace faiss {
 
 
     extern template
-    void binary_distence_knn_hc<int_maxheap_array_t>(
+    void binary_distance_knn_hc<int_maxheap_array_t>(
             MetricType metric_type,
             int_maxheap_array_t * ha,
             const uint8_t * a,
@@ -73,7 +81,7 @@ namespace faiss {
             const BitsetView& bitset);
 
     extern template
-    void binary_distence_knn_hc<float_maxheap_array_t>(
+    void binary_distance_knn_hc<float_maxheap_array_t>(
             MetricType metric_type,
             float_maxheap_array_t * ha,
             const uint8_t * a,

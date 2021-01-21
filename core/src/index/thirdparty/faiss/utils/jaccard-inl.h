@@ -354,8 +354,8 @@ struct JaccardComputer256 {
             int accu_den = 0;
 
             accu_num = vec_and_popcnt(a,b8,n);
-            accu_num = vec_or_popcnt(a,b8,n);
-            if (accu_num == 0)
+            accu_den = vec_or_popcnt(a,b8,n);
+            if (accu_den == 0)
                 return 1.0;
             return 1.0 - (float)(accu_num) / (float)(accu_den);
         }

@@ -42,9 +42,9 @@ int main() {
     }
 //#ifdef TEST_HAMMING
     // printf("test haming\n");
-    faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Hamming);
+   // faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Hamming);
 //#else
-    //  faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Jaccard);
+   faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Jaccard);
 //#endif
     index.add(nb, xb);
     printf("ntotal = %ld d = %d\n", index.ntotal, index.d);
@@ -98,7 +98,7 @@ int main() {
                 if(topk == 10)
                 {
                     for(int j=0; j<5;j++){
-                        printf("i: %d j: %d :%8ld %d\n", i,j,I[i * topk + j], D[i * topk + j]);
+                        printf("i: %d j: %d :%8ld %f\n", i,j,I[i * topk + j], d_float[i * topk + j]);
                     }
                 }
 

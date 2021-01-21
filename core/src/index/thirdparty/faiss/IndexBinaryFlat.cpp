@@ -55,7 +55,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                     size_t(nn), size_t(k), labels + s * k, D + s * k
             };
 
-            binary_distence_knn_hc<float_maxheap_array_t>(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
+            binary_distance_knn_hc<float_maxheap_array_t>(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
                     bitset);
 
         }
@@ -72,8 +72,8 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                 nn = n - s;
             }
 
-            // only match ids will be chosed, not to use heap
-            binary_distence_knn_mc(metric_type, x + s * code_size, xb.data(), nn, ntotal, k, code_size,
+            // only match ids will be chosen, not to use heap
+            binary_distance_knn_mc(metric_type, x + s * code_size, xb.data(), nn, ntotal, k, code_size,
                     D + s * k, labels + s * k, bitset);
         }
     } else {
@@ -87,7 +87,7 @@ void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                     size_t(nn), size_t(k), labels + s * k, distances + s * k
             };
 
-            binary_distence_knn_hc<int_maxheap_array_t>(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
+            binary_distance_knn_hc<int_maxheap_array_t>(metric_type, &res, x + s * code_size, xb.data(), ntotal, code_size,
                     bitset);
         }
     }

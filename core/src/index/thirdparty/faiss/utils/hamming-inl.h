@@ -243,11 +243,6 @@ struct HammingComputerDefault {
        return accu;
     }
 
-    int compute (const uint8_t *b8) const  {
-       return hamming(b8);
-    }
-
-
 };
 
 struct HammingComputerM8 {

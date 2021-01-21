@@ -28,7 +28,7 @@ static const size_t batch_size = 65536;
 
 template <class T>
 static
-void binary_distence_knn_mc(
+void binary_distance_knn_mc(
         int bytes_per_code,
         const uint8_t * bs1,
         const uint8_t * bs2,
@@ -138,7 +138,7 @@ void binary_distence_knn_mc(
     }
 }
 
-void binary_distence_knn_mc (
+void binary_distance_knn_mc (
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,
@@ -153,21 +153,21 @@ void binary_distence_knn_mc (
     switch (metric_type) {
     case METRIC_Substructure:
         switch (ncodes) {
-#define binary_distence_knn_mc_Substructure(ncodes) \
+#define binary_distance_knn_mc_Substructure(ncodes) \
         case ncodes: \
-            binary_distence_knn_mc<faiss::SubstructureComputer ## ncodes> \
+            binary_distance_knn_mc<faiss::SubstructureComputer ## ncodes> \
                 (ncodes, a, b, na, nb, k, distances, labels, bitset); \
         break;
-        binary_distence_knn_mc_Substructure(8);
-        binary_distence_knn_mc_Substructure(16);
-        binary_distence_knn_mc_Substructure(32);
-        binary_distence_knn_mc_Substructure(64);
-        binary_distence_knn_mc_Substructure(128);
-        binary_distence_knn_mc_Substructure(256);
-        binary_distence_knn_mc_Substructure(512);
-#undef binary_distence_knn_mc_Substructure
+        binary_distance_knn_mc_Substructure(8);
+        binary_distance_knn_mc_Substructure(16);
+        binary_distance_knn_mc_Substructure(32);
+        binary_distance_knn_mc_Substructure(64);
+        binary_distance_knn_mc_Substructure(128);
+        binary_distance_knn_mc_Substructure(256);
+        binary_distance_knn_mc_Substructure(512);
+#undef binary_distance_knn_mc_Substructure
         default:
-            binary_distence_knn_mc<faiss::SubstructureComputerDefault>
+            binary_distance_knn_mc<faiss::SubstructureComputerDefault>
                     (ncodes, a, b, na, nb, k, distances, labels, bitset);
             break;
         }
@@ -175,21 +175,21 @@ void binary_distence_knn_mc (
 
     case METRIC_Superstructure:
         switch (ncodes) {
-#define binary_distence_knn_mc_Superstructure(ncodes) \
+#define binary_distance_knn_mc_Superstructure(ncodes) \
         case ncodes: \
-            binary_distence_knn_mc<faiss::SuperstructureComputer ## ncodes> \
+            binary_distance_knn_mc<faiss::SuperstructureComputer ## ncodes> \
                 (ncodes, a, b, na, nb, k, distances, labels, bitset); \
         break;
-        binary_distence_knn_mc_Superstructure(8);
-        binary_distence_knn_mc_Superstructure(16);
-        binary_distence_knn_mc_Superstructure(32);
-        binary_distence_knn_mc_Superstructure(64);
-        binary_distence_knn_mc_Superstructure(128);
-        binary_distence_knn_mc_Superstructure(256);
-        binary_distence_knn_mc_Superstructure(512);
-#undef binary_distence_knn_mc_Superstructure
+        binary_distance_knn_mc_Superstructure(8);
+        binary_distance_knn_mc_Superstructure(16);
+        binary_distance_knn_mc_Superstructure(32);
+        binary_distance_knn_mc_Superstructure(64);
+        binary_distance_knn_mc_Superstructure(128);
+        binary_distance_knn_mc_Superstructure(256);
+        binary_distance_knn_mc_Superstructure(512);
+#undef binary_distance_knn_mc_Superstructure
         default:
-            binary_distence_knn_mc<faiss::SuperstructureComputerDefault>
+            binary_distance_knn_mc<faiss::SuperstructureComputerDefault>
                     (ncodes, a, b, na, nb, k, distances, labels, bitset);
             break;
         }
@@ -200,18 +200,10 @@ void binary_distence_knn_mc (
     }
 }
 
-/** Return the k smallest distances for a set of binary query vectors,
- * using a max heap.
- * @param a       queries, size ha->nh * ncodes
- * @param b       database, size nb * ncodes
- * @param nb      number of database vectors
- * @param ncodes  size of the binary codes (bytes)
- * @param ordered if != 0: order the results by decreasing distance
- *                (may be bottleneck for k/n > 0.01) */
-
 
 template <class T2, class Computer>
-void binary_distence_knn_hc (
+void binary_distance_knn_hc (
+        Computer computer,
         int bytes_per_code,
         T2 * ha,
         const uint8_t * bs1,
@@ -235,11 +227,6 @@ void binary_distence_knn_hc (
             labels[i] = -1;
         }
 
-        Computer *hc = new Computer[ha->nh];
-        for (size_t i = 0; i < ha->nh; i++) {
-            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
-        }
-
 #pragma omp parallel for
         for (size_t j = 0; j < n2; j++) {
             if(!bitset || !bitset.test(j)) {
@@ -247,8 +234,7 @@ void binary_distence_knn_hc (
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
                 for (size_t i = 0; i < ha->nh; i++) {
-                    T1 dis = hc[i].compute (bs2_);
-
+                    T1 dis = computer(bs1 + i * bytes_per_code, bs2_, bytes_per_code);
                     T1 * val_ = value + thread_no * thread_heap_size + i * k;
                     int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
                     if (  dis < val_[0]) {
@@ -277,7 +263,6 @@ void binary_distence_knn_hc (
         memcpy(ha->val, value, thread_heap_size * sizeof(T1));
         memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
 
-        delete[] hc;
         delete[] value;
         delete[] labels;
 
@@ -289,8 +274,6 @@ void binary_distence_knn_hc (
             const size_t j1 = std::min(j0 + block_size, n2);
 #pragma omp parallel for
             for (size_t i = 0; i < ha->nh; i++) {
-                Computer hc(bs1 + i * bytes_per_code, bytes_per_code);
-
                 const uint8_t *bs2_ = bs2 + j0 * bytes_per_code;
                 T1 dis;
                 T1 *__restrict bh_val_ = ha->val + i * k;
@@ -298,7 +281,7 @@ void binary_distence_knn_hc (
                 size_t j;
                 for (j = j0; j < j1; j++, bs2_ += bytes_per_code) {
                     if (!bitset || !bitset.test(j)) {
-                        dis = hc.compute(bs2_);
+                        dis = computer(bs1 + i * bytes_per_code, bs2_, bytes_per_code);
                         if (dis < bh_val_[0]) {
                             faiss::maxheap_swap_top<T1>(k, bh_val_, bh_ids_, dis, j);
                         }
@@ -311,10 +294,18 @@ void binary_distence_knn_hc (
     ha->reorder ();
 }
 
+int Hamming(const uint8_t * a, const uint8_t * b, size_t n) {
+    return vec_xor_popcnt(a, b, n);
+}
 
+float Jaccard(const uint8_t * a, const uint8_t * b, size_t n) {
+    int accu_num = vec_and_popcnt(a,b,n);
+    int accu_den = vec_or_popcnt(a,b,n);
+    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+}
 
 template <class T1>
-void binary_distence_knn_hc (
+void binary_distance_knn_hc (
         MetricType metric_type,
         T1 * ha,
         const uint8_t * a,
@@ -338,7 +329,7 @@ void binary_distence_knn_hc (
                 vec_or_popcnt = OR_popcnt_SSE;
                 vec_and_popcnt = AND_popcnt_SSE;
             }
-            binary_distence_knn_hc<T1, JaccardComputerDefault>(ncodes, ha, a, b, nb, bitset);
+            binary_distance_knn_hc(&Jaccard, ncodes, ha, a, b, nb, bitset);
             break;
         case METRIC_Hamming:
             if (support_avx512() && dim > 1024) {
@@ -348,7 +339,7 @@ void binary_distence_knn_hc (
             } else {
                 vec_xor_popcnt = XOR_popcnt_SSE;
             }
-            binary_distence_knn_hc<T1, HammingComputerDefault>(ncodes, ha, a, b, nb, bitset);
+            binary_distance_knn_hc(&Hamming, ncodes, ha, a, b, nb, bitset);
             break;
         default:
             break;
@@ -356,7 +347,7 @@ void binary_distence_knn_hc (
 }
 
 template
-void binary_distence_knn_hc<int_maxheap_array_t>(
+void binary_distance_knn_hc<int_maxheap_array_t>(
         MetricType metric_type,
         int_maxheap_array_t * ha,
         const uint8_t * a,
@@ -366,7 +357,7 @@ void binary_distence_knn_hc<int_maxheap_array_t>(
         const BitsetView& bitset);
 
 template
-void binary_distence_knn_hc<float_maxheap_array_t>(
+void binary_distance_knn_hc<float_maxheap_array_t>(
         MetricType metric_type,
         float_maxheap_array_t * ha,
         const uint8_t * a,
