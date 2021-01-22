@@ -49,6 +49,6 @@ func (s ProxyService) InvalidateCollectionMetaCache(request proxypb.InvalidateCo
 	panic("implement me")
 }
 
-func NewProxyServiceImpl() Interface {
+func NewProxyServiceImpl() interface{} {
 	return &ProxyService{}
 }

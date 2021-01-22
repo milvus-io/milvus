@@ -87,7 +87,7 @@ master: build-cpp
 proxynode: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building proxy ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxy $(PWD)/cmd/proxy/proxy.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
 
 # Builds various components locally.
 querynode: build-cpp
@@ -113,8 +113,8 @@ build-go: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building master ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/master $(PWD)/cmd/master/main.go 1>/dev/null
-	@echo "Building proxy ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxy $(PWD)/cmd/proxy/proxy.go 1>/dev/null
+	@echo "Building proxy node ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="0" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
 	@echo "Building query node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
 	@echo "Building indexbuilder ..."
@@ -145,7 +145,7 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
-#TODO: proxy master query node writer's unittest
+#TODO: proxynode master query node writer's unittest
 test-go:build-cpp
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -165,7 +165,7 @@ install: all
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxy $(GOPATH)/bin/proxy
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxynode $(GOPATH)/bin/proxynode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/writenode $(GOPATH)/bin/writenode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexbuilder $(GOPATH)/bin/indexbuilder
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/singlenode $(GOPATH)/bin/singlenode
@@ -179,7 +179,7 @@ clean:
 	@rm -rf bin/
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/master
-	@rm -rf $(GOPATH)/bin/proxy
+	@rm -rf $(GOPATH)/bin/proxynode
 	@rm -rf $(GOPATH)/bin/querynode
 	@rm -rf $(GOPATH)/bin/writenode
 	@rm -rf $(GOPATH)/bin/indexbuilder

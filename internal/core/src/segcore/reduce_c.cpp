@@ -15,7 +15,7 @@
 
 #include "segcore/Reduce.h"
 #include "common/Types.h"
-#include "pb/service_msg.pb.h"
+#include "pb/milvus.pb.h"
 
 using SearchResult = milvus::QueryResult;
 
@@ -206,7 +206,7 @@ ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
         for (int i = 0; i < num_groups; i++) {
             MarshaledHitsPeerGroup& hits_peer_group = (*marshaledHits).marshaled_hits_[i];
             for (int j = 0; j < num_queries_peer_group[i]; j++) {
-                milvus::proto::service::Hits hits;
+                milvus::proto::milvus::Hits hits;
                 for (int k = 0; k < topk; k++, fill_hit_offset++) {
                     hits.add_ids(result_ids[fill_hit_offset]);
                     hits.add_scores(result_distances[fill_hit_offset]);

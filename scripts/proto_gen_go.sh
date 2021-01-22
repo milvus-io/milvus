@@ -23,7 +23,7 @@ mkdir -p etcdpb
 mkdir -p indexcgopb
 
 #mkdir -p internalpb
-mkdir -p servicepb
+mkdir -p milvuspb
 mkdir -p masterpb
 mkdir -p indexbuilderpb
 mkdir -p writerpb
@@ -44,8 +44,6 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg
 
 #${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal_msg.proto
 
-${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service_msg.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./servicepb service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./writerpb write_node.proto
 

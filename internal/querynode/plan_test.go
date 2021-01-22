@@ -8,7 +8,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 func TestPlan_Plan(t *testing.T) {
@@ -58,14 +58,14 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i*4)))
 		searchRawData2 = append(searchRawData2, buf...)
 	}
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
 		Values: [][]byte{searchRawData1, searchRawData2},
 	}
 
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)

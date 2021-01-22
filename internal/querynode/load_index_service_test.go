@@ -20,7 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 )
 
@@ -159,21 +159,21 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 		binary.LittleEndian.PutUint32(vec, math.Float32bits(searchRowData[i]))
 		searchRowByteData = append(searchRowByteData, vec...)
 	}
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
 		Values: [][]byte{searchRowByteData},
 	}
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	if err != nil {
 		log.Print("marshal placeholderGroup failed")
 	}
-	query := servicepb.Query{
+	query := milvuspb.SearchRequest{
 		CollectionName:   "collection0",
-		PartitionTags:    []string{"default"},
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -219,7 +219,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	searchResultStream.Start()
 	searchResult := searchResultStream.Consume()
 	assert.NotNil(t, searchResult)
-	unMarshaledHit := servicepb.Hits{}
+	unMarshaledHit := milvuspb.Hits{}
 	err = proto.Unmarshal(searchResult.Msgs[0].(*msgstream.SearchResultMsg).Hits[0], &unMarshaledHit)
 	assert.Nil(t, err)
 
@@ -481,21 +481,21 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	//generate search data and send search msg
 	searchRowData := indexRowData[42*(DIM/8) : 43*(DIM/8)]
 	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"JACCARD\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_BINARY,
+		Type:   milvuspb.PlaceholderType_VECTOR_BINARY,
 		Values: [][]byte{searchRowData},
 	}
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	if err != nil {
 		log.Print("marshal placeholderGroup failed")
 	}
-	query := servicepb.Query{
+	query := milvuspb.SearchRequest{
 		CollectionName:   "collection0",
-		PartitionTags:    []string{"default"},
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -541,7 +541,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 	searchResultStream.Start()
 	searchResult := searchResultStream.Consume()
 	assert.NotNil(t, searchResult)
-	unMarshaledHit := servicepb.Hits{}
+	unMarshaledHit := milvuspb.Hits{}
 	err = proto.Unmarshal(searchResult.Msgs[0].(*msgstream.SearchResultMsg).Hits[0], &unMarshaledHit)
 	assert.Nil(t, err)
 

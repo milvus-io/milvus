@@ -12,7 +12,7 @@ services:
       - ../../..:/milvus-distributed:delegated
     working_dir: "/milvus-distributed/tests/python"
     command: >
-      /bin/bash -c "pytest --ip proxy"
+      /bin/bash -c "pytest --ip proxynode"
     networks:
       - milvus
 

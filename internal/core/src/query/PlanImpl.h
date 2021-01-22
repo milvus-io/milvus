@@ -15,7 +15,7 @@
 #include "utils/Json.h"
 #include "PlanNode.h"
 #include "utils/EasyAssert.h"
-#include "pb/service_msg.pb.h"
+#include "pb/milvus.pb.h"
 #include <memory>
 #include <map>
 #include <string>

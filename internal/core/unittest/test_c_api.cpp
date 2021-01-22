@@ -16,7 +16,7 @@
 #include <chrono>
 #include <google/protobuf/text_format.h>
 
-#include "pb/service_msg.pb.h"
+#include "pb/milvus.pb.h"
 #include "segcore/reduce_c.h"
 
 #include <index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h>
@@ -32,7 +32,7 @@ namespace chrono = std::chrono;
 
 using namespace milvus;
 using namespace milvus::segcore;
-using namespace milvus::proto;
+//using namespace milvus::proto;
 using namespace milvus::knowhere;
 
 TEST(CApiTest, CollectionTest) {
@@ -155,7 +155,7 @@ TEST(CApiTest, SearchTest) {
         }
     })";
 
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
     int dim = 16;
     std::normal_distribution<double> dis(0, 1);
@@ -376,6 +376,7 @@ generate_data(int N) {
 
 std::string
 generate_collection_shema(std::string metric_type, std::string dim, bool is_binary) {
+    namespace schema = milvus::proto::schema;
     schema::CollectionSchema collection_schema;
     collection_schema.set_name("collection_test");
     collection_schema.set_autoid(true);
@@ -672,7 +673,7 @@ TEST(CApiTest, Reduce) {
         }
     })";
 
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
     int dim = 16;
     std::normal_distribution<double> dis(0, 1);

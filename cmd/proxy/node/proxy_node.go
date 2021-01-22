@@ -2,21 +2,19 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	grpcproxynode "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode"
+
 	"go.uber.org/zap"
 )
 
 func main() {
-	proxynode.Init()
-	fmt.Println("ProxyID is", proxynode.Params.ProxyID())
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := proxynode.CreateProxy(ctx)
+	svr, err := grpcproxynode.CreateProxyNodeServer()
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -34,6 +32,10 @@ func main() {
 		cancel()
 	}()
 
+	if err := svr.Init(); err != nil {
+		log.Fatal("Init server failed", zap.Error(err))
+	}
+
 	if err := svr.Start(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
@@ -41,7 +43,9 @@ func main() {
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Close()
+	if err := svr.Stop(); err != nil {
+		log.Fatal("stop server failed", zap.Error(err))
+	}
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

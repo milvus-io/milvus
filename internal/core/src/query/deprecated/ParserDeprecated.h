@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "pb/service_msg.pb.h"
+#include "pb/milvus.pb.h"
 #include "query/deprecated/BooleanQuery.h"
 #include "query/deprecated/BinaryQuery.h"
 #include "query/deprecated/GeneralQuery.h"
@@ -18,6 +18,6 @@
 namespace milvus::wtf {
 
 query_old::QueryPtr
-Transformer(proto::service::Query* query);
+Transformer(proto::milvus::SearchRequest* query);
 
 }  // namespace milvus::wtf

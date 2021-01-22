@@ -15,7 +15,7 @@
 #include "query/ExprImpl.h"
 #include "utils/Json.h"
 #include "utils/EasyAssert.h"
-#include "pb/service_msg.pb.h"
+#include "pb/milvus.pb.h"
 #include <vector>
 #include <memory>
 #include <boost/align/aligned_allocator.hpp>
@@ -281,7 +281,7 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
-    namespace ser = milvus::proto::service;
+    namespace ser = milvus::proto::milvus;
     auto result = std::make_unique<PlaceholderGroup>();
     ser::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromString(blob);

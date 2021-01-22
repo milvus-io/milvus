@@ -11,12 +11,12 @@
 
 FROM alpine:3.12.1
 
-COPY ./bin/proxy /milvus-distributed/bin/proxy
+COPY ./bin/proxynode /milvus-distributed/bin/proxynode
 
 COPY ./configs/ /milvus-distributed/configs/
 
 WORKDIR /milvus-distributed/
 
-CMD ["./bin/proxy"]
+CMD ["./bin/proxynode"]
 
 EXPOSE 19530

@@ -20,7 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 type searchService struct {
@@ -233,14 +233,16 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 
 	searchTimestamp := searchMsg.Base.Timestamp
 	var queryBlob = searchMsg.Query.Value
-	query := servicepb.Query{}
+	query := milvuspb.SearchRequest{}
 	err := proto.Unmarshal(queryBlob, &query)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
 		return errors.New("unmarshal query failed")
 	}
 	collectionName := query.CollectionName
-	partitionTagsInQuery := query.PartitionTags
+	fmt.Println("[ljq collection name]: ", collectionName)
+	partitionTagsInQuery := query.PartitionNames
+	fmt.Println("[search service ljq] query: ", query)
 	collection, err := ss.replica.getCollectionByName(collectionName)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
@@ -306,7 +308,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		for _, group := range placeholderGroups {
 			nq := group.getNumOfQuery()
 			nilHits := make([][]byte, nq)
-			hit := &servicepb.Hits{}
+			hit := &milvuspb.Hits{}
 			for i := 0; i < int(nq); i++ {
 				bs, err := proto.Marshal(hit)
 				if err != nil {
@@ -374,7 +376,7 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 			hits = append(hits, hitsBlob[offset:offset+len])
 			//test code to checkout marshaled hits
 			//marshaledHit := hitsBlob[offset:offset+len]
-			//unMarshaledHit := servicepb.Hits{}
+			//unMarshaledHit := milvuspb.Hits{}
 			//err = proto.Unmarshal(marshaledHit, &unMarshaledHit)
 			//if err != nil {
 			//	return err

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/servicepb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -347,14 +347,14 @@ func TestSegment_segmentSearch(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
 		searchRawData = append(searchRawData, buf...)
 	}
-	placeholderValue := servicepb.PlaceholderValue{
+	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   servicepb.PlaceholderType_VECTOR_FLOAT,
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
 		Values: [][]byte{searchRawData},
 	}
 
-	placeholderGroup := servicepb.PlaceholderGroup{
-		Placeholders: []*servicepb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)

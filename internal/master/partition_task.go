@@ -31,7 +31,7 @@ type hasPartitionTask struct {
 
 //type describePartitionTask struct {
 //	baseTask
-//	description *servicepb.PartitionDescription
+//	description *milvuspb.PartitionDescription
 //	req         *internalpb.DescribePartitionRequest
 //}
 
@@ -225,7 +225,7 @@ func (t *hasPartitionTask) Execute() error {
 //
 //	partitionName := t.req.PartitionName
 //
-//	description := servicepb.PartitionDescription{
+//	description := milvuspb.PartitionDescription{
 //		Status: &commonpb.Status{
 //			ErrorCode: commonpb.ErrorCode_SUCCESS,
 //		},
