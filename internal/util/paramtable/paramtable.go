@@ -161,6 +161,23 @@ func (gp *BaseTable) tryloadFromEnv() {
 	if err != nil {
 		panic(err)
 	}
+
+	queryServiceAddress := os.Getenv("QUERY_SERVICE_ADDRESS")
+	if queryServiceAddress == "" {
+		serviceHost, err := gp.Load("queryService.address")
+		if err != nil {
+			panic(err)
+		}
+		port, err := gp.Load("queryService.port")
+		if err != nil {
+			panic(err)
+		}
+		queryServiceAddress = serviceHost + ":" + port
+	}
+	err = gp.Save("_QueryServiceAddress", queryServiceAddress)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (gp *BaseTable) Load(key string) (string, error) {

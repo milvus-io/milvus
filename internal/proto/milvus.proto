@@ -46,7 +46,6 @@ message DescribeCollectionRequest {
 message DescribeCollectionResponse {
   common.Status status = 1;
   schema.CollectionSchema schema = 2;
-  int64 collectionID = 3;
 }
 
 message LoadCollectionRequest {
