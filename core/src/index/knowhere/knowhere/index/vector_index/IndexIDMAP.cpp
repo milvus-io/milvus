@@ -126,6 +126,7 @@ IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
     real_idx->range_search(rows, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
     ExchangeDataset(result, res);
     index_->metric_type = default_type;
+    return result;
 }
 
 int64_t

@@ -247,11 +247,14 @@ TEST_P(IDMAPTest, idmap_range_search_l2) {
 
     auto compare_res = [&] (std::vector<milvus::knowhere::DynamicResultSegment> &results) {
         { // compare the result
+//            std::cout << "size of result: " << results.size() << std::endl;
             for (auto i = 0; i < nq; ++ i) {
-                int query_i_cnt = 0;
                 int correct_cnt = 0;
+//                std::cout << "query id = " << i << ", result[i].size = " << results[i].size() << std::endl;
                 for (auto &res_space: results[i]) {
+//                    std::cout << "buffer size = " << res_space->buffer_size << ", wp = " << res_space->wp << ", size of buffers = " << res_space->buffers.size() << std::endl;
                     auto qnr = res_space->buffer_size * res_space->buffers.size() - res_space->buffer_size + res_space->wp;
+//                    std::cout << "qnr = " << qnr << std::endl;
                     for (auto j = 0; j < qnr; ++ j) {
                         auto bno = j / res_space->buffer_size;
                         auto pos = j % res_space->buffer_size;
@@ -412,8 +415,14 @@ TEST_P(IDMAPTest, idmap_dynamic_result_set) {
 
     bruteforce();
 
-    auto compare_res = [&] (milvus::knowhere::DynamicResultSet &rst) {
+    auto check_rst = [&] (milvus::knowhere::DynamicResultSet &rst, milvus::knowhere::ResultSetPostProcessType rspt) {
         { // compare the result
+            for (auto i = 0; i < rst.count - 1; ++ i) {
+                if (rspt == milvus::knowhere::ResultSetPostProcessType::SortAsc)
+                    ASSERT_LE(rst.distances.get() + i, rst.distances.get() + i + 1);
+                else if (rspt == milvus::knowhere::ResultSetPostProcessType::SortDesc)
+                    ASSERT_GE(rst.distances.get() + i, rst.distances.get() + i + 1);
+            }
         }
     };
 
@@ -428,8 +437,9 @@ TEST_P(IDMAPTest, idmap_dynamic_result_set) {
         }
 
         auto rst = collector.Merge(1000, milvus::knowhere::ResultSetPostProcessType::SortAsc);
+        ASSERT_LE(rst.count, 1000);
 
-        compare_res(rst);
+        check_rst(rst, milvus::knowhere::ResultSetPostProcessType::SortAsc);
 
     }
 }
