@@ -11,6 +11,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
+	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/opentracing/opentracing-go"
@@ -32,9 +34,10 @@ type NodeImpl struct {
 	cancel func()
 	wg     sync.WaitGroup
 
-	initParams *internalpb2.InitParams
-	ip         string
-	port       int
+	proxyServiceClient *grpcproxyservice.Client
+	initParams         *internalpb2.InitParams
+	ip                 string
+	port               int
 
 	masterConn   *grpc.ClientConn
 	masterClient masterpb.MasterServiceClient

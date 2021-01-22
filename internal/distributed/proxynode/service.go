@@ -3,13 +3,18 @@ package grpcproxynode
 import (
 	"context"
 	"net"
+	"os"
 	"strconv"
 	"sync"
+
+	"github.com/go-basic/ipv4"
+
+	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
-	proxynodeimpl "github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/proxynode"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 
@@ -19,12 +24,12 @@ import (
 type Server struct {
 	ctx                 context.Context
 	wg                  sync.WaitGroup
-	impl                proxynodeimpl.ProxyNode
+	impl                proxynode.ProxyNode
 	grpcServer          *grpc.Server
 	ip                  string
 	port                int
 	proxyServiceAddress string
-	//proxyServiceClient  *proxyservice.Client
+	proxyServiceClient  *grpcproxyservice.Client
 }
 
 func CreateProxyNodeServer() (*Server, error) {
@@ -32,51 +37,56 @@ func CreateProxyNodeServer() (*Server, error) {
 }
 
 func (s *Server) connectProxyService() error {
-	proxynodeimpl.Params.Init()
+	proxynode.Params.Init()
 
-	//s.proxyServiceAddress = proxynodeimpl.Params.ProxyServiceAddress()
-	//s.proxyServiceClient = proxyservice.NewClient(s.ctx, s.proxyServiceAddress)
-	//
-	//getAvailablePort := func() int {
-	//	listener, err := net.Listen("tcp", ":0")
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	defer listener.Close()
-	//
-	//	return listener.Addr().(*net.TCPAddr).Port
-	//}
-	//getLocalIp := func() string {
-	//	return ipv4.LocalIP()
-	//}
-	//s.ip = getLocalIp()
-	//s.port = getAvailablePort()
-	//
-	//request := &proxypb.RegisterNodeRequest{
-	//	Address: &commonpb.Address{
-	//		Ip:   s.ip,
-	//		Port: int64(s.port),
-	//	},
-	//}
-	//response, err := s.proxyServiceClient.RegisterNode(request)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//proxynodeimpl.Params.Save("_proxyID", strconv.Itoa(int(response.InitParams.NodeID)))
-	//
-	//for _, params := range response.InitParams.StartParams {
-	//	proxynodeimpl.Params.Save(params.Key, params.Value)
-	//}
-	//
-	//return err
-	return nil
+	s.proxyServiceAddress = proxynode.Params.ProxyServiceAddress()
+	s.proxyServiceClient = grpcproxyservice.NewClient(s.ctx, s.proxyServiceAddress)
+
+	getAvailablePort := func() int {
+		listener, err := net.Listen("tcp", ":0")
+		if err != nil {
+			panic(err)
+		}
+		defer listener.Close()
+
+		return listener.Addr().(*net.TCPAddr).Port
+	}
+	getLocalIP := func() string {
+		localIP := ipv4.LocalIP()
+		host := os.Getenv("PROXY_NODE_HOST")
+		// TODO: shall we write this to ParamTable?
+		if len(host) <= 0 {
+			return localIP
+		}
+		return host
+	}
+	s.ip = getLocalIP()
+	s.port = getAvailablePort()
+
+	request := &proxypb.RegisterNodeRequest{
+		Address: &commonpb.Address{
+			Ip:   s.ip,
+			Port: int64(s.port),
+		},
+	}
+	response, err := s.proxyServiceClient.RegisterNode(request)
+	if err != nil {
+		panic(err)
+	}
+
+	proxynode.Params.Save("_proxyID", strconv.Itoa(int(response.InitParams.NodeID)))
+
+	for _, params := range response.InitParams.StartParams {
+		proxynode.Params.Save(params.Key, params.Value)
+	}
+
+	return err
 }
 
 func (s *Server) Init() error {
 	s.ctx = context.Background()
 	var err error
-	s.impl, err = proxynodeimpl.CreateProxyNodeImpl(s.ctx)
+	s.impl, err = proxynode.CreateProxyNodeImpl(s.ctx)
 	if err != nil {
 		return err
 	}
@@ -93,7 +103,7 @@ func (s *Server) Start() error {
 		defer s.wg.Done()
 
 		// TODO: use config
-		lis, err := net.Listen("tcp", ":"+strconv.Itoa(proxynodeimpl.Params.NetworkPort()))
+		lis, err := net.Listen("tcp", ":"+strconv.Itoa(s.port))
 		if err != nil {
 			panic(err)
 		}

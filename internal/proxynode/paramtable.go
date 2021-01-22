@@ -66,6 +66,12 @@ func (pt *ParamTable) NetworkAddress() string {
 }
 
 func (pt *ParamTable) ProxyServiceAddress() string {
+	addressFromEnv := os.Getenv("PROXY_SERVICE_ADDRESS")
+	if len(addressFromEnv) > 0 {
+		// TODO: or write to param table?
+		return addressFromEnv
+	}
+
 	addr, err := pt.Load("proxyService.address")
 	if err != nil {
 		panic(err)
