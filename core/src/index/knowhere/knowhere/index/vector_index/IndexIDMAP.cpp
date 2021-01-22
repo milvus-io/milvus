@@ -110,8 +110,9 @@ IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const milvus
     }
 
     auto default_type = index_->metric_type;
-    if (config.contains(Metric::TYPE))
+    if (config.contains(Metric::TYPE)) {
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+    }
     std::vector<faiss::RangeSearchPartialResult*> res;
     DynamicResultSegment result;
     auto radius = config[IndexParams::range_search_radius].get<float>();
@@ -120,8 +121,9 @@ IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const milvus
     if (real_idx == nullptr) {
         KNOWHERE_THROW_MSG("Cannot dynamic_cast the index to faiss::IndexFlat type!");
     }
-    if (index_->metric_type == faiss::MetricType::METRIC_L2)
+    if (index_->metric_type == faiss::MetricType::METRIC_L2) {
         radius *= radius;
+    }
     real_idx->range_search(rows, reinterpret_cast<const float*>(p_data), radius, res, buffer_size, bitset);
     ExchangeDataset(result, res);
     MapUids(result, uids_);

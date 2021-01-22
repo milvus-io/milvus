@@ -50,8 +50,9 @@ template <bool asc>
 void
 DynamicResultSet::quick_sort(size_t lp, size_t rp) {
     auto len = rp - lp;
-    if (len <= 1)
+    if (len <= 1) {
         return;
+    }
     auto pvot = lp + (len >> 1);
     size_t low = lp;
     size_t high = rp - 1;
@@ -64,16 +65,18 @@ DynamicResultSet::quick_sort(size_t lp, size_t rp) {
             while (low < high && pdis[low] <= pdis[high]) {
                 low++;
             }
-            if (low == high)
+            if (low == high) {
                 break;
+            }
             std::swap(pdis[low], pdis[high]);
             std::swap(pids[low], pids[high]);
             high--;
             while (low < high && pdis[high] >= pdis[low]) {
                 high--;
             }
-            if (low == high)
+            if (low == high) {
                 break;
+            }
             std::swap(pdis[low], pdis[high]);
             std::swap(pids[low], pids[high]);
             low++;
@@ -83,16 +86,18 @@ DynamicResultSet::quick_sort(size_t lp, size_t rp) {
             while (low < high && pdis[low] >= pdis[high]) {
                 low++;
             }
-            if (low == high)
+            if (low == high) {
                 break;
+            }
             std::swap(pdis[low], pdis[high]);
             std::swap(pids[low], pids[high]);
             high--;
             while (low < high && pdis[high] <= pdis[low]) {
                 high--;
             }
-            if (low == high)
+            if (low == high) {
                 break;
+            }
             std::swap(pdis[low], pdis[high]);
             std::swap(pids[low], pids[high]);
             low++;
@@ -111,9 +116,9 @@ BufferPool::BufferPool(size_t buffer_size) : buffer_size(buffer_size) {
 }
 
 BufferPool::~BufferPool() {
-    for (int i = 0; i < buffers.size(); i++) {
-        delete[] buffers[i].ids;
-        delete[] buffers[i].dis;
+    for (auto& buf : buffers) {
+        delete[] buf.ids;
+        delete[] buf.dis;
     }
 }
 
@@ -204,8 +209,9 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
         pseg->copy_range(0, ncopy, ret.labels.get() + boundaries[pos], ret.distances.get() + boundaries[pos]);
         boundaries[pos] += ncopy;
         last_len -= ncopy;
-        if (last_len <= 0)
+        if (last_len <= 0) {
             break;
+        }
     }
 
     if (postProcessType != ResultSetPostProcessType::None) {
@@ -243,14 +249,16 @@ MapUids(DynamicResultSegment& milvus_dataset, std::shared_ptr<std::vector<IDType
             for (auto j = 0; j < mrspr->buffers.size() - 1; ++j) {
                 auto buf = mrspr->buffers[j];
                 for (auto i = 0; i < mrspr->buffer_size; ++i) {
-                    if (buf.ids[i] >= 0)
+                    if (buf.ids[i] >= 0) {
                         buf.ids[i] = uids->at(buf.ids[i]);
+                    }
                 }
             }
             auto buf = mrspr->buffers[mrspr->buffers.size() - 1];
             for (auto i = 0; i < mrspr->wp; ++i) {
-                if (buf.ids[i] >= 0)
+                if (buf.ids[i] >= 0) {
                     buf.ids[i] = uids->at(buf.ids[i]);
+                }
             }
         }
     }
