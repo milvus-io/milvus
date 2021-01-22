@@ -27,6 +27,6 @@ class SegmentSealed : public SegmentInternalInterface {
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
 
 SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema, int64_t chunk_size = 32 * 1024);
+CreateSealedSegment(SchemaPtr schema, int64_t size_per_chunk = 32 * 1024);
 
 }  // namespace milvus::segcore
