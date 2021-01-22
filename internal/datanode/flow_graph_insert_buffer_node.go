@@ -25,7 +25,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -50,6 +49,7 @@ type (
 
 		timeTickStream          msgstream.MsgStream
 		segmentStatisticsStream msgstream.MsgStream
+		completeFlushStream     msgstream.MsgStream
 	}
 
 	insertBuffer struct {
@@ -109,14 +109,23 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	uniqueSeg := make(map[UniqueID]bool)
 	for _, msg := range iMsg.insertMessages {
 		currentSegID := msg.GetSegmentID()
-		collName := msg.GetCollectionName()
-		partitionName := msg.GetPartitionName()
+		collID := msg.GetCollectionID()
+		partitionID := msg.GetPartitionID()
+
 		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID, collName, partitionName)
+			err := ibNode.replica.addSegment(currentSegID, collID, partitionID)
 			if err != nil {
-				log.Println("Error: add segment error")
+				log.Println("Error: add segment error", err)
 			}
 		}
+
+		if !ibNode.flushMeta.hasSegmentFlush(currentSegID) {
+			err := ibNode.flushMeta.addSegmentFlush(currentSegID)
+			if err != nil {
+				log.Println("Error: add segment flush meta error", err)
+			}
+		}
+
 		err := ibNode.replica.updateSegmentRowNums(currentSegID, int64(len(msg.RowIDs)))
 		if err != nil {
 			log.Println("Error: update Segment Row number wrong, ", err)
@@ -153,7 +162,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			continue
 		}
 		currentSegID := msg.GetSegmentID()
-		collectionName := msg.GetCollectionName()
+		collectionID := msg.GetCollectionID()
 		span.LogFields(oplog.Int("segment id", int(currentSegID)))
 
 		idata, ok := ibNode.insertBuffer.insertData[currentSegID]
@@ -163,15 +172,14 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			}
 		}
 
-		// 1.1 Get CollectionMeta from etcd
-		collection, err := ibNode.replica.getCollectionByName(collectionName)
+		// 1.1 Get CollectionMeta
+		collection, err := ibNode.replica.getCollectionByID(collectionID)
 		if err != nil {
 			// GOOSE TODO add error handler
 			log.Println("bbb, Get meta wrong:", err)
 			continue
 		}
 
-		// collectionID := collection.ID() GOOSE TODO remove
 		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
@@ -418,7 +426,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
 
-			err = ibNode.flushSegment(currentSegID, msg.GetPartitionName(), collection.ID())
+			err = ibNode.flushSegment(currentSegID, msg.GetPartitionID(), collection.ID())
 			if err != nil {
 				log.Printf("flush segment (%v) fail: %v", currentSegID, err)
 			}
@@ -430,6 +438,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		var stopSign int = 0
 		for k := range ibNode.insertBuffer.insertData {
 			if stopSign >= 10 {
+				log.Printf("......")
 				break
 			}
 			log.Printf("seg(%v) buffer size = (%v)", k, ibNode.insertBuffer.size(k))
@@ -440,7 +449,6 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	// iMsg is Flush() msg from dataservice
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
 	for _, msg := range iMsg.flushMessages {
-		// flushTs := msg.Timestamp
 		for _, currentSegID := range msg.segmentIDs {
 			log.Printf(". Receiving flush message segID(%v)...", currentSegID)
 			if ibNode.insertBuffer.size(currentSegID) > 0 {
@@ -451,12 +459,11 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 					continue
 				}
 
-				err = ibNode.flushSegment(currentSegID, seg.partitionName, seg.collectionID)
+				err = ibNode.flushSegment(currentSegID, seg.partitionID, seg.collectionID)
 				if err != nil {
 					log.Printf("flush segment (%v) fail: %v", currentSegID, err)
 					continue
 				}
-
 			}
 		}
 	}
@@ -473,20 +480,15 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 	return []*Msg{&res}
 }
 
-func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionName string, collID UniqueID) error {
-	// partitionName -> partitionID GOOSE TODO: remove this
-	partitionID, err := typeutil.Hash32String(partitionName)
-	if err != nil {
-		return errors.Errorf("partitionName to partitionID wrong, %v", err)
-	}
+func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionID UniqueID, collID UniqueID) error {
 
-	coll, err := ibNode.replica.getCollectionByID(collID)
+	collSch, err := ibNode.getCollectionSchemaByID(collID)
 	if err != nil {
 		return errors.Errorf("Get collection by ID wrong, %v", err)
 	}
 
 	collMeta := &etcdpb.CollectionMeta{
-		Schema: coll.schema,
+		Schema: collSch,
 		ID:     collID,
 	}
 
@@ -505,7 +507,7 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionName strin
 	log.Println(".. Clearing buffer")
 
 	//   1.5.2 binLogs -> minIO/S3
-	collIDStr := strconv.FormatInt(coll.ID(), 10)
+	collIDStr := strconv.FormatInt(collID, 10)
 	partitionIDStr := strconv.FormatInt(partitionID, 10)
 	segIDStr := strconv.FormatInt(segID, 10)
 	keyPrefix := path.Join(ibNode.minioPrefix, collIDStr, partitionIDStr, segIDStr)
@@ -534,6 +536,29 @@ func (ibNode *insertBufferNode) flushSegment(segID UniqueID, partitionName strin
 	return nil
 }
 
+func (ibNode *insertBufferNode) completeFlush(segID UniqueID) error {
+	msgPack := msgstream.MsgPack{}
+	completeFlushMsg := internalpb2.SegmentFlushCompletedMsg{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kSegmentFlushDone,
+			MsgID:     0, // GOOSE TODO
+			Timestamp: 0, // GOOSE TODO
+			SourceID:  Params.DataNodeID,
+		},
+		SegmentID: segID,
+	}
+	var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		SegmentFlushCompletedMsg: completeFlushMsg,
+	}
+
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	return ibNode.timeTickStream.Produce(&msgPack)
+
+}
+
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.TimeTickMsg{
@@ -545,8 +570,8 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kTimeTick,
-				MsgID:     0,
-				Timestamp: ts,
+				MsgID:     0,  // GOOSE TODO
+				Timestamp: ts, // GOOSE TODO
 				SourceID:  Params.DataNodeID,
 			},
 		},
@@ -587,23 +612,11 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 	var msgPack = msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	err := ibNode.segmentStatisticsStream.Produce(&msgPack)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ibNode.segmentStatisticsStream.Produce(&msgPack)
 }
 
 func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
 	ret, err := ibNode.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return nil, err
-	}
-	return ret.schema, nil
-}
-
-func (ibNode *insertBufferNode) getCollectionSchemaByName(collectionName string) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByName(collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -655,14 +668,21 @@ func newInsertBufferNode(ctx context.Context,
 	wTt.SetPulsarClient(Params.PulsarAddress)
 	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
 	var wTtMsgStream msgstream.MsgStream = wTt
-	wTtMsgStream.Start()
+	wTtMsgStream.Start() // GOOSE TODO remove
 
 	// update statistics channel
 	segS := pulsarms.NewPulsarMsgStream(ctx, Params.SegmentStatisticsBufSize)
 	segS.SetPulsarClient(Params.PulsarAddress)
 	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
 	var segStatisticsMsgStream msgstream.MsgStream = segS
-	segStatisticsMsgStream.Start()
+	segStatisticsMsgStream.Start() // GOOSE TODO remove
+
+	// segment flush completed channel
+	cf := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	cf.SetPulsarClient(Params.PulsarAddress)
+	cf.CreatePulsarProducers([]string{Params.CompleteFlushChannelName})
+	var completeFlushStream msgstream.MsgStream = cf
+	completeFlushStream.Start() // GOOSE TODO remove
 
 	return &insertBufferNode{
 		BaseNode:                baseNode,
@@ -672,6 +692,7 @@ func newInsertBufferNode(ctx context.Context,
 		idAllocator:             idAllocator,
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
+		completeFlushStream:     completeFlushStream,
 		replica:                 replica,
 		flushMeta:               flushMeta,
 	}

@@ -4,21 +4,17 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 // NOTE: start pulsar before test
@@ -38,7 +34,9 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// init data node
 	pulsarURL := Params.PulsarAddress
-	collMeta := newMeta()
+
+	Factory := &factory.MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	node := NewDataNode(ctx, 0)
 	node.replica.addCollection(collMeta.ID, proto.MarshalTextString(collMeta.Schema))
 
@@ -212,176 +210,4 @@ func TestDataSyncService_Start(t *testing.T) {
 	node.Stop()
 
 	<-ctx.Done()
-}
-
-func newMeta() *etcdpb.CollectionMeta {
-	ETCDAddr := Params.EtcdAddress
-	MetaRootPath := Params.MetaRootPath
-
-	cli, _ := clientv3.New(clientv3.Config{
-		Endpoints:   []string{ETCDAddr},
-		DialTimeout: 5 * time.Second,
-	})
-	kvClient := etcdkv.NewEtcdKV(cli, MetaRootPath)
-	defer kvClient.Close()
-
-	sch := schemapb.CollectionSchema{
-		Name:        "col1",
-		Description: "test collection",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:     1,
-				Name:        "Timestamp",
-				Description: "test collection filed 1",
-				DataType:    schemapb.DataType_INT64,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "col1_f1_tk2",
-						Value: "col1_f1_tv2",
-					},
-				},
-			},
-			{
-				FieldID:     0,
-				Name:        "RowID",
-				Description: "test collection filed 1",
-				DataType:    schemapb.DataType_INT64,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "col1_f1_tk2",
-						Value: "col1_f1_tv2",
-					},
-				},
-			},
-			{
-				FieldID:     100,
-				Name:        "col1_f1",
-				Description: "test collection filed 1",
-				DataType:    schemapb.DataType_VECTOR_FLOAT,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "dim",
-						Value: "2",
-					},
-					{
-						Key:   "col1_f1_tk2",
-						Value: "col1_f1_tv2",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "col1_f1_ik1",
-						Value: "col1_f1_iv1",
-					},
-					{
-						Key:   "col1_f1_ik2",
-						Value: "col1_f1_iv2",
-					},
-				},
-			},
-			{
-				FieldID:     101,
-				Name:        "col1_f2",
-				Description: "test collection filed 2",
-				DataType:    schemapb.DataType_VECTOR_BINARY,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "dim",
-						Value: "32",
-					},
-					{
-						Key:   "col1_f2_tk2",
-						Value: "col1_f2_tv2",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "col1_f2_ik1",
-						Value: "col1_f2_iv1",
-					},
-					{
-						Key:   "col1_f2_ik2",
-						Value: "col1_f2_iv2",
-					},
-				},
-			},
-			{
-				FieldID:     102,
-				Name:        "col1_f3",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_BOOL,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     103,
-				Name:        "col1_f4",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_INT8,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     104,
-				Name:        "col1_f5",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_INT16,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     105,
-				Name:        "col1_f6",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_INT32,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     106,
-				Name:        "col1_f7",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_INT64,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     107,
-				Name:        "col1_f8",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_FLOAT,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     108,
-				Name:        "col1_f9",
-				Description: "test collection filed 3",
-				DataType:    schemapb.DataType_DOUBLE,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-		},
-	}
-
-	collection := etcdpb.CollectionMeta{
-		ID:            UniqueID(1),
-		Schema:        &sch,
-		CreateTime:    Timestamp(1),
-		SegmentIDs:    make([]UniqueID, 0),
-		PartitionTags: make([]string, 0),
-	}
-
-	collBytes := proto.MarshalTextString(&collection)
-	kvClient.Save("/collection/"+strconv.FormatInt(collection.ID, 10), collBytes)
-
-	segSch := etcdpb.SegmentMeta{
-		SegmentID:    UniqueID(1),
-		CollectionID: UniqueID(1),
-	}
-	segBytes := proto.MarshalTextString(&segSch)
-	kvClient.Save("/segment/"+strconv.FormatInt(segSch.SegmentID, 10), segBytes)
-
-	return &collection
 }

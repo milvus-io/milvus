@@ -104,6 +104,47 @@ func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
 	return insertMsg, nil
 }
 
+/////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
+// GOOSE TODO remove this
+type FlushCompletedMsg struct {
+	BaseMsg
+	internalpb2.SegmentFlushCompletedMsg
+}
+
+func (fl *FlushCompletedMsg) Type() MsgType {
+	return fl.Base.MsgType
+}
+
+func (fl *FlushCompletedMsg) GetMsgContext() context.Context {
+	return fl.MsgCtx
+}
+func (fl *FlushCompletedMsg) SetMsgContext(ctx context.Context) {
+	fl.MsgCtx = ctx
+}
+
+func (fl *FlushCompletedMsg) Marshal(input TsMsg) ([]byte, error) {
+	flushCompletedMsgTask := input.(*FlushCompletedMsg)
+	flushCompletedMsg := &flushCompletedMsgTask.SegmentFlushCompletedMsg
+	mb, err := proto.Marshal(flushCompletedMsg)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (fl *FlushCompletedMsg) Unmarshal(input []byte) (TsMsg, error) {
+	flushCompletedMsg := internalpb2.SegmentFlushCompletedMsg{}
+	err := proto.Unmarshal(input, &flushCompletedMsg)
+	if err != nil {
+		return nil, err
+	}
+	flushCompletedMsgTask := &FlushCompletedMsg{SegmentFlushCompletedMsg: flushCompletedMsg}
+	flushCompletedMsgTask.BeginTimestamp = flushCompletedMsgTask.Base.Timestamp
+	flushCompletedMsgTask.EndTimestamp = flushCompletedMsgTask.Base.Timestamp
+
+	return flushCompletedMsgTask, nil
+}
+
 /////////////////////////////////////////Flush//////////////////////////////////////////
 // GOOSE TODO remove this
 type FlushMsg struct {

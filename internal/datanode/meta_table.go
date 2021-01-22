@@ -14,7 +14,7 @@ import (
 type metaTable struct {
 	client          kv.TxnBase //
 	segID2FlushMeta map[UniqueID]*datapb.SegmentFlushMeta
-	collID2DdlMeta  map[UniqueID]*datapb.DDLFlushMeta
+	collID2DdlMeta  map[UniqueID]*datapb.DDLFlushMeta // GOOSE TODO: addDDLFlush and has DDLFlush
 
 	lock sync.RWMutex
 }
@@ -158,10 +158,7 @@ func (mt *metaTable) reloadSegMetaFromKV() error {
 func (mt *metaTable) addSegmentFlush(segmentID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	_, ok := mt.segID2FlushMeta[segmentID]
-	if ok {
-		return errors.Errorf("segment already exists with ID = " + strconv.FormatInt(segmentID, 10))
-	}
+
 	meta := &datapb.SegmentFlushMeta{
 		IsFlushed: false,
 		SegmentID: segmentID,
@@ -169,25 +166,12 @@ func (mt *metaTable) addSegmentFlush(segmentID UniqueID) error {
 	return mt.saveSegFlushMeta(meta)
 }
 
-// func (mt *metaTable) getFlushCloseTime(segmentID UniqueID) (Timestamp, error) {
-//     mt.lock.RLock()
-//     defer mt.lock.RUnlock()
-//     meta, ok := mt.segID2FlushMeta[segmentID]
-//     if !ok {
-//         return typeutil.ZeroTimestamp, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-//     }
-//     return meta.CloseTime, nil
-// }
-
-// func (mt *metaTable) getFlushOpenTime(segmentID UniqueID) (Timestamp, error) {
-//     mt.lock.RLock()
-//     defer mt.lock.RUnlock()
-//     meta, ok := mt.segID2FlushMeta[segmentID]
-//     if !ok {
-//         return typeutil.ZeroTimestamp, errors.Errorf("segment not exists with ID = " + strconv.FormatInt(segmentID, 10))
-//     }
-//     return meta.OpenTime, nil
-// }
+func (mt *metaTable) hasSegmentFlush(segmentID UniqueID) bool {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+	_, ok := mt.segID2FlushMeta[segmentID]
+	return ok
+}
 
 func (mt *metaTable) checkFlushComplete(segmentID UniqueID) (bool, error) {
 	mt.lock.RLock()

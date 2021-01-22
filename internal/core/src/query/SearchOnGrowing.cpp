@@ -72,46 +72,46 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     dataset::FloatQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
     auto max_indexed_id = indexing_record.get_finished_ack();
-    const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
-    auto search_conf = field_indexing.get_search_conf(topK);
+    const auto& indexing_entry = indexing_record.get_vec_entry(vecfield_offset);
+    auto search_conf = indexing_entry.get_search_conf(topK);
 
     for (int chunk_id = 0; chunk_id < max_indexed_id; ++chunk_id) {
-        auto size_per_chunk = field_indexing.get_size_per_chunk();
-        auto indexing = field_indexing.get_chunk_indexing(chunk_id);
+        auto chunk_size = indexing_entry.get_chunk_size();
+        auto indexing = indexing_entry.get_indexing(chunk_id);
 
-        auto sub_view = BitsetSubView(bitset, chunk_id * size_per_chunk, size_per_chunk);
+        auto sub_view = BitsetSubView(bitset, chunk_id * chunk_size, chunk_size);
         auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_qr.mutable_labels()) {
             if (x != -1) {
-                x += chunk_id * size_per_chunk;
+                x += chunk_id * chunk_size;
             }
         }
 
         final_qr.merge(sub_qr);
     }
-    auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
+    auto vec_ptr = record.get_entity<FloatVector>(vecfield_offset);
 
     // step 4: brute force search where small indexing is unavailable
-    auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-    Assert(vec_size_per_chunk == field_indexing.get_size_per_chunk());
-    auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
+    auto vec_chunk_size = vec_ptr->get_chunk_size();
+    Assert(vec_chunk_size == indexing_entry.get_chunk_size());
+    auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
 
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         auto& chunk = vec_ptr->get_chunk(chunk_id);
 
-        auto element_begin = chunk_id * vec_size_per_chunk;
-        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_size_per_chunk);
-        auto size_per_chunk = element_end - element_begin;
+        auto element_begin = chunk_id * vec_chunk_size;
+        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
+        auto chunk_size = element_end - element_begin;
 
-        auto sub_view = BitsetSubView(bitset, element_begin, size_per_chunk);
-        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), size_per_chunk, sub_view);
+        auto sub_view = BitsetSubView(bitset, element_begin, chunk_size);
+        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), chunk_size, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_qr.mutable_labels()) {
             if (x != -1) {
-                x += chunk_id * vec_size_per_chunk;
+                x += chunk_id * vec_chunk_size;
             }
         }
         final_qr.merge(sub_qr);
@@ -160,18 +160,18 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     // step 3: small indexing search
     query::dataset::BinaryQueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
 
-    auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
+    auto vec_ptr = record.get_entity<BinaryVector>(vecfield_offset);
 
     auto max_indexed_id = 0;
     // step 4: brute force search where small indexing is unavailable
 
-    auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-    auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
+    auto vec_chunk_size = vec_ptr->get_chunk_size();
+    auto max_chunk = upper_div(ins_barrier, vec_chunk_size);
     SubQueryResult final_result(num_queries, topK, metric_type);
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         auto& chunk = vec_ptr->get_chunk(chunk_id);
-        auto element_begin = chunk_id * vec_size_per_chunk;
-        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_size_per_chunk);
+        auto element_begin = chunk_id * vec_chunk_size;
+        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_chunk_size);
         auto nsize = element_end - element_begin;
 
         auto sub_view = BitsetSubView(bitset, element_begin, nsize);
@@ -180,7 +180,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         // convert chunk uid to segment uid
         for (auto& x : sub_result.mutable_labels()) {
             if (x != -1) {
-                x += chunk_id * vec_size_per_chunk;
+                x += chunk_id * vec_chunk_size;
             }
         }
         final_result.merge(sub_result);

@@ -319,14 +319,14 @@ Parser::ParseItemList(const Json& body) {
     std::vector<ExprPtr> results;
     if (body.is_object()) {
         // only one item;
-        auto new_expr = ParseAnyNode(body);
-        results.emplace_back(std::move(new_expr));
+        auto new_entry = ParseAnyNode(body);
+        results.emplace_back(std::move(new_entry));
     } else {
         // item array
         Assert(body.is_array());
         for (auto& item : body) {
-            auto new_expr = ParseAnyNode(item);
-            results.emplace_back(std::move(new_expr));
+            auto new_entry = ParseAnyNode(item);
+            results.emplace_back(std::move(new_entry));
         }
     }
     auto old_size = results.size();

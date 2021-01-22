@@ -13,14 +13,14 @@
 
 namespace milvus::segcore {
 
-InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk) : uids_(1), timestamps_(1) {
+InsertRecord::InsertRecord(const Schema& schema, int64_t chunk_size) : uids_(1), timestamps_(1) {
     for (auto& field : schema) {
         if (field.is_vector()) {
             if (field.get_data_type() == DataType::VECTOR_FLOAT) {
-                this->append_field_data<FloatVector>(field.get_dim(), size_per_chunk);
+                this->insert_entity<FloatVector>(field.get_dim(), chunk_size);
                 continue;
             } else if (field.get_data_type() == DataType::VECTOR_BINARY) {
-                this->append_field_data<BinaryVector>(field.get_dim(), size_per_chunk);
+                this->insert_entity<BinaryVector>(field.get_dim(), chunk_size);
                 continue;
             } else {
                 PanicInfo("unsupported");
@@ -28,34 +28,34 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk) : uids_
         }
         switch (field.get_data_type()) {
             case DataType::BOOL: {
-                this->append_field_data<bool>(size_per_chunk);
+                this->insert_entity<bool>(chunk_size);
                 break;
             }
             case DataType::INT8: {
-                this->append_field_data<int8_t>(size_per_chunk);
+                this->insert_entity<int8_t>(chunk_size);
                 break;
             }
             case DataType::INT16: {
-                this->append_field_data<int16_t>(size_per_chunk);
+                this->insert_entity<int16_t>(chunk_size);
                 break;
             }
             case DataType::INT32: {
-                this->append_field_data<int32_t>(size_per_chunk);
+                this->insert_entity<int32_t>(chunk_size);
                 break;
             }
 
             case DataType::INT64: {
-                this->append_field_data<int64_t>(size_per_chunk);
+                this->insert_entity<int64_t>(chunk_size);
                 break;
             }
 
             case DataType::FLOAT: {
-                this->append_field_data<float>(size_per_chunk);
+                this->insert_entity<float>(chunk_size);
                 break;
             }
 
             case DataType::DOUBLE: {
-                this->append_field_data<double>(size_per_chunk);
+                this->insert_entity<double>(chunk_size);
                 break;
             }
             default: {

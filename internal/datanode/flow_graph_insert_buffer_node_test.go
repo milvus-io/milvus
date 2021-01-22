@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -37,7 +38,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 	Params.MetaRootPath = testPath
 
-	collMeta := newMeta()
+	Factory := &factory.MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	schemaBlob := proto.MarshalTextString(collMeta.Schema)
 	require.NotEqual(t, "", schemaBlob)
 
@@ -54,7 +56,6 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 func genInsertMsg() insertMsg {
 	// test data generate
-	// GOOSE TODO orgnize
 	const DIM = 2
 	const N = 1
 	var rawData []byte
@@ -164,6 +165,8 @@ func genInsertMsg() insertMsg {
 				},
 				CollectionName: "col1",
 				PartitionName:  "default",
+				CollectionID:   0,
+				PartitionID:    1,
 				SegmentID:      UniqueID(1),
 				ChannelID:      "0",
 				Timestamps: []Timestamp{

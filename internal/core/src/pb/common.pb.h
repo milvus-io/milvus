@@ -203,12 +203,13 @@ enum MsgType : int {
   kRequestTSO = 1204,
   kAllocateSegment = 1205,
   kSegmentStatistics = 1206,
+  kSegmentFlushDone = 1207,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
 constexpr MsgType MsgType_MIN = kNone;
-constexpr MsgType MsgType_MAX = kSegmentStatistics;
+constexpr MsgType MsgType_MAX = kSegmentFlushDone;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();

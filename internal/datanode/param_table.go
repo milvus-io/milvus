@@ -50,6 +50,9 @@ type ParamTable struct {
 	// - timetick channel -
 	TimeTickChannelName string
 
+	// - complete flush channel -
+	CompleteFlushChannelName string
+
 	// - channel subname -
 	MsgChannelSubName string
 
@@ -112,6 +115,9 @@ func (p *ParamTable) Init() {
 
 	// - timetick channel -
 	p.initTimeTickChannelName()
+
+	// - flush completed channel -
+	p.initCompleteFlushChannelName()
 
 	// - channel subname -
 	p.initMsgChannelSubName()
@@ -311,6 +317,13 @@ func (p *ParamTable) initSegmentStatisticsBufSize() {
 
 func (p *ParamTable) initSegmentStatisticsUpdateInterval() {
 	p.SegmentStatisticsUpdateInterval = p.ParseInt("dataNode.msgStream.segStatistics.updateInterval")
+}
+
+// - flush completed channel -
+
+func (p *ParamTable) initCompleteFlushChannelName() {
+	// GOOSE TODO
+	p.CompleteFlushChannelName = "flush-completed"
 }
 
 // - Timetick channel -
