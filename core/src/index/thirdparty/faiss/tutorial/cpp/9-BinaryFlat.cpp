@@ -42,9 +42,9 @@ int main() {
     }
 //#ifdef TEST_HAMMING
     // printf("test haming\n");
-   // faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Hamming);
+    faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Hamming);
 //#else
-   faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Jaccard);
+    // faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Jaccard);
 //#endif
     index.add(nb, xb);
     printf("ntotal = %ld d = %d\n", index.ntotal, index.d);
@@ -81,7 +81,7 @@ int main() {
         {
             int64_t *I = new int64_t[topk * nq];
             int32_t *D = new int32_t[topk * nq];
-            float *d_float = reinterpret_cast<float*>(D);
+            //float *d_float = reinterpret_cast<float*>(D);
             timeval t0;
             gettimeofday(&t0, 0);
             //for (int loop = 1; loop <= nq; loop ++) {
@@ -92,17 +92,17 @@ int main() {
             timeval t1;
             gettimeofday(&t1, 0);
             printf("topk %d time %ldms\n",topk, getTime(t1,t0));
-            for(int i = 0; i < 5;i++)
-            {
-                if(i>5) break;
-                if(topk == 10)
-                {
-                    for(int j=0; j<5;j++){
-                        printf("i: %d j: %d :%8ld %f\n", i,j,I[i * topk + j], d_float[i * topk + j]);
-                    }
-                }
+             for(int i = 0; i < 5;i++)
+             {
+                 if(i>5) break;
+                 if(topk == 10)
+                 {
+                     for(int j=0; j<5;j++){
+                         printf("i: %d j: %d :%8ld %d\n", i,j,I[i * topk + j],D[i * topk + j]);
+                     }
+                 }
 
-            }
+             }
             delete [] I;
             delete [] D;
         }
@@ -114,5 +114,3 @@ int main() {
 
     return 0;
 }
-
-

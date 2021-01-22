@@ -422,6 +422,13 @@ AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const s
     return result;
 }
 
+float
+jaccard__AVX512(const uint8_t * a, const uint8_t * b, size_t n) {
+    int accu_num = AND_popcnt_AVX512VBMI_lookup(a,b,n);
+    int accu_den = OR_popcnt_AVX512VBMI_lookup(a,b,n);
+    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+}
+
 #else
 
 float

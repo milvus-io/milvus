@@ -3,31 +3,38 @@
 
 #include "faiss/Index.h"
 
-#include <faiss/utils/hamming.h>
-
 #include <stdint.h>
 
-
-
 #include <faiss/utils/Heap.h>
-#include <faiss/impl/FaissAssert.h>
-#include <faiss/utils/utils.h>
-#include <faiss/FaissHook.h>
-#include <faiss/utils/distances.h>
-#include <faiss/utils/distances_avx.h>
-#include <faiss/utils/distances_avx512.h>
-#include <faiss/utils/hamming.h>
-
-#include <faiss/utils/jaccard-inl.h>
-#include <faiss/utils/substructure-inl.h>
-#include <faiss/utils/superstructure-inl.h>
 
 /* The binary distance type */
 typedef float tadis_t;
 
 namespace faiss {
 
+int popcnt(
+        const uint8_t* data,
+        const size_t n);
 
+int XOR_popcnt(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
+
+int OR_popcnt(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
+
+int AND_popcnt(
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
+
+float fvec_jaccard (
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n);
 
  /** Return the k matched distances for a set of binary query vectors,
   * using an array.

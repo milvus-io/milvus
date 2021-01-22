@@ -19,8 +19,107 @@
 #include <faiss/utils/distances_avx.h>
 #include <faiss/utils/distances_avx512.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/substructure-inl.h>
+#include <faiss/utils/superstructure-inl.h>
 
 namespace faiss {
+
+int
+popcnt(const uint8_t* data, const size_t n) {
+    const uint64_t *b = (uint64_t *)data;
+    int accu = 0;
+    int i = 0;
+    for (; i < n/8; i++)
+        accu += popcount64 (b[i]);
+    switch( n % 8 )
+    {
+        case 7: accu += popcount64 (data[i*8 + 6]);
+        case 6: accu += popcount64 (data[i*8 + 5]);
+        case 5: accu += popcount64 (data[i*8 + 4]);
+        case 4: accu += popcount64 (data[i*8 + 3]);
+        case 3: accu += popcount64 (data[i*8 + 2]);
+        case 2: accu += popcount64 (data[i*8 + 1]);
+        case 1: accu += popcount64 (data[i*8 + 0]);
+        default: break;
+    }
+    return accu;
+}
+
+int
+XOR_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+    const uint64_t *a = (uint64_t *)data1;
+    const uint64_t *b = (uint64_t *)data2;
+    int accu = 0;
+    int i = 0;
+    for (; i < n/8; i++)
+        accu += popcount64 (a[i] ^ b[i]);
+    switch( n % 8 )
+    {
+        case 7: accu += popcount64 (data1[i*8 + 6] ^ data2[i*8 + 6]);
+        case 6: accu += popcount64 (data1[i*8 + 5] ^ data2[i*8 + 5]);
+        case 5: accu += popcount64 (data1[i*8 + 4] ^ data2[i*8 + 4]);
+        case 4: accu += popcount64 (data1[i*8 + 3] ^ data2[i*8 + 3]);
+        case 3: accu += popcount64 (data1[i*8 + 2] ^ data2[i*8 + 2]);
+        case 2: accu += popcount64 (data1[i*8 + 1] ^ data2[i*8 + 1]);
+        case 1: accu += popcount64 (data1[i*8 + 0] ^ data2[i*8 + 0]);
+        default: break;
+    }
+    return accu;
+}
+
+int
+OR_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+    const uint64_t *a = (uint64_t *)data1;
+    const uint64_t *b = (uint64_t *)data2;
+    int accu = 0;
+    int i = 0;
+    for (; i < n/8; i++)
+        accu += popcount64 (a[i] | b[i]);
+    switch( n % 8 )
+    {
+        case 7: accu += popcount64 (data1[i*8 + 6] | data2[i*8 + 6]);
+        case 6: accu += popcount64 (data1[i*8 + 5] | data2[i*8 + 5]);
+        case 5: accu += popcount64 (data1[i*8 + 4] | data2[i*8 + 4]);
+        case 4: accu += popcount64 (data1[i*8 + 3] | data2[i*8 + 3]);
+        case 3: accu += popcount64 (data1[i*8 + 2] | data2[i*8 + 2]);
+        case 2: accu += popcount64 (data1[i*8 + 1] | data2[i*8 + 1]);
+        case 1: accu += popcount64 (data1[i*8 + 0] | data2[i*8 + 0]);
+        default: break;
+    }
+    return accu;
+}
+
+int
+AND_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+    const uint64_t *a = (uint64_t *)data1;
+    const uint64_t *b = (uint64_t *)data2;
+    int accu = 0;
+    int i = 0;
+    for (; i < n/8; i++)
+        accu += popcount64 (a[i] & b[i]);
+    switch( n % 8 )
+    {
+        case 7: accu += popcount64 (data1[i*8 + 6] & data2[i*8 + 6]);
+        case 6: accu += popcount64 (data1[i*8 + 5] & data2[i*8 + 5]);
+        case 5: accu += popcount64 (data1[i*8 + 4] & data2[i*8 + 4]);
+        case 4: accu += popcount64 (data1[i*8 + 3] & data2[i*8 + 3]);
+        case 3: accu += popcount64 (data1[i*8 + 2] & data2[i*8 + 2]);
+        case 2: accu += popcount64 (data1[i*8 + 1] & data2[i*8 + 1]);
+        case 1: accu += popcount64 (data1[i*8 + 0] & data2[i*8 + 0]);
+        default: break;
+    }
+    return accu;
+}
+
+float fvec_jaccard (
+        const uint8_t* data1,
+        const uint8_t* data2,
+        const size_t n) {
+    int accu_num = AND_popcnt(data1, data2, n);
+    int accu_den = OR_popcnt(data1, data2, n);
+    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+}
+
 
 static const size_t size_1M = 1 * 1024 * 1024;
 static const size_t batch_size = 65536;
@@ -294,16 +393,6 @@ void binary_distance_knn_hc (
     ha->reorder ();
 }
 
-int Hamming(const uint8_t * a, const uint8_t * b, size_t n) {
-    return vec_xor_popcnt(a, b, n);
-}
-
-float Jaccard(const uint8_t * a, const uint8_t * b, size_t n) {
-    int accu_num = vec_and_popcnt(a,b,n);
-    int accu_den = vec_or_popcnt(a,b,n);
-    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
-}
-
 template <class T1>
 void binary_distance_knn_hc (
         MetricType metric_type,
@@ -317,30 +406,30 @@ void binary_distance_knn_hc (
     size_t dim = ncodes * 8;
     switch (metric_type) {
         case METRIC_Jaccard:
-        case METRIC_Tanimoto:
+        case METRIC_Tanimoto: {
+            float (*jaccard)(const uint8_t *a, const uint8_t *b, size_t n) = nullptr;
             if (support_avx512() && dim > 1024) {
-                vec_or_popcnt = OR_popcnt_AVX512VBMI_lookup;
-                vec_and_popcnt = AND_popcnt_AVX512VBMI_lookup;
-
+                jaccard = jaccard__AVX512;
             } else if (support_avx2() && dim > 512) {
-                vec_or_popcnt = OR_popcnt_AVX2_lookup;
-                vec_and_popcnt = AND_popcnt_AVX2_lookup;
+                jaccard = jaccard__AVX2;
             } else {
-                vec_or_popcnt = OR_popcnt_SSE;
-                vec_and_popcnt = AND_popcnt_SSE;
+                jaccard = fvec_jaccard;
             }
-            binary_distance_knn_hc(&Jaccard, ncodes, ha, a, b, nb, bitset);
+            binary_distance_knn_hc(jaccard, ncodes, ha, a, b, nb, bitset);
             break;
-        case METRIC_Hamming:
+        }
+        case METRIC_Hamming: {
+            int (*hamming)(const uint8_t * a, const uint8_t * b, size_t n) = nullptr;
             if (support_avx512() && dim > 1024) {
-                vec_xor_popcnt = XOR_popcnt_AVX512VBMI_lookup;
-            } else if(support_avx2() && dim > 512) {
-                vec_xor_popcnt = XOR_popcnt_AVX2_lookup;
+                hamming = XOR_popcnt_AVX512VBMI_lookup;
+            } else if (support_avx2() && dim > 512) {
+                hamming = XOR_popcnt_AVX2_lookup;
             } else {
-                vec_xor_popcnt = XOR_popcnt_SSE;
+                hamming = XOR_popcnt;
             }
-            binary_distance_knn_hc(&Hamming, ncodes, ha, a, b, nb, bitset);
+            binary_distance_knn_hc(hamming, ncodes, ha, a, b, nb, bitset);
             break;
+        }
         default:
             break;
     }

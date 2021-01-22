@@ -14,12 +14,9 @@
 #include <cassert>
 #include <cstring>
 #include <cmath>
-#include <x86intrin.h>
-#include <faiss/utils/hamming.h>
 
 #ifdef __SSE__
 #include <immintrin.h>
-
 #endif
 
 #ifdef __aarch64__
@@ -378,96 +375,6 @@ float fvec_inner_product_sse (const float * x,
     msum1 = _mm_hadd_ps (msum1, msum1);
     return  _mm_cvtss_f32 (msum1);
 }
-
-
-int
-popcnt_SSE(const uint8_t* data, const size_t n) {
-    const uint64_t *b = (uint64_t *)data;
-    int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data[i*8 + 6]);
-        case 6: accu += popcount64 (data[i*8 + 5]);
-        case 5: accu += popcount64 (data[i*8 + 4]);
-        case 4: accu += popcount64 (data[i*8 + 3]);
-        case 3: accu += popcount64 (data[i*8 + 2]);
-        case 2: accu += popcount64 (data[i*8 + 1]);
-        case 1: accu += popcount64 (data[i*8 + 0]);
-        default: break;
-    }
-    return accu;
-
-}
-
-int
-XOR_popcnt_SSE(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
-    int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] ^ b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] ^ data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] ^ data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] ^ data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] ^ data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] ^ data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] ^ data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] ^ data2[i*8 + 0]);
-        default: break;
-    }
-    return accu;
-}
-
-int
-OR_popcnt_SSE(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
-    int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] | b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] | data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] | data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] | data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] | data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] | data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] | data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] | data2[i*8 + 0]);
-        default: break;
-    }
-    return accu;
-}
-int
-AND_popcnt_SSE(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
-    int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] & b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] & data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] & data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] & data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] & data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] & data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] & data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] & data2[i*8 + 0]);
-        default: break;
-    }
-    return accu;
-
-}
-
 
 #endif /* defined(__SSE__) */
 

@@ -34,7 +34,7 @@ fvec_Linf_avx512(const float* x, const float* y, size_t d);
 int
 popcnt_AVX512VBMI_lookup(const uint8_t* data, const size_t n);
 
-/// hamming distance
+/// binary distance
 int
 XOR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
@@ -43,5 +43,8 @@ OR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const si
 
 int
 AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+
+float
+jaccard__AVX512(const uint8_t * a, const uint8_t * b, size_t n);
 
 } // namespace faiss

@@ -1,3 +1,5 @@
+#include <faiss/utils/BinaryDistance.h>
+
 namespace faiss {
 
     struct JaccardComputer8 {
@@ -350,14 +352,7 @@ struct JaccardComputer256 {
         }
 
         float compute (const uint8_t *b8) const {
-            int accu_num = 0;
-            int accu_den = 0;
-
-            accu_num = vec_and_popcnt(a,b8,n);
-            accu_den = vec_or_popcnt(a,b8,n);
-            if (accu_den == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return fvec_jaccard(a, b8, n);
         }
 
     };

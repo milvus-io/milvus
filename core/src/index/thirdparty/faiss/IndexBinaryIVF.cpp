@@ -20,6 +20,7 @@
 
 #include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/jaccard-inl.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/AuxIndexStructures.h>
