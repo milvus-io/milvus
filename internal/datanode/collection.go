@@ -20,6 +20,10 @@ func (c *Collection) ID() UniqueID {
 	return c.id
 }
 
+func (c *Collection) Schema() *schemapb.CollectionSchema {
+	return c.schema
+}
+
 func newCollection(collectionID UniqueID, schemaStr string) *Collection {
 
 	var schema schemapb.CollectionSchema

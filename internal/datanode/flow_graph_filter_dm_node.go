@@ -66,21 +66,14 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 
 	var iMsg = insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*msgstream.FlushMsg, 0),
+		flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: msgStreamMsg.TimestampMin(),
 			timestampMax: msgStreamMsg.TimestampMax(),
 		},
 	}
 
-	for _, fmsg := range ddMsg.flushMessages {
-		switch fmsg.Type() {
-		case commonpb.MsgType_kFlush:
-			iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
-		default:
-			log.Println("Non supporting message type:", fmsg.Type())
-		}
-	}
+	iMsg.flushMessages = append(iMsg.flushMessages, ddMsg.flushMessages...)
 
 	for key, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {

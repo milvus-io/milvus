@@ -4,26 +4,26 @@ import (
 	"context"
 	"log"
 
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type dataSyncService struct {
-	ctx        context.Context
-	fg         *flowgraph.TimeTickedFlowGraph
-	ddChan     chan *ddlFlushSyncMsg
-	insertChan chan *insertFlushSyncMsg
-	replica    collectionReplica
+	ctx       context.Context
+	fg        *flowgraph.TimeTickedFlowGraph
+	flushChan chan *flushMsg
+	replica   collectionReplica
 }
 
-func newDataSyncService(ctx context.Context,
-	ddChan chan *ddlFlushSyncMsg, insertChan chan *insertFlushSyncMsg, replica collectionReplica) *dataSyncService {
+func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
+	replica collectionReplica) *dataSyncService {
 
 	return &dataSyncService{
-		ctx:        ctx,
-		fg:         nil,
-		ddChan:     ddChan,
-		insertChan: insertChan,
-		replica:    replica,
+		ctx:       ctx,
+		fg:        nil,
+		flushChan: flushChan,
+		replica:   replica,
 	}
 }
 
@@ -40,6 +40,17 @@ func (dsService *dataSyncService) close() {
 
 func (dsService *dataSyncService) initNodes() {
 	// TODO: add delete pipeline support
+	// New metaTable
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+	if err != nil {
+		panic(err)
+	}
+
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+	mt, err := NewMetaTable(etcdKV)
+	if err != nil {
+		panic(err)
+	}
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
@@ -48,8 +59,8 @@ func (dsService *dataSyncService) initNodes() {
 
 	var filterDmNode Node = newFilteredDmNode()
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.ddChan, dsService.replica)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.insertChan, dsService.replica)
+	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)
@@ -62,7 +73,7 @@ func (dsService *dataSyncService) initNodes() {
 	dsService.fg.AddNode(&gcNode)
 
 	// dmStreamNode
-	var err = dsService.fg.SetEdges(dmStreamNode.Name(),
+	err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{},
 		[]string{filterDmNode.Name()},
 	)

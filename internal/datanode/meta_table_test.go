@@ -24,27 +24,15 @@ func TestMetaTable_all(t *testing.T) {
 	assert.NoError(t, err)
 	defer meta.client.Close()
 
-	t.Run("TestMetaTable_addSegmentFlush_and_OpenTime", func(t *testing.T) {
-		tsOpen := Timestamp(100)
-		err := meta.addSegmentFlush(101, tsOpen)
+	t.Run("TestMetaTable_addSegmentFlush", func(t *testing.T) {
+		err := meta.addSegmentFlush(101)
 		assert.NoError(t, err)
-		exp, err := meta.getFlushOpenTime(101)
-		assert.NoError(t, err)
-		assert.Equal(t, tsOpen, exp)
 
-		tsOpen = Timestamp(200)
-		err = meta.addSegmentFlush(102, tsOpen)
+		err = meta.addSegmentFlush(102)
 		assert.NoError(t, err)
-		exp, err = meta.getFlushOpenTime(102)
-		assert.NoError(t, err)
-		assert.Equal(t, tsOpen, exp)
 
-		tsOpen = Timestamp(200)
-		err = meta.addSegmentFlush(103, tsOpen)
+		err = meta.addSegmentFlush(103)
 		assert.NoError(t, err)
-		exp, err = meta.getFlushOpenTime(103)
-		assert.NoError(t, err)
-		assert.Equal(t, tsOpen, exp)
 
 		err = meta.reloadSegMetaFromKV()
 		assert.NoError(t, err)
@@ -52,8 +40,7 @@ func TestMetaTable_all(t *testing.T) {
 
 	t.Run("TestMetaTable_AppendSegBinlogPaths", func(t *testing.T) {
 		segmentID := UniqueID(201)
-		tsOpen := Timestamp(1000)
-		err := meta.addSegmentFlush(segmentID, tsOpen)
+		err := meta.addSegmentFlush(segmentID)
 		assert.Nil(t, err)
 
 		exp := map[int64][]string{
@@ -62,9 +49,9 @@ func TestMetaTable_all(t *testing.T) {
 		}
 		for fieldID, dataPaths := range exp {
 			for _, dp := range dataPaths {
-				err = meta.AppendSegBinlogPaths(tsOpen, segmentID, fieldID, []string{dp})
+				err = meta.AppendSegBinlogPaths(segmentID, fieldID, []string{dp})
 				assert.Nil(t, err)
-				err = meta.AppendSegBinlogPaths(tsOpen, segmentID, fieldID, []string{dp})
+				err = meta.AppendSegBinlogPaths(segmentID, fieldID, []string{dp})
 				assert.Nil(t, err)
 			}
 		}
@@ -99,27 +86,22 @@ func TestMetaTable_all(t *testing.T) {
 		}
 	})
 
-	t.Run("TestMetaTable_CompleteFlush_and_CloseTime", func(t *testing.T) {
+	t.Run("TestMetaTable_CompleteFlush", func(t *testing.T) {
 
 		var segmentID UniqueID = 401
-		openTime := Timestamp(1000)
-		closeTime := Timestamp(10000)
 
-		err := meta.addSegmentFlush(segmentID, openTime)
+		err := meta.addSegmentFlush(segmentID)
 		assert.NoError(t, err)
 
 		ret, err := meta.checkFlushComplete(segmentID)
 		assert.NoError(t, err)
 		assert.Equal(t, false, ret)
 
-		meta.CompleteFlush(closeTime, segmentID)
+		meta.CompleteFlush(segmentID)
 
 		ret, err = meta.checkFlushComplete(segmentID)
 		assert.NoError(t, err)
 		assert.Equal(t, true, ret)
-		ts, err := meta.getFlushCloseTime(segmentID)
-		assert.NoError(t, err)
-		assert.Equal(t, closeTime, ts)
 	})
 
 }

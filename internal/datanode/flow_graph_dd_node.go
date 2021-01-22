@@ -23,11 +23,12 @@ type ddNode struct {
 	ddMsg     *ddMsg
 	ddRecords *ddRecords
 	ddBuffer  *ddBuffer
-	outCh     chan *ddlFlushSyncMsg // for flush sync
+	inFlushCh chan *flushMsg
 
 	idAllocator *allocator.IDAllocator
 	kv          kv.Base
 	replica     collectionReplica
+	flushMeta   *metaTable
 }
 
 type ddData struct {
@@ -80,21 +81,18 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 		// TODO: add error handling
 	}
 
-	var ddMsg = ddMsg{
+	ddNode.ddMsg = &ddMsg{
 		collectionRecords: make(map[string][]metaOperateRecord),
 		partitionRecords:  make(map[string][]metaOperateRecord),
 		timeRange: TimeRange{
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
 		},
-		flushMessages: make([]*msgstream.FlushMsg, 0),
+		flushMessages: make([]*flushMsg, 0),
+		gcRecord: &gcRecord{
+			collections: make([]UniqueID, 0),
+		},
 	}
-	ddNode.ddMsg = &ddMsg
-
-	gcRecord := gcRecord{
-		collections: make([]UniqueID, 0),
-	}
-	ddNode.ddMsg.gcRecord = &gcRecord
 
 	// sort tsMessages
 	tsMessages := msMsg.TsMessages()
@@ -114,29 +112,23 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
 		case commonpb.MsgType_kDropPartition:
 			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
-		case commonpb.MsgType_kFlush:
-			fMsg := msg.(*msgstream.FlushMsg)
-			flushSegID := fMsg.SegmentID
-			ddMsg.flushMessages = append(ddMsg.flushMessages, fMsg)
-			ddNode.flush()
-
-			log.Println(".. manual flush completed ...")
-			ddlFlushMsg := &ddlFlushSyncMsg{
-				flushCompleted: true,
-				ddlBinlogPathMsg: ddlBinlogPathMsg{
-					segID: flushSegID,
-				},
-			}
-
-			ddNode.outCh <- ddlFlushMsg
-
 		default:
 			log.Println("Non supporting message type:", msg.Type())
 		}
 	}
 
+	select {
+	case fmsg := <-ddNode.inFlushCh:
+		log.Println(". receive flush message, flushing ...")
+		ddNode.flush()
+		ddNode.ddMsg.flushMessages = append(ddNode.ddMsg.flushMessages, fmsg)
+	default:
+		log.Println("..........default do nothing")
+	}
+
 	// generate binlog
 	if ddNode.ddBuffer.full() {
+		log.Println(". dd buffer full, auto flushing ...")
 		ddNode.flush()
 	}
 
@@ -146,7 +138,6 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 
 func (ddNode *ddNode) flush() {
 	// generate binlog
-	log.Println(". dd buffer full or receive Flush msg ...")
 	ddCodec := &storage.DataDefinitionCodec{}
 	for collectionID, data := range ddNode.ddBuffer.ddData {
 		// buffer data to binlog
@@ -196,15 +187,7 @@ func (ddNode *ddNode) flush() {
 			}
 			log.Println("save dd binlog, key = ", ddKey)
 
-			ddlFlushMsg := &ddlFlushSyncMsg{
-				flushCompleted: false,
-				ddlBinlogPathMsg: ddlBinlogPathMsg{
-					collID: collectionID,
-					paths:  []string{timestampKey, ddKey},
-				},
-			}
-
-			ddNode.outCh <- ddlFlushMsg
+			ddNode.flushMeta.AppendDDLBinlogPaths(collectionID, []string{timestampKey, ddKey})
 		}
 
 	}
@@ -328,9 +311,14 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 		}
 	}
 
-	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.CreatePartitionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
-	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.CreatePartitionEventType)
+	ddNode.ddBuffer.ddData[collectionID].ddRequestString =
+		append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.CreatePartitionRequest.String())
+
+	ddNode.ddBuffer.ddData[collectionID].timestamps =
+		append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
+
+	ddNode.ddBuffer.ddData[collectionID].eventTypes =
+		append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.CreatePartitionEventType)
 }
 
 func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
@@ -361,12 +349,18 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 		}
 	}
 
-	ddNode.ddBuffer.ddData[collectionID].ddRequestString = append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.DropPartitionRequest.String())
-	ddNode.ddBuffer.ddData[collectionID].timestamps = append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
-	ddNode.ddBuffer.ddData[collectionID].eventTypes = append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
+	ddNode.ddBuffer.ddData[collectionID].ddRequestString =
+		append(ddNode.ddBuffer.ddData[collectionID].ddRequestString, msg.DropPartitionRequest.String())
+
+	ddNode.ddBuffer.ddData[collectionID].timestamps =
+		append(ddNode.ddBuffer.ddData[collectionID].timestamps, msg.Base.Timestamp)
+
+	ddNode.ddBuffer.ddData[collectionID].eventTypes =
+		append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 
-func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg, replica collectionReplica) *ddNode {
+func newDDNode(ctx context.Context, flushMeta *metaTable,
+	inFlushCh chan *flushMsg, replica collectionReplica) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -409,10 +403,12 @@ func newDDNode(ctx context.Context, outCh chan *ddlFlushSyncMsg, replica collect
 			ddData:  make(map[UniqueID]*ddData),
 			maxSize: Params.FlushDdBufferSize,
 		},
-		outCh: outCh,
+		// outCh:     outCh,
+		inFlushCh: inFlushCh,
 
 		idAllocator: idAllocator,
 		kv:          minioKV,
 		replica:     replica,
+		flushMeta:   flushMeta,
 	}
 }

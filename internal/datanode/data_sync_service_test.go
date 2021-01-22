@@ -205,11 +205,11 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	// replica := newReplica()
-	node.dataSyncService = newDataSyncService(node.ctx, nil, nil, node.replica)
+	Params.FlushInsertBufferSize = 1
+	node.dataSyncService = newDataSyncService(node.ctx, nil, node.replica)
 	go node.dataSyncService.start()
 
-	node.Close()
+	node.Stop()
 
 	<-ctx.Done()
 }

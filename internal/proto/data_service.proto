@@ -136,6 +136,22 @@ message SegmentMsg{
   SegmentInfo segment = 2;
 }
 
+message FieldFlushMeta {
+    int64 fieldID = 1;
+    repeated string binlog_paths = 2;
+}
+
+message SegmentFlushMeta{
+    int64 segmentID = 1;
+    bool is_flushed = 2;
+    repeated FieldFlushMeta fields = 5;
+}
+
+message DDLFlushMeta {
+    int64 collectionID = 1;
+    repeated string binlog_paths = 2;
+}
+
 service DataService {
 
    rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}

@@ -2,11 +2,12 @@ package datanode
 
 import (
 	"context"
+	"log"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/clientv3"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,6 +15,14 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
+
+func newMetaTable() *metaTable {
+	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+	mt, _ := NewMetaTable(etcdKV)
+	return mt
+}
 
 func TestFlowGraphDDNode_Operate(t *testing.T) {
 	newMeta()
@@ -30,22 +39,17 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		ctx = context.Background()
 	}
 
-	ddChan := make(chan *ddlFlushSyncMsg, 10)
-	defer close(ddChan)
-	insertChan := make(chan *insertFlushSyncMsg, 10)
-	defer close(insertChan)
+	inFlushCh := make(chan *flushMsg, 10)
+	defer close(inFlushCh)
 
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
 	Params.MetaRootPath = testPath
-	fService := newFlushSyncService(ctx, ddChan, insertChan)
-	assert.Equal(t, testPath, fService.metaTable.client.(*etcdkv.EtcdKV).GetPath("."))
-	go fService.start()
 
 	Params.FlushDdBufferSize = 4
 	replica := newReplica()
-	ddNode := newDDNode(ctx, ddChan, replica)
+	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica)
 
 	colID := UniqueID(0)
 	colName := "col-test-0"
@@ -135,21 +139,11 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		DropPartitionRequest: dropPartitionReq,
 	}
 
-	flushMsg := msgstream.FlushMsg{
-		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: Timestamp(5),
-			EndTimestamp:   Timestamp(5),
-			HashValues:     []uint32{uint32(0)},
-		},
-		FlushMsg: internalpb2.FlushMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kFlush,
-				MsgID:     1,
-				Timestamp: 6,
-				SourceID:  1,
-			},
-			SegmentID: 1,
-		},
+	inFlushCh <- &flushMsg{
+		msgID:        1,
+		Timestamp:    6,
+		segmentIDs:   []UniqueID{1},
+		collectionID: UniqueID(1),
 	}
 
 	tsMessages := make([]msgstream.TsMsg, 0)
@@ -157,8 +151,38 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropColMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
-	tsMessages = append(tsMessages, msgstream.TsMsg(&flushMsg))
 	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3))
 	var inMsg Msg = msgStream
 	ddNode.Operate([]*Msg{&inMsg})
+}
+
+func clearEtcd(rootPath string) error {
+	etcdAddr := Params.EtcdAddress
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	if err != nil {
+		return err
+	}
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, rootPath)
+
+	err = etcdKV.RemoveWithPrefix("writer/segment")
+	if err != nil {
+		return err
+	}
+	_, _, err = etcdKV.LoadWithPrefix("writer/segment")
+	if err != nil {
+		return err
+	}
+	log.Println("Clear ETCD with prefix writer/segment ")
+
+	err = etcdKV.RemoveWithPrefix("writer/ddl")
+	if err != nil {
+		return err
+	}
+	_, _, err = etcdKV.LoadWithPrefix("writer/ddl")
+	if err != nil {
+		return err
+	}
+	log.Println("Clear ETCD with prefix writer/ddl")
+	return nil
+
 }
