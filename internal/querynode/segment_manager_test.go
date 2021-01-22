@@ -2,18 +2,23 @@ package querynode
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"path"
 	"strconv"
 	"testing"
+	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
@@ -209,11 +214,11 @@ func generateIndex(segmentID UniqueID) ([]string, indexParam, error) {
 	return indexPaths, indexParams, nil
 }
 
-func TestSegmentManager_load_and_release(t *testing.T) {
+func TestSegmentManager_load_release_and_search(t *testing.T) {
 	collectionID := UniqueID(0)
 	partitionID := UniqueID(1)
 	segmentID := UniqueID(2)
-	fieldIDs := []int64{101}
+	fieldIDs := []int64{0, 101}
 
 	node := newQueryNodeMock()
 	defer node.Stop()
@@ -236,7 +241,7 @@ func TestSegmentManager_load_and_release(t *testing.T) {
 	assert.NoError(t, err)
 
 	fieldsMap := node.segManager.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
-	assert.Equal(t, len(fieldsMap), 1)
+	assert.Equal(t, len(fieldsMap), 2)
 
 	err = node.segManager.loadSegmentFieldsData(segmentID, fieldsMap)
 	assert.NoError(t, err)
@@ -246,6 +251,51 @@ func TestSegmentManager_load_and_release(t *testing.T) {
 
 	err = node.segManager.loadIndex(segmentID, indexPaths, indexParams)
 	assert.NoError(t, err)
+
+	// do search
+	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+
+	const DIM = 16
+	var searchRawData []byte
+	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	for _, ele := range vec {
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		searchRawData = append(searchRawData, buf...)
+	}
+	placeholderValue := milvuspb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   milvuspb.PlaceholderType_VECTOR_FLOAT,
+		Values: [][]byte{searchRawData},
+	}
+
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+	}
+
+	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
+	assert.NoError(t, err)
+
+	searchTimestamp := Timestamp(1020)
+	collection, err := node.replica.getCollectionByID(collectionID)
+	assert.NoError(t, err)
+	plan, err := createPlan(*collection, dslString)
+	assert.NoError(t, err)
+	holder, err := parserPlaceholderGroup(plan, placeHolderGroupBlob)
+	assert.NoError(t, err)
+	placeholderGroups := make([]*PlaceholderGroup, 0)
+	placeholderGroups = append(placeholderGroups, holder)
+
+	// wait for segment building index
+	time.Sleep(3 * time.Second)
+
+	segment, err := node.replica.getSegmentByID(segmentID)
+	assert.NoError(t, err)
+	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+	assert.Nil(t, err)
+
+	plan.delete()
+	holder.delete()
 
 	<-ctx.Done()
 }

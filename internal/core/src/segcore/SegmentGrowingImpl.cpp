@@ -240,7 +240,7 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
 
 Status
 SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
-    auto field_offset = schema_->get_offset(FieldName(info.field_name));
+    auto field_offset = schema_->get_offset(FieldId(info.field_id));
 
     Assert(info.index_params.count("metric_type"));
     auto metric_type_str = info.index_params.at("metric_type");

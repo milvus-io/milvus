@@ -1317,6 +1317,7 @@ class DescribeCollectionResponse :
   enum : int {
     kStatusFieldNumber = 1,
     kSchemaFieldNumber = 2,
+    kCollectionIDFieldNumber = 3,
   };
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -1334,6 +1335,11 @@ class DescribeCollectionResponse :
   ::milvus::proto::schema::CollectionSchema* mutable_schema();
   void set_allocated_schema(::milvus::proto::schema::CollectionSchema* schema);
 
+  // int64 collectionID = 3;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeCollectionResponse)
  private:
   class _Internal;
@@ -1341,6 +1347,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::CollectionSchema* schema_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -7781,6 +7788,20 @@ inline void DescribeCollectionResponse::set_allocated_schema(::milvus::proto::sc
   }
   schema_ = schema;
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DescribeCollectionResponse.schema)
+}
+
+// int64 collectionID = 3;
+inline void DescribeCollectionResponse::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 DescribeCollectionResponse::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.collectionID)
+  return collectionid_;
+}
+inline void DescribeCollectionResponse::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.collectionID)
 }
 
 // -------------------------------------------------------------------
