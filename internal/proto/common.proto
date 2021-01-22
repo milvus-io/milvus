@@ -83,6 +83,10 @@ enum MsgType {
     kDescribePartition = 203;
     kShowPartitions = 204;
 
+    /* Define Requests: segment */
+    kShowSegment = 250;
+    kDescribeSegment = 251;
+
     /* Definition Requests: Index */
     kCreateIndex = 300;
     kDescribeIndex = 301;

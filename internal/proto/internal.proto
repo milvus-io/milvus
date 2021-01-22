@@ -103,11 +103,14 @@ message InsertRequest {
   string db_name = 2;
   string collection_name = 3;
   string partition_name = 4;
-  int64 segmentID = 5;
-  string channelID = 6;
-  repeated uint64 timestamps = 7;
-  repeated int64 rowIDs = 8;
-  repeated common.Blob row_data = 9;
+  int64 dbID = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+  int64 segmentID = 8;
+  string channelID = 9;
+  repeated uint64 timestamps = 10;
+  repeated int64 rowIDs = 11;
+  repeated common.Blob row_data = 12;
 }
 
 
