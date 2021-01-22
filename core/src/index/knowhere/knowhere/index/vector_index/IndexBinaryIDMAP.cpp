@@ -66,8 +66,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const fa
 }
 
 DynamicResultSegment
-BinaryIDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset,
-                             const milvus::knowhere::Config& config,
+BinaryIDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& config,
                              const faiss::BitsetView& bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");

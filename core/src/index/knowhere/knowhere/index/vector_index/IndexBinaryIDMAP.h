@@ -48,7 +48,7 @@ class BinaryIDMAP : public VecIndex, public FaissBaseBinaryIndex {
     Query(const DatasetPtr&, const Config&, const faiss::BitsetView& bitset) override;
 
     DynamicResultSegment
-    QueryByDistance(const DatasetPtr& dataset, const Config &config, const faiss::BitsetView &bitset);
+    QueryByDistance(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset);
 
     int64_t
     Count() override;
