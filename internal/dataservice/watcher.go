@@ -3,6 +3,9 @@ package dataservice
 import (
 	"log"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"golang.org/x/net/context"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -14,6 +17,8 @@ type (
 		msgQueue  chan *msgstream.TimeTickMsg
 	}
 	dataNodeTimeTickWatcher struct {
+		meta      *meta
+		cluster   *dataNodeCluster
 		allocator segmentAllocator
 		msgQueue  chan *msgstream.TimeTickMsg
 	}
@@ -30,7 +35,7 @@ func (watcher *proxyTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("proxy time tick watcher clsoed")
+			log.Println("proxy time tick watcher closed")
 			return
 		case msg := <-watcher.msgQueue:
 			if err := watcher.allocator.ExpireAllocations(msg.Base.Timestamp); err != nil {
@@ -44,9 +49,11 @@ func (watcher *proxyTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
 	watcher.msgQueue <- msg
 }
 
-func newDataNodeTimeTickWatcher(allocator segmentAllocator) *dataNodeTimeTickWatcher {
+func newDataNodeTimeTickWatcher(meta *meta, allocator segmentAllocator, cluster *dataNodeCluster) *dataNodeTimeTickWatcher {
 	return &dataNodeTimeTickWatcher{
+		meta:      meta,
 		allocator: allocator,
+		cluster:   cluster,
 		msgQueue:  make(chan *msgstream.TimeTickMsg, 1),
 	}
 }
@@ -74,7 +81,21 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 					continue
 				}
 				if expired {
-					// TODO: flush segment
+					segmentInfo, err := watcher.meta.GetSegment(id)
+					if err != nil {
+						log.Println(err.Error())
+						continue
+					}
+					watcher.cluster.FlushSegment(&datapb.FlushSegRequest{
+						Base: &commonpb.MsgBase{
+							MsgType:   commonpb.MsgType_kShowCollections,
+							MsgID:     -1, // todo add msg id
+							Timestamp: 0,  // todo
+							SourceID:  -1, // todo
+						},
+						CollectionID: segmentInfo.CollectionID,
+						SegmentIDs:   []int64{segmentInfo.SegmentID},
+					})
 					watcher.allocator.DropSegment(id)
 				}
 			}

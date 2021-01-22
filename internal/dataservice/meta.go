@@ -8,16 +8,12 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
 type (
-	UniqueID           = typeutil.UniqueID
-	Timestamp          = typeutil.Timestamp
 	errSegmentNotFound struct {
 		segmentID UniqueID
 	}
@@ -33,9 +29,8 @@ type (
 		client      kv.TxnBase                       // client of a reliable kv service, i.e. etcd client
 		collID2Info map[UniqueID]*collectionInfo     // collection id to collection info
 		segID2Info  map[UniqueID]*datapb.SegmentInfo // segment id to segment info
-
-		allocator allocator
-		ddLock    sync.RWMutex
+		allocator   allocator
+		ddLock      sync.RWMutex
 	}
 )
 
