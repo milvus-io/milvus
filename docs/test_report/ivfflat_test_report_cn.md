@@ -97,7 +97,7 @@ Milvus设置：
 - gpu_cache_capacity: 6
 - use_blas_threshold: 2100
 
-Milvus设置的详细定义可以参考 https://milvus.io/docs/en/reference/milvus_config/ 。
+Milvus设置的详细定义可以参考 https://milvus.io/cn/docs/milvus_config.md。
 
 测试方法
 

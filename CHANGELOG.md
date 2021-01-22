@@ -1,7 +1,7 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
-# Milvus 0.10.5 (TBD)
+# Milvus 0.10.5 (2021-01-07)
 ## Bug
 -   \#4296,#4554 Fix mishards add name-mismatched pod to read-only group
 -   \#4307 Specify partition to load for load_collection()

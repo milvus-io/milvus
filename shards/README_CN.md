@@ -20,7 +20,7 @@ Mishards 负责将上游请求拆分，并路由到内部各细分子服务，�
 
 以下分别向您展示如何使用源代码在单机上启动 Mishards 和 Milvus 服务，以及如何使用 Kubernetes 启动 Milvus 集群和 Mishards。
 
-Milvus 启动的前提条件请参考 [Milvus 安装](https://milvus.io/cn/docs/guides/get_started/install_milvus/install_milvus.md)。
+Milvus 启动的前提条件请参考 [Milvus 安装](https://milvus.io/cn/docs/install_milvus.md)。
 
 ### 源代码启动示例
 
