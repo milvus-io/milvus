@@ -4,31 +4,31 @@
 
 -   [Build from source](#build-from-source)
 
-  - [Requirements](#requirements)
+    - [Requirements](#requirements)
 
-  - [Compilation](#compilation)
+    - [Compilation](#compilation)
 
-  - [Launch Milvus server](#launch-milvus-server)
+    - [Launch Milvus server](#launch-milvus-server)
 
--   [Compile Milvus on Docker](#compile-milvus-on-docker)
+-   [Compile Milvus on Docker](#compile-milvus-on-docker)  
 
-  - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
+    - [Step 1 Pull Milvus Docker images](#step-1-pull-milvus-docker-images)
 
-  - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
+    - [Step 2 Start the Docker container](#step-2-start-the-docker-container)
 
-  - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
+    - [Step 3 Download Milvus source code](#step-3-download-milvus-source-code)
 
-  - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
+    - [Step 4 Compile Milvus in the container](#step-4-compile-milvus-in-the-container)
 
 -   [Troubleshooting](#troubleshooting)
 
-  - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
+    - [Error message: `protocol https not supported or disabled in libcurl`](#error-message-protocol-https-not-supported-or-disabled-in-libcurl)
 
-  - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
+    - [Error message: `internal compiler error`](#error-message-internal-compiler-error)
 
-  - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
+    - [Error message: `error while loading shared libraries: libmysqlpp.so.3`](#error-message-error-while-loading-shared-libraries-libmysqlppso3)
 
-  - [CMake version is not supported](#cmake-version-is-not-supported)
+    - [CMake version is not supported](#cmake-version-is-not-supported)
 
 <!-- /TOC -->
 
@@ -42,64 +42,77 @@
 
   - CentOS 7
 
-  > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
+    > Note: If your Linux operating system does not meet the requirements, we recommend that you pull a Docker image of [Ubuntu 18.04](https://docs.docker.com/install/linux/docker-ce/ubuntu/) or [CentOS 7](https://docs.docker.com/install/linux/docker-ce/centos/) as your compilation environment.
   
 -   GCC 7.0 or higher to support C++ 17
 
--   CMake 3.12 or higher
+-   CMake 3.14 or higher
 
 -   Git
 
 For GPU-enabled version, you will also need:
 
--   CUDA 10.0 or higher
+-   CUDA 10.x (10.0, 10.1, 10.2)
 
 -   NVIDIA driver 418 or higher
 
 ### Compilation
 
-#### Step 1 Install dependencies
+#### Step 1 Download Milvus source code and specify version 
+
+Download Milvus source code, change directory and specify version (for example, 0.10.3):
+
+```shell
+$ git clone https://github.com/milvus-io/milvus
+$ cd ./milvus/core
+$ git checkout 0.10.3
+```
+
+#### Step 2 Install dependencies
 
 ##### Install in Ubuntu
 
 ```shell
-$ cd [Milvus root path]/core
 $ ./ubuntu_build_deps.sh
 ```
 
 ##### Install in CentOS
 
 ```shell
-$ cd [Milvus root path]/core
 $ ./centos7_build_deps.sh
 ```
 
-#### Step 2 Build
+#### Step 3 Build Milvus source code
 
-```shell
-$ cd [Milvus root path]/core
-$ ./build.sh -t Debug
-```
+If you want to use CPU-only:
 
-or
+run `build.sh`:
 
 ```shell
 $ ./build.sh -t Release
 ```
 
-By default, it will build CPU-only version. To build GPU version, add `-g` option.
+If you want to use GPU-enabled:
+
+1. Add cuda library path to `LD_LIBRARY_PATH`:
 
 ```shell
-$ ./build.sh -g
+$ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ```
 
-If you want to know the complete build options, run the following command.
+2. Add cuda binary path to `PATH`:
 
 ```shell
-$./build.sh -h
+$ export PATH=/usr/local/cuda/bin:$PATH
 ```
 
-When the build is completed, everything that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
+3. Add a `-g` parameter to run `build.sh`:
+
+```shell
+$ ./build.sh -g -t Release
+```
+
+When the build completes, everything that you need to run Milvus is under `[Milvus root path]/core/milvus`.
 
 ### Launch Milvus server
 
@@ -132,23 +145,40 @@ With the following Docker images, you should be able to compile Milvus on any Li
 
 ### Step 1 Pull Milvus Docker images
 
+#### ubuntu18.04
+
 Pull CPU-only image:
 
 ```shell
-$ docker pull milvusdb/milvus-cpu-build-env:latest
+$ docker pull milvusdb/milvus-cpu-build-env:v0.7.0-ubuntu18.04
 ```
 
 Pull GPU-enabled image:
 
 ```shell
-$ docker pull milvusdb/milvus-gpu-build-env:latest
+$ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-ubuntu18.04
 ```
+
+#### CentOs7
+
+Pull CPU-only image:
+
+```shell
+$ docker pull milvusdb/milvus-cpu-build-env:v0.7.0-centos7
+```
+
+Pull GPU-enabled image:
+
+```shell
+$ docker pull milvusdb/milvus-gpu-build-env:v0.7.0-centos7
+```
+
 ### Step 2 Start the Docker container
 
 Start a CPU-only container:
 
 ```shell
-$ docker run -it -p 19530:19530 -d milvusdb/milvus-cpu-build-env:latest
+$ docker run -it -p 19530:19530 -d <milvus_cpu_docker_image>
 ```
 
 Start a GPU container:
@@ -156,13 +186,13 @@ Start a GPU container:
 - For nvidia docker 2:
 
 ```shell
-$ docker run --runtime=nvidia -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
+$ docker run --runtime=nvidia -it -p 19530:19530 -d <milvus_gpu_docker_image>
 ```
 
 - For nvidia container toolkit:
 
 ```shell
-docker run --gpus all -it -p 19530:19530 -d milvusdb/milvus-gpu-build-env:latest
+docker run --gpus all -it -p 19530:19530 -d <milvus_gpu_docker_image>
 ```
 
 To enter the container:
@@ -173,10 +203,9 @@ $ docker exec -it [container_id] bash
 
 ### Step 3 Download Milvus source code
 
-Download latest Milvus source code:
+Download Milvus source code:
 
 ```shell
-$ cd /home
 $ git clone https://github.com/milvus-io/milvus
 ```
 
@@ -184,6 +213,12 @@ To enter its core directory:
 
 ```shell
 $ cd ./milvus/core
+```
+
+Specify version (for example, 0.10.3):
+
+```shell
+$ git checkout 0.10.3
 ```
 
 ### Step 4 Compile Milvus in the container
@@ -267,16 +302,16 @@ Follow the steps below to solve this problem:
 Follow the steps below to install a supported version of CMake:
 
 1.  Remove the unsupported version of CMake.
-2.  Get CMake 3.12 or higher. Here we get CMake 3.12.
+2.  Get CMake 3.14 or higher. Here we get CMake 3.14.
 
     ```shell
-    $ wget https://cmake.org/files/v3.12/cmake-3.12.2-Linux-x86_64.tar.gz
+    $ wget https://cmake.org/files/v3.14/cmake-3.14.7-Linux-x86_64.tar.gz
     ```
 
 3.  Extract the file and install CMake.
 
     ```shell
-    $ tar zxvf cmake-3.12.2-Linux-x86_64.tar.gz
-    $ mv cmake-3.12.2-Linux-x86_64 /opt/cmake-3.12.2
-    $ ln -sf /opt/cmake-3.12.2/bin/* /usr/bin/
+    $ tar zxvf cmake-3.14.7-Linux-x86_64.tar.gz
+    $ mv cmake-3.14.7-Linux-x86_64 /opt/cmake-3.14.7
+    $ ln -sf /opt/cmake-3.14.7/bin/* /usr/bin/
     ```
