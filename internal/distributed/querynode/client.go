@@ -13,28 +13,28 @@ type Client struct {
 	grpcClient querypb.QueryNodeClient
 }
 
-func (c *Client) Init() error {
-	panic("implement me")
-}
-
-func (c *Client) Start() error {
-	panic("implement me")
-}
-
-func (c *Client) Stop() error {
-	panic("implement me")
-}
-
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	panic("implement me")
+	states, err := c.grpcClient.GetComponentStates(context.TODO(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return states.ServerStates, nil
 }
 
 func (c *Client) GetTimeTickChannel() (string, error) {
-	panic("implement me")
+	response, err := c.grpcClient.GetTimeTickChannel(context.TODO(), nil)
+	if err != nil {
+		return "", err
+	}
+	return response.TimeTickChannelID, nil
 }
 
 func (c *Client) GetStatisticsChannel() (string, error) {
-	panic("implement me")
+	response, err := c.grpcClient.GetStatsChannel(context.TODO(), nil)
+	if err != nil {
+		return "", err
+	}
+	return response.StatsChannelID, nil
 }
 
 func (c *Client) AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
@@ -55,8 +55,4 @@ func (c *Client) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status,
 
 func (c *Client) ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	return c.grpcClient.ReleaseSegments(context.TODO(), in)
-}
-
-func (c *Client) GetPartitionState(in *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
-	return c.grpcClient.GetPartitionState(context.TODO(), in)
 }

@@ -130,7 +130,7 @@ func newQueryNodeMock() *QueryNode {
 		ctx = context.Background()
 	}
 
-	svr := newQueryNode(ctx, 0)
+	svr := NewQueryNode(ctx, 0)
 	return svr
 
 }

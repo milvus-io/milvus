@@ -213,7 +213,7 @@ func TestSearch_Search(t *testing.T) {
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
-	node := newQueryNode(context.Background(), 0)
+	node := NewQueryNode(context.Background(), 0)
 	initTestMeta(t, node, "collection0", 0, 0)
 
 	pulsarURL := Params.PulsarAddress

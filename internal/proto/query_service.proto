@@ -167,10 +167,13 @@ service QueryService {
 }
 
 service QueryNode {
+  rpc GetTimeTickChannel(common.Empty) returns (GetTimeTickChannelResponse) {}
+  rpc GetStatsChannel(common.Empty) returns (GetStatsChannelResponse) {}
+  rpc GetComponentStates(common.Empty) returns (ServiceStatesResponse) {}
+
   rpc AddQueryChannel(AddQueryChannelsRequest) returns (common.Status) {}
   rpc RemoveQueryChannel(RemoveQueryChannelsRequest) returns (common.Status) {}
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentRequest) returns (common.Status) {}
-  rpc GetPartitionState(PartitionStatesRequest) returns (PartitionStatesResponse) {}
 }

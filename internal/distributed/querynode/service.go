@@ -13,7 +13,7 @@ import (
 
 type Server struct {
 	grpcServer *grpc.Server
-	node       querynode.Node
+	node       *querynode.QueryNode
 }
 
 func NewServer(ctx context.Context, queryNodeID uint64) *Server {
@@ -36,9 +36,59 @@ func (s *Server) StartGrpcServer() {
 	}
 }
 
-func (s *Server) Start() {
+func (s *Server) Init() error {
+	return s.Init()
+}
+
+func (s *Server) Start() error {
 	go s.StartGrpcServer()
-	s.node.Start()
+	return s.node.Start()
+}
+
+func (s *Server) Stop() error {
+	return s.Stop()
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*querypb.GetTimeTickChannelResponse, error) {
+	// ignore ctx and in
+	channel, err := s.node.GetTimeTickChannel()
+	if err != nil {
+		return nil, err
+	}
+	return &querypb.GetTimeTickChannelResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		TimeTickChannelID: channel,
+	}, nil
+}
+
+func (s *Server) GetStatsChannel(ctx context.Context, in *commonpb.Empty) (*querypb.GetStatsChannelResponse, error) {
+	// ignore ctx and in
+	channel, err := s.node.GetStatisticsChannel()
+	if err != nil {
+		return nil, err
+	}
+	return &querypb.GetStatsChannelResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		StatsChannelID: channel,
+	}, nil
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, in *commonpb.Empty) (*querypb.ServiceStatesResponse, error) {
+	// ignore ctx and in
+	componentStates, err := s.node.GetComponentStates()
+	if err != nil {
+		return nil, err
+	}
+	return &querypb.ServiceStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		ServerStates: componentStates,
+	}, nil
 }
 
 func (s *Server) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
@@ -64,9 +114,4 @@ func (s *Server) LoadSegments(ctx context.Context, in *querypb.LoadSegmentReques
 func (s *Server) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.node.ReleaseSegments(in)
-}
-
-func (s *Server) GetPartitionState(ctx context.Context, in *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
-	// ignore ctx
-	return s.node.GetPartitionState(in)
 }
