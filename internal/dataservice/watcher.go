@@ -10,45 +10,27 @@ import (
 
 type (
 	proxyTimeTickWatcher struct {
-		allocator  segmentAllocator
-		msgQueue   chan *msgstream.TimeTickMsg
-		ctx        context.Context
-		cancelFunc context.CancelFunc
+		allocator segmentAllocator
+		msgQueue  chan *msgstream.TimeTickMsg
 	}
 	dataNodeTimeTickWatcher struct {
-		allocator  segmentAllocator
-		msgQueue   chan *msgstream.TimeTickMsg
-		ctx        context.Context
-		cancelFunc context.CancelFunc
+		allocator segmentAllocator
+		msgQueue  chan *msgstream.TimeTickMsg
 	}
 )
 
-func newProxyTimeTickWatcher(ctx context.Context, allocator segmentAllocator) *proxyTimeTickWatcher {
-	cancel, cancelFunc := context.WithCancel(ctx)
+func newProxyTimeTickWatcher(allocator segmentAllocator) *proxyTimeTickWatcher {
 	return &proxyTimeTickWatcher{
-		allocator:  allocator,
-		msgQueue:   make(chan *msgstream.TimeTickMsg, 1),
-		ctx:        cancel,
-		cancelFunc: cancelFunc,
+		allocator: allocator,
+		msgQueue:  make(chan *msgstream.TimeTickMsg, 1),
 	}
 }
 
-func (watcher *proxyTimeTickWatcher) Start() {
-	go watcher.handleProxyTimeTickMsg()
-}
-
-func (watcher *proxyTimeTickWatcher) Close() {
-	watcher.cancelFunc()
-}
-
-func (watcher *proxyTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
-	watcher.msgQueue <- msg
-}
-
-func (watcher *proxyTimeTickWatcher) handleProxyTimeTickMsg() {
+func (watcher *proxyTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 	for {
 		select {
-		case <-watcher.ctx.Done():
+		case <-ctx.Done():
+			log.Println("proxy time tick watcher clsoed")
 			return
 		case msg := <-watcher.msgQueue:
 			if err := watcher.allocator.ExpireAllocations(msg.Base.Timestamp); err != nil {
@@ -58,13 +40,14 @@ func (watcher *proxyTimeTickWatcher) handleProxyTimeTickMsg() {
 	}
 }
 
-func newDataNodeTimeTickWatcher(ctx context.Context, allocator segmentAllocator) *dataNodeTimeTickWatcher {
-	cancel, cancelFunc := context.WithCancel(ctx)
+func (watcher *proxyTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
+	watcher.msgQueue <- msg
+}
+
+func newDataNodeTimeTickWatcher(allocator segmentAllocator) *dataNodeTimeTickWatcher {
 	return &dataNodeTimeTickWatcher{
-		allocator:  allocator,
-		msgQueue:   make(chan *msgstream.TimeTickMsg, 1),
-		ctx:        cancel,
-		cancelFunc: cancelFunc,
+		allocator: allocator,
+		msgQueue:  make(chan *msgstream.TimeTickMsg, 1),
 	}
 }
 
@@ -72,18 +55,11 @@ func (watcher *dataNodeTimeTickWatcher) Watch(msg *msgstream.TimeTickMsg) {
 	watcher.msgQueue <- msg
 }
 
-func (watcher *dataNodeTimeTickWatcher) Start() {
-	go watcher.handleDataNodeTimeTickMsg()
-}
-
-func (watcher *dataNodeTimeTickWatcher) Close() {
-	watcher.cancelFunc()
-}
-
-func (watcher *dataNodeTimeTickWatcher) handleDataNodeTimeTickMsg() {
+func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 	for {
 		select {
-		case <-watcher.ctx.Done():
+		case <-ctx.Done():
+			log.Println("data node time tick watcher clsoed")
 			return
 		case msg := <-watcher.msgQueue:
 			segments, err := watcher.allocator.GetSealedSegments()

@@ -26,13 +26,13 @@ func (err errRemainInSufficient) Error() string {
 // segmentAllocator is used to allocate rows for segments and record the allocations.
 type segmentAllocator interface {
 	// OpenSegment add the segment to allocator and set it allocatable
-	OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelRange) error
+	OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelGroup) error
 	// AllocSegment allocate rows and record the allocation.
 	AllocSegment(collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (UniqueID, int, Timestamp, error)
 	// GetSealedSegments get all sealed segment.
 	GetSealedSegments() ([]UniqueID, error)
 	// SealSegment set segment sealed, the segment will not be allocated anymore.
-	SealSegment(segmentID UniqueID)
+	SealSegment(segmentID UniqueID) error
 	// DropSegment drop the segment from allocator.
 	DropSegment(segmentID UniqueID)
 	// ExpireAllocations check all allocations' expire time and remove the expired allocation.
@@ -50,7 +50,7 @@ type (
 		sealed         bool
 		lastExpireTime Timestamp
 		allocations    []*allocation
-		cRange         channelRange
+		cRange         channelGroup
 	}
 	allocation struct {
 		rowNums    int
@@ -79,7 +79,7 @@ func newSegmentAssigner(metaTable *meta, allocator allocator) (*segmentAllocator
 	return segmentAllocator, nil
 }
 
-func (allocator *segmentAllocatorImpl) OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelRange) error {
+func (allocator *segmentAllocatorImpl) OpenSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, cRange channelGroup) error {
 	if _, ok := allocator.segments[segmentID]; ok {
 		return fmt.Errorf("segment %d already exist", segmentID)
 	}
@@ -99,7 +99,8 @@ func (allocator *segmentAllocatorImpl) OpenSegment(collectionID UniqueID, partit
 	return nil
 }
 
-func (allocator *segmentAllocatorImpl) AllocSegment(collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int) (segID UniqueID, retCount int, expireTime Timestamp, err error) {
+func (allocator *segmentAllocatorImpl) AllocSegment(collectionID UniqueID,
+	partitionID UniqueID, channelName string, requestRows int) (segID UniqueID, retCount int, expireTime Timestamp, err error) {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 
@@ -195,14 +196,18 @@ func (allocator *segmentAllocatorImpl) checkSegmentSealed(segStatus *segmentStat
 	return float64(segMeta.NumRows) >= allocator.segmentThresholdFactor*float64(segStatus.total), nil
 }
 
-func (allocator *segmentAllocatorImpl) SealSegment(segmentID UniqueID) {
+func (allocator *segmentAllocatorImpl) SealSegment(segmentID UniqueID) error {
 	allocator.mu.Lock()
 	defer allocator.mu.Unlock()
 	status, ok := allocator.segments[segmentID]
 	if !ok {
-		return
+		return nil
+	}
+	if err := allocator.mt.SealSegment(segmentID); err != nil {
+		return err
 	}
 	status.sealed = true
+	return nil
 }
 
 func (allocator *segmentAllocatorImpl) DropSegment(segmentID UniqueID) {
@@ -223,7 +228,6 @@ func (allocator *segmentAllocatorImpl) ExpireAllocations(timeTick Timestamp) err
 			i--
 		}
 	}
-
 	return nil
 }
 

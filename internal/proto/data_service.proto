@@ -6,6 +6,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/dat
 
 import "common.proto";
 import "internal.proto";
+import "milvus.proto";
 
 
 message RegisterNodeRequest {
@@ -15,6 +16,7 @@ message RegisterNodeRequest {
 
 message RegisterNodeResponse {
   internal.InitParams init_params = 1;
+  common.Status status = 2;
 }
 
 
@@ -30,8 +32,7 @@ message SegIDRequest {
 message AssignSegIDRequest {
   int64 nodeID = 1;
   string peer_role = 2;
-  uint64 timestamp = 3;
-  repeated SegIDRequest segIDRequests = 4;
+  repeated SegIDRequest segIDRequests = 3;
 }
 
 
@@ -66,6 +67,7 @@ message ShowSegmentRequest {
 
 message ShowSegmentResponse {
   repeated int64 segmentIDs = 1;
+  common.Status status = 2;
 }
 
 enum SegmentState {
@@ -73,6 +75,7 @@ enum SegmentState {
   SegmentNotExist = 1;
   SegmentGrowing = 2;
   SegmentSealed = 3;
+  SegmentFlushed = 4;
 }
 
 
@@ -85,8 +88,10 @@ message SegmentStatesResponse {
   SegmentState state = 1;
   uint64 create_time = 2;
   uint64 sealed_time = 3;
-  repeated internal.MsgPosition start_positions = 4;
-  repeated internal.MsgPosition end_positions = 5;
+  uint64 flushed_time = 4;
+  repeated internal.MsgPosition start_positions = 5;
+  repeated internal.MsgPosition end_positions = 6;
+  common.Status status = 7;
 }
 
 message InsertBinlogPathRequest {
@@ -97,6 +102,7 @@ message InsertBinlogPathRequest {
 message InsertBinlogPathsResponse {
   repeated int64 fieldIDs = 1;
   repeated internal.StringList paths = 2;
+  common.Status status = 3;
 }
 
 
@@ -126,14 +132,39 @@ message SegmentInfo {
   int64 partitionID=3;
   repeated string insert_channels = 4;
   uint64 open_time=5;
-  uint64 close_time=6;
-  int64 num_rows=7;
-  int64 mem_size=8;
+  uint64 sealed_time = 6;
+  uint64 flushed_time = 7;
+  int64 num_rows=8;
+  int64 mem_size=9;
+  SegmentState state = 10;
 }
 
 message SegmentMsg{
   common.MsgBase base = 1;
   SegmentInfo segment = 2;
+}
+
+message CollectionStatsRequest{
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+}
+
+message CollectionStatsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
+}
+
+message PartitionStatsRequest{
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+}
+
+message PartitionStatsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
 }
 
 message FieldFlushMeta {
@@ -164,5 +195,10 @@ service DataService {
    rpc GetInsertBinlogPaths(InsertBinlogPathRequest) returns (InsertBinlogPathsResponse) {}
 
    rpc GetInsertChannels(InsertChannelRequest) returns (internal.StringList) {}
+   rpc GetCollectionStatistics(CollectionStatsRequest) returns (CollectionStatsResponse) {}
+   rpc GetPartitionStatistics(PartitionStatsRequest) returns (PartitionStatsResponse) {}
 
+   rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+   rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
+   rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 }

@@ -21,6 +21,7 @@ message ComponentInfo {
 message ComponentStates {
   ComponentInfo state = 1;
   repeated ComponentInfo subcomponent_states = 2;
+  common.Status status = 3;
 }
 
 message  NodeInfo {
@@ -34,7 +35,8 @@ message InitParams {
 }
 
 message StringList {
-  repeated string values = 2;
+  repeated string values = 1;
+  common.Status status = 2;
 }
 
 message TimeTickMsg {
