@@ -21,7 +21,7 @@ Milvus 是一款开源的特征向量相似度搜索引擎，具有使用方便�
 
 Milvus 的架构如下：
 
-![arch](https://github.com/milvus-io/docs/raw/v0.7.1/assets/milvus_arch.png)
+![arch](https://github.com/milvus-io/docs/blob/master/v0.10.5/assets/milvus_arch.png)
 
 若要了解 Milvus 详细介绍和整体架构，请访问 [Milvus 简介](https://www.milvus.io/cn/docs/about_milvus/overview.md)。您可以通过 [版本发布说明](https://www.milvus.io/cn/docs/releases/release_notes.md) 获取最新版本的功能和更新。
 
