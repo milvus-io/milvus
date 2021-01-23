@@ -35,7 +35,7 @@ func newMockAllocator() *MockAllocator {
 	return &MockAllocator{}
 }
 
-func NewTestSchema() *schemapb.CollectionSchema {
+func newTestSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Name:        "test",
 		Description: "schema for test used",

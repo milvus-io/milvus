@@ -2,6 +2,9 @@ package dataservice
 
 import (
 	"context"
+	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
@@ -11,8 +14,45 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
+const (
+	timeout = 30 * time.Second
+	retry   = 3
+)
+
 type Client struct {
 	grpcClient datapb.DataServiceClient
+	conn       *grpc.ClientConn
+	addr       string
+}
+
+func NewClient(addr string) *Client {
+	return &Client{
+		addr: addr,
+	}
+}
+
+func (c *Client) Init() error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var err error
+	for i := 0; i < retry; i++ {
+		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock()); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return err
+	}
+	c.grpcClient = datapb.NewDataServiceClient(c.conn)
+	return nil
+}
+
+func (c *Client) Start() error {
+	return nil
+}
+
+func (c *Client) Stop() error {
+	return c.conn.Close()
 }
 
 func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
