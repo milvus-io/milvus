@@ -38,25 +38,7 @@ struct DynamicResultSet {
     quick_sort(size_t lp, size_t rp);
 };
 
-struct BufferPool {
-    size_t buffer_size;  /// max size of a single buffer, in bytes
-    struct Buffer {
-        idx_t* ids;
-        float* dis;
-    };
-    std::vector<Buffer> buffers;  /// buffer pool
-    size_t wp;                    /// writer pointer of the last buffer
-
-    explicit BufferPool(size_t buffer_size);
-    ~BufferPool();
-
-    /// copy elements [ofs: ofs + n - 1] seen as liner data in the buffers to
-    /// target dest_ids, dest_dis
-    void
-    copy_range(size_t ofs, size_t n, idx_t* dest_ids, float* dest_dis);
-};
-
-typedef BufferPool DynamicResultFragment;
+typedef faiss::BufferList DynamicResultFragment;
 typedef DynamicResultFragment* DynamicResultFragmentPtr;
 typedef std::vector<DynamicResultFragmentPtr> DynamicResultSegment;
 
@@ -73,9 +55,6 @@ struct DynamicResultCollector {
 
 void
 ExchangeDataset(DynamicResultSegment& milvus_dataset, std::vector<faiss::RangeSearchPartialResult*>& faiss_dataset);
-
-void
-MapUids(DynamicResultSegment& milvus_dataset, std::shared_ptr<std::vector<IDType>> uids);
 
 }  // namespace knowhere
 }  // namespace milvus

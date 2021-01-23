@@ -107,40 +107,6 @@ DynamicResultSet::quick_sort(size_t lp, size_t rp) {
     quick_sort<asc>(low, rp);
 }
 
-/***********************************************************************
- * BufferPool
- ***********************************************************************/
-
-BufferPool::BufferPool(size_t buffer_size) : buffer_size(buffer_size) {
-    wp = buffer_size;
-}
-
-BufferPool::~BufferPool() {
-    for (auto& buf : buffers) {
-        delete[] buf.ids;
-        delete[] buf.dis;
-    }
-}
-
-/// copy elemnts ofs:ofs+n-1 seen as linear data in the buffers to
-/// tables dest_ids, dest_dis
-void
-BufferPool::copy_range(size_t ofs, size_t n, idx_t* dest_ids, float* dest_dis) {
-    size_t bno = ofs / buffer_size;
-    ofs -= bno * buffer_size;
-    while (n > 0) {
-        size_t ncopy = ofs + n < buffer_size ? n : buffer_size - ofs;
-        Buffer buf = buffers[bno];
-        memcpy(dest_ids, buf.ids + ofs, ncopy * sizeof(*dest_ids));
-        memcpy(dest_dis, buf.dis + ofs, ncopy * sizeof(*dest_dis));
-        dest_ids += ncopy;
-        dest_dis += ncopy;
-        ofs = 0;
-        bno++;
-        n -= ncopy;
-    }
-}
-
 DynamicResultSet
 DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcessType) {
     if (limit <= 0) {
@@ -166,7 +132,7 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
 
     // abandon redundancy answers randomly
     // abandon strategy: keep the top limit sequentially
-    int pos = 1;
+    int32_t pos = 1;
     for (int i = 1; i < boundaries.size(); ++i) {
         if (boundaries[i] >= ret.count) {
             pos = i;
@@ -221,30 +187,6 @@ ExchangeDataset(DynamicResultSegment& milvus_dataset, std::vector<faiss::RangeSe
         }
         delete prspr->res;
         milvus_dataset.push_back(mrspr);
-    }
-}
-
-void
-MapUids(DynamicResultSegment& milvus_dataset, std::shared_ptr<std::vector<IDType>> uids) {
-    if (uids) {
-        for (auto& mrspr : milvus_dataset) {
-            if (mrspr->buffers.size() == 0)
-                continue;
-            for (auto j = 0; j < mrspr->buffers.size() - 1; ++j) {
-                auto buf = mrspr->buffers[j];
-                for (auto i = 0; i < mrspr->buffer_size; ++i) {
-                    if (buf.ids[i] >= 0) {
-                        buf.ids[i] = uids->at(buf.ids[i]);
-                    }
-                }
-            }
-            auto buf = mrspr->buffers[mrspr->buffers.size() - 1];
-            for (auto i = 0; i < mrspr->wp; ++i) {
-                if (buf.ids[i] >= 0) {
-                    buf.ids[i] = uids->at(buf.ids[i]);
-                }
-            }
-        }
     }
 }
 

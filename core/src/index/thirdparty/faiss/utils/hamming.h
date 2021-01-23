@@ -193,16 +193,6 @@ void hamming_range_search (
     size_t nb,
     int radius,
     size_t ncodes,
-    RangeSearchResult *result,
-    const BitsetView& bitset);
-
-void hamming_range_search (
-    const uint8_t * a,
-    const uint8_t * b,
-    size_t na,
-    size_t nb,
-    int radius,
-    size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
     const BitsetView& bitset);

@@ -93,17 +93,7 @@ void IndexFlat::range_search (idx_t n, const float *x, float radius,
                               RangeSearchResult *result,
                               const BitsetView& bitset) const
 {
-    switch (metric_type) {
-    case METRIC_INNER_PRODUCT:
-        range_search_inner_product (x, xb.data(), d, n, ntotal,
-                                    radius, result);
-        break;
-    case METRIC_L2:
-        range_search_L2sqr (x, xb.data(), d, n, ntotal, radius, result);
-        break;
-    default:
-        FAISS_THROW_MSG("metric type not supported");
-    }
+    FAISS_THROW_MSG("This interface is abandoned yet.");
 }
 
 void IndexFlat::range_search(faiss::Index::idx_t n,
