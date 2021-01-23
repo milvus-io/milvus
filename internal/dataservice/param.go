@@ -29,6 +29,7 @@ type ParamTable struct {
 	StatisticsChannelName         string
 	TimeTickChannelName           string
 	DataNodeNum                   int
+	SegmentChannelName            string // todo init
 }
 
 var Params ParamTable
