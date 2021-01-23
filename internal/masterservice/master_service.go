@@ -532,7 +532,7 @@ func (c *Core) setMsgStreams() error {
 						if ok {
 							c.DataServiceSegmentChan <- segInfoMsg.Segment
 						} else {
-							flushMsg, ok := segm.(*ms.SegmentFlushCompletedMsg)
+							flushMsg, ok := segm.(*ms.FlushCompletedMsg)
 							if ok {
 								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
 							} else {
