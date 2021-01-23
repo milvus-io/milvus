@@ -612,7 +612,7 @@ func (c *Core) GetComponentStates(empty *commonpb.Empty) (*internalpb2.Component
 	return &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
 			NodeID:    int64(Params.NodeID),
-			Role:      "master",
+			Role:      typeutil.MasterServiceRole,
 			StateCode: code,
 			ExtraInfo: nil,
 		},

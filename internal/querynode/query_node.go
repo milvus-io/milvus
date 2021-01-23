@@ -182,7 +182,7 @@ func (node *QueryNode) GetComponentStates() (*internalpb2.ComponentStates, error
 	}
 	info := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryNodeID,
-		Role:      "query-node",
+		Role:      typeutil.QueryNodeRole,
 		StateCode: code,
 	}
 	stats := &internalpb2.ComponentStates{

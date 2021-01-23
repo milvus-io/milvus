@@ -262,7 +262,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 	defer cancel()
 	req := &datapb.AssignSegIDRequest{
 		NodeID:        sa.PeerID,
-		PeerRole:      "ProxyNode",
+		PeerRole:      typeutil.ProxyNodeRole,
 		SegIDRequests: sa.segReqs,
 	}
 

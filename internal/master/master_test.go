@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
+	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -1147,7 +1148,7 @@ func TestMaster(t *testing.T) {
 
 		resp, err := cli.AssignSegmentID(ctx, &datapb.AssignSegIDRequest{
 			NodeID:   1,
-			PeerRole: "ProxyNode",
+			PeerRole: typeutil.ProxyNodeRole,
 			SegIDRequests: []*datapb.SegIDRequest{
 				{Count: 10000, ChannelName: "0", CollName: collName, PartitionName: partitionName},
 			},
