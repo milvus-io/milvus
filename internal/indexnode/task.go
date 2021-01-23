@@ -173,12 +173,11 @@ func (it *IndexBuildTask) Execute() error {
 		indexParams[key] = value
 	}
 
-	fmt.Println("before NewCIndex ..........................")
 	it.index, err = NewCIndex(typeParams, indexParams)
 	if err != nil {
+		fmt.Println("NewCIndex err:", err.Error())
 		return err
 	}
-	fmt.Println("after NewCIndex ..........................")
 
 	getKeyByPathNaive := func(path string) string {
 		// splitElements := strings.Split(path, "/")
@@ -221,6 +220,7 @@ func (it *IndexBuildTask) Execute() error {
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
 	partitionID, segmentID, insertData, err2 := insertCodec.Deserialize(storageBlobs)
+	//fmt.Println("IndexBuilder for segmentID,", segmentID)
 	if err2 != nil {
 		return err2
 	}
@@ -230,11 +230,11 @@ func (it *IndexBuildTask) Execute() error {
 
 	for _, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
-		fmt.Println("before build index ..................................")
 		floatVectorFieldData, fOk := value.(*storage.FloatVectorFieldData)
 		if fOk {
 			err = it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
 			if err != nil {
+				fmt.Println("BuildFloatVecIndexWithoutIds, error:", err.Error())
 				return err
 			}
 		}
@@ -243,19 +243,19 @@ func (it *IndexBuildTask) Execute() error {
 		if bOk {
 			err = it.index.BuildBinaryVecIndexWithoutIds(binaryVectorFieldData.Data)
 			if err != nil {
+				fmt.Println("BuildBinaryVecIndexWithoutIds, err:", err.Error())
 				return err
 			}
 		}
-		fmt.Println("after build index ..................................")
 
 		if !fOk && !bOk {
 			return errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
 		}
 
-		fmt.Println("before serialize .............................................")
 		indexBlobs, err := it.index.Serialize()
-		fmt.Println("after serialize .............................................")
 		if err != nil {
+			fmt.Println("serialize ... err:", err.Error())
+
 			return err
 		}
 
@@ -284,8 +284,8 @@ func (it *IndexBuildTask) Execute() error {
 			it.savePaths = append(it.savePaths, savePath)
 		}
 	}
-
-	return it.index.Delete()
+	it.index.Delete()
+	return nil
 }
 
 func (it *IndexBuildTask) PostExecute() error {

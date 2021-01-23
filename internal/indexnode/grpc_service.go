@@ -60,7 +60,9 @@ func (b *Builder) GetIndexStates(ctx context.Context, request *indexpb.IndexStat
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range request.IndexID {
 		indexState, err := b.metaTable.GetIndexStates(indexID)
-		log.Println("GetIndexStates error, err=", err)
+		if err != nil {
+			log.Println("GetIndexStates error, err=", err)
+		}
 		indexStates = append(indexStates, indexState)
 	}
 	ret := &indexpb.IndexStatesResponse{

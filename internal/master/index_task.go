@@ -195,6 +195,7 @@ func (task *getIndexStateTask) Execute() error {
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 	}
+
 	if int64(totalSegmentNums) == relatedSegments {
 		task.resp.State = commonpb.IndexState_FINISHED
 	} else {

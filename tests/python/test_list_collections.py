@@ -50,7 +50,9 @@ class TestListCollections:
         collection_name = gen_unique_str(uid)
         assert collection_name not in connect.list_collections()
 
+
     @pytest.mark.level(2)
+    @pytest.mark.skip("can't run in parallel")
     def test_list_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db

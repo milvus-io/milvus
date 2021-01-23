@@ -499,7 +499,7 @@ func (node *NodeImpl) DescribeIndex(ctx context.Context, request *milvuspb.Descr
 }
 
 func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
-	log.Println("Describe index progress for: ", request)
+	// log.Println("Describe index progress for: ", request)
 	dipt := &GetIndexStateTask{
 		Condition:         NewTaskCondition(ctx),
 		IndexStateRequest: request,

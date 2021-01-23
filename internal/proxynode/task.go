@@ -3,7 +3,6 @@ package proxynode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"math"
 	"strconv"
@@ -491,11 +490,11 @@ func (st *SearchTask) PostExecute() error {
 	for {
 		select {
 		case <-st.ctx.Done():
-			log.Print("wait to finish failed, timeout!")
+			log.Print("SearchTask: wait to finish failed, timeout!, taskID:", st.ID())
 			span.LogFields(oplog.String("wait to finish failed, timeout", "wait to finish failed, timeout"))
-			return errors.New("wait to finish failed, timeout")
+			return errors.New("SearchTask:wait to finish failed, timeout:" + strconv.FormatInt(st.ID(), 10))
 		case searchResults := <-st.resultBuf:
-			fmt.Println("searchResults: ", searchResults)
+			// fmt.Println("searchResults: ", searchResults)
 			span.LogFields(oplog.String("receive result", "receive result"))
 			filterSearchResult := make([]*internalpb2.SearchResults, 0)
 			var filterReason string

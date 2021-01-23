@@ -116,7 +116,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	tID, _ := queue.sched.idAllocator.AllocOne()
-	log.Printf("[Builder] allocate reqID: %v", tID)
+	// log.Printf("[Builder] allocate reqID: %v", tID)
 	t.SetID(tID)
 	err := t.OnEnqueue()
 	if err != nil {
@@ -209,17 +209,17 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
-		log.Printf("notify with error: %v", err)
+		// log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
 		return
 	}
 
 	q.AddActiveTask(t)
-	log.Printf("task add to active list ...")
+	// log.Printf("task add to active list ...")
 	defer func() {
 		q.PopActiveTask(t.ID())
-		log.Printf("pop from active list ...")
+		// log.Printf("pop from active list ...")
 	}()
 
 	err = t.Execute()
@@ -227,9 +227,9 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		log.Printf("execute definition task failed, error = %v", err)
 		return
 	}
-	log.Printf("task execution done ...")
+	// log.Printf("task execution done ...")
 	err = t.PostExecute()
-	log.Printf("post execute task done ...")
+	// log.Printf("post execute task done ...")
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

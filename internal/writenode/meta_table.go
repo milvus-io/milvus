@@ -131,7 +131,6 @@ func (mt *metaTable) saveSegFlushMeta(meta *pb.SegmentFlushMeta) error {
 	value := proto.MarshalTextString(meta)
 
 	mt.segID2FlushMeta[meta.SegmentID] = *meta
-
 	return mt.client.Save(Params.WriteNodeSegKvSubPath+strconv.FormatInt(meta.SegmentID, 10), value)
 }
 

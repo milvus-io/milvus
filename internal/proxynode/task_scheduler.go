@@ -4,7 +4,9 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strconv"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -170,11 +172,11 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	}
 
 	ts, _ := queue.sched.tsoAllocator.AllocOne()
-	log.Printf("[NodeImpl] allocate timestamp: %v", ts)
+	// log.Printf("[NodeImpl] allocate timestamp: %v", ts)
 	t.SetTs(ts)
 
 	reqID, _ := queue.sched.idAllocator.AllocOne()
-	log.Printf("[NodeImpl] allocate reqID: %v", reqID)
+	// log.Printf("[NodeImpl] allocate reqID: %v", reqID)
 	t.SetID(reqID)
 
 	return queue.addUnissuedTask(t)
@@ -296,17 +298,17 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		t.Notify(err)
-		log.Printf("notify with error: %v", err)
+		// log.Printf("notify with error: %v", err)
 	}()
 	if err != nil {
 		return
 	}
 
 	q.AddActiveTask(t)
-	log.Printf("task add to active list ...")
+	// log.Printf("task add to active list ...")
 	defer func() {
 		q.PopActiveTask(t.EndTs())
-		log.Printf("pop from active list ...")
+		// log.Printf("pop from active list ...")
 	}()
 
 	err = t.Execute()
@@ -314,9 +316,9 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		log.Printf("execute definition task failed, error = %v", err)
 		return
 	}
-	log.Printf("task execution done ...")
+	// log.Printf("task execution done ...")
 	err = t.PostExecute()
-	log.Printf("post execute task done ...")
+	// log.Printf("post execute task done ...")
 }
 
 func (sched *TaskScheduler) definitionLoop() {
@@ -357,7 +359,7 @@ func (sched *TaskScheduler) queryLoop() {
 		case <-sched.ctx.Done():
 			return
 		case <-sched.DqQueue.utChan():
-			log.Print("scheduler receive query request ...")
+			// log.Print("scheduler receive query request ...")
 			if !sched.DqQueue.UTEmpty() {
 				t := sched.scheduleDqTask()
 				go sched.processTask(t, sched.DqQueue)
@@ -398,11 +400,25 @@ func (sched *TaskScheduler) queryResultLoop() {
 			for _, tsMsg := range msgPack.Msgs {
 				searchResultMsg, _ := tsMsg.(*msgstream.SearchResultMsg)
 				reqID := searchResultMsg.Base.MsgID
+				reqIDStr := strconv.FormatInt(reqID, 10)
+				t := sched.getTaskByReqID(reqID)
+				if t == nil {
+					log.Println(fmt.Sprint("QueryResult:czs:GetTaskByReqID failed, reqID:", reqIDStr))
+					delete(queryResultBuf, reqID)
+					continue
+				}
+
 				_, ok = queryResultBuf[reqID]
 				if !ok {
 					queryResultBuf[reqID] = make([]*internalpb2.SearchResults, 0)
 				}
 				queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResults)
+
+				//t := sched.getTaskByReqID(reqID)
+				{
+					colName := t.(*SearchTask).query.CollectionName
+					fmt.Println("ljq getCollection: ", colName, " reqID: ", reqIDStr, " answer cnt:", len(queryResultBuf[reqID]))
+				}
 				if len(queryResultBuf[reqID]) == queryNodeNum {
 					t := sched.getTaskByReqID(reqID)
 					if t != nil {
@@ -413,7 +429,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 							delete(queryResultBuf, reqID)
 						}
 					} else {
-						log.Printf("task with reqID %v is nil", reqID)
+
+						// log.Printf("task with reqID %v is nil", reqID)
 					}
 				}
 			}
