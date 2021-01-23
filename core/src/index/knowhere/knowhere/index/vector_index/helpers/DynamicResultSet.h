@@ -50,14 +50,6 @@ struct BufferPool {
     explicit BufferPool(size_t buffer_size);
     ~BufferPool();
 
-    /// create a new buffer and append it to buffer pool
-    void
-    append();
-
-    /// add one result
-    void
-    add(idx_t id, float dis);
-
     /// copy elements [ofs: ofs + n - 1] seen as liner data in the buffers to
     /// target dest_ids, dest_dis
     void
@@ -77,18 +69,6 @@ struct DynamicResultCollector {
 
  private:
     std::vector<DynamicResultSegment> seg_results;  /// unmerged results of every segments
-
-    /// called by range_search before allocate space for res
-    void
-    set_lims();
-
-    /// called by range_search after do_allocation
-    void
-    copy_result();
-
-    /// called by range_search after set_lims, allocate memory space 4 final result space
-    void
-    allocation();
 };
 
 void

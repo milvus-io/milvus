@@ -122,24 +122,6 @@ BufferPool::~BufferPool() {
     }
 }
 
-void
-BufferPool::add(idx_t id, float dis) {
-    if (wp == buffer_size) {  // need new buffer
-        append();
-    }
-    Buffer& buf = buffers.back();
-    buf.ids[wp] = id;
-    buf.dis[wp] = dis;
-    wp++;
-}
-
-void
-BufferPool::append() {
-    Buffer buf = {new idx_t[buffer_size], new float[buffer_size]};
-    buffers.push_back(buf);
-    wp = 0;
-}
-
 /// copy elemnts ofs:ofs+n-1 seen as linear data in the buffers to
 /// tables dest_ids, dest_dis
 void
@@ -184,8 +166,8 @@ DynamicResultCollector::Merge(size_t limit, ResultSetPostProcessType postProcess
 
     // abandon redundancy answers randomly
     // abandon strategy: keep the top limit sequentially
-    size_t pos = 1;
-    for (size_t i = 1; i < boundaries.size(); ++i) {
+    int pos = 1;
+    for (int i = 1; i < boundaries.size(); ++i) {
         if (boundaries[i] >= ret.count) {
             pos = i;
             break;
@@ -246,6 +228,8 @@ void
 MapUids(DynamicResultSegment& milvus_dataset, std::shared_ptr<std::vector<IDType>> uids) {
     if (uids) {
         for (auto& mrspr : milvus_dataset) {
+            if (mrspr->buffers.size() == 0)
+                continue;
             for (auto j = 0; j < mrspr->buffers.size() - 1; ++j) {
                 auto buf = mrspr->buffers[j];
                 for (auto i = 0; i < mrspr->buffer_size; ++i) {
