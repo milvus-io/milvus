@@ -96,14 +96,17 @@ type Interface interface {
 
 // master core
 type Core struct {
-	//TODO DataService Interface
-	//TODO IndexService Interface
-	//TODO ProxyServiceClient Interface, get proxy service time tick channel,InvalidateCollectionMetaCache
+	/*
+		ProxyServiceClient Interface:
+		get proxy service time tick channel,InvalidateCollectionMetaCache
 
-	//TODO Segment States Channel, from DataService, if create new segment, data service should put the segment id into this channel, and let the master add the segment id to the collection meta
+		DataService Interface:
+		Segment States Channel, from DataService, if create new segment, data service should put the segment id into this channel, and let the master add the segment id to the collection meta
+		Segment Flush Watcher, monitor if segment has flushed into disk
 
-	//TODO Segment Flush Watcher, monitor if segment has flushed into disk
-	//TODO indexBuilder Sch, tell index service to build index
+		IndexService Interface:
+		indexBuilder Sch, tell index service to build index
+	*/
 
 	MetaTable *metaTable
 	//id allocator
@@ -485,8 +488,8 @@ func (c *Core) setMsgStreams() error {
 	}
 
 	// receive time tick from msg stream
+	c.ProxyTimeTickChan = make(chan typeutil.Timestamp, 1024)
 	go func() {
-		c.ProxyTimeTickChan = make(chan typeutil.Timestamp, 1024)
 		for {
 			select {
 			case <-c.ctx.Done():
@@ -515,6 +518,7 @@ func (c *Core) setMsgStreams() error {
 	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
 	dataServiceStream.Start()
 	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
+	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
 
 	// receive segment info from msg stream
 	go func() {
@@ -536,7 +540,7 @@ func (c *Core) setMsgStreams() error {
 							if ok {
 								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
 							} else {
-								log.Printf("receiver unexpected msg from data service stream, value = %v", segm)
+								log.Printf("receive unexpected msg from data service stream, value = %v", segm)
 							}
 						}
 					}

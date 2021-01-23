@@ -18,7 +18,8 @@ import (
 func TestMetaTable(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
-	etcdAddr := "127.0.0.1:2379"
+	Params.Init()
+	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
