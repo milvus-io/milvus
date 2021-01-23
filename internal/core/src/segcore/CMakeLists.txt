@@ -6,7 +6,7 @@ set(SEGCORE_FILES
         SegmentGrowing.cpp
         SegmentGrowingImpl.cpp
         SegmentSealedImpl.cpp
-        IndexingEntry.cpp
+        FieldIndexing.cpp
         InsertRecord.cpp
         Reduce.cpp
         plan_c.cpp

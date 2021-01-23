@@ -170,7 +170,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_begin,
     record_.uids_.set_data(reserved_begin, uids.data(), size);
     for (int fid = 0; fid < schema_->size(); ++fid) {
         auto field_offset = FieldOffset(fid);
-        record_.get_base_entity(field_offset)->set_data_raw(reserved_begin, entities[fid].data(), size);
+        record_.get_field_data_base(field_offset)->set_data_raw(reserved_begin, entities[fid].data(), size);
     }
 
     for (int i = 0; i < uids.size(); ++i) {
@@ -180,7 +180,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_begin,
     }
 
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
-    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / chunk_size_, record_);
+    indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / size_per_chunk_, record_);
     return Status::OK();
 }
 
@@ -231,9 +231,9 @@ SegmentGrowingImpl::Close() {
 int64_t
 SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t total_bytes = 0;
-    int64_t ins_n = upper_align(record_.reserved, chunk_size_);
+    int64_t ins_n = upper_align(record_.reserved, size_per_chunk_);
     total_bytes += ins_n * (schema_->get_total_sizeof() + 16 + 1);
-    int64_t del_n = upper_align(deleted_record_.reserved, chunk_size_);
+    int64_t del_n = upper_align(deleted_record_.reserved, size_per_chunk_);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
 }
@@ -245,20 +245,20 @@ SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
     Assert(info.index_params.count("metric_type"));
     auto metric_type_str = info.index_params.at("metric_type");
 
-    sealed_indexing_record_.add_entry(field_offset, GetMetricType(metric_type_str), info.index);
+    sealed_indexing_record_.append_field_indexing(field_offset, GetMetricType(metric_type_str), info.index);
     return Status::OK();
 }
 
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const {
-    auto vec = get_insert_record().get_base_entity(field_offset);
+    auto vec = get_insert_record().get_field_data_base(field_offset);
     return vec->get_span_base(chunk_id);
 }
 
 int64_t
-SegmentGrowingImpl::num_chunk_data() const {
+SegmentGrowingImpl::num_chunk() const {
     auto size = get_insert_record().ack_responder_.GetAck();
-    return upper_div(size, chunk_size_);
+    return upper_div(size, size_per_chunk_);
 }
 void
 SegmentGrowingImpl::vector_search(int64_t vec_count,

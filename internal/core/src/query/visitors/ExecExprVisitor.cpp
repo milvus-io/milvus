@@ -120,41 +120,33 @@ template <typename T, typename IndexFunc, typename ElementFunc>
 auto
 ExecExprVisitor::ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc index_func, ElementFunc element_func)
     -> RetType {
-    auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
     auto field_offset = expr.field_offset_;
     auto& field_meta = schema[field_offset];
-    // auto vec_ptr = records.get_entity<T>(field_offset);
-    // auto& vec = *vec_ptr;
-    // const segcore::ScalarIndexingEntry<T>& entry = indexing_record.get_scalar_entry<T>(field_offset);
-
-    // RetType results(vec.num_chunk());
-    auto indexing_barrier = segment_.num_chunk_index_safe(field_offset);
-    auto chunk_size = segment_.size_per_chunk();
-    auto num_chunk = upper_div(row_count_, chunk_size);
+    auto indexing_barrier = segment_.num_chunk_index(field_offset);
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunk = upper_div(row_count_, size_per_chunk);
     RetType results;
 
     using Index = knowhere::scalar::StructuredIndex<T>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
-        // auto& result = results[chunk_id];
         const Index& indexing = segment_.chunk_scalar_index<T>(field_offset, chunk_id);
         // NOTE: knowhere is not const-ready
         // This is a dirty workaround
         auto data = index_func(const_cast<Index*>(&indexing));
-        Assert(data->size() == chunk_size);
+        Assert(data->size() == size_per_chunk);
         results.emplace_back(std::move(*data));
     }
 
     for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
-        boost::dynamic_bitset<> result(chunk_size);
-        // auto& result = results[chunk_id];
-        result.resize(chunk_size);
+        boost::dynamic_bitset<> result(size_per_chunk);
+        result.resize(size_per_chunk);
         auto chunk = segment_.chunk_data<T>(field_offset, chunk_id);
         const T* data = chunk.data();
-        for (int index = 0; index < chunk_size; ++index) {
+        for (int index = 0; index < size_per_chunk; ++index) {
             result[index] = element_func(data[index]);
         }
-        Assert(result.size() == chunk_size);
+        Assert(result.size() == size_per_chunk);
         results.emplace_back(std::move(result));
     }
     return results;
@@ -282,27 +274,19 @@ template <typename T>
 auto
 ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
-    // auto& records = segment_.get_insert_record();
-    auto data_type = expr.data_type_;
     auto& schema = segment_.get_schema();
 
     auto field_offset = expr_raw.field_offset_;
     auto& field_meta = schema[field_offset];
-    // auto vec_ptr = records.get_entity<T>(field_offset);
-    // auto& vec = *vec_ptr;
-    auto chunk_size = segment_.size_per_chunk();
-    auto num_chunk = upper_div(row_count_, chunk_size);
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunk = upper_div(row_count_, size_per_chunk);
     RetType bitsets;
-
-    // auto N = records.ack_responder_.GetAck();
-    // TODO: enable index for term
-
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
 
-        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * chunk_size : chunk_size;
+        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
 
-        boost::dynamic_bitset<> bitset(chunk_size);
+        boost::dynamic_bitset<> bitset(size_per_chunk);
         for (int i = 0; i < size; ++i) {
             auto value = chunk.data()[i];
             bool is_in = std::binary_search(expr.terms_.begin(), expr.terms_.end(), value);

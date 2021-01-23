@@ -62,16 +62,16 @@ SearchOnSealed(const Schema& schema,
     auto dim = field.get_dim();
 
     Assert(record.is_ready(field_offset));
-    auto indexing_entry = record.get_entry(field_offset);
-    Assert(indexing_entry->metric_type_ == query_info.metric_type_);
+    auto field_indexing = record.get_field_indexing(field_offset);
+    Assert(field_indexing->metric_type_ == query_info.metric_type_);
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
         auto conf = query_info.search_params_;
         conf[milvus::knowhere::meta::TOPK] = query_info.topK_;
-        conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(indexing_entry->metric_type_);
-        return indexing_entry->indexing_->Query(ds, conf, bitset);
+        conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
+        return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
     auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
