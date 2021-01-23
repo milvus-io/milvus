@@ -690,3 +690,41 @@ func (sim *SegmentInfoMsg) Unmarshal(input []byte) (TsMsg, error) {
 		SegmentMsg: segMsg,
 	}, nil
 }
+
+/////////////////////////////////////////SegmentFlushCompletedMsg//////////////////////////////////////////
+type SegmentFlushCompletedMsg struct {
+	BaseMsg
+	datapb.SegmentFlushCompletedMsg
+}
+
+func (sfm *SegmentFlushCompletedMsg) Type() MsgType {
+	return sfm.Base.MsgType
+}
+
+func (sfm *SegmentFlushCompletedMsg) GetMsgContext() context.Context {
+	return sfm.MsgCtx
+}
+
+func (sfm *SegmentFlushCompletedMsg) SetMsgContext(ctx context.Context) {
+	sfm.MsgCtx = ctx
+}
+
+func (sfm *SegmentFlushCompletedMsg) Marshal(input TsMsg) ([]byte, error) {
+	sfmsg := input.(*SegmentFlushCompletedMsg)
+	mb, err := proto.Marshal(&sfmsg.SegmentFlushCompletedMsg)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (sfm *SegmentFlushCompletedMsg) Unmarshal(input []byte) (TsMsg, error) {
+	sfmsg := datapb.SegmentFlushCompletedMsg{}
+	err := proto.Unmarshal(input, &sfmsg)
+	if err != nil {
+		return nil, err
+	}
+	return &SegmentFlushCompletedMsg{
+		SegmentFlushCompletedMsg: sfmsg,
+	}, nil
+}

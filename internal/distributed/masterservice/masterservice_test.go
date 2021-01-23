@@ -3,6 +3,7 @@ package masterservice
 import (
 	"fmt"
 	"math/rand"
+	"regexp"
 	"testing"
 	"time"
 
@@ -99,6 +100,12 @@ func TestGrpcService(t *testing.T) {
 		return 2000, nil
 	}
 
+	collectionMetaCache := make([]string, 0, 16)
+	core.InvalidateCollectionMetaCache = func(dbName string, collectionName string) error {
+		collectionMetaCache = append(collectionMetaCache, collectionName)
+		return nil
+	}
+
 	err = svr.Start()
 	assert.Nil(t, err)
 
@@ -150,15 +157,60 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, createCollectionArray[0].Base.MsgType, commonpb.MsgType_kCreateCollection)
 		assert.Equal(t, createCollectionArray[0].CollectionName, "testColl")
+
+		req.Base.MsgID = 101
+		req.Base.Timestamp = 101
+		req.Base.SourceID = 101
+		status, err = cli.CreateCollection(req)
+		assert.Nil(t, err)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+
+		req.Base.MsgID = 102
+		req.Base.Timestamp = 102
+		req.Base.SourceID = 102
+		req.CollectionName = "testColl-again"
+		status, err = cli.CreateCollection(req)
+		assert.Nil(t, err)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+
+		schema.Name = req.CollectionName
+		sbf, err = proto.Marshal(&schema)
+		assert.Nil(t, err)
+		req.Schema = sbf
+		req.Base.MsgID = 103
+		req.Base.Timestamp = 103
+		req.Base.SourceID = 103
+		status, err = cli.CreateCollection(req)
+		assert.Nil(t, err)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, len(createCollectionArray), 2)
+		assert.Equal(t, createCollectionArray[1].Base.MsgType, commonpb.MsgType_kCreateCollection)
+		assert.Equal(t, createCollectionArray[1].CollectionName, "testColl-again")
+
+		//time stamp go back
+		schema.Name = "testColl-goback"
+		sbf, err = proto.Marshal(&schema)
+		assert.Nil(t, err)
+		req.CollectionName = schema.Name
+		req.Schema = sbf
+		req.Base.MsgID = 103
+		req.Base.Timestamp = 103
+		req.Base.SourceID = 103
+		status, err = cli.CreateCollection(req)
+		assert.Nil(t, err)
+		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
+		matched, err := regexp.MatchString("input timestamp = [0-9]+, last dd time stamp = [0-9]+", status.Reason)
+		assert.Nil(t, err)
+		assert.True(t, matched)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
 		req := &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kHasCollection,
-				MsgID:     101,
-				Timestamp: 101,
-				SourceID:  101,
+				MsgID:     110,
+				Timestamp: 110,
+				SourceID:  110,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -171,9 +223,9 @@ func TestGrpcService(t *testing.T) {
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kHasCollection,
-				MsgID:     102,
-				Timestamp: 102,
-				SourceID:  102,
+				MsgID:     111,
+				Timestamp: 111,
+				SourceID:  111,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl2",
@@ -183,20 +235,21 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, rsp.Value, false)
 
+		// test time stamp go back
 		req = &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kHasCollection,
-				MsgID:     102,
-				Timestamp: 102,
-				SourceID:  102,
+				MsgID:     111,
+				Timestamp: 111,
+				SourceID:  111,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl2",
 		}
 		rsp, err = cli.HasCollection(req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_UNEXPECTED_ERROR)
-
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		assert.Equal(t, rsp.Value, false)
 	})
 
 	t.Run("describe collection", func(t *testing.T) {
@@ -205,9 +258,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeCollection,
-				MsgID:     103,
-				Timestamp: 103,
-				SourceID:  103,
+				MsgID:     120,
+				Timestamp: 120,
+				SourceID:  120,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -223,26 +276,26 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.ShowCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kShowCollections,
-				MsgID:     106,
-				Timestamp: 106,
-				SourceID:  106,
+				MsgID:     130,
+				Timestamp: 130,
+				SourceID:  130,
 			},
 			DbName: "testDb",
 		}
 		rsp, err := cli.ShowCollections(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-		assert.Equal(t, rsp.CollectionNames[0], "testColl")
-		assert.Equal(t, len(rsp.CollectionNames), 1)
+		assert.ElementsMatch(t, rsp.CollectionNames, []string{"testColl", "testColl-again"})
+		assert.Equal(t, len(rsp.CollectionNames), 2)
 	})
 
 	t.Run("create partition", func(t *testing.T) {
 		req := &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kCreatePartition,
-				MsgID:     107,
-				Timestamp: 107,
-				SourceID:  107,
+				MsgID:     140,
+				Timestamp: 140,
+				SourceID:  140,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -264,9 +317,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.HasPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kHasPartition,
-				MsgID:     108,
-				Timestamp: 108,
-				SourceID:  108,
+				MsgID:     150,
+				Timestamp: 150,
+				SourceID:  150,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -284,9 +337,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.ShowPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kShowPartitions,
-				MsgID:     110,
-				Timestamp: 110,
-				SourceID:  110,
+				MsgID:     160,
+				Timestamp: 160,
+				SourceID:  160,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -320,9 +373,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.ShowSegmentRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kShowSegment,
-				MsgID:     111,
-				Timestamp: 111,
-				SourceID:  111,
+				MsgID:     170,
+				Timestamp: 170,
+				SourceID:  170,
 			},
 			CollectionID: coll.ID,
 			PartitionID:  partID,
@@ -338,9 +391,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kCreateIndex,
-				MsgID:     112,
-				Timestamp: 112,
-				SourceID:  112,
+				MsgID:     180,
+				Timestamp: 180,
+				SourceID:  180,
 			},
 			DbName:         "",
 			CollectionName: "testColl",
@@ -366,9 +419,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeSegment,
-				MsgID:     113,
-				Timestamp: 113,
-				SourceID:  113,
+				MsgID:     190,
+				Timestamp: 190,
+				SourceID:  190,
 			},
 			CollectionID: coll.ID,
 			SegmentID:    1000,
@@ -383,9 +436,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeIndex,
-				MsgID:     114,
-				Timestamp: 114,
-				SourceID:  114,
+				MsgID:     200,
+				Timestamp: 200,
+				SourceID:  200,
 			},
 			DbName:         "",
 			CollectionName: "testColl",
@@ -422,9 +475,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeIndex,
-				MsgID:     115,
-				Timestamp: 115,
-				SourceID:  115,
+				MsgID:     210,
+				Timestamp: 210,
+				SourceID:  210,
 			},
 			DbName:         "",
 			CollectionName: "testColl",
@@ -444,9 +497,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDropPartition,
-				MsgID:     199,
-				Timestamp: 199,
-				SourceID:  199,
+				MsgID:     220,
+				Timestamp: 220,
+				SourceID:  220,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -467,9 +520,9 @@ func TestGrpcService(t *testing.T) {
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDropCollection,
-				MsgID:     200,
-				Timestamp: 200,
-				SourceID:  200,
+				MsgID:     230,
+				Timestamp: 230,
+				SourceID:  230,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",
@@ -481,13 +534,15 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, dropCollectionArray[0].Base.MsgType, commonpb.MsgType_kDropCollection)
 		assert.Equal(t, dropCollectionArray[0].CollectionName, "testColl")
+		assert.Equal(t, len(collectionMetaCache), 1)
+		assert.Equal(t, collectionMetaCache[0], "testColl")
 
 		req = &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDropCollection,
-				MsgID:     200,
-				Timestamp: 200,
-				SourceID:  200,
+				MsgID:     231,
+				Timestamp: 231,
+				SourceID:  231,
 			},
 			DbName:         "testDb",
 			CollectionName: "testColl",

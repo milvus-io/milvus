@@ -14,6 +14,7 @@ import (
 type reqTask interface {
 	Type() commonpb.MsgType
 	Ts() (typeutil.Timestamp, error)
+	IgnoreTimeStamp() bool
 	Execute() error
 	WaitToFinish() error
 	Notify(err error)
@@ -48,8 +49,13 @@ type CreateCollectionReqTask struct {
 func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
+
 func (t *CreateCollectionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *CreateCollectionReqTask) IgnoreTimeStamp() bool {
+	return false
 }
 
 func (t *CreateCollectionReqTask) Execute() error {
@@ -57,6 +63,10 @@ func (t *CreateCollectionReqTask) Execute() error {
 	err := proto.Unmarshal(t.Req.Schema, &schema)
 	if err != nil {
 		return err
+	}
+
+	if t.Req.CollectionName != schema.Name {
+		return errors.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
 	}
 
 	for idx, field := range schema.Fields {
@@ -141,9 +151,16 @@ func (t *DropCollectionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *DropCollectionReqTask) IgnoreTimeStamp() bool {
+	return false
+}
+
 func (t *DropCollectionReqTask) Execute() error {
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
+		return err
+	}
+	if err = t.core.InvalidateCollectionMetaCache(t.Req.DbName, t.Req.CollectionName); err != nil {
 		return err
 	}
 	err = t.core.MetaTable.DeleteCollection(collMeta.ID)
@@ -182,6 +199,10 @@ func (t *HasCollectionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *HasCollectionReqTask) IgnoreTimeStamp() bool {
+	return true
+}
+
 func (t *HasCollectionReqTask) Execute() error {
 	_, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err == nil {
@@ -204,6 +225,10 @@ func (t *DescribeCollectionReqTask) Type() commonpb.MsgType {
 
 func (t *DescribeCollectionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DescribeCollectionReqTask) IgnoreTimeStamp() bool {
+	return true
 }
 
 func (t *DescribeCollectionReqTask) Execute() error {
@@ -237,6 +262,10 @@ func (t *ShowCollectionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *ShowCollectionReqTask) IgnoreTimeStamp() bool {
+	return true
+}
+
 func (t *ShowCollectionReqTask) Execute() error {
 	coll, err := t.core.MetaTable.ListCollections()
 	if err != nil {
@@ -257,6 +286,10 @@ func (t *CreatePartitionReqTask) Type() commonpb.MsgType {
 
 func (t *CreatePartitionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *CreatePartitionReqTask) IgnoreTimeStamp() bool {
+	return false
 }
 
 func (t *CreatePartitionReqTask) Execute() error {
@@ -304,6 +337,10 @@ func (t *DropPartitionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *DropPartitionReqTask) IgnoreTimeStamp() bool {
+	return false
+}
+
 func (t *DropPartitionReqTask) Execute() error {
 	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
@@ -345,6 +382,10 @@ func (t *HasPartitionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *HasPartitionReqTask) IgnoreTimeStamp() bool {
+	return true
+}
+
 func (t *HasPartitionReqTask) Execute() error {
 	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
@@ -366,6 +407,10 @@ func (t *ShowPartitionReqTask) Type() commonpb.MsgType {
 
 func (t *ShowPartitionReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *ShowPartitionReqTask) IgnoreTimeStamp() bool {
+	return true
 }
 
 func (t *ShowPartitionReqTask) Execute() error {
@@ -399,6 +444,10 @@ func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
 
 func (t *DescribeSegmentReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DescribeSegmentReqTask) IgnoreTimeStamp() bool {
+	return true
 }
 
 func (t *DescribeSegmentReqTask) Execute() error {
@@ -448,6 +497,10 @@ func (t *ShowSegmentReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
 }
 
+func (t *ShowSegmentReqTask) IgnoreTimeStamp() bool {
+	return true
+}
+
 func (t *ShowSegmentReqTask) Execute() error {
 	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
 	if err != nil {
@@ -474,6 +527,10 @@ func (t *CreateIndexReqTask) Type() commonpb.MsgType {
 
 func (t *CreateIndexReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *CreateIndexReqTask) IgnoreTimeStamp() bool {
+	return false
 }
 
 func (t *CreateIndexReqTask) Execute() error {
@@ -509,6 +566,10 @@ func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
 
 func (t *DescribeIndexReqTask) Ts() (typeutil.Timestamp, error) {
 	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DescribeIndexReqTask) IgnoreTimeStamp() bool {
+	return true
 }
 
 func (t *DescribeIndexReqTask) Execute() error {
