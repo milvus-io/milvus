@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"io"
 	"sync/atomic"
 
@@ -342,6 +343,14 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	partitionID := in.PartitionID
 	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
+
+	// segments are ordered before LoadSegments calling
+	if in.LastSegmentState.State == datapb.SegmentState_SegmentGrowing {
+		segmentNum := len(segmentIDs)
+		node.segManager.seekSegment(segmentIDs[segmentNum-1])
+		segmentIDs = segmentIDs[:segmentNum-1]
+	}
+
 	err := node.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		status := &commonpb.Status{

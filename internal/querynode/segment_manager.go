@@ -57,6 +57,10 @@ func newSegmentManager(ctx context.Context, replica collectionReplica, loadIndex
 	}
 }
 
+func (s *segmentManager) seekSegment(segmentID UniqueID) {
+	// TODO: impl
+}
+
 func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
 	// TODO: interim solution
 	if len(fieldIDs) == 0 {
