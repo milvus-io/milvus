@@ -9,9 +9,9 @@ func TestParamTable_DataNode(t *testing.T) {
 
 	Params.Init()
 
-	t.Run("Test DataNodeID", func(t *testing.T) {
-		id := Params.DataNodeID
-		log.Println("DataNodeID:", id)
+	t.Run("Test NodeID", func(t *testing.T) {
+		id := Params.NodeID
+		log.Println("NodeID:", id)
 	})
 
 	t.Run("Test flowGraphMaxQueueLength", func(t *testing.T) {
@@ -79,29 +79,9 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("DDChannelNames:", names)
 	})
 
-	t.Run("Test DdMsgStreamReceiveBufSize", func(t *testing.T) {
-		bufSize := Params.DDReceiveBufSize
-		log.Println("DDReceiveBufSize:", bufSize)
-	})
-
-	t.Run("Test DdPulsarBufSize", func(t *testing.T) {
-		bufSize := Params.DDPulsarBufSize
-		log.Println("DDPulsarBufSize:", bufSize)
-	})
-
 	t.Run("Test SegmentStatisticsChannelName", func(t *testing.T) {
 		name := Params.SegmentStatisticsChannelName
 		log.Println("SegmentStatisticsChannelName:", name)
-	})
-
-	t.Run("Test SegmentStatisticsBufSize", func(t *testing.T) {
-		size := Params.SegmentStatisticsBufSize
-		log.Println("SegmentStatisticsBufSize:", size)
-	})
-
-	t.Run("Test SegmentStatisticsUpdateInterval", func(t *testing.T) {
-		interval := Params.SegmentStatisticsUpdateInterval
-		log.Println("SegmentStatisticsUpdateInterval:", interval)
 	})
 
 	t.Run("Test timeTickChannelName", func(t *testing.T) {

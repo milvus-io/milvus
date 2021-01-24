@@ -202,3 +202,9 @@ service DataService {
    rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
    rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 }
+
+service DataNode {
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+  rpc WatchDmChannels(WatchDmChannelRequest) returns (common.Status) {}
+  rpc FlushSegments(FlushSegRequest) returns(common.Status) {}
+}

@@ -12,7 +12,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -38,7 +37,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 	Params.MetaRootPath = testPath
 
-	Factory := &factory.MetaFactory{}
+	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	schemaBlob := proto.MarshalTextString(collMeta.Schema)
 	require.NotEqual(t, "", schemaBlob)
@@ -48,7 +47,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Params.FlushInsertBufSize = 2
-	iBNode := newInsertBufferNode(ctx, newMetaTable(), replica)
+	idFactory := AllocatorFactory{}
+	iBNode := newInsertBufferNode(ctx, newMetaTable(), replica, idFactory)
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]*flowgraph.Msg{&iMsg})

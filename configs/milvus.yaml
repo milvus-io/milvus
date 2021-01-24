@@ -73,3 +73,7 @@ indexNode:
 indexServer:
   address: localhost
   port: 21118
+
+dataNode:
+  address: localhost
+  port: 21124

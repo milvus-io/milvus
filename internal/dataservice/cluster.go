@@ -84,7 +84,7 @@ func (c *dataNodeCluster) WatchInsertChannels(groups []channelGroup) {
 	defer c.mu.Unlock()
 	sort.Slice(c.nodes, func(i, j int) bool { return c.nodes[i].channelNum < c.nodes[j].channelNum })
 	for i, group := range groups {
-		err := c.nodes[i%len(c.nodes)].client.WatchDmChannels(&datapb.WatchDmChannelRequest{
+		_, err := c.nodes[i%len(c.nodes)].client.WatchDmChannels(&datapb.WatchDmChannelRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kDescribeCollection,
 				MsgID:     -1, // todo
@@ -119,7 +119,7 @@ func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for _, node := range c.nodes {
-		if err := node.client.FlushSegments(request); err != nil {
+		if _, err := node.client.FlushSegments(request); err != nil {
 			log.Println(err.Error())
 			continue
 		}

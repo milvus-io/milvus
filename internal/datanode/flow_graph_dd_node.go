@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -25,7 +24,7 @@ type ddNode struct {
 	ddBuffer  *ddBuffer
 	inFlushCh chan *flushMsg
 
-	idAllocator *allocator.IDAllocator
+	idAllocator allocator
 	kv          kv.Base
 	replica     collectionReplica
 	flushMeta   *metaTable
@@ -174,7 +173,7 @@ func (ddNode *ddNode) flush() {
 			keyCommon := path.Join(Params.DdBinlogRootPath, strconv.FormatInt(collectionID, 10))
 
 			// save ts binlog
-			timestampLogIdx, err := ddNode.idAllocator.AllocOne()
+			timestampLogIdx, err := ddNode.idAllocator.allocID()
 			if err != nil {
 				log.Println(err)
 			}
@@ -186,7 +185,7 @@ func (ddNode *ddNode) flush() {
 			log.Println("save ts binlog, key = ", timestampKey)
 
 			// save dd binlog
-			ddLogIdx, err := ddNode.idAllocator.AllocOne()
+			ddLogIdx, err := ddNode.idAllocator.allocID()
 			if err != nil {
 				log.Println(err)
 			}
@@ -370,7 +369,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 }
 
 func newDDNode(ctx context.Context, flushMeta *metaTable,
-	inFlushCh chan *flushMsg, replica collectionReplica) *ddNode {
+	inFlushCh chan *flushMsg, replica collectionReplica, alloc allocator) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -397,15 +396,6 @@ func newDDNode(ctx context.Context, flushMeta *metaTable,
 		panic(err)
 	}
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, Params.MasterAddress)
-	if err != nil {
-		panic(err)
-	}
-	err = idAllocator.Start()
-	if err != nil {
-		panic(err)
-	}
-
 	return &ddNode{
 		BaseNode:  baseNode,
 		ddRecords: ddRecords,
@@ -413,10 +403,9 @@ func newDDNode(ctx context.Context, flushMeta *metaTable,
 			ddData:  make(map[UniqueID]*ddData),
 			maxSize: Params.FlushDdBufferSize,
 		},
-		// outCh:     outCh,
 		inFlushCh: inFlushCh,
 
-		idAllocator: idAllocator,
+		idAllocator: alloc,
 		kv:          minioKV,
 		replica:     replica,
 		flushMeta:   flushMeta,

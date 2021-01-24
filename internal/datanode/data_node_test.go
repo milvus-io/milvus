@@ -26,6 +26,10 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func refreshChannelNames() {
+	Params.DDChannelNames = []string{"datanode-test"}
+	Params.SegmentStatisticsChannelName = "segtment-statistics"
+	Params.CompleteFlushChannelName = "flush-completed"
+	Params.TimeTickChannelName = "hard-timetick"
 	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
@@ -79,28 +83,6 @@ func TestMain(m *testing.M) {
 	startMaster(ctx)
 	exitCode := m.Run()
 	os.Exit(exitCode)
-}
-
-func newDataNode() *DataNode {
-
-	const ctxTimeInMillisecond = 2000
-	const closeWithDeadline = true
-	var ctx context.Context
-
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		go func() {
-			<-ctx.Done()
-			cancel()
-		}()
-	} else {
-		ctx = context.Background()
-	}
-
-	svr := NewDataNode(ctx, 0)
-	return svr
 }
 
 func newMetaTable() *metaTable {

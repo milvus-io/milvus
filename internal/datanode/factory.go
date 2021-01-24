@@ -1,20 +1,19 @@
-package factory
+package datanode
 
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 type (
-	UniqueID  = typeutil.UniqueID
-	Timestamp = typeutil.Timestamp
-
 	Factory interface {
 	}
 
 	MetaFactory struct {
+	}
+
+	AllocatorFactory struct {
 	}
 )
 
@@ -151,4 +150,9 @@ func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionNa
 		PartitionTags: make([]string, 0),
 	}
 	return &collection
+}
+
+func (alloc AllocatorFactory) allocID() (UniqueID, error) {
+	// GOOSE TODO: random ID generate
+	return UniqueID(0), nil
 }

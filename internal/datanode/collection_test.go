@@ -5,14 +5,12 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/zilliztech/milvus-distributed/internal/datanode/factory"
 )
 
 func TestCollection_newCollection(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(1)
-	Factory := &factory.MetaFactory{}
+	Factory := &MetaFactory{}
 	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
@@ -26,7 +24,7 @@ func TestCollection_newCollection(t *testing.T) {
 func TestCollection_deleteCollection(t *testing.T) {
 	collectionName := "collection0"
 	collectionID := UniqueID(1)
-	Factory := &factory.MetaFactory{}
+	Factory := &MetaFactory{}
 	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
 	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
