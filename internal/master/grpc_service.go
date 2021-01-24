@@ -476,15 +476,15 @@ func (s *Master) GetPartitionStatistics(ctx context.Context, request *milvuspb.P
 	panic("implement me")
 }
 
-func (s *Master) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (s *Master) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	panic("implement me")
 }
 
-func (s *Master) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Master) GetTimeTickChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
-func (s *Master) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Master) GetStatisticsChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
@@ -496,6 +496,6 @@ func (s *Master) ShowSegments(ctx context.Context, request *milvuspb.ShowSegment
 	panic("implement me")
 }
 
-func (s *Master) GetDdChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (s *Master) GetDdChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }

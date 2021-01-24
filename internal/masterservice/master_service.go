@@ -13,12 +13,14 @@ import (
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
+	msutil "github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -32,25 +34,26 @@ import (
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
 
-type InitParams struct {
-	ProxyTimeTickChannel string
+type ProxyServiceInterface interface {
+	GetTimeTickChannel() (string, error)
+	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
-type Service interface {
-	Init(params *InitParams) error
-	Start() error
-	Stop() error
-	GetComponentStates() (*internalpb2.ComponentStates, error)
-	GetTimeTickChannel() (string, error)
-	GetStatesChannel() (string, error)
+type DataServiceInterface interface {
+	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
+	GetSegmentInfoChannel() (string, error)
+}
+
+type IndexServiceInterface interface {
+	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
 }
 
 type Interface interface {
 	//service
-	Init(params *InitParams) error
+	Init() error
 	Start() error
 	Stop() error
-	GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error)
+	GetComponentStates() (*internalpb2.ComponentStates, error)
 
 	//DDL request
 	CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
@@ -74,13 +77,13 @@ type Interface interface {
 	//TODO, master load these channel form config file ?
 
 	//receiver time tick from proxy service, and put it into this channel
-	GetTimeTickChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error)
+	GetTimeTickChannel() (string, error)
 
 	//receive ddl from rpc and time tick from proxy service, and put them into this channel
-	GetDdChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error)
+	GetDdChannel() (string, error)
 
 	//just define a channel, not used currently
-	GetStatisticsChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error)
+	GetStatisticsChannel() (string, error)
 
 	//segment
 	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
@@ -152,7 +155,7 @@ type Core struct {
 	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error)
 
 	//TODO, proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(dbName string, collectionName string) error
+	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	// put create index task into this chan
 	indexTaskQueue chan *CreateIndexTask
@@ -368,18 +371,34 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 }
 
 func (c *Core) setMsgStreams() error {
+	if Params.PulsarAddress == "" {
+		return errors.Errorf("PulsarAddress is empty")
+	}
+	if Params.MsgChannelSubName == "" {
+		return errors.Errorf("MsgChannelSubName is emptyr")
+	}
+
 	//proxy time tick stream,
+	if Params.ProxyTimeTickChannel == "" {
+		return errors.Errorf("ProxyTimeTickChannel is empty")
+	}
 	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
-	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
+	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
 	proxyTimeTickStream.Start()
 
 	// master time tick channel
+	if Params.TimeTickChannel == "" {
+		return errors.Errorf("TimeTickChannel is empty")
+	}
 	timeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	timeTickStream.SetPulsarClient(Params.PulsarAddress)
 	timeTickStream.CreatePulsarProducers([]string{Params.TimeTickChannel})
 
 	// master dd channel
+	if Params.DdChannel == "" {
+		return errors.Errorf("DdChannel is empty")
+	}
 	ddStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	ddStream.SetPulsarClient(Params.PulsarAddress)
 	ddStream.CreatePulsarProducers([]string{Params.DdChannel})
@@ -433,7 +452,6 @@ func (c *Core) setMsgStreams() error {
 	}
 
 	c.DdDropCollectionReq = func(req *internalpb2.DropCollectionRequest) error {
-		//TODO, notify proxy to delete this collection before send this msg into dd channel
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: req.Base.Timestamp,
@@ -513,9 +531,12 @@ func (c *Core) setMsgStreams() error {
 	}()
 
 	//segment channel, data service create segment,or data node flush segment will put msg in this channel
+	if Params.DataServiceSegmentChannel == "" {
+		return errors.Errorf("DataServiceSegmentChannel is empty")
+	}
 	dataServiceStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024)
 	dataServiceStream.SetPulsarClient(Params.PulsarAddress)
-	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, util.NewUnmarshalDispatcher(), 1024)
+	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName, msutil.NewUnmarshalDispatcher(), 1024)
 	dataServiceStream.Start()
 	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
 	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
@@ -552,10 +573,92 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-func (c *Core) Init(params *InitParams) error {
+func (c *Core) SetProxyService(s ProxyServiceInterface) error {
+	rsp, err := s.GetTimeTickChannel()
+	if err != nil {
+		return err
+	}
+	Params.ProxyTimeTickChannel = rsp
+
+	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
+		status, err := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO,MsgType
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  int64(Params.NodeID),
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		if err != nil {
+			return err
+		}
+		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.Errorf("InvalidateCollectionMetaCache failed, error = %s", status.Reason)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (c *Core) SetDataService(s DataServiceInterface) error {
+	rsp, err := s.GetSegmentInfoChannel()
+	if err != nil {
+		return err
+	}
+	Params.DataServiceSegmentChannel = rsp
+	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+		ts, err := c.tsoAllocator.Alloc(1)
+		if err != nil {
+			return nil, err
+		}
+		binlog, err := s.GetInsertBinlogPaths(&datapb.InsertBinlogPathRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO, msy type
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  int64(Params.NodeID),
+			},
+			SegmentID: segID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if binlog.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return nil, errors.Errorf("GetInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
+		}
+		for i := range binlog.FieldIDs {
+			if binlog.FieldIDs[i] == fieldID {
+				return binlog.Paths[i].Values, nil
+			}
+		}
+		return nil, errors.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
+	}
+	return nil
+}
+
+func (c *Core) SetIndexService(s IndexServiceInterface) error {
+	c.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
+		rsp, err := s.BuildIndex(&indexpb.BuildIndexRequest{
+			DataPaths:   binlog,
+			TypeParams:  typeParams,
+			IndexParams: indexParams,
+		})
+		if err != nil {
+			return 0, err
+		}
+		if rsp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return 0, errors.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
+		}
+		return rsp.IndexID, nil
+	}
+	return nil
+}
+
+func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
-		Params.ProxyTimeTickChannel = params.ProxyTimeTickChannel
 		if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second}); initError != nil {
 			return
 		}
@@ -607,7 +710,7 @@ func (c *Core) Stop() error {
 	return nil
 }
 
-func (c *Core) GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb2.StateCode)
 	return &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
@@ -619,34 +722,16 @@ func (c *Core) GetComponentStates(empty *commonpb.Empty) (*internalpb2.Component
 	}, nil
 }
 
-func (c *Core) GetTimeTickChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		Value: Params.TimeTickChannel,
-	}, nil
+func (c *Core) GetTimeTickChannel() (string, error) {
+	return Params.TimeTickChannel, nil
 }
 
-func (c *Core) GetDdChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		Value: Params.DdChannel,
-	}, nil
+func (c *Core) GetDdChannel() (string, error) {
+	return Params.DdChannel, nil
 }
 
-func (c *Core) GetStatisticsChannel(empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		Value: Params.StatisticsChannel,
-	}, nil
+func (c *Core) GetStatisticsChannel() (string, error) {
+	return Params.StatisticsChannel, nil
 }
 
 func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {

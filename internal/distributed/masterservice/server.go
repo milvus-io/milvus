@@ -58,8 +58,8 @@ func NewGrpcServer() (*GrpcServer, error) {
 	return s, nil
 }
 
-func (s *GrpcServer) Init(params *cms.InitParams) error {
-	return s.core.Init(params)
+func (s *GrpcServer) Init() error {
+	return s.core.Init()
 }
 
 func (s *GrpcServer) Start() error {
@@ -73,8 +73,8 @@ func (s *GrpcServer) Stop() error {
 	return err
 }
 
-func (s *GrpcServer) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return nil, nil
+func (s *GrpcServer) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	return s.core.GetComponentStates()
 }
 
 //DDL request
@@ -133,18 +133,66 @@ func (s *GrpcServer) AllocID(ctx context.Context, in *masterpb.IDRequest) (*mast
 }
 
 //receiver time tick from proxy service, and put it into this channel
-func (s *GrpcServer) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetTimeTickChannel(empty)
+func (s *GrpcServer) GetTimeTickChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	rsp, err := s.core.GetTimeTickChannel()
+	if err != nil {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: "",
+		}, nil
+	}
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: rsp,
+	}, nil
 }
 
 //receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (s *GrpcServer) GetDdChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetDdChannel(in)
+func (s *GrpcServer) GetDdChannelRPC(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	rsp, err := s.core.GetDdChannel()
+	if err != nil {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: "",
+		}, nil
+	}
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: rsp,
+	}, nil
 }
 
 //just define a channel, not used currently
-func (s *GrpcServer) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	return s.core.GetStatisticsChannel(empty)
+func (s *GrpcServer) GetStatisticsChannelRPC(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	rsp, err := s.core.GetStatisticsChannel()
+	if err != nil {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: "",
+		}, nil
+	}
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		Value: rsp,
+	}, nil
 }
 
 func (s *GrpcServer) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {

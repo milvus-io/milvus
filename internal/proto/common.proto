@@ -103,6 +103,9 @@ enum MsgType {
     kGetCollectionStatistics = 503;
     kGetPartitionStatistics = 504;
 
+    /* Data Service */
+    kSegmentInfo = 600;
+
     /* System Control */
     kTimeTick = 1200;
     kQueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats

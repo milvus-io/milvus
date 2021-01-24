@@ -160,7 +160,7 @@ func (t *DropCollectionReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
-	if err = t.core.InvalidateCollectionMetaCache(t.Req.DbName, t.Req.CollectionName); err != nil {
+	if err = t.core.InvalidateCollectionMetaCache(t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName); err != nil {
 		return err
 	}
 	err = t.core.MetaTable.DeleteCollection(collMeta.ID)

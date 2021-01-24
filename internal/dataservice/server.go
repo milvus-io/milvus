@@ -292,12 +292,12 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 	}
 	s.cluster.Register(req.Address.Ip, req.Address.Port, req.Base.SourceID)
 	if len(s.ddChannelName) == 0 {
-		resp, err := s.masterClient.GetDdChannel(nil)
+		resp, err := s.masterClient.GetDdChannel()
 		if err != nil {
 			ret.Status.Reason = err.Error()
 			return ret, err
 		}
-		s.ddChannelName = resp.Value
+		s.ddChannelName = resp
 	}
 	ret.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
 	ret.InitParams = &internalpb2.InitParams{
