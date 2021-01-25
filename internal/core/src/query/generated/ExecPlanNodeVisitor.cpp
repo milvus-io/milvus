@@ -9,32 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#pragma once
-// Generated File
-// DO NOT EDIT
-#include "query/Plan.h"
-#include "ExprVisitor.h"
+#error TODO: copy this file out, and modify the content.
+#include "query/generated/ExecPlanNodeVisitor.h"
 
 namespace milvus::query {
-class ExtractInfoExprVisitor : public ExprVisitor {
- public:
-    void
-    visit(BoolUnaryExpr& expr) override;
+void
+ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
+    // TODO
+}
 
-    void
-    visit(BoolBinaryExpr& expr) override;
+void
+ExecPlanNodeVisitor::visit(BinaryVectorANNS& node) {
+    // TODO
+}
 
-    void
-    visit(TermExpr& expr) override;
-
-    void
-    visit(RangeExpr& expr) override;
-
- public:
-    explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
-    }
-
- private:
-    ExtractedPlanInfo& plan_info_;
-};
 }  // namespace milvus::query

@@ -22,7 +22,6 @@
 #include <boost/algorithm/string.hpp>
 #include <algorithm>
 #include "query/generated/VerifyPlanNodeVisitor.h"
-#include "query/generated/ExtractInfoPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -143,14 +142,9 @@ Parser::CreatePlanImpl(const std::string& dsl_str) {
     VerifyPlanNodeVisitor verifier;
     vec_node->accept(verifier);
 
-    ExtractedPlanInfo plan_info(schema.size());
-    ExtractInfoPlanNodeVisitor extractor(plan_info);
-    vec_node->accept(extractor);
-
     auto plan = std::make_unique<Plan>(schema);
     plan->tag2field_ = std::move(tag2field_);
     plan->plan_node_ = std::move(vec_node);
-    plan->extra_info_opt_ = std::move(plan_info);
     return plan;
 }
 

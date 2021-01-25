@@ -24,13 +24,14 @@ const reTryCnt = 3
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	log.Printf("master service address : %s:%d", ms.Params.Address, ms.Params.Port)
 
 	svr, err := msc.NewGrpcServer(ctx)
 	if err != nil {
 		panic(err)
 	}
+	log.Printf("master service address : %s:%d", ms.Params.Address, ms.Params.Port)
 
+	psc.Params.Init()
 	log.Printf("proxy service address : %s", psc.Params.NetworkAddress())
 	//proxyService := psc.NewClient(ctx, psc.Params.NetworkAddress())
 
@@ -40,6 +41,7 @@ func main() {
 	//	panic(err)
 	//}
 
+	ds.Params.Init()
 	log.Printf("data service address : %s:%d", ds.Params.Address, ds.Params.Port)
 	dataService := dsc.NewClient(fmt.Sprintf("%s:%d", ds.Params.Address, ds.Params.Port))
 	if err = dataService.Init(); err != nil {
@@ -52,9 +54,11 @@ func main() {
 	for cnt = 0; cnt < reTryCnt; cnt++ {
 		dsStates, err := dataService.GetComponentStates()
 		if err != nil {
+			log.Printf("retry cout = %d, error = %s", cnt, err.Error())
 			continue
 		}
 		if dsStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			log.Printf("retry cout = %d, error = %s", cnt, dsStates.Status.Reason)
 			continue
 		}
 		if dsStates.State.StateCode != internalpb2.StateCode_INITIALIZING && dsStates.State.StateCode != internalpb2.StateCode_HEALTHY {
@@ -66,9 +70,9 @@ func main() {
 		panic("connect to data service failed")
 	}
 
-	//if err = svr.SetDataService(dataService); err != nil {
-	//	panic(err)
-	//}
+	if err = svr.SetDataService(dataService); err != nil {
+		panic(err)
+	}
 
 	log.Printf("index service address : %s", is.Params.Address)
 	indexService := isc.NewClient(is.Params.Address)
