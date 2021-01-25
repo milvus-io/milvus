@@ -7,94 +7,46 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetaService_start(t *testing.T) {
+func TestMetaService_All(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	replica := newReplica()
+	mFactory := &MasterServiceFactory{}
+	mFactory.setCollectionID(0)
+	mFactory.setCollectionName("a-collection")
+	metaService := newMetaService(ctx, replica, mFactory)
 
-	metaService := newMetaService(ctx, replica)
+	t.Run("Test getCollectionNames", func(t *testing.T) {
+		names, err := metaService.getCollectionNames()
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(names))
+		assert.Equal(t, "a-collection", names[0])
+	})
 
-	metaService.start()
-}
+	t.Run("Test createCollection", func(t *testing.T) {
+		hasColletion := metaService.replica.hasCollection(0)
+		assert.False(t, hasColletion)
 
-func TestMetaService_getCollectionObjId(t *testing.T) {
-	var key = "/collection/collection0"
-	var collectionObjID1 = GetCollectionObjID(key)
+		err := metaService.createCollection("a-collection")
+		assert.NoError(t, err)
+		hasColletion = metaService.replica.hasCollection(0)
+		assert.True(t, hasColletion)
+	})
 
-	assert.Equal(t, collectionObjID1, "/collection/collection0")
+	t.Run("Test loadCollections", func(t *testing.T) {
+		hasColletion := metaService.replica.hasCollection(1)
+		assert.False(t, hasColletion)
 
-	key = "fakeKey"
-	var collectionObjID2 = GetCollectionObjID(key)
+		mFactory.setCollectionID(1)
+		mFactory.setCollectionName("a-collection-1")
+		err := metaService.loadCollections()
+		assert.NoError(t, err)
 
-	assert.Equal(t, collectionObjID2, "fakeKey")
-}
+		hasColletion = metaService.replica.hasCollection(1)
+		assert.True(t, hasColletion)
+		hasColletion = metaService.replica.hasCollection(0)
+		assert.True(t, hasColletion)
+	})
 
-func TestMetaService_isCollectionObj(t *testing.T) {
-	var key = Params.MetaRootPath + "/collection/collection0"
-	var b1 = isCollectionObj(key)
-
-	assert.Equal(t, b1, true)
-
-	key = Params.MetaRootPath + "/segment/segment0"
-	var b2 = isCollectionObj(key)
-
-	assert.Equal(t, b2, false)
-}
-
-func TestMetaService_processCollectionCreate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	replica := newReplica()
-	metaService := newMetaService(ctx, replica)
-	defer cancel()
-	id := "0"
-	value := `schema: <
-				name: "test"
-				fields: <
-				fieldID:100
-				name: "vec"
-				data_type: VECTOR_FLOAT
-				type_params: <
-				  key: "dim"
-				  value: "16"
-				>
-				index_params: <
-				  key: "metric_type"
-				  value: "L2"
-				>
-				>
-				fields: <
-				fieldID:101
-				name: "age"
-				data_type: INT32
-				type_params: <
-				  key: "dim"
-				  value: "1"
-				>
-				>
-				>
-				segmentIDs: 0
-				partition_tags: "default"
-				`
-
-	metaService.processCollectionCreate(id, value)
-
-	collectionNum := replica.getCollectionNum()
-	assert.Equal(t, collectionNum, 1)
-
-	collection, err := replica.getCollectionByName("test")
-	assert.NoError(t, err)
-	assert.Equal(t, collection.ID(), UniqueID(0))
-}
-
-func TestMetaService_loadCollections(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	replica := newReplica()
-
-	metaService := newMetaService(ctx, replica)
-
-	err2 := (*metaService).loadCollections()
-	assert.Nil(t, err2)
 }
