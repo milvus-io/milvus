@@ -21,7 +21,7 @@ try {
         try {
             withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                 sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-                sh 'docker-compose push regression'
+                sh 'docker-compose push regression || true'
             }
         } catch (exc) {
             throw exc
