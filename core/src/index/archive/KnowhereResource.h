@@ -12,6 +12,7 @@
 #pragma once
 
 #include "utils/Status.h"
+#include "value/config/ServerConfig.h"
 
 namespace milvus {
 namespace engine {
@@ -23,6 +24,33 @@ class KnowhereResource {
 
     static Status
     Finalize();
+
+    static void
+    SetSimdType(const int64_t& st);
+
+    static Status
+    FaissHook();
+
+    static void
+    SetBlasThreshold(const int64_t& use_blas_threshold);
+
+    static void
+    SetEarlyStopThreshold(const double& early_stop_threshold);
+
+    static void
+    SetClusteringType(const int64_t& clustering_type);
+
+    static void
+    SetStatisticsLevel(const int64_t& stat_level);
+
+    static void
+    SetFaissLogHandler();
+
+    static void
+    SetNGTLogHandler();
+
+    static void
+    SetGPUEnable(bool enable_gpu);
 };
 
 }  // namespace engine
