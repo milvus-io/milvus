@@ -20,6 +20,10 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb2.SegmentStat
 		return err
 	}
 
+	//if segStats.IsNewSegment {
+	//	segMeta.OpenTime = segStats.CreateTime
+	//	segMeta.segStats.StartPositions
+	//}
 	segMeta.NumRows = segStats.NumRows
 	segMeta.MemSize = segStats.MemorySize
 
