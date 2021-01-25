@@ -24,6 +24,10 @@ class SegmentSealedImpl : public SegmentSealed {
     LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
+    void
+    DropIndex(const FieldId field_id) override;
+    void
+    DropFieldData(const FieldId field_id) override;
 
  public:
     int64_t
@@ -107,17 +111,26 @@ class SegmentSealedImpl : public SegmentSealed {
                   QueryResult& output) const override;
 
     bool
+    is_system_field_ready() const {
+        return system_ready_count_ == 1;
+    }
+
+    bool
     is_all_ready() const {
         // TODO: optimize here
         // NOTE: including row_ids
-        return ready_count_ == schema_->size() + 1;
+        if (!is_system_field_ready()) {
+            return false;
+        }
+        return ready_count_ == schema_->size();
     }
 
-    mutable std::shared_mutex mutex_;
-    std::atomic_int ready_count_ = 0;
-
  private:
-    // TOOD: generate index for scalar
+    // segment loading state
+    std::atomic<int> ready_count_ = 0;
+    std::atomic<int> system_ready_count_ = 0;
+    // segment datas
+    // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
     std::map<FieldOffset, knowhere::IndexPtr> scalar_indexings_;
     SealedIndexingRecord vec_indexings_;

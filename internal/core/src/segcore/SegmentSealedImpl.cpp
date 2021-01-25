@@ -14,6 +14,7 @@
 namespace milvus::segcore {
 void
 SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
+    // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto field_offset = schema_->get_offset(field_id);
 
@@ -35,7 +36,7 @@ SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
 
 void
 SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
-    // TODO
+    // NOTE: lock only when data is ready to avoid starvation
     Assert(info.row_count > 0);
     auto field_id = FieldId(info.field_id);
     Assert(info.blob);
@@ -54,8 +55,8 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         update_row_count(info.row_count);
         AssertInfo(row_ids_.empty(), "already exists");
         row_ids_ = std::move(vec_data);
+        ++system_ready_count_;
 
-        ++ready_count_;
     } else {
         // prepare data
         auto field_offset = schema_->get_offset(field_id);
@@ -105,12 +106,13 @@ SegmentSealedImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) c
 const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const {
     // TODO: support scalar index
-    return nullptr;
+    PanicInfo("unimplemented");
 }
 
 int64_t
 SegmentSealedImpl::GetMemoryUsageInBytes() const {
     // TODO: add estimate for index
+    std::shared_lock lck(mutex_);
     auto row_count = row_count_opt_.value_or(0);
     return schema_->get_total_sizeof() * row_count;
 }
@@ -118,8 +120,7 @@ SegmentSealedImpl::GetMemoryUsageInBytes() const {
 int64_t
 SegmentSealedImpl::get_row_count() const {
     std::shared_lock lck(mutex_);
-    AssertInfo(row_count_opt_.has_value(), "Data not loaded");
-    return row_count_opt_.value();
+    return row_count_opt_.value_or(0);
 }
 
 const Schema&
@@ -139,6 +140,16 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     Assert(field_meta.is_vector());
     Assert(vec_indexings_.is_ready(field_offset));
     query::SearchOnSealed(*schema_, vec_indexings_, query_info, query_data, query_count, bitset, output);
+}
+void
+SegmentSealedImpl::DropFieldData(const FieldId field_id) {
+    std::unique_lock lck(mutex_);
+    PanicInfo("unimplemented");
+}
+void
+SegmentSealedImpl::DropIndex(const FieldId field_id) {
+    std::unique_lock lck(mutex_);
+    PanicInfo("unimplemented");
 }
 
 SegmentSealedPtr

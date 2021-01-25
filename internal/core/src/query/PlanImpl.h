@@ -34,7 +34,8 @@ struct Plan {
     const Schema& schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> FieldOffset
-    std::vector<std::string> target_entries_;
+    std::vector<FieldOffset> target_entries_;
+    std::vector<FieldOffset> referred_fields_;
     // TODO: add move extra info
 };
 
