@@ -54,6 +54,9 @@ type collectionReplica interface {
 	getPartitionByTag(collectionID UniqueID, partitionTag string) (*Partition, error)
 	getPartitionByID(collectionID UniqueID, partitionID UniqueID) (*Partition, error)
 	hasPartition(collectionID UniqueID, partitionTag string) bool
+	enablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
+	disablePartitionDM(collectionID UniqueID, partitionID UniqueID) error
+	getEnablePartitionDM(collectionID UniqueID, partitionID UniqueID) (bool, error)
 
 	// segment
 	getSegmentNum() int
@@ -360,6 +363,43 @@ func (colReplica *collectionReplicaImpl) hasPartition(collectionID UniqueID, par
 	}
 
 	return false
+}
+
+func (colReplica *collectionReplicaImpl) enablePartitionDM(collectionID UniqueID, partitionID UniqueID) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	if err != nil {
+		return err
+	}
+
+	partition.enableDM = true
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) disablePartitionDM(collectionID UniqueID, partitionID UniqueID) error {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	if err != nil {
+		return err
+	}
+
+	partition.enableDM = false
+	return nil
+}
+
+func (colReplica *collectionReplicaImpl) getEnablePartitionDM(collectionID UniqueID, partitionID UniqueID) (bool, error) {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	partition, err := colReplica.getPartitionByIDPrivate(collectionID, partitionID)
+	if err != nil {
+		return false, err
+	}
+	return partition.enableDM, nil
 }
 
 //----------------------------------------------------------------------------------------------------- segment

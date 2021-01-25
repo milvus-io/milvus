@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -42,7 +41,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	replica := newReplica()
 	allocFactory := AllocatorFactory{}
 	sync := newDataSyncService(ctx, flushChan, replica, allocFactory)
-	sync.replica.addCollection(collMeta.ID, proto.MarshalTextString(collMeta.Schema))
+	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	go sync.start()
 
 	// test data generate

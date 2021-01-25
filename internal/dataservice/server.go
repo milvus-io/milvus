@@ -49,31 +49,28 @@ type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 	Server    struct {
-		ctx                context.Context
-		serverLoopCtx      context.Context
-		serverLoopCancel   context.CancelFunc
-		serverLoopWg       sync.WaitGroup
-		state              internalpb2.StateCode
-		client             *etcdkv.EtcdKV
-		meta               *meta
-		segAllocator       segmentAllocator
-		statsHandler       *statsHandler
-		insertChannelMgr   *insertChannelManager
-		allocator          allocator
-		cluster            *dataNodeCluster
-		msgProducer        *timesync.MsgProducer
-		registerFinishCh   chan struct{}
-		masterClient       *masterservice.GrpcClient
-		ttMsgStream        msgstream.MsgStream
-		k2sMsgStream       msgstream.MsgStream
-		ddChannelName      string
-		segmentInfoStream  msgstream.MsgStream
-		segmentFlushStream msgstream.MsgStream
+		ctx               context.Context
+		serverLoopCtx     context.Context
+		serverLoopCancel  context.CancelFunc
+		serverLoopWg      sync.WaitGroup
+		state             internalpb2.StateCode
+		client            *etcdkv.EtcdKV
+		meta              *meta
+		segAllocator      segmentAllocator
+		statsHandler      *statsHandler
+		insertChannelMgr  *insertChannelManager
+		allocator         allocator
+		cluster           *dataNodeCluster
+		msgProducer       *timesync.MsgProducer
+		registerFinishCh  chan struct{}
+		masterClient      *masterservice.GrpcClient
+		ttMsgStream       msgstream.MsgStream
+		ddChannelName     string
+		segmentInfoStream msgstream.MsgStream
 	}
 )
 
 func CreateServer(ctx context.Context, client *masterservice.GrpcClient) (*Server, error) {
-	Params.Init()
 	ch := make(chan struct{})
 	return &Server{
 		ctx:              ctx,
@@ -86,29 +83,32 @@ func CreateServer(ctx context.Context, client *masterservice.GrpcClient) (*Serve
 }
 
 func (s *Server) Init() error {
+	Params.Init()
 	return nil
 }
 
 func (s *Server) Start() error {
-	var err error
 	s.allocator = newAllocatorImpl(s.masterClient)
-	if err = s.initMeta(); err != nil {
+	if err := s.initMeta(); err != nil {
 		return err
 	}
 	s.statsHandler = newStatsHandler(s.meta)
-	s.segAllocator, err = newSegmentAllocator(s.meta, s.allocator)
+	segAllocator, err := newSegmentAllocator(s.meta, s.allocator)
 	if err != nil {
 		return err
 	}
-	s.initSegmentInfoChannel()
-	if err = s.initMsgProducer(); err != nil {
-		return err
-	}
+	s.segAllocator = segAllocator
+	s.waitDataNodeRegister()
+
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
+	if err = s.initMsgProducer(); err != nil {
+		return err
+	}
+
+	s.initSegmentInfoChannel()
 	s.startServerLoop()
-	s.waitDataNodeRegister()
 	s.state = internalpb2.StateCode_HEALTHY
 	log.Println("start success")
 	return nil
@@ -128,34 +128,67 @@ func (s *Server) initMeta() error {
 	return nil
 }
 
-func (s *Server) initSegmentInfoChannel() {
-	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
-	segmentInfoStream.SetPulsarClient(Params.PulsarAddress)
-	segmentInfoStream.CreatePulsarProducers([]string{Params.SegmentInfoChannelName})
-	s.segmentInfoStream = segmentInfoStream
-	s.segmentInfoStream.Start()
+func (s *Server) waitDataNodeRegister() {
+	log.Println("waiting data node to register")
+	<-s.registerFinishCh
+	log.Println("all data nodes register")
 }
+
 func (s *Server) initMsgProducer() error {
-	ttMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	ttMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
 	ttMsgStream.SetPulsarClient(Params.PulsarAddress)
 	ttMsgStream.CreatePulsarConsumers([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
 	s.ttMsgStream = ttMsgStream
 	s.ttMsgStream.Start()
 	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
-	k2sStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
-	k2sStream.SetPulsarClient(Params.PulsarAddress)
-	k2sStream.CreatePulsarProducers(Params.K2SChannelNames)
-	s.k2sMsgStream = k2sStream
-	s.k2sMsgStream.Start()
-	k2sMsgWatcher := timesync.NewMsgTimeTickWatcher(s.k2sMsgStream)
-	producer, err := timesync.NewTimeSyncMsgProducer(timeTickBarrier, dataNodeTTWatcher, k2sMsgWatcher)
+	producer, err := timesync.NewTimeSyncMsgProducer(timeTickBarrier, dataNodeTTWatcher)
 	if err != nil {
 		return err
 	}
 	s.msgProducer = producer
 	s.msgProducer.Start(s.ctx)
 	return nil
+}
+
+func (s *Server) startServerLoop() {
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	s.serverLoopWg.Add(1)
+	go s.startStatsChannel(s.serverLoopCtx)
+}
+
+func (s *Server) startStatsChannel(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	statsStream.SetPulsarClient(Params.PulsarAddress)
+	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	statsStream.Start()
+	defer statsStream.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		msgPack := statsStream.Consume()
+		for _, msg := range msgPack.Msgs {
+			statistics := msg.(*msgstream.SegmentStatisticsMsg)
+			for _, stat := range statistics.SegStats {
+				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
+					log.Println(err.Error())
+					continue
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) initSegmentInfoChannel() {
+	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	segmentInfoStream.SetPulsarClient(Params.PulsarAddress)
+	segmentInfoStream.CreatePulsarProducers([]string{Params.SegmentInfoChannelName})
+	s.segmentInfoStream = segmentInfoStream
+	s.segmentInfoStream.Start()
 }
 
 func (s *Server) loadMetaFromMaster() error {
@@ -215,83 +248,9 @@ func (s *Server) loadMetaFromMaster() error {
 	log.Println("load collection meta from master complete")
 	return nil
 }
-func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
-	go s.startStatsChannel(s.serverLoopCtx)
-	go s.startSegmentFlushChannel(s.serverLoopCtx)
-}
-
-func (s *Server) startStatsChannel(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
-	statsStream.SetPulsarClient(Params.PulsarAddress)
-	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
-	statsStream.Start()
-	defer statsStream.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		msgPack := statsStream.Consume()
-		for _, msg := range msgPack.Msgs {
-			statistics := msg.(*msgstream.SegmentStatisticsMsg)
-			for _, stat := range statistics.SegStats {
-				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
-					log.Println(err.Error())
-					continue
-				}
-			}
-		}
-	}
-}
-
-func (s *Server) startSegmentFlushChannel(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	flushStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
-	flushStream.SetPulsarClient(Params.PulsarAddress)
-	flushStream.CreatePulsarConsumers([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
-	flushStream.Start()
-	defer flushStream.Close()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("segment flush channel shut down")
-			return
-		default:
-		}
-		msgPack := flushStream.Consume()
-		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_kSegmentFlushDone {
-				continue
-			}
-			realMsg := msg.(*msgstream.FlushCompletedMsg)
-
-			segmentInfo, err := s.meta.GetSegment(realMsg.SegmentID)
-			if err != nil {
-				log.Println(err.Error())
-				continue
-			}
-			segmentInfo.FlushedTime = realMsg.BeginTimestamp
-			if err = s.meta.UpdateSegment(segmentInfo); err != nil {
-				log.Println(err.Error())
-				continue
-			}
-		}
-	}
-}
-
-func (s *Server) waitDataNodeRegister() {
-	log.Println("waiting data node to register")
-	<-s.registerFinishCh
-	log.Println("all data nodes register")
-}
 
 func (s *Server) Stop() error {
 	s.ttMsgStream.Close()
-	s.k2sMsgStream.Close()
 	s.msgProducer.Close()
 	s.segmentInfoStream.Close()
 	s.stopServerLoop()
@@ -439,23 +398,6 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	if err = s.segAllocator.OpenSegment(segmentInfo); err != nil {
 		return err
 	}
-	infoMsg := &msgstream.SegmentInfoMsg{
-		SegmentMsg: datapb.SegmentMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kSegmentInfo,
-				MsgID:     0,
-				Timestamp: 0, // todo
-				SourceID:  0,
-			},
-			Segment: segmentInfo,
-		},
-	}
-	msgPack := &pulsarms.MsgPack{
-		Msgs: []msgstream.TsMsg{infoMsg},
-	}
-	if err = s.segmentInfoStream.Produce(msgPack); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -480,8 +422,7 @@ func (s *Server) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.Seg
 	resp.CreateTime = segmentInfo.OpenTime
 	resp.SealedTime = segmentInfo.SealedTime
 	resp.FlushedTime = segmentInfo.FlushedTime
-	resp.StartPositions = segmentInfo.StartPosition
-	resp.EndPositions = segmentInfo.EndPosition
+	// TODO start/end positions
 	return resp, nil
 }
 

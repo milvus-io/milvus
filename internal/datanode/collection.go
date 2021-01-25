@@ -1,9 +1,6 @@
 package datanode
 
 import (
-	"log"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
@@ -24,17 +21,9 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
-func newCollection(collectionID UniqueID, schemaStr string) *Collection {
-
-	var schema schemapb.CollectionSchema
-	err := proto.UnmarshalText(schemaStr, &schema)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
-
+func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	var newCollection = &Collection{
-		schema: &schema,
+		schema: schema,
 		id:     collectionID,
 	}
 	return newCollection

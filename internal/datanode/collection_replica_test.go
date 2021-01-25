@@ -3,7 +3,6 @@ package datanode
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +22,7 @@ func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName
 	Factory := &MetaFactory{}
 	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
-	schemaBlob := proto.MarshalTextString(collectionMeta.Schema)
-	require.NotEqual(t, "", schemaBlob)
-
-	var err = replica.addCollection(collectionMeta.ID, schemaBlob)
+	var err = replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
 	require.NoError(t, err)
 
 	collection, err := replica.getCollectionByName(collectionName)
