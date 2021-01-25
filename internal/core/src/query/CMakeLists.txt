@@ -8,6 +8,8 @@ set(MILVUS_QUERY_SRCS
         visitors/ExecExprVisitor.cpp
         visitors/VerifyPlanNodeVisitor.cpp
         visitors/VerifyExprVisitor.cpp
+        visitors/ExtractInfoPlanNodeVisitor.cpp
+        visitors/ExtractInfoExprVisitor.cpp
         Plan.cpp
         SearchOnGrowing.cpp
         SearchOnSealed.cpp

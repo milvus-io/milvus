@@ -12,11 +12,9 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	PulsarAddress         string
-	ETCDAddress           string
-	MetaRootPath          string
-	WriteNodeSegKvSubPath string
-	IndexBuilderAddress   string
+	PulsarAddress string
+	ETCDAddress   string
+	MetaRootPath  string
 
 	QueryNodeIP                 string
 	QueryNodePort               int64
@@ -133,8 +131,6 @@ func (p *ParamTable) Init() {
 	p.initPulsarAddress()
 	p.initETCDAddress()
 	p.initMetaRootPath()
-	p.initWriteNodeSegKvSubPath()
-	p.initIndexBuilderAddress()
 
 	p.initGracefulTime()
 	p.initMsgChannelSubName()
@@ -250,14 +246,6 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = url
 }
 
-func (p *ParamTable) initIndexBuilderAddress() {
-	ret, err := p.Load("_IndexBuilderAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.IndexBuilderAddress = ret
-}
-
 func (p *ParamTable) initInsertChannelRange() {
 	insertChannelRange, err := p.Load("msgChannel.channelRange.insert")
 	if err != nil {
@@ -348,14 +336,6 @@ func (p *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *ParamTable) initWriteNodeSegKvSubPath() {
-	subPath, err := p.Load("etcd.writeNodeSegKvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.WriteNodeSegKvSubPath = subPath + "/"
 }
 
 func (p *ParamTable) initGracefulTime() {

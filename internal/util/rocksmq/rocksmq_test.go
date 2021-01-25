@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	master "github.com/zilliztech/milvus-distributed/internal/master"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -19,15 +20,14 @@ func TestFixChannelName(t *testing.T) {
 }
 
 func TestRocksMQ(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
+	master.Init()
+
+	etcdAddr := master.Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := master.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq"
@@ -76,15 +76,14 @@ func TestRocksMQ(t *testing.T) {
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
+	master.Init()
+
+	etcdAddr := master.Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := master.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_1"
@@ -144,15 +143,14 @@ func TestRocksMQ_Loop(t *testing.T) {
 }
 
 func TestRocksMQ_Goroutines(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
+	master.Init()
+
+	etcdAddr := master.Params.EtcdAddress
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
-	idAllocator := NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := master.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_2"

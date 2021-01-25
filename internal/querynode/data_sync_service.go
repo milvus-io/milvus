@@ -19,18 +19,17 @@ type dataSyncService struct {
 }
 
 func newDataSyncService(ctx context.Context, replica collectionReplica) *dataSyncService {
-	service := &dataSyncService{
+
+	return &dataSyncService{
 		ctx: ctx,
 		fg:  nil,
 
 		replica: replica,
 	}
-
-	service.initNodes()
-	return service
 }
 
 func (dsService *dataSyncService) start() {
+	dsService.initNodes()
 	dsService.fg.Start()
 }
 
@@ -48,7 +47,7 @@ func (dsService *dataSyncService) initNodes() {
 	var dmStreamNode node = dsService.newDmInputNode(dsService.ctx)
 	var ddStreamNode node = dsService.newDDInputNode(dsService.ctx)
 
-	var filterDmNode node = newFilteredDmNode(dsService.replica)
+	var filterDmNode node = newFilteredDmNode()
 	var ddNode node = newDDNode(dsService.replica)
 
 	var insertNode node = newInsertNode(dsService.replica)
