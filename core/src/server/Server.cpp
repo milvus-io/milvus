@@ -265,7 +265,20 @@ Server::Stop() {
 Status
 Server::StartService() {
     Status stat;
-    stat = engine::KnowhereResource::Initialize();
+    {
+        milvus::engine::KnowhereResource::SetSimdType(config.engine.simd_type());
+        stat = milvus::engine::KnowhereResource::FaissHook();
+
+        // init faiss global variable
+        milvus::engine::KnowhereResource::SetBlasThreshold(config.engine.use_blas_threshold());
+        milvus::engine::KnowhereResource::SetEarlyStopThreshold(config.engine.early_stop_threshold());
+        milvus::engine::KnowhereResource::SetClusteringType(config.engine.clustering_type());
+
+        milvus::engine::KnowhereResource::SetLogHandler();
+        milvus::engine::KnowhereResource::SetStatisticsLevel(config.engine.statistics_level());
+
+        milvus::engine::KnowhereResource::SetGPUEnable(config.gpu.enable());
+    }
     if (!stat.ok()) {
         LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
         goto FAIL;

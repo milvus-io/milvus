@@ -41,27 +41,6 @@ namespace engine {
 constexpr int64_t M_BYTE = 1024 * 1024;
 
 Status
-KnowhereResource::Initialize() {
-    SetSimdType(config.engine.simd_type());
-    auto stat = FaissHook();
-    if (!stat.ok())
-        return stat;
-
-    // init faiss global variable
-    SetBlasThreshold(config.engine.use_blas_threshold());
-    SetEarlyStopThreshold(config.engine.early_stop_threshold());
-    SetClusteringType(config.engine.clustering_type());
-
-    SetFaissLogHandler();
-    SetNGTLogHandler();
-    SetStatisticsLevel(config.engine.statistics_level());
-
-    SetGPUEnable(config.gpu.enable());
-
-    return Status::OK();
-}
-
-Status
 KnowhereResource::Finalize() {
 #ifdef MILVUS_GPU_VERSION
     knowhere::FaissGpuResourceMgr::GetInstance().Free();  // free gpu resource.
@@ -70,7 +49,7 @@ KnowhereResource::Finalize() {
 }
 
 void
-KnowhereResource::SetSimdType(const int64_t& simd_type) {
+KnowhereResource::SetSimdType(const int64_t simd_type) {
     if (simd_type == SimdType::AVX512) {
         faiss::faiss_use_avx512 = true;
         faiss::faiss_use_avx2 = false;
@@ -103,17 +82,17 @@ KnowhereResource::FaissHook() {
 }
 
 void
-KnowhereResource::SetBlasThreshold(const int64_t& use_blas_threshold) {
+KnowhereResource::SetBlasThreshold(const int64_t use_blas_threshold) {
     faiss::distance_compute_blas_threshold = (int)use_blas_threshold;
 }
 
 void
-KnowhereResource::SetEarlyStopThreshold(const double& early_stop_threshold) {
+KnowhereResource::SetEarlyStopThreshold(const double early_stop_threshold) {
     faiss::early_stop_threshold = early_stop_threshold;
 }
 
 void
-KnowhereResource::SetClusteringType(const int64_t& clustering_type) {
+KnowhereResource::SetClusteringType(const int64_t clustering_type) {
     switch (clustering_type) {
         case ClusteringType::K_MEANS:
         default:
@@ -126,20 +105,16 @@ KnowhereResource::SetClusteringType(const int64_t& clustering_type) {
 }
 
 void
-KnowhereResource::SetStatisticsLevel(const int64_t& stat_level) {
+KnowhereResource::SetStatisticsLevel(const int64_t stat_level) {
     milvus::knowhere::STATISTICS_LEVEL = stat_level;
     faiss::STATISTICS_LEVEL = stat_level;
 }
 
 void
-KnowhereResource::SetFaissLogHandler() {
+KnowhereResource::SetLogHandler() {
     faiss::LOG_ERROR_ = &knowhere::log_error_;
     faiss::LOG_WARNING_ = &knowhere::log_warning_;
     // faiss::LOG_DEBUG_ = &knowhere::log_debug_;
-}
-
-void
-KnowhereResource::SetNGTLogHandler() {
     NGT_LOG_ERROR_ = &knowhere::log_error_;
     NGT_LOG_WARNING_ = &knowhere::log_warning_;
     // NGT_LOG_DEBUG_ = &knowhere::log_debug_;
