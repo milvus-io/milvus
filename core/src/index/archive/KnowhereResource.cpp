@@ -83,7 +83,7 @@ KnowhereResource::FaissHook() {
 
 void
 KnowhereResource::SetBlasThreshold(const int64_t use_blas_threshold) {
-    faiss::distance_compute_blas_threshold = (int)use_blas_threshold;
+    faiss::distance_compute_blas_threshold = static_cast<int>(use_blas_threshold);
 }
 
 void
