@@ -16,7 +16,8 @@ As an open source vector similarity search engine, Milvus is easy-to-use, highly
 
 The following is Milvus architecture:
 
-![arch](https://github.com/milvus-io/docs/blob/master/v0.9.1/assets/milvus_arch.png)
+![arch](https://github.com/milvus-io/docs/blob/master/v0.10.5/assets/milvus_arch.png)
+
 For more detailed introduction of Milvus and its architecture, see [Milvus overview](https://www.milvus.io/docs/overview.md). See Milvus [release notes](https://www.milvus.io/docs/release_notes.md) to keep up-to-date with its releases and updates.
 
 Milvus is an incubation-stage project at [LF AI & Data Foundation](https://lfaidata.foundation/).
