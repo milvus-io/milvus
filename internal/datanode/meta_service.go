@@ -4,91 +4,73 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"reflect"
+	"strings"
+	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/errors"
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
+
+	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 )
 
 type metaService struct {
-	ctx          context.Context
-	replica      collectionReplica
-	masterClient MasterServiceInterface
+	ctx     context.Context
+	kvBase  *etcdkv.EtcdKV
+	replica collectionReplica
 }
 
-func newMetaService(ctx context.Context, replica collectionReplica, m MasterServiceInterface) *metaService {
+func newMetaService(ctx context.Context, replica collectionReplica) *metaService {
+	ETCDAddr := Params.EtcdAddress
+	MetaRootPath := Params.MetaRootPath
+
+	cli, _ := clientv3.New(clientv3.Config{
+		Endpoints:   []string{ETCDAddr},
+		DialTimeout: 5 * time.Second,
+	})
+
 	return &metaService{
-		ctx:          ctx,
-		replica:      replica,
-		masterClient: m,
+		ctx:     ctx,
+		kvBase:  etcdkv.NewEtcdKV(cli, MetaRootPath),
+		replica: replica,
 	}
 }
 
-func (mService *metaService) init() {
+func (mService *metaService) start() {
+	// init from meta
 	err := mService.loadCollections()
 	if err != nil {
-		log.Fatal("metaService init failed:", err)
+		log.Fatal("metaService loadCollections failed")
 	}
 }
 
-func (mService *metaService) loadCollections() error {
-	names, err := mService.getCollectionNames()
-	if err != nil {
-		return err
-	}
+func GetCollectionObjID(key string) string {
+	ETCDRootPath := Params.MetaRootPath
 
-	for _, name := range names {
-		err := mService.createCollection(name)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
+	return strings.TrimPrefix(key, prefix)
 }
 
-func (mService *metaService) getCollectionNames() ([]string, error) {
-	req := &milvuspb.ShowCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowCollections,
-			MsgID:     0, //GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		DbName: "default", // GOOSE TODO
-	}
+func isCollectionObj(key string) bool {
+	ETCDRootPath := Params.MetaRootPath
 
-	response, err := mService.masterClient.ShowCollections(req)
-	if err != nil {
-		return nil, errors.Errorf("Get collection names from master service wrong: %v", err)
-	}
-	return response.GetCollectionNames(), nil
+	prefix := path.Join(ETCDRootPath, CollectionPrefix) + "/"
+	prefix = strings.TrimSpace(prefix)
+	index := strings.Index(key, prefix)
+
+	return index == 0
 }
 
-func (mService *metaService) createCollection(name string) error {
-	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDescribeCollection,
-			MsgID:     0, //GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		DbName:         "default", // GOOSE TODO
-		CollectionName: name,
-	}
+func isSegmentObj(key string) bool {
+	ETCDRootPath := Params.MetaRootPath
 
-	response, err := mService.masterClient.DescribeCollection(req)
-	if err != nil {
-		return errors.Errorf("Describe collection %v from master service wrong: %v", name, err)
-	}
+	prefix := path.Join(ETCDRootPath, SegmentPrefix) + "/"
+	prefix = strings.TrimSpace(prefix)
+	index := strings.Index(key, prefix)
 
-	err = mService.replica.addCollection(response.GetCollectionID(), response.GetSchema())
-	if err != nil {
-		return errors.Errorf("Add collection %v into collReplica wrong: %v", name, err)
-	}
-
-	return nil
+	return index == 0
 }
 
 func printCollectionStruct(obj *etcdpb.CollectionMeta) {
@@ -102,4 +84,52 @@ func printCollectionStruct(obj *etcdpb.CollectionMeta) {
 		}
 		fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
 	}
+}
+
+func (mService *metaService) processCollectionCreate(id string, value string) {
+	//println(fmt.Sprintf("Create Collection:$%s$", id))
+
+	col := mService.collectionUnmarshal(value)
+	if col != nil {
+		schema := col.Schema
+		schemaBlob := proto.MarshalTextString(schema)
+		err := mService.replica.addCollection(col.ID, schemaBlob)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+}
+
+func (mService *metaService) loadCollections() error {
+	keys, values, err := mService.kvBase.LoadWithPrefix(CollectionPrefix)
+	if err != nil {
+		return err
+	}
+
+	for i := range keys {
+		objID := GetCollectionObjID(keys[i])
+		mService.processCollectionCreate(objID, values[i])
+	}
+
+	return nil
+}
+
+//----------------------------------------------------------------------- Unmarshal and Marshal
+func (mService *metaService) collectionUnmarshal(value string) *etcdpb.CollectionMeta {
+	col := etcdpb.CollectionMeta{}
+	err := proto.UnmarshalText(value, &col)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	return &col
+}
+
+func (mService *metaService) collectionMarshal(col *etcdpb.CollectionMeta) string {
+	value := proto.MarshalTextString(col)
+	if value == "" {
+		log.Println("marshal collection failed")
+		return ""
+	}
+	return value
 }

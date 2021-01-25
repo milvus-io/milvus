@@ -29,6 +29,10 @@ msgChannel:
     queryNodeStats: "query-node-stats"
     # cmd for loadIndex, flush, etc...
     cmd: "cmd"
+    dataServiceInsertChannel: "insert-channel-"
+    dataServiceStatistic: "dataservice-statistics-channel"
+    dataServiceTimeTick: "dataservice-timetick-channel"
+    dataServiceSegmentInfo: "segment-info-channel"
 
   # sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:
@@ -37,6 +41,7 @@ msgChannel:
     queryNodeSubNamePrefix: "queryNode"
     writeNodeSubNamePrefix: "writeNode" # GOOSE TODO: remove this
     dataNodeSubNamePrefix: "dataNode"
+    dataServiceSubNamePrefix: "dataService"
 
   # default channel range [0, 1)
   channelRange:

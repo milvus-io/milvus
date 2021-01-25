@@ -25,7 +25,7 @@ func (alloc *allocatorImpl) allocID() (UniqueID, error) {
 	resp, err := alloc.masterService.AllocID(&masterpb.IDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kShowCollections,
-			MsgID:     1, // GOOSE TODO
+			MsgID:     1, // GOOSE TODO add msg id
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,
 		},

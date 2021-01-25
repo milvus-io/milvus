@@ -6,14 +6,13 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 type collectionReplica interface {
 
 	// collection
 	getCollectionNum() int
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
+	addCollection(collectionID UniqueID, schemaBlob string) error
 	removeCollection(collectionID UniqueID) error
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
@@ -163,11 +162,11 @@ func (colReplica *collectionReplicaImpl) getCollectionNum() int {
 	return len(colReplica.collections)
 }
 
-func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, schemaBlob string) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	var newCollection = newCollection(collectionID, schema)
+	var newCollection = newCollection(collectionID, schemaBlob)
 	colReplica.collections = append(colReplica.collections, newCollection)
 	log.Println("Create collection: ", newCollection.Name())
 
