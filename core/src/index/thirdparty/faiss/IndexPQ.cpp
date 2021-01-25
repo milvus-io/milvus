@@ -261,8 +261,8 @@ void IndexPQ::search (idx_t n, const float *x, idx_t k,
 
             if (search_type == ST_HE) {
 
-                binary_distance_knn_hc<int_maxheap_array_t>(faiss::METRIC_Hamming, &res, (const uint8_t *)q_codes, codes.data(),
-                                                            ntotal, pq.code_size, bitset);
+                binary_distance_knn_hc(faiss::METRIC_Hamming, &res, (const uint8_t *)q_codes, codes.data(),
+                                       ntotal, pq.code_size, bitset);
 
             } else if (search_type == ST_generalized_HE) {
 

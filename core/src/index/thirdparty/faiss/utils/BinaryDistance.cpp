@@ -311,11 +311,12 @@ void binary_distance_knn_hc (
         const uint8_t * bs1,
         const uint8_t * bs2,
         size_t n2,
-        const BitsetView& bitset =nullptr)
+        const BitsetView& bitset = nullptr)
 {
     typedef typename T2::T T1;
     size_t k = ha->k;
 
+    // Todo: how to select the strategy
     if ((bytes_per_code + k * (sizeof(T1) + sizeof(int64_t))) * ha->nh < size_1M) {
         int thread_max_num = omp_get_max_threads();
         // init heap
@@ -323,7 +324,7 @@ void binary_distance_knn_hc (
         size_t all_heap_size = thread_heap_size * thread_max_num;
         T1 *value = new T1[all_heap_size];
         int64_t *labels = new int64_t[all_heap_size];
-        T1 init_value = typeid(T1) == typeid(float)? 1.0 / 0.0:0x7fffffff;
+        T1 init_value = (typeid(T1) == typeid(float))? (1.0 / 0.0) : 0x7fffffff;
         for (int i = 0; i < all_heap_size; i++) {
             value[i] = init_value;
             labels[i] = -1;
@@ -408,8 +409,7 @@ void binary_distance_knn_hc (
 {
     size_t dim = ncodes * 8;
     switch (metric_type) {
-        case METRIC_Jaccard:
-        case METRIC_Tanimoto: {
+        case METRIC_Jaccard: {
             float (*jaccard)(const uint8_t *a, const uint8_t *b, size_t n) = nullptr;
             if (support_avx512() && dim > 1024) {
                 jaccard = jaccard__AVX512;
