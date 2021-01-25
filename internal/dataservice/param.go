@@ -29,8 +29,7 @@ type ParamTable struct {
 	StatisticsChannelName         string
 	TimeTickChannelName           string
 	DataNodeNum                   int
-	SegmentInfoChannelName        string
-	DataServiceSubscriptionName   string
+	SegmentChannelName            string // todo init
 }
 
 var Params ParamTable
@@ -63,8 +62,6 @@ func (p *ParamTable) Init() {
 	p.initStatisticsChannelName()
 	p.initTimeTickChannelName()
 	p.initDataNodeNum()
-	p.initSegmentInfoChannelName()
-	p.initDataServiceSubscriptionName()
 }
 
 func (p *ParamTable) initAddress() {
@@ -153,12 +150,4 @@ func (p *ParamTable) initTimeTickChannelName() {
 
 func (p *ParamTable) initDataNodeNum() {
 	p.DataNodeNum = 2
-}
-
-func (p *ParamTable) initSegmentInfoChannelName() {
-	p.SegmentInfoChannelName = "segment-info-channel"
-}
-
-func (p *ParamTable) initDataServiceSubscriptionName() {
-	p.DataServiceSubscriptionName = "dataserive-sub"
 }

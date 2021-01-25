@@ -6,8 +6,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
@@ -30,7 +28,6 @@ const role = "dataservice"
 
 type DataService interface {
 	typeutil.Service
-	typeutil.Component
 	RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	Flush(req *datapb.FlushRequest) (*commonpb.Status, error)
 
@@ -38,35 +35,36 @@ type DataService interface {
 	ShowSegments(req *datapb.ShowSegmentRequest) (*datapb.ShowSegmentResponse, error)
 	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
 	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel() (string, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
+
+	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
 	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 	GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetTimeTickChannel() (*milvuspb.StringResponse, error)
+	GetStatisticsChannel() (*milvuspb.StringResponse, error)
 }
 
 type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 	Server    struct {
-		ctx               context.Context
-		serverLoopCtx     context.Context
-		serverLoopCancel  context.CancelFunc
-		serverLoopWg      sync.WaitGroup
-		state             internalpb2.StateCode
-		client            *etcdkv.EtcdKV
-		meta              *meta
-		segAllocator      segmentAllocator
-		statsHandler      *statsHandler
-		insertChannelMgr  *insertChannelManager
-		allocator         allocator
-		cluster           *dataNodeCluster
-		msgProducer       *timesync.MsgProducer
-		registerFinishCh  chan struct{}
-		masterClient      *masterservice.GrpcClient
-		ttMsgStream       msgstream.MsgStream
-		ddChannelName     string
-		segmentInfoStream msgstream.MsgStream
+		ctx              context.Context
+		serverLoopCtx    context.Context
+		serverLoopCancel context.CancelFunc
+		serverLoopWg     sync.WaitGroup
+		state            internalpb2.StateCode
+		client           *etcdkv.EtcdKV
+		meta             *meta
+		segAllocator     segmentAllocator
+		statsHandler     *statsHandler
+		insertChannelMgr *insertChannelManager
+		allocator        allocator
+		cluster          *dataNodeCluster
+		msgProducer      *timesync.MsgProducer
+		registerFinishCh chan struct{}
+		masterClient     *masterservice.GrpcClient
+		ttMsgStream      msgstream.MsgStream
+		ddChannelName    string
 	}
 )
 
@@ -107,7 +105,6 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.initSegmentInfoChannel()
 	s.startServerLoop()
 	s.state = internalpb2.StateCode_HEALTHY
 	log.Println("start success")
@@ -121,7 +118,7 @@ func (s *Server) initMeta() error {
 	}
 	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 	s.client = etcdKV
-	s.meta, err = newMeta(etcdKV)
+	s.meta, err = newMeta(etcdKV, s.allocator)
 	if err != nil {
 		return err
 	}
@@ -135,10 +132,7 @@ func (s *Server) waitDataNodeRegister() {
 }
 
 func (s *Server) initMsgProducer() error {
-	ttMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
-	ttMsgStream.SetPulsarClient(Params.PulsarAddress)
-	ttMsgStream.CreatePulsarConsumers([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
-	s.ttMsgStream = ttMsgStream
+	s.ttMsgStream = pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
 	s.ttMsgStream.Start()
 	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
@@ -160,8 +154,6 @@ func (s *Server) startServerLoop() {
 func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
-	statsStream.SetPulsarClient(Params.PulsarAddress)
-	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -181,14 +173,6 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (s *Server) initSegmentInfoChannel() {
-	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
-	segmentInfoStream.SetPulsarClient(Params.PulsarAddress)
-	segmentInfoStream.CreatePulsarProducers([]string{Params.SegmentInfoChannelName})
-	s.segmentInfoStream = segmentInfoStream
-	s.segmentInfoStream.Start()
 }
 
 func (s *Server) loadMetaFromMaster() error {
@@ -252,7 +236,6 @@ func (s *Server) loadMetaFromMaster() error {
 func (s *Server) Stop() error {
 	s.ttMsgStream.Close()
 	s.msgProducer.Close()
-	s.segmentInfoStream.Close()
 	s.stopServerLoop()
 	return nil
 }
@@ -283,12 +266,22 @@ func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return resp, nil
 }
 
-func (s *Server) GetTimeTickChannel() (string, error) {
-	return Params.TimeTickChannelName, nil
+func (s *Server) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.TimeTickChannelName,
+	}, nil
 }
 
-func (s *Server) GetStatisticsChannel() (string, error) {
-	return Params.StatisticsChannelName, nil
+func (s *Server) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: Params.StatisticsChannelName,
+	}, nil
 }
 
 func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
@@ -298,7 +291,7 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 		},
 	}
 	s.cluster.Register(req.Address.Ip, req.Address.Port, req.Base.SourceID)
-	if s.ddChannelName == "" {
+	if len(s.ddChannelName) == 0 {
 		resp, err := s.masterClient.GetDdChannel()
 		if err != nil {
 			ret.Status.Reason = err.Error()
@@ -313,14 +306,21 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 			{Key: "DDChannelName", Value: s.ddChannelName},
 			{Key: "SegmentStatisticsChannelName", Value: Params.StatisticsChannelName},
 			{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-			{Key: "CompleteFlushChannelName", Value: Params.SegmentInfoChannelName},
+			{Key: "CompleteFlushChannelName", Value: Params.SegmentChannelName},
 		},
 	}
 	return ret, nil
 }
 
 func (s *Server) Flush(req *datapb.FlushRequest) (*commonpb.Status, error) {
-	s.segAllocator.SealAllSegments(req.CollectionID)
+	success, fails := s.segAllocator.SealAllSegments(req.CollectionID)
+	log.Printf("sealing failed segments: %v", fails)
+	if !success {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("flush failed, %d segment can not be sealed", len(fails)),
+		}, nil
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}, nil
@@ -383,12 +383,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 	if err != nil {
 		return err
 	}
-
-	id, err := s.allocator.allocID()
-	if err != nil {
-		return err
-	}
-	segmentInfo, err := BuildSegment(collectionID, partitionID, id, group)
+	segmentInfo, err := s.meta.BuildSegment(collectionID, partitionID, group)
 	if err != nil {
 		return err
 	}
@@ -430,14 +425,22 @@ func (s *Server) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 	panic("implement me")
 }
 
-func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
+func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
+	resp := &internalpb2.StringList{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
 	contains, ret := s.insertChannelMgr.ContainsCollection(req.CollectionID)
 	if contains {
-		return ret, nil
+		resp.Values = ret
+		return resp, nil
 	}
 	channelGroups, err := s.insertChannelMgr.AllocChannels(req.CollectionID, s.cluster.GetNumOfNodes())
 	if err != nil {
-		return nil, err
+		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		resp.Status.Reason = err.Error()
+		return resp, nil
 	}
 
 	channels := make([]string, Params.InsertChannelNumPerCollection)
@@ -446,7 +449,8 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 	}
 	s.cluster.WatchInsertChannels(channelGroups)
 
-	return channels, nil
+	resp.Values = channels
+	return resp, nil
 }
 
 func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
@@ -457,8 +461,4 @@ func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*d
 func (s *Server) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
 	// todo implement
 	return nil, nil
-}
-
-func (s *Server) GetSegmentInfoChannel() (string, error) {
-	return Params.SegmentInfoChannelName, nil
 }

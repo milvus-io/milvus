@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -26,10 +27,10 @@ type GrpcServer struct {
 	cancel context.CancelFunc
 }
 
-func NewGrpcServer() (*GrpcServer, error) {
+func NewGrpcServer(ctx context.Context) (*GrpcServer, error) {
 	s := &GrpcServer{}
 	var err error
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.ctx, s.cancel = context.WithCancel(ctx)
 	if s.core, err = cms.NewCore(s.ctx); err != nil {
 		return nil, err
 	}
@@ -71,6 +72,30 @@ func (s *GrpcServer) Stop() error {
 	s.cancel()
 	s.grpcServer.GracefulStop()
 	return err
+}
+
+func (s *GrpcServer) SetProxyService(p cms.ProxyServiceInterface) error {
+	c, ok := s.core.(*cms.Core)
+	if !ok {
+		return errors.Errorf("set proxy service failed")
+	}
+	return c.SetProxyService(p)
+}
+
+func (s *GrpcServer) SetDataService(p cms.DataServiceInterface) error {
+	c, ok := s.core.(*cms.Core)
+	if !ok {
+		return errors.Errorf("set data service failed")
+	}
+	return c.SetDataService(p)
+}
+
+func (s *GrpcServer) SetIndexService(p cms.IndexServiceInterface) error {
+	c, ok := s.core.(*cms.Core)
+	if !ok {
+		return errors.Errorf("set index service failed")
+	}
+	return c.SetIndexService(p)
 }
 
 func (s *GrpcServer) GetComponentStatesRPC(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {

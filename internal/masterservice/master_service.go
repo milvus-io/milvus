@@ -2,6 +2,7 @@ package masterservice
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"strconv"
@@ -735,6 +736,13 @@ func (c *Core) GetStatisticsChannel() (string, error) {
 }
 
 func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -758,6 +766,13 @@ func (c *Core) CreateCollection(in *milvuspb.CreateCollectionRequest) (*commonpb
 }
 
 func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -780,6 +795,16 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 }
 
 func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			Value: false,
+		}, nil
+	}
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -809,6 +834,17 @@ func (c *Core) HasCollection(in *milvuspb.HasCollectionRequest) (*milvuspb.BoolR
 }
 
 func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			Schema:       nil,
+			CollectionID: 0,
+		}, nil
+	}
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -836,6 +872,16 @@ func (c *Core) DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milv
 }
 
 func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.ShowCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			CollectionNames: nil,
+		}, nil
+	}
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -865,6 +911,13 @@ func (c *Core) ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.Sh
 }
 
 func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -887,6 +940,13 @@ func (c *Core) CreatePartition(in *milvuspb.CreatePartitionRequest) (*commonpb.S
 }
 
 func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -909,6 +969,16 @@ func (c *Core) DropPartition(in *milvuspb.DropPartitionRequest) (*commonpb.Statu
 }
 
 func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.BoolResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			Value: false,
+		}, nil
+	}
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -938,6 +1008,17 @@ func (c *Core) HasPartition(in *milvuspb.HasPartitionRequest) (*milvuspb.BoolRes
 }
 
 func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.ShowPartitionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			PartitionNames: nil,
+			PartitionIDs:   nil,
+		}, nil
+	}
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -968,6 +1049,13 @@ func (c *Core) ShowPartitions(in *milvuspb.ShowPartitionRequest) (*milvuspb.Show
 }
 
 func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+		}, nil
+	}
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -990,6 +1078,16 @@ func (c *Core) CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, e
 }
 
 func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			IndexDescriptions: nil,
+		}, nil
+	}
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1020,6 +1118,16 @@ func (c *Core) DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.Descr
 }
 
 func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.DescribeSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			IndexID: 0,
+		}, nil
+	}
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),
@@ -1050,6 +1158,16 @@ func (c *Core) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.D
 }
 
 func (c *Core) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error) {
+	code := c.stateCode.Load().(internalpb2.StateCode)
+	if code != internalpb2.StateCode_HEALTHY {
+		return &milvuspb.ShowSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    fmt.Sprintf("state code = %s", internalpb2.StateCode_name[int32(code)]),
+			},
+			SegmentIDs: nil,
+		}, nil
+	}
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			cv:   make(chan error),

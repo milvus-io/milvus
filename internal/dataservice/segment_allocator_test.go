@@ -25,9 +25,7 @@ func TestAllocSegment(t *testing.T) {
 		Schema: schema,
 	})
 	assert.Nil(t, err)
-	id, err := mockAllocator.allocID()
-	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, []string{"c1", "c2"})
+	segmentInfo, err := meta.BuildSegment(collID, 100, []string{"c1", "c2"})
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
@@ -78,9 +76,7 @@ func TestSealSegment(t *testing.T) {
 	assert.Nil(t, err)
 	var lastSegID UniqueID
 	for i := 0; i < 10; i++ {
-		id, err := mockAllocator.allocID()
-		assert.Nil(t, err)
-		segmentInfo, err := BuildSegment(collID, 100, id, []string{"c" + strconv.Itoa(i)})
+		segmentInfo, err := meta.BuildSegment(collID, 100, []string{"c" + strconv.Itoa(i)})
 		assert.Nil(t, err)
 		err = meta.AddSegment(segmentInfo)
 		assert.Nil(t, err)
@@ -91,7 +87,9 @@ func TestSealSegment(t *testing.T) {
 
 	err = segAllocator.SealSegment(lastSegID)
 	assert.Nil(t, err)
-	segAllocator.SealAllSegments(collID)
+	success, ids := segAllocator.SealAllSegments(collID)
+	assert.True(t, success)
+	assert.EqualValues(t, 0, len(ids))
 	sealedSegments, err := segAllocator.GetSealedSegments()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 10, len(sealedSegments))
@@ -113,9 +111,7 @@ func TestExpireSegment(t *testing.T) {
 		Schema: schema,
 	})
 	assert.Nil(t, err)
-	id, err := mockAllocator.allocID()
-	assert.Nil(t, err)
-	segmentInfo, err := BuildSegment(collID, 100, id, []string{"c1", "c2"})
+	segmentInfo, err := meta.BuildSegment(collID, 100, []string{"c1", "c2"})
 	assert.Nil(t, err)
 	err = meta.AddSegment(segmentInfo)
 	assert.Nil(t, err)
