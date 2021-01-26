@@ -35,14 +35,6 @@ func NewGrpcService(ctx context.Context) *Service {
 		log.Fatalf("create server error: %s", err.Error())
 		return nil
 	}
-	return s
-}
-
-func (s *Service) SetMasterClient(masterClient dataservice.MasterClient) {
-	s.server.SetMasterClient(masterClient)
-}
-
-func (s *Service) Init() error {
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", dataservice.Params.Address, dataservice.Params.Port))
@@ -54,6 +46,14 @@ func (s *Service) Init() error {
 		log.Fatal(err.Error())
 		return nil
 	}
+	return s
+}
+
+func (s *Service) SetMasterClient(masterClient dataservice.MasterClient) {
+	s.server.SetMasterClient(masterClient)
+}
+
+func (s *Service) Init() error {
 	return s.server.Init()
 }
 
