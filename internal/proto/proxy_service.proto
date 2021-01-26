@@ -5,6 +5,7 @@ option go_package = "github.com/zilliztech/milvus-distributed/internal/proto/pro
 
 import "common.proto";
 import "internal.proto";
+import "milvus.proto";
 
 
 message RegisterNodeRequest {
@@ -24,6 +25,8 @@ message InvalidateCollMetaCacheRequest {
 }
 
 service ProxyService {
+  rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
 }

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -22,6 +24,26 @@ type Server struct {
 	wg         sync.WaitGroup
 	impl       proxyservice.ProxyService
 	grpcServer *grpc.Server
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	channel, err := s.impl.GetTimeTickChannel()
+	if err != nil {
+		return &milvuspb.StringResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+			Value: "",
+		}, nil
+	}
+	return &milvuspb.StringResponse{
+		Value: channel,
+	}, nil
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	return s.impl.GetComponentStates()
 }
 
 func CreateProxyServiceServer() (*Server, error) {

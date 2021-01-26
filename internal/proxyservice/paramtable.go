@@ -24,6 +24,14 @@ func (pt *ParamTable) PulsarAddress() string {
 	return ret
 }
 
+func (pt *ParamTable) MasterAddress() string {
+	ret, err := pt.Load("_MasterAddress")
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
 func (pt *ParamTable) NodeTimeTickChannel() []string {
 	prefix, err := pt.Load("msgChannel.chanNamePrefix.proxyTimeTick")
 	if err != nil {

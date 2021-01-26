@@ -40,7 +40,7 @@ func (s *Server) connectProxyService() error {
 	proxynode.Params.Init()
 
 	s.proxyServiceAddress = proxynode.Params.ProxyServiceAddress()
-	s.proxyServiceClient = grpcproxyservice.NewClient(s.ctx, s.proxyServiceAddress)
+	s.proxyServiceClient = grpcproxyservice.NewClient(s.proxyServiceAddress)
 
 	getAvailablePort := func() int {
 		listener, err := net.Listen("tcp", ":0")
