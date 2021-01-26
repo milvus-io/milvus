@@ -11,6 +11,8 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/indexnode"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
@@ -23,6 +25,42 @@ type Server struct {
 	loopCtx      context.Context
 	loopCancel   func()
 	loopWg       sync.WaitGroup
+}
+
+func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	return s.node.GetComponentStates()
+}
+
+func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	ret, err := s.node.GetTimeTickChannel()
+	resp := &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	if err != nil {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		resp.Status.Reason = err.Error()
+	} else {
+		resp.Value = ret
+	}
+	return resp, nil
+}
+
+func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
+	ret, err := s.node.GetStatisticsChannel()
+	resp := &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	if err != nil {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		resp.Status.Reason = err.Error()
+	} else {
+		resp.Value = ret
+	}
+	return resp, nil
 }
 
 func (s *Server) registerNode() error {
