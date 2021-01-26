@@ -15,6 +15,7 @@
 #include <fiu/fiu-local.h>
 #include <iostream>
 #include <thread>
+#include <src/index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/IndexType.h"
@@ -206,6 +207,240 @@ TEST_P(IDMAPTest, idmap_slice) {
         auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
+    }
+}
+
+TEST_P(IDMAPTest, idmap_range_search_l2) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::IndexParams::range_search_radius, radius},
+                                  {milvus::knowhere::IndexParams::range_search_buffer_size, buffer_size},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+
+    auto l2dis = [](const float *pa, const float *pb, size_t dim) -> float {
+        float ret = 0;
+        for (auto i = 0; i < dim; ++ i) {
+            auto dif = (pa[i] - pb[i]);
+            ret += dif * dif;
+        }
+        return ret;
+    };
+
+    std::vector<std::vector<bool>> idmap(nq, std::vector<bool>(nb, false));
+    std::vector<size_t> bf_cnt(nq, 0);
+
+    auto bruteforce = [&] () {
+        auto rds = radius * radius;
+        for (auto i = 0; i < nq; ++ i) {
+            const float *pq = xq.data() + i * dim;
+            for (auto j = 0; j < nb; ++ j) {
+                const float *pb = xb.data() + j * dim;
+                auto dist = l2dis(pq, pb, dim);
+                if (dist < rds) {
+                    idmap[i][j] = true;
+                    bf_cnt[i] ++;
+                }
+            }
+        }
+    };
+
+    bruteforce();
+
+    auto compare_res = [&] (std::vector<milvus::knowhere::DynamicResultSegment> &results) {
+        { // compare the result
+//            std::cout << "size of result: " << results.size() << std::endl;
+            for (auto i = 0; i < nq; ++ i) {
+                int correct_cnt = 0;
+//                std::cout << "query id = " << i << ", result[i].size = " << results[i].size() << std::endl;
+                for (auto &res_space: results[i]) {
+//                    std::cout << "buffer size = " << res_space->buffer_size << ", wp = " << res_space->wp << ", size of buffers = " << res_space->buffers.size() << std::endl;
+                    auto qnr = res_space->buffer_size * res_space->buffers.size() - res_space->buffer_size + res_space->wp;
+//                    std::cout << "qnr = " << qnr << std::endl;
+                    for (auto j = 0; j < qnr; ++ j) {
+                        auto bno = j / res_space->buffer_size;
+                        auto pos = j % res_space->buffer_size;
+                        ASSERT_EQ(idmap[i][res_space->buffers[bno].ids[pos]], true);
+                        if (idmap[i][res_space->buffers[bno].ids[pos]]) {
+                            correct_cnt ++;
+                        }
+                    }
+                }
+                ASSERT_EQ(correct_cnt, bf_cnt[i]);
+            }
+        }
+    };
+
+    {
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+
+        std::vector<milvus::knowhere::DynamicResultSegment> results;
+        for (auto i = 0; i < nq; ++ i) {
+            auto qd = milvus::knowhere::GenDataset(1, dim, xq.data() + i * dim);
+            results.push_back(index_->QueryByDistance(qd, conf, nullptr));
+        }
+
+        compare_res(results);
+
+        auto binaryset = index_->Serialize(conf);
+        index_->Load(binaryset);
+
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        { // query again and compare the result
+            std::vector<milvus::knowhere::DynamicResultSegment> rresults;
+            for (auto i = 0; i < nq; ++ i) {
+                auto qd = milvus::knowhere::GenDataset(1, dim, xq.data() + i * dim);
+                rresults.push_back(index_->QueryByDistance(qd, conf, nullptr));
+            }
+
+            compare_res(rresults);
+        }
+    }
+}
+
+TEST_P(IDMAPTest, idmap_range_search_ip) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::IndexParams::range_search_radius, radius},
+                                  {milvus::knowhere::IndexParams::range_search_buffer_size, buffer_size},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::IP}};
+
+    auto ipdis = [](const float *pa, const float *pb, size_t dim) -> float {
+        float ret = 0;
+        for (auto i = 0; i < dim; ++ i) {
+            ret += pa[i] * pb[i];
+        }
+        return ret;
+    };
+
+    std::vector<std::vector<bool>> idmap(nq, std::vector<bool>(nb, false));
+    std::vector<size_t> bf_cnt(nq, 0);
+
+    auto bruteforce = [&] () {
+        for (auto i = 0; i < nq; ++ i) {
+            const float *pq = xq.data() + i * dim;
+            for (auto j = 0; j < nb; ++ j) {
+                const float *pb = xb.data() + j * dim;
+                auto dist = ipdis(pq, pb, dim);
+                if (dist > radius) {
+                    idmap[i][j] = true;
+                    bf_cnt[i] ++;
+                }
+            }
+        }
+    };
+
+    bruteforce();
+
+    auto compare_res = [&] (std::vector<milvus::knowhere::DynamicResultSegment> &results) {
+        { // compare the result
+            for (auto i = 0; i < nq; ++ i) {
+                int correct_cnt = 0;
+                for (auto &res_space: results[i]) {
+                    auto qnr = res_space->buffer_size * res_space->buffers.size() - res_space->buffer_size + res_space->wp;
+                    for (auto j = 0; j < qnr; ++ j) {
+                        auto bno = j / res_space->buffer_size;
+                        auto pos = j % res_space->buffer_size;
+                        ASSERT_EQ(idmap[i][res_space->buffers[bno].ids[pos]], true);
+                        if (idmap[i][res_space->buffers[bno].ids[pos]]) {
+                            correct_cnt ++;
+                        }
+                    }
+                }
+                ASSERT_EQ(correct_cnt, bf_cnt[i]);
+            }
+        }
+    };
+
+    {
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+
+        std::vector<milvus::knowhere::DynamicResultSegment> results;
+        for (auto i = 0; i < nq; ++ i) {
+            auto qd = milvus::knowhere::GenDataset(1, dim, xq.data() + i * dim);
+            results.push_back(index_->QueryByDistance(qd, conf, nullptr));
+        }
+
+        compare_res(results);
+
+        auto binaryset = index_->Serialize(conf);
+        index_->Load(binaryset);
+
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        { // query again and compare the result
+            std::vector<milvus::knowhere::DynamicResultSegment> rresults;
+            for (auto i = 0; i < nq; ++ i) {
+                auto qd = milvus::knowhere::GenDataset(1, dim, xq.data() + i * dim);
+                rresults.push_back(index_->QueryByDistance(qd, conf, nullptr));
+            }
+
+            compare_res(rresults);
+        }
+    }
+}
+
+TEST_P(IDMAPTest, idmap_dynamic_result_set) {
+    milvus::knowhere::Config conf{{milvus::knowhere::meta::DIM, dim},
+                                  {milvus::knowhere::IndexParams::range_search_radius, radius},
+                                  {milvus::knowhere::IndexParams::range_search_buffer_size, buffer_size},
+                                  {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2}};
+
+    auto l2dis = [](const float *pa, const float *pb, size_t dim) -> float {
+        float ret = 0;
+        for (auto i = 0; i < dim; ++ i) {
+            auto dif = (pa[i] - pb[i]);
+            ret += dif * dif;
+        }
+        return ret;
+    };
+
+    std::vector<std::vector<bool>> idmap(nq, std::vector<bool>(nb, false));
+    std::vector<size_t> bf_cnt(nq, 0);
+
+    auto bruteforce = [&] () {
+        auto rds = radius * radius;
+        for (auto i = 0; i < nq; ++ i) {
+            const float *pq = xq.data() + i * dim;
+            for (auto j = 0; j < nb; ++ j) {
+                const float *pb = xb.data() + j * dim;
+                auto dist = l2dis(pq, pb, dim);
+                if (dist < rds) {
+                    idmap[i][j] = true;
+                    bf_cnt[i] ++;
+                }
+            }
+        }
+    };
+
+    bruteforce();
+
+    auto check_rst = [&] (milvus::knowhere::DynamicResultSet &rst, milvus::knowhere::ResultSetPostProcessType rspt) {
+        { // compare the result
+            for (auto i = 0; i < rst.count - 1; ++ i) {
+                if (rspt == milvus::knowhere::ResultSetPostProcessType::SortAsc)
+                    ASSERT_LE(rst.distances.get() + i, rst.distances.get() + i + 1);
+                else if (rspt == milvus::knowhere::ResultSetPostProcessType::SortDesc)
+                    ASSERT_GE(rst.distances.get() + i, rst.distances.get() + i + 1);
+            }
+        }
+    };
+
+    {
+        milvus::knowhere::DynamicResultCollector collector;
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+
+        for (auto i = 0; i < 3; ++ i) {
+            auto qd = milvus::knowhere::GenDataset(1, dim, xq.data());
+            collector.Append(index_->QueryByDistance(qd, conf, nullptr));
+        }
+
+        auto rst = collector.Merge(1000, milvus::knowhere::ResultSetPostProcessType::SortAsc);
+        ASSERT_LE(rst.count, 1000);
+
+        check_rst(rst, milvus::knowhere::ResultSetPostProcessType::SortAsc);
+
     }
 }
 

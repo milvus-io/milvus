@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <faiss/IndexBinary.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 namespace faiss {
 
@@ -44,6 +45,11 @@ struct IndexBinaryFlat : IndexBinary {
   void range_search(idx_t n, const uint8_t *x, int radius,
                    RangeSearchResult *result,
                    const BitsetView& bitset = nullptr) const override;
+
+  void range_search(idx_t n, const uint8_t *x, int radius,
+                    std::vector<RangeSearchPartialResult*> &result,
+                    size_t buffer_size,
+                    const BitsetView& bitset = nullptr); // const override
 
   void reconstruct(idx_t key, uint8_t *recons) const override;
 
