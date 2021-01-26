@@ -62,13 +62,11 @@ func (s *Server) GetStatisticsChannel() (string, error) {
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 
-	log.Println("Register IndexNode starting..., node address = ", req.Address)
 	return s.server.RegisterNode(req)
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 
-	log.Println("Build Index ...")
 	return s.server.BuildIndex(req)
 }
 
@@ -84,22 +82,12 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePa
 
 func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 
-	log.Println("build index finished.")
 	return s.server.NotifyBuildIndex(nty)
-}
-
-func NewServer() *Server {
-
-	return &Server{
-		//server: &indexservice.IndexService{},
-		//grpcServer: indexservice.IndexService{},
-	}
 }
 
 func (s *Server) grpcLoop() {
 	defer s.loopWg.Done()
 
-	log.Println("Starting start IndexServer")
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(indexservice.Params.Port))
 	if err != nil {
 		log.Fatalf("IndexServer grpc server fatal error=%v", err)
@@ -108,7 +96,6 @@ func (s *Server) grpcLoop() {
 	s.grpcServer = grpc.NewServer()
 	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
 
-	log.Println("IndexServer register finished")
 	if err = s.grpcServer.Serve(lis); err != nil {
 		log.Fatalf("IndexServer grpc server fatal error=%v", err)
 	}
@@ -122,7 +109,7 @@ func (s *Server) startIndexServer() error {
 	return s.server.Start()
 }
 
-func CreateIndexServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context) (*Server, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
 	serverImp, err := indexservice.CreateIndexService(ctx)

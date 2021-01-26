@@ -216,10 +216,8 @@ func (sched *TaskScheduler) indexBuildLoop() {
 	for {
 		select {
 		case <-sched.ctx.Done():
-			log.Println("id Done?")
 			return
 		case <-sched.IndexBuildQueue.utChan():
-			log.Println("index build loop ...")
 			if !sched.IndexBuildQueue.utEmpty() {
 				tasks := sched.scheduleIndexBuildTask()
 				var wg sync.WaitGroup

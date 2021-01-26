@@ -25,6 +25,14 @@ dir ('build/docker/deploy') {
             sh 'docker-compose build --force-rm proxynode'
             sh 'docker-compose push proxynode'
 
+            sh 'docker pull ${SOURCE_REPO}/indexservice:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm indexservice'
+            sh 'docker-compose push indexservice'
+
+            sh 'docker pull ${SOURCE_REPO}/indexnode:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm indexnode'
+            sh 'docker-compose push indexnode'
+
             sh 'docker pull ${SOURCE_REPO}/queryservice:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm queryservice'
             sh 'docker-compose push queryservice'
@@ -38,28 +46,6 @@ dir ('build/docker/deploy') {
             sh 'docker pull ${SOURCE_REPO}/writenode:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm writenode'
             sh 'docker-compose push writenode'
-        }
-    } catch (exc) {
-        throw exc
-    } finally {
-        sh 'docker logout ${DOKCER_REGISTRY_URL}'
-        sh "docker rmi -f \$(docker images | grep '<none>' | awk '{print \$3}') || true"
-        sh 'docker-compose down --rmi all'
-    }
-}
-
-dir ('build/docker/deploy/distributed') {
-	try {
-        withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-            sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-
-            sh 'docker pull ${SOURCE_REPO}/indexservice:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm indexservice'
-            sh 'docker-compose push indexservice'
-
-            sh 'docker pull ${SOURCE_REPO}/indexnode:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm indexnode'
-            sh 'docker-compose push indexnode'
         }
     } catch (exc) {
         throw exc

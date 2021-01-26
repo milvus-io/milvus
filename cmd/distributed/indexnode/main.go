@@ -25,7 +25,7 @@ import (
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	grpcindexnode.Init()
-	svr, err := grpcindexnode.CreateIndexNode(ctx)
+	svr, err := grpcindexnode.NewGrpcServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

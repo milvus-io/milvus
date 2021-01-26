@@ -71,9 +71,7 @@ func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
 		return nil, err
 	}
 
-	log.Println("loopctx = ", b.loopCtx)
 	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
-	log.Println("err = ", err)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +130,6 @@ func (i *IndexNode) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status
 	t.cmd = request
 	t.kv = i.kv
 	t.serviceClient = i.serviceClient
-	log.Println("t.serviceClient = ", t.serviceClient)
 	t.nodeID = Params.NodeID
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
