@@ -70,6 +70,10 @@ indexServer:
   address: localhost
   port: 31000
 
+dataService:
+  address: localhost
+  port: 13333
+
 dataNode:
   address: localhost
   port: 21124

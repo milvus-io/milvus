@@ -6,11 +6,15 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
+	masterservice "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/queryservice"
@@ -28,21 +32,20 @@ type Server struct {
 }
 
 func (s *Server) Init() error {
-	log.Println()
-	initParams := queryservice.InitParams{
-		Distributed: true,
-	}
-	s.InitParams(&initParams)
+	log.Println("query service init")
 	s.queryService.Init()
+	s.queryService.SetEnableGrpc(true)
 	return nil
 }
 
-func (s *Server) InitParams(params *queryservice.InitParams) {
-	s.queryService.InitParams(params)
-}
-
 func (s *Server) Start() error {
-	s.Init()
+	masterServiceClient, err := masterservice.NewGrpcClient(queryservice.Params.MasterServiceAddress, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	s.queryService.SetMasterService(masterServiceClient)
+	dataServiceClient := dataservice.NewClient(queryservice.Params.DataServiceAddress)
+	s.queryService.SetDataService(dataServiceClient)
 	log.Println("start query service ...")
 	s.loopWg.Add(1)
 	go s.grpcLoop()
@@ -60,26 +63,10 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-//func (s *Server) SetDataService(p querynode.DataServiceInterface) error {
-//	c, ok := s.queryService
-//	if !ok {
-//		return errors.Errorf("set data service failed")
-//	}
-//	return c.SetDataService(p)
-//}
-//
-//func (s *Server) SetIndexService(p querynode.IndexServiceInterface) error {
-//	c, ok := s.core.(*cms.Core)
-//	if !ok {
-//		return errors.Errorf("set index service failed")
-//	}
-//	return c.SetIndexService(p)
-//}
-
-func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*querypb.ComponentStatesResponse, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	componentStates, err := s.queryService.GetComponentStates()
 	if err != nil {
-		return &querypb.ComponentStatesResponse{
+		return &internalpb2.ComponentStates{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
@@ -87,13 +74,7 @@ func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*
 		}, err
 	}
 
-	return &querypb.ComponentStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-			Reason:    "",
-		},
-		States: componentStates,
-	}, nil
+	return componentStates, nil
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *commonpb.Empty) (*milvuspb.StringResponse, error) {
@@ -174,13 +155,13 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*
 
 func (s *Server) NewServer(ctx context.Context) *Server {
 	ctx1, cancel := context.WithCancel(ctx)
-	serviceInterface, err := queryservice.NewQueryService(ctx)
+	service, err := queryservice.NewQueryService(ctx)
 	if err != nil {
 		log.Fatal(errors.New("create QueryService failed"))
 	}
 
 	return &Server{
-		queryService: serviceInterface.(*QueryService),
+		queryService: service,
 		loopCtx:      ctx1,
 		loopCancel:   cancel,
 	}

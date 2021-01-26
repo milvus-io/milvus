@@ -178,6 +178,23 @@ func (gp *BaseTable) tryloadFromEnv() {
 	if err != nil {
 		panic(err)
 	}
+
+	dataServiceAddress := os.Getenv("DATA_SERVICE_ADDRESS")
+	if dataServiceAddress == "" {
+		serviceHost, err := gp.Load("dataService.address")
+		if err != nil {
+			panic(err)
+		}
+		port, err := gp.Load("dataService.port")
+		if err != nil {
+			panic(err)
+		}
+		dataServiceAddress = serviceHost + ":" + port
+	}
+	err = gp.Save("_DataServiceAddress", dataServiceAddress)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (gp *BaseTable) Load(key string) (string, error) {

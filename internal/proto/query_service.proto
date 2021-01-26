@@ -156,7 +156,7 @@ service QueryService {
   rpc GetTimeTickChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetStatisticsChannel(common.Empty) returns (milvus.StringResponse) {}
   rpc GetPartitionStates(PartitionStatesRequest) returns (PartitionStatesResponse) {}
-  rpc GetComponentStates(common.Empty) returns (ComponentStatesResponse) {}
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
 }
 
 service QueryNode {
