@@ -140,7 +140,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropColMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
-	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3))
+	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3), make([]*internalpb2.MsgPosition, 0))
 	var inMsg Msg = msgStream
 	ddNode.Operate([]*Msg{&inMsg})
 }
