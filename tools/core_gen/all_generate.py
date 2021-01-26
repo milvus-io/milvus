@@ -62,6 +62,10 @@ if __name__ == "__main__":
                 'visitor_name': "VerifyExprVisitor",
                 "parameter_name": 'expr',
             },
+            {
+                'visitor_name': "ExtractInfoExprVisitor",
+                "parameter_name": 'expr',
+            },
         ],
         'PlanNode': [
             {
@@ -74,6 +78,10 @@ if __name__ == "__main__":
             },
             {
                 'visitor_name': "VerifyPlanNodeVisitor",
+                "parameter_name": 'node',
+            },
+            {
+                'visitor_name': "ExtractInfoPlanNodeVisitor",
                 "parameter_name": 'node',
             },
         ]

@@ -4,21 +4,19 @@ import (
 	"context"
 	"log"
 	"math/rand"
-	"net"
-	"strconv"
-	"sync"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
-	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	miniokv "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"google.golang.org/grpc"
+)
+
+const (
+	reqTimeoutInterval = time.Second * 10
 )
 
 type UniqueID = typeutil.UniqueID
@@ -27,97 +25,16 @@ type Timestamp = typeutil.Timestamp
 type IndexNode struct {
 	loopCtx    context.Context
 	loopCancel func()
-	loopWg     sync.WaitGroup
 
-	grpcServer *grpc.Server
-	sched      *TaskScheduler
-
-	idAllocator *allocator.IDAllocator
+	sched *TaskScheduler
 
 	kv kv.Base
 
-	metaTable *metaTable
+	serviceClient typeutil.IndexServiceInterface // method factory
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
-
-	indexNodeID int64
-	//serviceClient indexservice.Interface // method factory
-}
-
-func (i *IndexNode) Init() error {
-	panic("implement me")
-}
-
-func (i *IndexNode) Start() error {
-	panic("implement me")
-}
-
-func (i *IndexNode) Stop() error {
-	panic("implement me")
-}
-
-func (i *IndexNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	panic("implement me")
-}
-
-func (i *IndexNode) GetTimeTickChannel() (string, error) {
-	panic("implement me")
-}
-
-func (i *IndexNode) GetStatisticsChannel() (string, error) {
-	panic("implement me")
-}
-
-func (i *IndexNode) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-
-	log.Println("Create index with indexID=", req.IndexID)
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_SUCCESS,
-		Reason:    "",
-	}, nil
-}
-
-func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
-	return &IndexNode{}, nil
-}
-
-func NewIndexNode(ctx context.Context, nodeID int64) *IndexNode {
-	ctx1, cancel := context.WithCancel(ctx)
-	in := &IndexNode{
-		loopCtx:    ctx1,
-		loopCancel: cancel,
-
-		indexNodeID: nodeID,
-	}
-
-	return in
-}
-
-type Builder struct {
-	loopCtx    context.Context
-	loopCancel func()
-	loopWg     sync.WaitGroup
-
-	grpcServer *grpc.Server
-	sched      *TaskScheduler
-
-	idAllocator *allocator.IDAllocator
-
-	kv kv.Base
-
-	metaTable *metaTable
-	// Add callback functions at different stages
-	startCallbacks []func()
-	closeCallbacks []func()
-}
-
-func (b *Builder) RegisterNode(ctx context.Context, request *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	panic("implement me")
-}
-
-func (b *Builder) NotifyBuildIndex(ctx context.Context, notification *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
-	panic("implement me")
 }
 
 func Init() {
@@ -125,34 +42,12 @@ func Init() {
 	Params.Init()
 }
 
-func CreateBuilder(ctx context.Context) (*Builder, error) {
+func CreateIndexNode(ctx context.Context) (*IndexNode, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	b := &Builder{
+	b := &IndexNode{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 	}
-
-	connectEtcdFn := func() error {
-		etcdAddress := Params.EtcdAddress
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}})
-		if err != nil {
-			return err
-		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(etcdKV)
-		if err != nil {
-			return err
-		}
-		b.metaTable = metakv
-		return nil
-	}
-	err := Retry(10, time.Millisecond*200, connectEtcdFn)
-	if err != nil {
-		return nil, err
-	}
-
-	idAllocator, err := allocator.NewIDAllocator(b.loopCtx, Params.MasterAddress)
-	b.idAllocator = idAllocator
 
 	connectMinIOFn := func() error {
 		option := &miniokv.Option{
@@ -163,19 +58,22 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 			BucketName:        Params.MinioBucketName,
 			CreateBucket:      true,
 		}
-
+		var err error
 		b.kv, err = miniokv.NewMinIOKV(b.loopCtx, option)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = Retry(10, time.Millisecond*200, connectMinIOFn)
+
+	err := retry.Retry(10, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
 		return nil, err
 	}
 
-	b.sched, err = NewTaskScheduler(b.loopCtx, b.idAllocator, b.kv, b.metaTable)
+	log.Println("loopctx = ", b.loopCtx)
+	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
+	log.Println("err = ", err)
 	if err != nil {
 		return nil, err
 	}
@@ -184,70 +82,86 @@ func CreateBuilder(ctx context.Context) (*Builder, error) {
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (b *Builder) AddStartCallback(callbacks ...func()) {
-	b.startCallbacks = append(b.startCallbacks, callbacks...)
+func (i *IndexNode) AddStartCallback(callbacks ...func()) {
+	i.startCallbacks = append(i.startCallbacks, callbacks...)
 }
 
-func (b *Builder) startBuilder() error {
+// AddCloseCallback adds a callback in the Close phase.
+func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
+	i.closeCallbacks = append(i.closeCallbacks, callbacks...)
+}
 
-	b.sched.Start()
+func (i *IndexNode) Init() error {
+	return nil
+}
+
+func (i *IndexNode) Start() error {
+	i.sched.Start()
 
 	// Start callbacks
-	for _, cb := range b.startCallbacks {
+	for _, cb := range i.startCallbacks {
 		cb()
 	}
-
-	b.idAllocator.Start()
-
-	b.loopWg.Add(1)
-	go b.grpcLoop()
 
 	return nil
 }
 
-// AddCloseCallback adds a callback in the Close phase.
-func (b *Builder) AddCloseCallback(callbacks ...func()) {
-	b.closeCallbacks = append(b.closeCallbacks, callbacks...)
-}
+func (i *IndexNode) stopIndexNodeLoop() {
+	i.loopCancel()
 
-func (b *Builder) grpcLoop() {
-	defer b.loopWg.Done()
-
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(Params.Port))
-	if err != nil {
-		log.Fatalf("Builder grpc server fatal error=%v", err)
-	}
-
-	b.grpcServer = grpc.NewServer()
-	indexpb.RegisterIndexServiceServer(b.grpcServer, b)
-	if err = b.grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Builder grpc server fatal error=%v", err)
-	}
-}
-
-func (b *Builder) Start() error {
-	return b.startBuilder()
-}
-
-func (b *Builder) stopBuilderLoop() {
-	b.loopCancel()
-
-	b.idAllocator.Close()
-
-	if b.grpcServer != nil {
-		b.grpcServer.GracefulStop()
-	}
-
-	b.sched.Close()
-	b.loopWg.Wait()
+	i.sched.Close()
 }
 
 // Close closes the server.
-func (b *Builder) Close() {
-	b.stopBuilderLoop()
+func (i *IndexNode) Stop() error {
+	i.stopIndexNodeLoop()
 
-	for _, cb := range b.closeCallbacks {
+	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	log.Print("builder  closed.")
+	log.Print("IndexNode  closed.")
+	return nil
+}
+
+func (i *IndexNode) SetServiceClient(serviceClient typeutil.IndexServiceInterface) {
+	i.serviceClient = serviceClient
+}
+
+func (i *IndexNode) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
+	t := newIndexBuildTask()
+	t.cmd = request
+	t.kv = i.kv
+	t.serviceClient = i.serviceClient
+	log.Println("t.serviceClient = ", t.serviceClient)
+	t.nodeID = Params.NodeID
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("Enqueue BuildQueue timeout")
+		default:
+			return i.sched.IndexBuildQueue.Enqueue(t)
+		}
+	}
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}
+
+	err := fn()
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+	log.Println("index scheduler successfully with indexID = ", request.IndexID)
+	err = t.WaitToFinish()
+	log.Println("build index finish ...err = ", err)
+	if err != nil {
+		ret.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+	return ret, nil
 }

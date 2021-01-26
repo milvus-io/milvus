@@ -16,6 +16,7 @@ type ParamTable struct {
 	MasterAddress string
 
 	EtcdAddress  string
+	KvRootPath   string
 	MetaRootPath string
 
 	MinIOAddress         string
@@ -34,6 +35,7 @@ func (pt *ParamTable) Init() {
 	pt.initEtcdAddress()
 	pt.initMasterAddress()
 	pt.initMetaRootPath()
+	pt.initKvRootPath()
 	pt.initMinIOAddress()
 	pt.initMinIOAccessKeyID()
 	pt.initMinIOSecretAccessKey()
@@ -88,6 +90,18 @@ func (pt *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	pt.MetaRootPath = rootPath + "/" + subPath
+}
+
+func (pt *ParamTable) initKvRootPath() {
+	rootPath, err := pt.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := pt.Load("etcd.kvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.KvRootPath = rootPath + "/" + subPath
 }
 
 func (pt *ParamTable) initMasterAddress() {

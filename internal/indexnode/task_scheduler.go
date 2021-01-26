@@ -7,7 +7,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 )
 
@@ -66,7 +65,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Panic("sorry, but the unissued task list is empty!")
+		log.Println("FrontUnissuedTask sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -78,7 +77,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("sorry, but the unissued task list is empty!")
+		log.Println("PopUnissuedtask sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -115,9 +114,6 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
-	tID, _ := queue.sched.idAllocator.AllocOne()
-	// log.Printf("[Builder] allocate reqID: %v", tID)
-	t.SetID(tID)
 	err := t.OnEnqueue()
 	if err != nil {
 		return err
@@ -125,31 +121,8 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
-type IndexAddTaskQueue struct {
-	BaseTaskQueue
-	lock sync.Mutex
-}
-
 type IndexBuildTaskQueue struct {
 	BaseTaskQueue
-}
-
-func (queue *IndexAddTaskQueue) Enqueue(t task) error {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
-	return queue.BaseTaskQueue.Enqueue(t)
-}
-
-func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
-	return &IndexAddTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[UniqueID]task),
-			maxTaskNum:    1024,
-			utBufChan:     make(chan int, 1024),
-			sched:         sched,
-		},
-	}
 }
 
 func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexBuildTaskQueue {
@@ -165,42 +138,47 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexBuildTaskQueue {
 }
 
 type TaskScheduler struct {
-	IndexAddQueue   TaskQueue
 	IndexBuildQueue TaskQueue
 
-	idAllocator *allocator.IDAllocator
-	metaTable   *metaTable
-	kv          kv.Base
-
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	buildParallel int
+	kv            kv.Base
+	wg            sync.WaitGroup
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 func NewTaskScheduler(ctx context.Context,
-	idAllocator *allocator.IDAllocator,
-	kv kv.Base,
-	table *metaTable) (*TaskScheduler, error) {
+	kv kv.Base) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		idAllocator: idAllocator,
-		metaTable:   table,
-		kv:          kv,
-		ctx:         ctx1,
-		cancel:      cancel,
+		kv:            kv,
+		ctx:           ctx1,
+		cancel:        cancel,
+		buildParallel: 1, // default value
 	}
-	s.IndexAddQueue = NewIndexAddTaskQueue(s)
 	s.IndexBuildQueue = NewIndexBuildTaskQueue(s)
 
 	return s, nil
 }
 
-func (sched *TaskScheduler) scheduleIndexAddTask() task {
-	return sched.IndexAddQueue.PopUnissuedTask()
+func (sched *TaskScheduler) setParallelism(parallel int) {
+	if parallel <= 0 {
+		log.Println("can not set parallelism to less than zero!")
+		return
+	}
+	sched.buildParallel = parallel
 }
 
-func (sched *TaskScheduler) scheduleIndexBuildTask() task {
-	return sched.IndexBuildQueue.PopUnissuedTask()
+func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
+	ret := make([]task, 0)
+	for i := 0; i < sched.buildParallel; i++ {
+		t := sched.IndexBuildQueue.PopUnissuedTask()
+		if t == nil {
+			return ret
+		}
+		ret = append(ret, t)
+	}
+	return ret
 }
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
@@ -233,39 +211,32 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
+	log.Println("index build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {
 		case <-sched.ctx.Done():
+			log.Println("id Done?")
 			return
 		case <-sched.IndexBuildQueue.utChan():
+			log.Println("index build loop ...")
 			if !sched.IndexBuildQueue.utEmpty() {
-				t := sched.scheduleIndexBuildTask()
-				sched.processTask(t, sched.IndexBuildQueue)
-			}
-		}
-	}
-}
-
-func (sched *TaskScheduler) indexAddLoop() {
-	defer sched.wg.Done()
-	for {
-		select {
-		case <-sched.ctx.Done():
-			return
-		case <-sched.IndexAddQueue.utChan():
-			if !sched.IndexAddQueue.utEmpty() {
-				t := sched.scheduleIndexAddTask()
-				go sched.processTask(t, sched.IndexAddQueue)
+				tasks := sched.scheduleIndexBuildTask()
+				var wg sync.WaitGroup
+				for _, t := range tasks {
+					wg.Add(1)
+					go func(group *sync.WaitGroup, t task) {
+						defer group.Done()
+						sched.processTask(t, sched.IndexBuildQueue)
+					}(&wg, t)
+				}
+				wg.Wait()
 			}
 		}
 	}
 }
 
 func (sched *TaskScheduler) Start() error {
-
-	sched.wg.Add(1)
-	go sched.indexAddLoop()
 
 	sched.wg.Add(1)
 	go sched.indexBuildLoop()

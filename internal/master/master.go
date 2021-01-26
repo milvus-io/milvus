@@ -10,19 +10,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
-
-	indexnodeclient "github.com/zilliztech/milvus-distributed/internal/indexnode/client"
-
-	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
-
+	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
+	"github.com/zilliztech/milvus-distributed/internal/querynode/client"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	writerclient "github.com/zilliztech/milvus-distributed/internal/writenode/client"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
 )
@@ -187,10 +184,7 @@ func CreateServer(ctx context.Context) (*Master, error) {
 	if err != nil {
 		return nil, err
 	}
-	buildIndexClient, err := indexnodeclient.NewBuildIndexClient(ctx, Params.IndexBuilderAddress)
-	if err != nil {
-		return nil, err
-	}
+	buildIndexClient := grpcindexserviceclient.NewClient(Params.IndexBuilderAddress)
 	queryNodeClient := client.NewQueryNodeClient(ctx, Params.PulsarAddress, Params.LoadIndexChannelNames)
 
 	m.indexLoadSch = NewIndexLoadScheduler(ctx, queryNodeClient, m.metaTable)

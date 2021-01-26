@@ -16,6 +16,7 @@ type Partition struct {
 	partitionTag string
 	id           UniqueID
 	segments     []*Segment
+	enableDM     bool
 }
 
 func (p *Partition) ID() UniqueID {
@@ -33,6 +34,7 @@ func (p *Partition) Segments() *[]*Segment {
 func newPartition2(partitionTag string) *Partition {
 	var newPartition = &Partition{
 		partitionTag: partitionTag,
+		enableDM:     false,
 	}
 
 	return newPartition
@@ -40,7 +42,8 @@ func newPartition2(partitionTag string) *Partition {
 
 func newPartition(partitionID UniqueID) *Partition {
 	var newPartition = &Partition{
-		id: partitionID,
+		id:       partitionID,
+		enableDM: false,
 	}
 
 	return newPartition

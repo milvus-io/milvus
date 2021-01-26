@@ -19,7 +19,7 @@ message RegisterNodeResponse {
 }
 
 message IndexStatesRequest {
-  repeated int64 indexID = 1;
+  repeated int64 indexIDs = 1;
 }
 
 message IndexInfo {
@@ -44,7 +44,6 @@ message BuildIndexResponse {
   int64 indexID = 2;
 }
 
-
 message BuildIndexCmd {
   int64 indexID = 1;
   BuildIndexRequest req = 2;
@@ -54,6 +53,7 @@ message BuildIndexNotification {
   common.Status status = 1;
   int64 indexID = 2;
   repeated string index_file_paths = 3;
+  int64 nodeID = 4;
 }
 
 message IndexFilePathsRequest {
@@ -74,11 +74,9 @@ message IndexFilePathsResponse {
 message IndexMeta {
   common.IndexState state = 1;
   int64   indexID = 2;
-  int64 enque_time = 3;
-  int64 schedule_time = 4;
-  int64 build_complete_time = 5;
-  BuildIndexRequest req = 6;
-  repeated string index_file_paths = 7;
+  string fail_reason = 3;
+  BuildIndexRequest req = 4;
+  repeated string index_file_paths = 5;
 }
 
 /****************IndexService************************/

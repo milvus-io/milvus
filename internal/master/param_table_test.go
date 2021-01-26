@@ -31,7 +31,7 @@ func TestParamTable_KVRootPath(t *testing.T) {
 	assert.Equal(t, path, "by-dev/kv")
 }
 
-func TestParamTable_IndexBuilderAddress(t *testing.T) {
+func TestParamTableIndexServiceAddress(t *testing.T) {
 	path := Params.IndexBuilderAddress
 	assert.Equal(t, path, "localhost:31000")
 }

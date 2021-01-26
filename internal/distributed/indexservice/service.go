@@ -19,7 +19,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	server indexservice.Interface
+	server typeutil.IndexServiceInterface
 
 	grpcServer *grpc.Server
 
@@ -28,17 +28,22 @@ type Server struct {
 	loopWg     sync.WaitGroup
 }
 
-func (s *Server) Init() error {
+func Init() error {
 	indexservice.Params.Init()
 	return nil
 }
 
 func (s *Server) Start() error {
-	s.Init()
 	return s.startIndexServer()
 }
 
 func (s *Server) Stop() error {
+	s.server.Stop()
+	s.loopCancel()
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
+	}
+
 	s.loopWg.Wait()
 	return nil
 }
@@ -57,12 +62,13 @@ func (s *Server) GetStatisticsChannel() (string, error) {
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
 
-	log.Println("Register IndexNode starting...")
+	log.Println("Register IndexNode starting..., node address = ", req.Address)
 	return s.server.RegisterNode(req)
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 
+	log.Println("Build Index ...")
 	return s.server.BuildIndex(req)
 }
 
@@ -78,6 +84,7 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.IndexFilePa
 
 func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 
+	log.Println("build index finished.")
 	return s.server.NotifyBuildIndex(nty)
 }
 
@@ -112,23 +119,23 @@ func (s *Server) startIndexServer() error {
 	go s.grpcLoop()
 	log.Println("IndexServer grpc server start successfully")
 
-	return nil
+	return s.server.Start()
 }
 
 func CreateIndexServer(ctx context.Context) (*Server, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
+	serverImp, err := indexservice.CreateIndexService(ctx)
+	if err != nil {
+		defer cancel()
+		return nil, err
+	}
 	s := &Server{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 
-		server: indexservice.NewIndexServiceImpl(ctx),
+		server: serverImp,
 	}
 
 	return s, nil
-}
-
-func (s *Server) Close() {
-
-	s.Stop()
 }

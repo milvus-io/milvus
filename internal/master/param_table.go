@@ -132,7 +132,7 @@ func (p *ParamTable) initPulsarAddress() {
 }
 
 func (p *ParamTable) initIndexBuilderAddress() {
-	ret, err := p.Load("_IndexBuilderAddress")
+	ret, err := p.Load("IndexServiceAddress")
 	if err != nil {
 		panic(err)
 	}
