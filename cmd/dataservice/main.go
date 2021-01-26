@@ -1,4 +1,4 @@
-package dataservice
+package main
 
 import (
 	"context"
