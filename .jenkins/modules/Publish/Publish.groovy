@@ -43,9 +43,9 @@ dir ('build/docker/deploy') {
             sh 'docker-compose push querynode'
 
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
-            sh 'docker pull ${SOURCE_REPO}/writenode:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm writenode'
-            sh 'docker-compose push writenode'
+            sh 'docker pull ${SOURCE_REPO}/datanode:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm datanode'
+            sh 'docker-compose push datanode'
         }
     } catch (exc) {
         throw exc
