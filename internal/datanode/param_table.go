@@ -89,6 +89,7 @@ func (p *ParamTable) Init() {
 	// === DataNode External Components Configs ===
 	// --- Master ---
 	p.initMasterAddress()
+	p.initServiceAddress()
 
 	// --- Pulsar ---
 	p.initPulsarAddress()
@@ -192,6 +193,19 @@ func (p *ParamTable) initMasterAddress() {
 		panic(err)
 	}
 	p.MasterAddress = addr
+}
+
+func (p *ParamTable) initServiceAddress() {
+	addr, err := p.Load("dataService.address")
+	if err != nil {
+		panic(err)
+	}
+
+	port, err := p.Load("dataService.port")
+	if err != nil {
+		panic(err)
+	}
+	p.ServiceAddress = addr + ":" + port
 }
 
 // ---- Pulsar ----

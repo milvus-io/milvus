@@ -35,6 +35,7 @@ func main() {
 	// --- Master Service Client ---
 	ms.Params.Init()
 	log.Println("Master service address:", dn.Params.MasterAddress)
+	log.Println("Init master service client ...")
 	masterClient, err := msc.NewGrpcClient(dn.Params.MasterAddress, 20*time.Second)
 	if err != nil {
 		panic(err)
@@ -79,6 +80,7 @@ func main() {
 
 	// --- Data Service Client ---
 	log.Println("Data service address: ", dn.Params.ServiceAddress)
+	log.Println("Init data service client ...")
 	dataService := dsc.NewClient(dn.Params.ServiceAddress)
 	if err = dataService.Init(); err != nil {
 		panic(err)
@@ -128,6 +130,7 @@ func main() {
 	if err := svr.Start(); err != nil {
 		panic(err)
 	}
+	log.Println("Data node successfully started ...")
 
 	<-ctx.Done()
 	log.Println("Got signal to exit signal:", sig.String())

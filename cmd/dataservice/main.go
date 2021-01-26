@@ -9,13 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	ms "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-
-	"github.com/zilliztech/milvus-distributed/internal/masterservice"
-
 	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
+	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/master"
 )
 
 func main() {
@@ -23,8 +22,8 @@ func main() {
 
 	service := dataservice.NewGrpcService(ctx)
 
-	masterservice.Params.Init()
-	client, err := ms.NewGrpcClient(fmt.Sprintf("%s:%d", masterservice.Params.Address, masterservice.Params.Port), 30*time.Second)
+	master.Params.Init()
+	client, err := masterservice.NewGrpcClient(fmt.Sprintf("%s:%d", master.Params.Address, master.Params.Port), 30*time.Second)
 	if err != nil {
 		panic(err)
 	}
