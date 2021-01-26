@@ -22,29 +22,33 @@ typedef float tadis_t;
 
 namespace faiss {
 
-int popcnt(
-        const uint8_t* data,
+extern int popcnt(
+        const uint8_t* data1,
         const size_t n);
 
-int XOR_popcnt(
+extern int xor_popcnt(
         const uint8_t* data1,
         const uint8_t* data2,
         const size_t n);
 
-int OR_popcnt(
+extern int or_popcnt(
         const uint8_t* data1,
         const uint8_t* data2,
         const size_t n);
 
-int AND_popcnt(
+extern int and_popcnt(
         const uint8_t* data1,
         const uint8_t* data2,
         const size_t n);
 
-float fvec_jaccard (
+extern float bvec_jaccard (
         const uint8_t* data1,
         const uint8_t* data2,
         const size_t n);
+
+inline float Jaccard_2_Tanimoto (float jcd) {
+    return -log2(1 - jcd);
+}
 
  /** Return the k matched distances for a set of binary query vectors,
   * using an array.

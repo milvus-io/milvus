@@ -27,106 +27,94 @@
 
 namespace faiss {
 
-int
-popcnt(const uint8_t* data, const size_t n) {
-    const uint64_t *b = (uint64_t *)data;
-    int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data[i*8 + 6]);
-        case 6: accu += popcount64 (data[i*8 + 5]);
-        case 5: accu += popcount64 (data[i*8 + 4]);
-        case 4: accu += popcount64 (data[i*8 + 3]);
-        case 3: accu += popcount64 (data[i*8 + 2]);
-        case 2: accu += popcount64 (data[i*8 + 1]);
-        case 1: accu += popcount64 (data[i*8 + 0]);
-        default: break;
+#define fast_loop_imp(fun_u64, fun_u8) \
+    auto a = reinterpret_cast<const uint64_t*>(data1); \
+    auto b = reinterpret_cast<const uint64_t*>(data2); \
+    int div = n / 8; \
+    int mod = n % 8; \
+    int i = 0, len = div; \
+    switch(len & 7) { \
+        default: \
+            while (len > 7) { \
+                len -= 8; \
+                fun_u64; i++; \
+                case 7: fun_u64; i++; \
+                case 6: fun_u64; i++; \
+                case 5: fun_u64; i++; \
+                case 4: fun_u64; i++; \
+                case 3: fun_u64; i++; \
+                case 2: fun_u64; i++; \
+                case 1: fun_u64; i++; \
+            } \
+    } \
+    if (mod) { \
+        auto a = data1 + 8 * div; \
+        auto b = data2 + 8 * div; \
+        switch (mod) { \
+            case 7: fun_u8(6); \
+            case 6: fun_u8(5); \
+            case 5: fun_u8(4); \
+            case 4: fun_u8(3); \
+            case 3: fun_u8(2); \
+            case 2: fun_u8(1); \
+            case 1: fun_u8(0); \
+            default: break; \
+        } \
     }
+
+int popcnt(const uint8_t* data, const size_t n) {
+    auto data1 = data, data2 = data; // for the macro fast_loop_imp
+#define fun_u64 accu += popcount64(a[i])
+#define fun_u8(i) accu += lookup8bit[a[i]]
+    int accu = 0;
+    fast_loop_imp(fun_u64, fun_u8);
     return accu;
+#undef fun_u64
+#undef fun_u8
 }
 
-int
-XOR_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
+int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+#define fun_u64 accu += popcount64(a[i] ^ b[i]);
+#define fun_u8(i) accu += lookup8bit[a[i] ^ b[i]];
     int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] ^ b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] ^ data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] ^ data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] ^ data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] ^ data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] ^ data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] ^ data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] ^ data2[i*8 + 0]);
-        default: break;
-    }
+    fast_loop_imp(fun_u64, fun_u8);
     return accu;
+#undef fun_u64
+#undef fun_u8
 }
 
-int
-OR_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
+int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+#define fun_u64 accu += popcount64(a[i] | b[i])
+#define fun_u8(i) accu += lookup8bit[a[i] | b[i]]
     int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] | b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] | data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] | data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] | data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] | data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] | data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] | data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] | data2[i*8 + 0]);
-        default: break;
-    }
+    fast_loop_imp(fun_u64, fun_u8);
     return accu;
+#undef fun_u64
+#undef fun_u8
 }
 
-int
-AND_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
-    const uint64_t *a = (uint64_t *)data1;
-    const uint64_t *b = (uint64_t *)data2;
+int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+#define fun_u64 accu += popcount64(a[i] & b[i])
+#define fun_u8(i) accu += lookup8bit[a[i] & b[i]]
     int accu = 0;
-    int i = 0;
-    for (; i < n/8; i++)
-        accu += popcount64 (a[i] & b[i]);
-    switch( n % 8 )
-    {
-        case 7: accu += popcount64 (data1[i*8 + 6] & data2[i*8 + 6]);
-        case 6: accu += popcount64 (data1[i*8 + 5] & data2[i*8 + 5]);
-        case 5: accu += popcount64 (data1[i*8 + 4] & data2[i*8 + 4]);
-        case 4: accu += popcount64 (data1[i*8 + 3] & data2[i*8 + 3]);
-        case 3: accu += popcount64 (data1[i*8 + 2] & data2[i*8 + 2]);
-        case 2: accu += popcount64 (data1[i*8 + 1] & data2[i*8 + 1]);
-        case 1: accu += popcount64 (data1[i*8 + 0] & data2[i*8 + 0]);
-        default: break;
-    }
+    fast_loop_imp(fun_u64, fun_u8);
     return accu;
+#undef fun_u64
+#undef fun_u8
 }
 
-float fvec_jaccard (
-        const uint8_t* data1,
-        const uint8_t* data2,
-        const size_t n) {
-    int accu_num = AND_popcnt(data1, data2, n);
-    int accu_den = OR_popcnt(data1, data2, n);
+float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+#define fun_u64 accu_num += popcount64(a[i] & b[i]); accu_den += popcount64(a[i] | b[i])
+#define fun_u8(i) accu_num += lookup8bit[a[i] & b[i]]; accu_den += lookup8bit[a[i] | b[i]]
+    int accu_num = 0;
+    int accu_den = 0;
+    fast_loop_imp(fun_u64, fun_u8);
     return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+#undef fun_u64
+#undef fun_u8
 }
-
 
 static const size_t size_1M = 1 * 1024 * 1024;
-static const size_t batch_size = 65536;
-
 
 template <class T>
 static
@@ -141,9 +129,10 @@ void binary_distance_knn_mc(
         int64_t *labels,
         const BitsetView& bitset)
 {
-    if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
-        int thread_max_num = omp_get_max_threads();
+    int thread_max_num = omp_get_max_threads();
+    size_t l3_size = get_L3_Size();
 
+    if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
         size_t group_num = n1 * thread_max_num;
         size_t *match_num = new size_t[group_num];
         int64_t *match_data = new int64_t[group_num * k];
@@ -197,12 +186,13 @@ void binary_distance_knn_mc(
         delete[] match_data;
 
     } else {
+        const size_t block_size = l3_size / bytes_per_code;
+
         size_t *num = new size_t[n1];
         for (size_t i = 0; i < n1; i++) {
             num[i] = 0;
         }
 
-        const size_t block_size = batch_size;
         for (size_t j0 = 0; j0 < n2; j0 += block_size) {
             const size_t j1 = std::min(j0 + block_size, n2);
 #pragma omp parallel for
@@ -316,15 +306,20 @@ void binary_distance_knn_hc (
     typedef typename T2::T T1;
     size_t k = ha->k;
 
-    // Todo: how to select the strategy
-    if ((bytes_per_code + k * (sizeof(T1) + sizeof(int64_t))) * ha->nh < size_1M) {
-        int thread_max_num = omp_get_max_threads();
+    size_t l3_size = get_L3_Size();
+    size_t thread_max_num = omp_get_max_threads();
+
+    /*
+     * Here is an empirical formula, and later we may propose a more reasonable strategy.
+     */
+    if ((bytes_per_code + k * (sizeof(T1) + sizeof(int64_t))) * ha->nh * thread_max_num <= l3_size &&
+            (ha->nh < (n2 >> 11) + thread_max_num / 3)) {
         // init heap
         size_t thread_heap_size = ha->nh * k;
         size_t all_heap_size = thread_heap_size * thread_max_num;
         T1 *value = new T1[all_heap_size];
         int64_t *labels = new int64_t[all_heap_size];
-        T1 init_value = (typeid(T1) == typeid(float))? (1.0 / 0.0) : 0x7fffffff;
+        T1 init_value = (typeid(T1) == typeid(float)) ? (1.0 / 0.0) : 0x7fffffff;
         for (int i = 0; i < all_heap_size; i++) {
             value[i] = init_value;
             labels[i] = -1;
@@ -370,9 +365,10 @@ void binary_distance_knn_hc (
         delete[] labels;
 
     } else {
+        const size_t block_size = l3_size / bytes_per_code;
+
         ha->heapify ();
 
-        const size_t block_size = batch_size;
         for (size_t j0 = 0; j0 < n2; j0 += block_size) {
             const size_t j1 = std::min(j0 + block_size, n2);
 #pragma omp parallel for
@@ -416,7 +412,7 @@ void binary_distance_knn_hc (
             } else if (support_avx2() && dim > 512) {
                 jaccard = jaccard__AVX2;
             } else {
-                jaccard = fvec_jaccard;
+                jaccard = bvec_jaccard;
             }
             binary_distance_knn_hc(jaccard, ncodes, ha, a, b, nb, bitset);
             break;
@@ -424,11 +420,11 @@ void binary_distance_knn_hc (
         case METRIC_Hamming: {
             int (*hamming)(const uint8_t * a, const uint8_t * b, size_t n) = nullptr;
             if (support_avx512() && dim > 1024) {
-                hamming = XOR_popcnt_AVX512VBMI_lookup;
+                hamming = xor_popcnt_AVX512VBMI_lookup;
             } else if (support_avx2() && dim > 512) {
-                hamming = XOR_popcnt_AVX2_lookup;
+                hamming = xor_popcnt_AVX2_lookup;
             } else {
-                hamming = XOR_popcnt;
+                hamming = xor_popcnt;
             }
             binary_distance_knn_hc(hamming, ncodes, ha, a, b, nb, bitset);
             break;

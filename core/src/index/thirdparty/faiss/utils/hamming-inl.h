@@ -233,7 +233,7 @@ struct HammingComputerDefault {
     }
 
     int hamming (const uint8_t *b8) const  {
-        return XOR_popcnt(a, b8, n);
+        return xor_popcnt(a, b8, n);
     }
 
 };

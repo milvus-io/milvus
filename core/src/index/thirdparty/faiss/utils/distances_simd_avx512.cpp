@@ -282,7 +282,7 @@ popcnt_AVX512VBMI_lookup(const uint8_t* data, const size_t n) {
 }
 
 int
-XOR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
+xor_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
 
     size_t i = 0;
 

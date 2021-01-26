@@ -352,7 +352,7 @@ struct JaccardComputer256 {
         }
 
         float compute (const uint8_t *b8) const {
-            return fvec_jaccard(a, b8, n);
+            return bvec_jaccard(a, b8, n);
         }
 
     };

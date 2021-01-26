@@ -33,13 +33,13 @@ fvec_Linf_avx(const float* x, const float* y, size_t d);
 
 /// binary distance
 int
-XOR_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+xor_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 int
-OR_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+or_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 int
-AND_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+and_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 /// popcnt
 int

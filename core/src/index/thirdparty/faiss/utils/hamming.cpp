@@ -33,9 +33,10 @@
 #include <omp.h>
 
 #include <faiss/utils/Heap.h>
-#include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/distances_avx.h>
 #include <faiss/utils/utils.h>
 #include <faiss/impl/AuxIndexStructures.h>
+#include <faiss/impl/FaissAssert.h>
 
 static const size_t BLOCKSIZE_QUERY = 8192;
 static const size_t size_1M = 1 * 1024 * 1024;
@@ -43,26 +44,6 @@ static const size_t size_1M = 1 * 1024 * 1024;
 namespace faiss {
 
 size_t hamming_batch_size = 65536;
-
-static const uint8_t hamdis_tab_ham_bytes[256] = {
-    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
-    4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8
-};
-
 
 /* Elementary Hamming distance computation: unoptimized  */
 template <size_t nbits, typename T>
@@ -73,7 +54,7 @@ T hamming (const uint8_t *bs1,
     size_t i;
     T h = 0;
     for (i = 0; i < nbytes; i++)
-        h += (T) hamdis_tab_ham_bytes[bs1[i]^bs2[i]];
+        h += (T) lookup8bit[bs1[i]^bs2[i]];
     return h;
 }
 
