@@ -175,7 +175,7 @@ void knn_inner_product (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetViewPtr bitset = nullptr);
 
 /** Same as knn_inner_product, for the L2 distance */
 void knn_L2sqr (
@@ -183,14 +183,14 @@ void knn_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetViewPtr bitset = nullptr);
 
 void knn_jaccard (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetViewPtr bitset = nullptr);
         
 /** same as knn_L2sqr, but base_shift[bno] is subtracted to all
  * computed distances.
@@ -244,7 +244,7 @@ void range_search_L2sqr (
         float radius,
         std::vector<RangeSearchPartialResult*> &result,
         size_t buffer_size,
-        const BitsetView &bitset = nullptr);
+        const BitsetViewPtr bitset = nullptr);
 
 /// same as range_search_L2sqr for the inner product similarity
 void range_search_inner_product (
@@ -254,7 +254,7 @@ void range_search_inner_product (
     float radius,
     std::vector<RangeSearchPartialResult*> &result,
     size_t buffer_size,
-    const BitsetView &bitset = nullptr);
+    const BitsetViewPtr bitset = nullptr);
 
 
 /***************************************************************************

@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "faiss/utils/ConcurrentBitset.h"
+#include "faiss/utils/BitsetView.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/IndexType.h"
 
@@ -147,8 +147,8 @@ class Statistics {
     }
 
     void
-    update_filter_percentage(const faiss::BitsetView& bitset) {
-        double fps = !bitset.empty() ? static_cast<double>(bitset.count_1()) / bitset.size() : 0.0;
+    update_filter_percentage(const faiss::BitsetViewPtr bitset) {
+        double fps = bitset != nullptr ? static_cast<double>(bitset->count_1()) / bitset->size() : 0.0;
         filter_stat[static_cast<int>(fps * 100) / 5] += 1;
     }
 

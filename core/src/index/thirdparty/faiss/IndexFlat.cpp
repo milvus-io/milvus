@@ -41,7 +41,7 @@ void IndexFlat::reset() {
 
 void IndexFlat::search (idx_t n, const float *x, idx_t k,
                         float *distances, idx_t *labels,
-                        const BitsetView& bitset) const
+                        const BitsetViewPtr bitset) const
 {
     // we see the distances and labels as heaps
 
@@ -91,7 +91,7 @@ void IndexFlat::assign(idx_t n, const float * x, idx_t * labels, float* distance
 
 void IndexFlat::range_search (idx_t n, const float *x, float radius,
                               RangeSearchResult *result,
-                              const BitsetView& bitset) const
+                              const BitsetViewPtr bitset) const
 {
     FAISS_THROW_MSG("This interface is abandoned yet.");
 }
@@ -101,7 +101,7 @@ void IndexFlat::range_search(faiss::Index::idx_t n,
                              float radius,
                              std::vector<faiss::RangeSearchPartialResult*>& result,
                              size_t buffer_size,
-                             const faiss::BitsetView& bitset) {
+                             const faiss::BitsetViewPtr bitset) {
 
     switch (metric_type) {
         case METRIC_INNER_PRODUCT:
@@ -280,7 +280,7 @@ void IndexFlatL2BaseShift::search (
             idx_t k,
             float *distances,
             idx_t *labels,
-            const BitsetView& bitset) const
+            const BitsetViewPtr bitset) const
 {
     FAISS_THROW_IF_NOT (shift.size() == ntotal);
 
@@ -364,7 +364,7 @@ static void reorder_2_heaps (
 void IndexRefineFlat::search (
               idx_t n, const float *x, idx_t k,
               float *distances, idx_t *labels,
-              const BitsetView& bitset) const
+              const BitsetViewPtr bitset) const
 {
     FAISS_THROW_IF_NOT (is_trained);
     idx_t k_base = idx_t (k * k_factor);
@@ -458,7 +458,7 @@ void IndexFlat1D::search (
             idx_t k,
             float *distances,
             idx_t *labels,
-            const BitsetView& bitset) const
+            const BitsetViewPtr bitset) const
 {
     FAISS_THROW_IF_NOT_MSG (perm.size() == ntotal,
                     "Call update_permutation before search");

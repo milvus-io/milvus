@@ -56,7 +56,7 @@ struct IndexIVFPQR: IndexIVFPQ {
                              float *distances, idx_t *labels,
                              bool store_pairs,
                              const IVFSearchParameters *params=nullptr,
-                             const BitsetView& bitset = nullptr
+                             const BitsetViewPtr bitset = nullptr
                              ) const override;
 
     IndexIVFPQR();

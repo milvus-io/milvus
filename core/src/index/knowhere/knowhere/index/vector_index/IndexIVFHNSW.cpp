@@ -115,7 +115,7 @@ IVFHNSW::UpdateIndexSize() {
 
 void
 IVFHNSW::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                   const faiss::BitsetView& bitset) {
+                   const faiss::BitsetViewPtr bitset) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);

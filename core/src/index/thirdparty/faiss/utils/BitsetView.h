@@ -37,10 +37,10 @@ class BitsetView {
         assert(nullptr_value == nullptr);
     }
     
-    bool
-    empty() const {
-        return size_ == 0;
-    }
+//    bool
+//    empty() const {
+//        return size_ == 0;
+//    }
     
     // return count of all bits
     int64_t 
@@ -57,10 +57,6 @@ class BitsetView {
     const uint8_t*
     data() const {
         return blocks_;
-    }
-
-    operator bool() const {
-        return !empty();
     }
 
     bool
@@ -99,5 +95,7 @@ class BitsetView {
     const uint8_t* blocks_ = nullptr;
     int64_t size_ = 0;  // size of bits
 };
+
+using BitsetViewPtr = std::shared_ptr<BitsetView>;
 
 }  // namespace faiss

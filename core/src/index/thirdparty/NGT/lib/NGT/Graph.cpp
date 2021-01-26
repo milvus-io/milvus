@@ -599,7 +599,7 @@ NeighborhoodGraph::setupSeeds(NGT::SearchContainer &sc, ObjectDistances &seeds, 
   }
 
   // for milvus
-  void NeighborhoodGraph::search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::BitsetView& bitset)
+  void NeighborhoodGraph::search(NGT::SearchContainer & sc, ObjectDistances & seeds, const faiss::BitsetViewPtr bitset)
   {
       if (sc.explorationCoefficient == 0.0)
       {
@@ -710,7 +710,7 @@ NeighborhoodGraph::setupSeeds(NGT::SearchContainer &sc, ObjectDistances &seeds, 
               distanceChecked.insert(neighbor.id);
 
               // judge if id in blacklist
-              if (!bitset.empty() && bitset.test((faiss::ConcurrentBitset::id_type_t)neighbor.id - 1)) {
+              if (bitset != nullptr && bitset->test((faiss::ConcurrentBitset::id_type_t)neighbor.id - 1)) {
                   continue;
               }
 

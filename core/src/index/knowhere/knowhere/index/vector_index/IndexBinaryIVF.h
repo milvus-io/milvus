@@ -49,7 +49,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
     AddWithoutIds(const DatasetPtr&, const Config&) override;
 
     DatasetPtr
-    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) override;
+    Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetViewPtr bitset = nullptr) override;
 
     int64_t
     Count() override;
@@ -72,7 +72,7 @@ class BinaryIVF : public VecIndex, public FaissBaseBinaryIndex {
 
     virtual void
     QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-              const faiss::BitsetView& bitset);
+              const faiss::BitsetViewPtr bitset = nullptr);
 };
 
 using BinaryIVFIndexPtr = std::shared_ptr<BinaryIVF>;

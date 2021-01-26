@@ -30,7 +30,7 @@ namespace faiss {
             size_t nb,
             size_t ncodes,
             int ordered,
-            const BitsetView& bitset = nullptr);
+            const BitsetViewPtr bitset = nullptr);
 
  /** Return the k matched distances for a set of binary query vectors,
   * using a max heap.
@@ -51,7 +51,7 @@ namespace faiss {
             size_t ncodes,
             float *distances,
             int64_t *labels,
-            const BitsetView& bitset);
+            const BitsetViewPtr bitset = nullptr);
 
 } // namespace faiss
 

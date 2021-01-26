@@ -220,7 +220,7 @@ ExecutionEngineImpl::VecSearch(milvus::engine::ExecutionEngineContext& context,
         dataset = knowhere::GenDataset(nq, vec_index->Dim(), query_vector.binary_data.data());
     }
 
-    auto result = vec_index->Query(dataset, conf, bitset);
+    auto result = vec_index->Query(dataset, conf, std::make_shared<faiss::BitsetView>(bitset));
     CopyResult(result, nq * topk, context.query_result_->result_distances_.data(),
                context.query_result_->result_ids_.data());
 
