@@ -195,7 +195,7 @@ func genInsertMsg() insertMsg {
 
 	fmsg := &flushMsg{
 		msgID:        1,
-		Timestamp:    2000,
+		timestamp:    2000,
 		segmentIDs:   []UniqueID{1},
 		collectionID: UniqueID(1),
 	}

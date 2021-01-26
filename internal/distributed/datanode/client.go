@@ -2,12 +2,18 @@ package datanode
 
 import (
 	"context"
+	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"google.golang.org/grpc"
+)
+
+const (
+	RPCConnectionTimeout = 30 * time.Second
+	Retry                = 3
 )
 
 type Client struct {

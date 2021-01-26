@@ -3,6 +3,7 @@ package datanode
 import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
@@ -202,4 +203,14 @@ func (m *MasterServiceFactory) DescribeCollection(in *milvuspb.DescribeCollectio
 		Schema:       meta.Schema,
 	}
 	return resp, nil
+}
+
+func (m *MasterServiceFactory) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	return &internalpb2.ComponentStates{
+		State:              &internalpb2.ComponentInfo{},
+		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}, nil
 }

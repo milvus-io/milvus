@@ -16,7 +16,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -25,18 +24,31 @@ const (
 
 type (
 	Inteface interface {
-		typeutil.Service
-		typeutil.Component
+		// Service
+		Init() error
+		Start() error
+		Stop() error
+
+		// Component
+		GetComponentStates() (*internalpb2.ComponentStates, error)
+		GetTimeTickChannel() (string, error)   // This function has no effect
+		GetStatisticsChannel() (string, error) // This function has no effect
 
 		WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
 		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
+
+		SetMasterServiceInterface(ms MasterServiceInterface) error
+
+		SetDataServiceInterface(ds DataServiceInterface) error
 	}
 
 	DataServiceInterface interface {
+		GetComponentStates() (*internalpb2.ComponentStates, error)
 		RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	}
 
 	MasterServiceInterface interface {
+		GetComponentStates() (*internalpb2.ComponentStates, error)
 		AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
 		ShowCollections(in *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error)
 		DescribeCollection(in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
@@ -55,30 +67,40 @@ type (
 		masterService MasterServiceInterface
 		dataService   DataServiceInterface
 
-		replica collectionReplica
+		flushChan chan *flushMsg
+		replica   collectionReplica
 
 		tracer opentracing.Tracer
 		closer io.Closer
 	}
 )
 
-func NewDataNode(ctx context.Context, nodeID UniqueID, masterService MasterServiceInterface,
-	dataService DataServiceInterface) *DataNode {
+func NewDataNode(ctx context.Context) *DataNode {
 
 	Params.Init()
 	node := &DataNode{
 		ctx:             ctx,
-		NodeID:          nodeID,     // GOOSE TODO
-		Role:            "DataNode", // GOOSE TODO
+		NodeID:          Params.NodeID, // GOOSE TODO
+		Role:            "DataNode",    // GOOSE TODO
 		State:           internalpb2.StateCode_INITIALIZING,
 		dataSyncService: nil,
 		metaService:     nil,
-		masterService:   masterService,
-		dataService:     dataService,
+		masterService:   nil,
+		dataService:     nil,
 		replica:         nil,
 	}
 
 	return node
+}
+
+func (node *DataNode) SetMasterServiceInterface(ms MasterServiceInterface) error {
+	node.masterService = ms
+	return nil
+}
+
+func (node *DataNode) SetDataServiceInterface(ds DataServiceInterface) error {
+	node.dataService = ds
+	return nil
 }
 
 func (node *DataNode) Init() error {
@@ -123,8 +145,8 @@ func (node *DataNode) Init() error {
 
 	var alloc allocator = newAllocatorImpl(node.masterService)
 	chanSize := 100
-	flushChan := make(chan *flushMsg, chanSize)
-	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc)
+	node.flushChan = make(chan *flushMsg, chanSize)
+	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc)
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 	node.replica = replica
 
@@ -148,7 +170,6 @@ func (node *DataNode) Init() error {
 
 	opentracing.SetGlobalTracer(node.tracer)
 
-	node.State = internalpb2.StateCode_HEALTHY
 	return nil
 }
 
@@ -156,13 +177,15 @@ func (node *DataNode) Start() error {
 
 	go node.dataSyncService.start()
 	node.metaService.init()
+	node.State = internalpb2.StateCode_HEALTHY
 
 	return nil
 }
 
-func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) error {
-	// GOOSE TODO: Implement me
-	return nil
+func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+	Params.InsertChannelNames = append(Params.InsertChannelNames, in.GetChannelNames()...)
+
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
@@ -173,13 +196,23 @@ func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error)
 			StateCode: node.State,
 		},
 		SubcomponentStates: make([]*internalpb2.ComponentInfo, 0),
-		Status:             &commonpb.Status{},
+		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS},
 	}
 	return states, nil
 }
 
 func (node *DataNode) FlushSegments(in *datapb.FlushSegRequest) error {
-	// GOOSE TODO: Implement me
+	ids := make([]UniqueID, 0)
+	ids = append(ids, in.SegmentIDs...)
+
+	flushmsg := &flushMsg{
+		msgID:        in.Base.MsgID,
+		timestamp:    in.Base.Timestamp,
+		segmentIDs:   ids,
+		collectionID: in.CollectionID,
+	}
+
+	node.flushChan <- flushmsg
 	return nil
 }
 
@@ -195,5 +228,12 @@ func (node *DataNode) Stop() error {
 		node.closer.Close()
 	}
 	return nil
+}
 
+func (node *DataNode) GetTimeTickChannel() (string, error) {
+	return "Nothing happened", nil
+}
+
+func (node *DataNode) GetStatisticsChannel() (string, error) {
+	return "Nothing happened", nil
 }
