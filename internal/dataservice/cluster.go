@@ -89,7 +89,7 @@ func (c *dataNodeCluster) WatchInsertChannels(groups []channelGroup) {
 				MsgType:   commonpb.MsgType_kDescribeCollection,
 				MsgID:     -1, // todo
 				Timestamp: 0,  // todo
-				SourceID:  -1, // todo
+				SourceID:  Params.NodeID,
 			},
 			ChannelNames: group,
 		})
@@ -105,7 +105,7 @@ func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, err
 	defer c.mu.RUnlock()
 	ret := make([]*internalpb2.ComponentInfo, 0)
 	for _, node := range c.nodes {
-		states, err := node.client.GetComponentStates(nil)
+		states, err := node.client.GetComponentStates(&commonpb.Empty{})
 		if err != nil {
 			log.Println(err.Error())
 			continue

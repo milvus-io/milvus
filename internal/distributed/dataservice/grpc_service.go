@@ -2,9 +2,9 @@ package dataservice
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
-	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 
@@ -22,52 +22,37 @@ import (
 type Service struct {
 	server       *dataservice.Server
 	ctx          context.Context
-	cancel       context.CancelFunc
 	grpcServer   *grpc.Server
 	masterClient *masterservice.GrpcClient
 }
 
-func NewGrpcService() {
+func NewGrpcService(ctx context.Context) *Service {
 	s := &Service{}
 	var err error
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	if err = s.connectMaster(); err != nil {
-		log.Fatal("connect to master" + err.Error())
-	}
-	s.server, err = dataservice.CreateServer(s.ctx, s.masterClient)
+	s.ctx = ctx
+	s.server, err = dataservice.CreateServer(s.ctx)
 	if err != nil {
 		log.Fatalf("create server error: %s", err.Error())
-		return
+		return nil
 	}
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
-	lis, err := net.Listen("tcp", "localhost:11111") // todo address
+	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", dataservice.Params.Address, dataservice.Params.Port))
 	if err != nil {
 		log.Fatal(err.Error())
-		return
+		return nil
 	}
 	if err = s.grpcServer.Serve(lis); err != nil {
 		log.Fatal(err.Error())
-		return
+		return nil
 	}
+	return s
 }
 
-func (s *Service) connectMaster() error {
-	log.Println("connecting to master")
-	master, err := masterservice.NewGrpcClient("localhost:10101", 30*time.Second) // todo address
-	if err != nil {
-		return err
-	}
-	if err = master.Init(); err != nil {
-		return err
-	}
-	if err = master.Start(); err != nil {
-		return err
-	}
-	s.masterClient = master
-	log.Println("connect to master success")
-	return nil
+func (s *Service) SetMasterClient(masterClient dataservice.MasterClient) {
+	s.server.SetMasterClient(masterClient)
 }
+
 func (s *Service) Init() error {
 	return s.server.Init()
 }
@@ -79,7 +64,6 @@ func (s *Service) Start() error {
 func (s *Service) Stop() error {
 	err := s.server.Stop()
 	s.grpcServer.GracefulStop()
-	s.cancel()
 	return err
 }
 
