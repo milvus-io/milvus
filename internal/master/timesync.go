@@ -34,7 +34,53 @@ type (
 		ctx      context.Context
 		cancel   context.CancelFunc
 	}
+
+	proxyServiceTimeTickBarrier struct {
+		ttStream ms.MsgStream
+		ctx      context.Context
+		cancel   context.CancelFunc
+	}
 )
+
+func (ttBarrier *proxyServiceTimeTickBarrier) GetTimeTick() (Timestamp, error) {
+	select {
+	case <-ttBarrier.ctx.Done():
+		return 0, errors.Errorf("[GetTimeTick] closed.")
+	case ttmsgs := <-ttBarrier.ttStream.Chan():
+		log.Println("ttmsgs: ", ttmsgs)
+		tempMin := Timestamp(math.MaxUint64)
+		for _, ttmsg := range ttmsgs.Msgs {
+			timeTickMsg, ok := ttmsg.(*ms.TimeTickMsg)
+			if !ok {
+				log.Println("something wrong in time tick message!")
+			}
+			if timeTickMsg.Base.Timestamp < tempMin {
+				tempMin = timeTickMsg.Base.Timestamp
+			}
+		}
+		log.Println("[GetTimeTick]: ", tempMin)
+		return tempMin, nil
+	}
+}
+
+func (ttBarrier *proxyServiceTimeTickBarrier) Start() error {
+	ttBarrier.ttStream.Start()
+	return nil
+}
+
+func (ttBarrier *proxyServiceTimeTickBarrier) Close() {
+	ttBarrier.ttStream.Close()
+	ttBarrier.cancel()
+}
+
+func newProxyServiceTimeTickBarrier(ctx context.Context, stream ms.MsgStream) TimeTickBarrier {
+	ctx1, cancel := context.WithCancel(ctx)
+	return &proxyServiceTimeTickBarrier{
+		ttStream: stream,
+		ctx:      ctx1,
+		cancel:   cancel,
+	}
+}
 
 func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	select {

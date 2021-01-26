@@ -25,6 +25,10 @@ dir ('build/docker/deploy') {
             sh 'docker-compose build --force-rm proxynode'
             sh 'docker-compose push proxynode'
 
+            sh 'docker pull ${SOURCE_REPO}/queryservice:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm queryservice'
+            sh 'docker-compose push queryservice'
+
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
             sh 'docker pull ${SOURCE_REPO}/querynode:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm querynode'

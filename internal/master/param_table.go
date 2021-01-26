@@ -40,13 +40,13 @@ type ParamTable struct {
 	SegIDAssignExpiration int64
 
 	// msgChannel
-	ProxyTimeTickChannelNames     []string
-	WriteNodeTimeTickChannelNames []string
-	DDChannelNames                []string
-	InsertChannelNames            []string
-	K2SChannelNames               []string
-	QueryNodeStatsChannelName     string
-	MsgChannelSubName             string
+	ProxyServiceTimeTickChannelNames []string
+	WriteNodeTimeTickChannelNames    []string
+	DDChannelNames                   []string
+	InsertChannelNames               []string
+	K2SChannelNames                  []string
+	QueryNodeStatsChannelName        string
+	MsgChannelSubName                string
 
 	MaxPartitionNum     int64
 	DefaultPartitionTag string
@@ -90,7 +90,7 @@ func (p *ParamTable) Init() {
 	p.initMaxSegIDAssignCnt()
 	p.initSegIDAssignExpiration()
 
-	p.initProxyTimeTickChannelNames()
+	p.initProxyServiceTimeTickChannelNames()
 	p.initWriteNodeTimeTickChannelNames()
 	p.initInsertChannelNames()
 	p.initDDChannelNames()
@@ -220,25 +220,12 @@ func (p *ParamTable) initProxyIDList() {
 	p.ProxyIDList = p.BaseTable.ProxyIDList()
 }
 
-func (p *ParamTable) initProxyTimeTickChannelNames() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.proxyTimeTick")
+func (p *ParamTable) initProxyServiceTimeTickChannelNames() {
+	ch, err := p.Load("msgChannel.chanNamePrefix.proxyServiceTimeTick")
 	if err != nil {
 		log.Panic(err)
 	}
-	id, err := p.Load("nodeID.proxyIDList")
-	if err != nil {
-		log.Panicf("load proxy id list error, %s", err.Error())
-	}
-	ids := strings.Split(id, ",")
-	channels := make([]string, 0, len(ids))
-	for _, i := range ids {
-		_, err := strconv.ParseInt(i, 10, 64)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		channels = append(channels, ch+"-"+i)
-	}
-	p.ProxyTimeTickChannelNames = channels
+	p.ProxyServiceTimeTickChannelNames = []string{ch}
 }
 
 func (p *ParamTable) initMsgChannelSubName() {

@@ -53,7 +53,7 @@ func refreshChannelNames() {
 	master.Params.WriteNodeTimeTickChannelNames = makeNewChannalNames(master.Params.WriteNodeTimeTickChannelNames, suffix)
 	master.Params.InsertChannelNames = makeNewChannalNames(master.Params.InsertChannelNames, suffix)
 	master.Params.K2SChannelNames = makeNewChannalNames(master.Params.K2SChannelNames, suffix)
-	master.Params.ProxyTimeTickChannelNames = makeNewChannalNames(master.Params.ProxyTimeTickChannelNames, suffix)
+	master.Params.ProxyServiceTimeTickChannelNames = makeNewChannalNames(master.Params.ProxyServiceTimeTickChannelNames, suffix)
 }
 
 func startMaster(ctx context.Context) {

@@ -63,7 +63,7 @@ func refreshChannelNames() {
 	Params.WriteNodeTimeTickChannelNames = makeNewChannalNames(Params.WriteNodeTimeTickChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannalNames(Params.InsertChannelNames, suffix)
 	Params.K2SChannelNames = makeNewChannalNames(Params.K2SChannelNames, suffix)
-	Params.ProxyTimeTickChannelNames = makeNewChannalNames(Params.ProxyTimeTickChannelNames, suffix)
+	Params.ProxyServiceTimeTickChannelNames = makeNewChannalNames(Params.ProxyServiceTimeTickChannelNames, suffix)
 	Params.QueryNodeStatsChannelName = Params.QueryNodeStatsChannelName + suffix
 	Params.MetaRootPath = "/test" + strconv.FormatInt(rand.Int63n(100), 10) + "/root/kv"
 }
@@ -903,7 +903,7 @@ func TestMaster(t *testing.T) {
 
 		proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream
 		proxyTimeTickStream.SetPulsarClient(pulsarAddr)
-		proxyTimeTickStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames)
+		proxyTimeTickStream.CreatePulsarProducers(Params.ProxyServiceTimeTickChannelNames)
 		proxyTimeTickStream.Start()
 
 		writeNodeStream := pulsarms.NewPulsarMsgStream(ctx, 1024) //input stream

@@ -60,6 +60,22 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+//func (s *Server) SetDataService(p querynode.DataServiceInterface) error {
+//	c, ok := s.queryService
+//	if !ok {
+//		return errors.Errorf("set data service failed")
+//	}
+//	return c.SetDataService(p)
+//}
+//
+//func (s *Server) SetIndexService(p querynode.IndexServiceInterface) error {
+//	c, ok := s.core.(*cms.Core)
+//	if !ok {
+//		return errors.Errorf("set index service failed")
+//	}
+//	return c.SetIndexService(p)
+//}
+
 func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*querypb.ComponentStatesResponse, error) {
 	componentStates, err := s.queryService.GetComponentStates()
 	if err != nil {

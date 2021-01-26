@@ -96,10 +96,11 @@ func (t *RegisterLinkTask) PostExecute() error {
 
 type RegisterNodeTask struct {
 	Condition
-	request   *proxypb.RegisterNodeRequest
-	response  *proxypb.RegisterNodeResponse
-	allocator NodeIDAllocator
-	nodeInfos *GlobalNodeInfoTable
+	request     *proxypb.RegisterNodeRequest
+	response    *proxypb.RegisterNodeResponse
+	startParams []*commonpb.KeyValuePair
+	allocator   NodeIDAllocator
+	nodeInfos   *GlobalNodeInfoTable
 }
 
 func (t *RegisterNodeTask) PreExecute() error {
@@ -117,7 +118,7 @@ func (t *RegisterNodeTask) Execute() error {
 	t.response = &proxypb.RegisterNodeResponse{
 		InitParams: &internalpb2.InitParams{
 			NodeID:      nodeID,
-			StartParams: nil,
+			StartParams: t.startParams,
 		},
 	}
 	return err
