@@ -717,6 +717,18 @@ func (c *Core) GetComponentStates() (*internalpb2.ComponentStates, error) {
 			StateCode: code,
 			ExtraInfo: nil,
 		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+			Reason:    "",
+		},
+		SubcomponentStates: []*internalpb2.ComponentInfo{
+			{
+				NodeID:    int64(Params.NodeID),
+				Role:      typeutil.MasterServiceRole,
+				StateCode: code,
+				ExtraInfo: nil,
+			},
+		},
 	}, nil
 }
 

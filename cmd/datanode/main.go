@@ -12,6 +12,7 @@ import (
 	dnc "github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -32,6 +33,7 @@ func main() {
 	log.Println("Datanode is", dn.Params.NodeID)
 
 	// --- Master Service Client ---
+	ms.Params.Init()
 	log.Println("Master service address:", dn.Params.MasterAddress)
 	masterClient, err := msc.NewGrpcClient(dn.Params.MasterAddress, 20*time.Second)
 	if err != nil {
