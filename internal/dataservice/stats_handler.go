@@ -20,10 +20,25 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb2.SegmentStat
 		return err
 	}
 
-	//if segStats.IsNewSegment {
-	//	segMeta.OpenTime = segStats.CreateTime
-	//	segMeta.segStats.StartPositions
-	//}
+	if segStats.IsNewSegment {
+		segMeta.OpenTime = segStats.CreateTime
+		segMeta.StartPosition = append(segMeta.StartPosition, segStats.StartPositions...)
+	}
+	segMeta.SealedTime = segStats.EndTime
+	for _, pos := range segStats.EndPositions {
+		isNew := true
+		for _, epos := range segMeta.EndPosition {
+			if epos.ChannelName == pos.ChannelName {
+				epos.Timestamp = pos.Timestamp
+				epos.MsgID = pos.MsgID
+				isNew = false
+				break
+			}
+		}
+		if isNew {
+			segMeta.EndPosition = append(segMeta.EndPosition, pos)
+		}
+	}
 	segMeta.NumRows = segStats.NumRows
 	segMeta.MemSize = segStats.MemorySize
 
