@@ -17,6 +17,7 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/BitsetView.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 
 namespace faiss {
@@ -241,15 +242,19 @@ void range_search_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float radius,
-        RangeSearchResult *result);
+        std::vector<RangeSearchPartialResult*> &result,
+        size_t buffer_size,
+        const BitsetView &bitset = nullptr);
 
 /// same as range_search_L2sqr for the inner product similarity
 void range_search_inner_product (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float radius,
-        RangeSearchResult *result);
+    const float * x,
+    const float * y,
+    size_t d, size_t nx, size_t ny,
+    float radius,
+    std::vector<RangeSearchPartialResult*> &result,
+    size_t buffer_size,
+    const BitsetView &bitset = nullptr);
 
 
 /***************************************************************************

@@ -48,9 +48,12 @@ void RangeSearchResult::do_allocation () {
 }
 
 RangeSearchResult::~RangeSearchResult () {
-    delete [] labels;
-    delete [] distances;
-    delete [] lims;
+    if (labels)
+        delete [] labels;
+    if (distances)
+        delete [] distances;
+    if (lims)
+        delete [] lims;
 }
 
 
@@ -71,8 +74,10 @@ BufferList::BufferList (size_t buffer_size):
 BufferList::~BufferList ()
 {
     for (int i = 0; i < buffers.size(); i++) {
-        delete [] buffers[i].ids;
-        delete [] buffers[i].dis;
+        if (buffers[i].ids)
+            delete [] buffers[i].ids;
+        if (buffers[i].dis)
+            delete [] buffers[i].dis;
     }
 }
 

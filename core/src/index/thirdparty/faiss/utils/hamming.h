@@ -30,6 +30,7 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/BitsetView.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 /* The Hamming distance type */
 typedef int32_t hamdis_t;
@@ -192,8 +193,9 @@ void hamming_range_search (
     size_t nb,
     int radius,
     size_t ncodes,
-    RangeSearchResult *result);
-
+    std::vector<faiss::RangeSearchPartialResult*>& result,
+    size_t buffer_size,
+    const BitsetView& bitset);
 
 /* Counting the number of matches or of cross-matches (without returning them)
    For use with function that assume pre-allocated memory */

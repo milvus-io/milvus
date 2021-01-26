@@ -16,6 +16,7 @@
 
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/vector_index/helpers/DynamicResultSet.h"
 
 namespace milvus {
 namespace knowhere {
@@ -44,6 +45,9 @@ class IDMAP : public VecIndex, public FaissBaseIndex {
 
     DatasetPtr
     Query(const DatasetPtr&, const Config&, const faiss::BitsetView&) override;
+
+    DynamicResultSegment
+    QueryByDistance(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset);
 
     int64_t
     Count() override;

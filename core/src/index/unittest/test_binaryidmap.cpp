@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
+#include <src/index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexBinaryIDMAP.h"
@@ -39,6 +40,7 @@ class BinaryIDMAPTest : public DataGen, public TestWithParam<std::string> {
 INSTANTIATE_TEST_CASE_P(METRICParameters, BinaryIDMAPTest,
                         Values(std::string("JACCARD"), std::string("TANIMOTO"), std::string("HAMMING")));
 
+/*
 TEST_P(BinaryIDMAPTest, binaryidmap_basic) {
     ASSERT_TRUE(!xb_bin.empty());
 
@@ -157,3 +159,89 @@ TEST_P(BinaryIDMAPTest, binaryidmap_slice) {
         // PrintResult(result, nq, k);
     }
 }
+*/
+
+TEST_P(BinaryIDMAPTest, binaryidmap_range_search) {
+    std::string MetricType = GetParam();
+    milvus::knowhere::Config conf{
+        {milvus::knowhere::meta::DIM, dim},
+        {milvus::knowhere::IndexParams::range_search_radius, radius},
+        {milvus::knowhere::IndexParams::range_search_buffer_size, buffer_size},
+        {milvus::knowhere::Metric::TYPE, MetricType},
+    };
+
+    int hamming_radius = 10;
+    auto hamming_dis = [] (const int64_t *pa, const int64_t *pb) -> int {
+        return __builtin_popcountl((*pa) ^ (*pb));
+    };
+
+    std::vector<std::vector<bool>> idmap(nq, std::vector<bool>(nb, false));
+    std::vector<size_t> bf_cnt(nq, 0);
+
+    auto bruteforce = [&] () {
+        for (auto i = 0; i < nq; ++ i) {
+            const int64_t *pq = reinterpret_cast<int64_t*>(xq_bin.data()) + i;
+            const int64_t *pb = reinterpret_cast<int64_t*>(xb_bin.data());
+            for (auto j = 0; j < nb; ++ j) {
+                auto dist = hamming_dis(pq, pb + j);
+                if (dist < hamming_radius) {
+                    idmap[i][j] = true;
+                    bf_cnt[i] ++;
+                }
+            }
+        }
+    };
+
+    bruteforce();
+
+    auto compare_res = [&] (std::vector<milvus::knowhere::DynamicResultSegment> &results) {
+        for (auto i = 0; i < nq; ++ i) {
+            int query_i_cnt = 0;
+            int correct_cnt = 0;
+            for (auto &res_space: results[i]) {
+                auto qnr = res_space->buffer_size * res_space->buffers.size() - res_space->buffer_size + res_space->wp;
+                for (auto j = 0; j < qnr; ++ j) {
+                    auto bno = j / res_space->buffer_size;
+                    auto pos = j % res_space->buffer_size;
+                    ASSERT_EQ(idmap[i][res_space->buffers[bno].ids[pos]], true);
+                    if (idmap[i][res_space->buffers[bno].ids[pos]]) {
+                        correct_cnt ++;
+                    }
+                }
+            }
+            ASSERT_EQ(correct_cnt, bf_cnt[i]);
+        }
+    };
+
+    {
+        // serialize index
+        index_->Train(base_dataset, conf);
+        index_->AddWithoutIds(base_dataset, milvus::knowhere::Config());
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+
+        std::vector<milvus::knowhere::DynamicResultSegment> results;
+        for (auto i = 0; i < nq; ++ i) {
+            auto qd = milvus::knowhere::GenDataset(1, dim, xq_bin.data() + i * dim / 8);
+            results.push_back(index_->QueryByDistance(qd, conf, nullptr));
+        }
+
+        compare_res(results);
+        //
+        auto binaryset = index_->Serialize(conf);
+        index_->Load(binaryset);
+
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dim(), dim);
+        {
+            std::vector<milvus::knowhere::DynamicResultSegment> rresults;
+            for (auto i = 0; i < nq; ++ i) {
+                auto qd = milvus::knowhere::GenDataset(1, dim, xq_bin.data() + i * dim / 8);
+                rresults.push_back(index_->QueryByDistance(qd, conf, nullptr));
+            }
+
+            compare_res(rresults);
+        }
+    }
+}
+
