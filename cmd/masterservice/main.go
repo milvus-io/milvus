@@ -89,10 +89,15 @@ func main() {
 		panic(err)
 	}
 
+	is.Params.Init()
 	log.Printf("index service address : %s", is.Params.Address)
 	indexService := isc.NewClient(is.Params.Address)
 
 	if err = svr.SetIndexService(indexService); err != nil {
+		panic(err)
+	}
+
+	if err = svr.Init(); err != nil {
 		panic(err)
 	}
 

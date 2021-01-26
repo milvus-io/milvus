@@ -65,26 +65,26 @@ type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 	Server    struct {
-		ctx                context.Context
-		serverLoopCtx      context.Context
-		serverLoopCancel   context.CancelFunc
-		serverLoopWg       sync.WaitGroup
-		state              atomic.Value
-		client             *etcdkv.EtcdKV
-		meta               *meta
-		segAllocator       segmentAllocator
-		statsHandler       *statsHandler
-		insertChannelMgr   *insertChannelManager
-		allocator          allocator
-		cluster            *dataNodeCluster
-		msgProducer        *timesync.MsgProducer
-		registerFinishCh   chan struct{}
-		masterClient       MasterClient
-		ttMsgStream        msgstream.MsgStream
-		k2sMsgStream       msgstream.MsgStream
-		ddChannelName      string
-		segmentInfoStream  msgstream.MsgStream
-		segmentFlushStream msgstream.MsgStream
+		ctx               context.Context
+		serverLoopCtx     context.Context
+		serverLoopCancel  context.CancelFunc
+		serverLoopWg      sync.WaitGroup
+		state             atomic.Value
+		client            *etcdkv.EtcdKV
+		meta              *meta
+		segAllocator      segmentAllocator
+		statsHandler      *statsHandler
+		ddHandler         *ddHandler
+		insertChannelMgr  *insertChannelManager
+		allocator         allocator
+		cluster           *dataNodeCluster
+		msgProducer       *timesync.MsgProducer
+		registerFinishCh  chan struct{}
+		masterClient      MasterClient
+		ttMsgStream       msgstream.MsgStream
+		k2sMsgStream      msgstream.MsgStream
+		ddChannelName     string
+		segmentInfoStream msgstream.MsgStream
 	}
 )
 
@@ -97,7 +97,6 @@ func CreateServer(ctx context.Context) (*Server, error) {
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
 	}
-	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return s, nil
 }
 
@@ -106,6 +105,7 @@ func (s *Server) SetMasterClient(masterClient MasterClient) {
 }
 
 func (s *Server) Init() error {
+	s.state.Store(internalpb2.StateCode_INITIALIZING)
 	return nil
 }
 
@@ -120,6 +120,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
+	s.ddHandler = newDDHandler(s.meta, s.segAllocator)
 	s.initSegmentInfoChannel()
 	if err = s.initMsgProducer(); err != nil {
 		return err
@@ -186,6 +187,13 @@ func (s *Server) loadMetaFromMaster() error {
 	log.Println("loading collection meta from master")
 	if err := s.checkMasterIsHealthy(); err != nil {
 		return err
+	}
+	if s.ddChannelName == "" {
+		channel, err := s.masterClient.GetDdChannel()
+		if err != nil {
+			return err
+		}
+		s.ddChannelName = channel
 	}
 	collections, err := s.masterClient.ShowCollections(&milvuspb.ShowCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -274,9 +282,10 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
+	s.serverLoopWg.Add(3)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
+	go s.startDDChannel(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -333,6 +342,30 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			}
 			segmentInfo.FlushedTime = realMsg.BeginTimestamp
 			if err = s.meta.UpdateSegment(segmentInfo); err != nil {
+				log.Println(err.Error())
+				continue
+			}
+		}
+	}
+}
+
+func (s *Server) startDDChannel(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	ddStream.SetPulsarClient(Params.PulsarAddress)
+	ddStream.CreatePulsarConsumers([]string{s.ddChannelName}, Params.DataServiceSubscriptionName, util.NewUnmarshalDispatcher(), 1024)
+	ddStream.Start()
+	defer ddStream.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("dd channel shut down")
+			return
+		default:
+		}
+		msgPack := ddStream.Consume()
+		for _, msg := range msgPack.Msgs {
+			if err := s.ddHandler.HandleDDMsg(msg); err != nil {
 				log.Println(err.Error())
 				continue
 			}
@@ -512,8 +545,8 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_kSegmentInfo,
 				MsgID:     0,
-				Timestamp: 0, // todo
-				SourceID:  0,
+				Timestamp: 0,
+				SourceID:  Params.NodeID,
 			},
 			Segment: segmentInfo,
 		},
