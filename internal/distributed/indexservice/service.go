@@ -7,12 +7,10 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
 	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
@@ -28,43 +26,6 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
-	return s.server.GetComponentStates()
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.server.GetTimeTickChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	resp.Value = channel
-	return resp, nil
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.server.GetStatisticsChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Value = channel
-	return resp, nil
 }
 
 func Init() error {
@@ -85,6 +46,18 @@ func (s *Server) Stop() error {
 
 	s.loopWg.Wait()
 	return nil
+}
+
+func (s *Server) GetComponentStates() (*internalpb2.ComponentStates, error) {
+	panic("implement me")
+}
+
+func (s *Server) GetTimeTickChannel() (string, error) {
+	panic("implement me")
+}
+
+func (s *Server) GetStatisticsChannel() (string, error) {
+	panic("implement me")
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
