@@ -27,7 +27,9 @@ type Server struct {
 }
 
 func New(ctx context.Context) (*Server, error) {
-	var s = &Server{}
+	var s = &Server{
+		ctx: ctx,
+	}
 
 	s.core = dn.NewDataNode(s.ctx)
 	s.grpcServer = grpc.NewServer()
