@@ -338,7 +338,7 @@ struct JaccardComputer256 {
     struct JaccardComputerDefault {
         const uint8_t *a;
         int n;
-
+        Jaccard_Computer computer_ptr;
 
         JaccardComputerDefault () {}
 
@@ -349,10 +349,11 @@ struct JaccardComputer256 {
         void set (const uint8_t *a8, int code_size) {
             a =  a8;
             n = code_size;
+            computer_ptr = Get_Jaccard_Computer(code_size * 8);
         }
 
         float compute (const uint8_t *b8) const {
-            return bvec_jaccard(a, b8, n);
+            return computer_ptr(a, b8, n);
         }
 
     };

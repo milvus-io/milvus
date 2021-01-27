@@ -103,15 +103,126 @@ int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+float bvec_jaccard_default (const uint8_t* data1, const uint8_t* data2, const size_t n) {
 #define fun_u64 accu_num += popcount64(a[i] & b[i]); accu_den += popcount64(a[i] | b[i])
 #define fun_u8(i) accu_num += lookup8bit[a[i] & b[i]]; accu_den += lookup8bit[a[i] | b[i]]
     int accu_num = 0;
     int accu_den = 0;
     fast_loop_imp(fun_u64, fun_u8);
-    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 #undef fun_u64
 #undef fun_u8
+}
+
+float bvec_jaccard_512 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]) +
+                   popcount64(a[2] & b[2]) + popcount64(a[3] & b[3]) +
+                   popcount64(a[4] & b[4]) + popcount64(a[5] & b[5]) +
+                   popcount64(a[6] & b[6]) + popcount64(a[7] & b[7]);
+    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]) +
+                   popcount64(a[2] | b[2]) + popcount64(a[3] | b[3]) +
+                   popcount64(a[4] | b[4]) + popcount64(a[5] | b[5]) +
+                   popcount64(a[6] | b[6]) + popcount64(a[7] | b[7]);
+
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
+}
+
+float bvec_jaccard_256 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]) +
+                   popcount64(a[2] & b[2]) + popcount64(a[3] & b[3]);
+    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]) +
+                   popcount64(a[2] | b[2]) + popcount64(a[3] | b[3]);
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
+}
+
+float bvec_jaccard_128 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]);
+    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]);
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
+}
+
+float bvec_jaccard_64 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    int accu_num = popcount64(a[0] & b[0]);
+    int accu_den = popcount64(a[0] | b[0]);
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
+}
+
+Jaccard_Computer
+Get_Jaccard_Computer(size_t dim) {
+    if (support_avx512() && dim > 1024) {
+        return jaccard__AVX512;
+    }
+    if (support_avx2() && dim > 512) {
+        return jaccard__AVX2;
+    }
+    switch (dim) {
+        case 512: return bvec_jaccard_512;
+        case 256: return bvec_jaccard_256;
+        case 128: return bvec_jaccard_128;
+        case 64: return bvec_jaccard_64;
+        default: return bvec_jaccard_default;
+    }
+}
+
+int bvec_hamming_512 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]) +
+           popcount64(a[2] ^ b[2]) + popcount64(a[3] ^ b[3]) +
+           popcount64(a[4] ^ b[4]) + popcount64(a[5] ^ b[5]) +
+           popcount64(a[6] ^ b[6]) + popcount64(a[7] ^ b[7]);
+}
+
+int bvec_hamming_256 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]) +
+           popcount64(a[2] ^ b[2]) + popcount64(a[3] ^ b[3]);
+}
+
+int bvec_hamming_128 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]);
+}
+
+int bvec_hamming_64 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+    auto a = reinterpret_cast<const uint64_t*>(data1);
+    auto b = reinterpret_cast<const uint64_t*>(data2);
+
+    return popcount64(a[0] ^ b[0]);
+}
+
+Hamming_Computer
+Get_Hamming_Computer(size_t dim) {
+    if (support_avx512() && dim > 1024) {
+        return xor_popcnt_AVX512VBMI_lookup;
+    }
+    if (support_avx2() && dim > 512) {
+        return xor_popcnt_AVX2_lookup;
+    }
+    switch (dim) {
+        case 512: return bvec_hamming_512;
+        case 256: return bvec_hamming_256;
+        case 128: return bvec_hamming_128;
+        case 64: return bvec_hamming_64;
+        default: return xor_popcnt;
+    }
 }
 
 static const size_t size_1M = 1 * 1024 * 1024;
@@ -406,26 +517,12 @@ void binary_distance_knn_hc (
     size_t dim = ncodes * 8;
     switch (metric_type) {
         case METRIC_Jaccard: {
-            float (*jaccard)(const uint8_t *a, const uint8_t *b, size_t n) = nullptr;
-            if (support_avx512() && dim > 1024) {
-                jaccard = jaccard__AVX512;
-            } else if (support_avx2() && dim > 512) {
-                jaccard = jaccard__AVX2;
-            } else {
-                jaccard = bvec_jaccard;
-            }
+            auto jaccard = Get_Jaccard_Computer(dim);
             binary_distance_knn_hc(jaccard, ncodes, ha, a, b, nb, bitset);
             break;
         }
         case METRIC_Hamming: {
-            int (*hamming)(const uint8_t * a, const uint8_t * b, size_t n) = nullptr;
-            if (support_avx512() && dim > 1024) {
-                hamming = xor_popcnt_AVX512VBMI_lookup;
-            } else if (support_avx2() && dim > 512) {
-                hamming = xor_popcnt_AVX2_lookup;
-            } else {
-                hamming = xor_popcnt;
-            }
+            auto hamming = Get_Hamming_Computer(dim);
             binary_distance_knn_hc(hamming, ncodes, ha, a, b, nb, bitset);
             break;
         }

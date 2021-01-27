@@ -21,34 +21,51 @@
 typedef float tadis_t;
 
 namespace faiss {
+    extern int popcnt(
+            const uint8_t* data1,
+            const size_t n);
 
-extern int popcnt(
-        const uint8_t* data1,
-        const size_t n);
+    extern int xor_popcnt(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t n);
 
-extern int xor_popcnt(
-        const uint8_t* data1,
-        const uint8_t* data2,
-        const size_t n);
+    extern int or_popcnt(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t n);
 
-extern int or_popcnt(
-        const uint8_t* data1,
-        const uint8_t* data2,
-        const size_t n);
+    extern int and_popcnt(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t n);
 
-extern int and_popcnt(
-        const uint8_t* data1,
-        const uint8_t* data2,
-        const size_t n);
+/**
+ * Get a hamming function pointer
+*/
+    typedef int (*Hamming_Computer)(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t n);
 
-extern float bvec_jaccard (
-        const uint8_t* data1,
-        const uint8_t* data2,
-        const size_t n);
+    extern Hamming_Computer
+    Get_Hamming_Computer(size_t dim = 0);
 
-inline float Jaccard_2_Tanimoto (float jcd) {
-    return -log2(1 - jcd);
-}
+/**
+ * Get a jaccard function pointer
+*/
+    typedef float (*Jaccard_Computer)(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t n);
+
+    extern Jaccard_Computer
+    Get_Jaccard_Computer(size_t dim = 0);
+
+
+    inline float Jaccard_2_Tanimoto (float jcd) {
+        return -log2(1 - jcd);
+    }
 
  /** Return the k matched distances for a set of binary query vectors,
   * using an array.
