@@ -16,7 +16,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"io"
 	"log"
 	"sync/atomic"
@@ -27,6 +26,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	queryPb "github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -69,9 +69,10 @@ type QueryNode struct {
 	closer io.Closer
 
 	// clients
-	queryClient QueryServiceInterface
-	indexClient IndexServiceInterface
-	dataClient  DataServiceInterface
+	masterClient MasterServiceInterface
+	queryClient  QueryServiceInterface
+	indexClient  IndexServiceInterface
+	dataClient   DataServiceInterface
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
@@ -203,7 +204,7 @@ func (node *QueryNode) Start() error {
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
 	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
-	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
+	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
 
 	// start services
 	go node.dataSyncService.start()
@@ -243,9 +244,17 @@ func (node *QueryNode) Stop() error {
 	return nil
 }
 
+func (node *QueryNode) SetMasterService(master MasterServiceInterface) error {
+	if master == nil {
+		return errors.New("null master service interface")
+	}
+	node.masterClient = master
+	return nil
+}
+
 func (node *QueryNode) SetQueryService(query QueryServiceInterface) error {
 	if query == nil {
-		return errors.New("query index service interface")
+		return errors.New("null query service interface")
 	}
 	node.queryClient = query
 	return nil

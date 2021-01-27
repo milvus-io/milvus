@@ -405,7 +405,7 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 
 	ctx := node.queryNodeLoopCtx
 	node.loadIndexService = newLoadIndexService(ctx, node.replica)
-	node.segManager = newSegmentManager(ctx, nil, nil, node.replica, nil, node.loadIndexService.loadIndexReqChan)
+	node.segManager = newSegmentManager(ctx, nil, nil, nil, node.replica, nil, node.loadIndexService.loadIndexReqChan)
 	go node.loadIndexService.start()
 
 	collectionName := "collection0"

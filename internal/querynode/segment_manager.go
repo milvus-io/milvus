@@ -12,6 +12,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	internalPb "github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
@@ -21,8 +22,9 @@ type segmentManager struct {
 	dmStream         msgstream.MsgStream
 	loadIndexReqChan chan []msgstream.TsMsg
 
-	dataClient  DataServiceInterface
-	indexClient IndexServiceInterface
+	masterClient MasterServiceInterface
+	dataClient   DataServiceInterface
+	indexClient  IndexServiceInterface
 
 	kv     kv.Base // minio kv
 	iCodec *storage.InsertCodec
@@ -39,6 +41,29 @@ func (s *segmentManager) seekSegment(positions []*internalPb.MsgPosition) error 
 	return nil
 }
 
+func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, indexParam, error) {
+	req := &milvuspb.DescribeSegmentRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_kDescribeSegment,
+		},
+		CollectionID: collectionID,
+		SegmentID:    segmentID,
+	}
+	response, err := s.masterClient.DescribeSegment(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(response.IndexDescription.Params) <= 0 {
+		return 0, nil, errors.New("null index param")
+	}
+
+	var targetIndexParam = make(map[string]string)
+	for _, param := range response.IndexDescription.Params {
+		targetIndexParam[param.Key] = param.Value
+	}
+	return response.IndexID, targetIndexParam, nil
+}
+
 func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
 	// TODO: interim solution
 	if len(fieldIDs) == 0 {
@@ -52,7 +77,10 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		}
 	}
 	for _, segmentID := range segmentIDs {
-		indexID := UniqueID(0) // TODO: get index id from master
+		indexID, indexParams, err := s.getIndexInfo(collectionID, segmentID)
+		if err != nil {
+			return err
+		}
 		paths, srcFieldIDs, err := s.getInsertBinlogPaths(segmentID)
 		if err != nil {
 			return err
@@ -76,11 +104,7 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		if err != nil {
 			return err
 		}
-		iParam, err := s.getIndexParam()
-		if err != nil {
-			return err
-		}
-		err = s.loadIndex(segmentID, indexPaths, iParam)
+		err = s.loadIndex(segmentID, indexPaths, indexParams)
 		if err != nil {
 			// TODO: return or continue?
 			return err
@@ -236,12 +260,6 @@ func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
 	return pathResponse.FilePaths[0].IndexFilePaths, nil
 }
 
-func (s *segmentManager) getIndexParam() (indexParam, error) {
-	var targetIndexParam indexParam
-	// TODO: get index param from master
-	return targetIndexParam, nil
-}
-
 func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string, indexParam indexParam) error {
 	// get vector field ids from schema to load index
 	vecFieldIDs, err := s.replica.getVecFieldsBySegmentID(segmentID)
@@ -288,7 +306,7 @@ func (s *segmentManager) sendLoadIndex(indexPaths []string,
 	s.loadIndexReqChan <- messages
 }
 
-func newSegmentManager(ctx context.Context, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream, loadIndexReqChan chan []msgstream.TsMsg) *segmentManager {
+func newSegmentManager(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream, loadIndexReqChan chan []msgstream.TsMsg) *segmentManager {
 	bucketName := Params.MinioBucketName
 	option := &miniokv.Option{
 		Address:           Params.MinioEndPoint,
@@ -309,8 +327,9 @@ func newSegmentManager(ctx context.Context, dataClient DataServiceInterface, ind
 		dmStream:         dmStream,
 		loadIndexReqChan: loadIndexReqChan,
 
-		dataClient:  dataClient,
-		indexClient: indexClient,
+		masterClient: masterClient,
+		dataClient:   dataClient,
+		indexClient:  indexClient,
 
 		kv:     minioKV,
 		iCodec: &storage.InsertCodec{},
