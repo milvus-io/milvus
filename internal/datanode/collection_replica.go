@@ -51,7 +51,17 @@ type (
 	}
 )
 
-//----------------------------------------------------------------------------------------------------- collection
+func newReplica() collectionReplica {
+	collections := make([]*Collection, 0)
+	segments := make([]*Segment, 0)
+
+	var replica collectionReplica = &collectionReplicaImpl{
+		collections: collections,
+		segments:    segments,
+	}
+	return replica
+}
+
 func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Segment, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -61,7 +71,7 @@ func (colReplica *collectionReplicaImpl) getSegmentByID(segmentID UniqueID) (*Se
 			return segment, nil
 		}
 	}
-	return nil, errors.Errorf("cannot find segment, id = %v", segmentID)
+	return nil, errors.Errorf("Cannot find segment, id = %v", segmentID)
 }
 
 func (colReplica *collectionReplicaImpl) addSegment(segmentID UniqueID, collID UniqueID,
@@ -163,7 +173,7 @@ func (colReplica *collectionReplicaImpl) addCollection(collectionID UniqueID, sc
 
 	var newCollection = newCollection(collectionID, schema)
 	colReplica.collections = append(colReplica.collections, newCollection)
-	log.Println("Create collection: ", newCollection.Name())
+	log.Println("Create collection:", newCollection.Name())
 
 	return nil
 }
@@ -177,25 +187,25 @@ func (colReplica *collectionReplicaImpl) getCollectionIDByName(collName string) 
 			return collection.ID(), nil
 		}
 	}
-	return 0, errors.Errorf("There is no collection name=%v", collName)
+	return 0, errors.Errorf("Cannot get collection ID by name %s: not exist", collName)
 
 }
 
 func (colReplica *collectionReplicaImpl) removeCollection(collectionID UniqueID) error {
-	// GOOSE TODO: optimize
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	tmpCollections := make([]*Collection, 0)
-	for _, col := range colReplica.collections {
-		if col.ID() != collectionID {
-			tmpCollections = append(tmpCollections, col)
-		} else {
-			log.Println("Drop collection : ", col.Name())
+	length := len(colReplica.collections)
+	for index, col := range colReplica.collections {
+		if col.ID() == collectionID {
+			log.Println("Drop collection: ", col.Name())
+			colReplica.collections[index] = colReplica.collections[length-1]
+			colReplica.collections = colReplica.collections[:length-1]
+			return nil
 		}
 	}
-	colReplica.collections = tmpCollections
-	return nil
+
+	return errors.Errorf("Cannot remove collection %d: not exist", collectionID)
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID) (*Collection, error) {
@@ -207,7 +217,7 @@ func (colReplica *collectionReplicaImpl) getCollectionByID(collectionID UniqueID
 			return collection, nil
 		}
 	}
-	return nil, errors.Errorf("cannot find collection, id = %v", collectionID)
+	return nil, errors.Errorf("Cannot get collection %d by ID: not exist", collectionID)
 }
 
 func (colReplica *collectionReplicaImpl) getCollectionByName(collectionName string) (*Collection, error) {
