@@ -1,7 +1,7 @@
 package proxyservice
 
 import (
-	"context"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 
@@ -17,22 +17,21 @@ type NodeIDAllocator interface {
 
 type NaiveNodeIDAllocatorImpl struct {
 	impl *allocator.IDAllocator
+	now  UniqueID
+	mtx  sync.Mutex
 }
 
 func (allocator *NaiveNodeIDAllocatorImpl) AllocOne() UniqueID {
-	id, err := allocator.impl.AllocOne()
-	if err != nil {
-		panic(err)
-	}
-	return id
+	allocator.mtx.Lock()
+	defer func() {
+		allocator.now++
+		allocator.mtx.Unlock()
+	}()
+	return allocator.now
 }
 
 func NewNodeIDAllocator() NodeIDAllocator {
-	impl, err := allocator.NewIDAllocator(context.Background(), Params.MasterAddress())
-	if err != nil {
-		panic(err)
-	}
 	return &NaiveNodeIDAllocatorImpl{
-		impl: impl,
+		now: 0,
 	}
 }

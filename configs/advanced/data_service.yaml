@@ -10,4 +10,4 @@ dataservice:
     # old name: segmentExpireDuration: 2000
     IDAssignExpiration: 2000 # ms
   insertChannelNumPerCollection: 4
-  dataNodeNum: 1
+  dataNodeNum: 2
