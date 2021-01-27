@@ -77,6 +77,26 @@ func (qs *QueryService) Stop() error {
 	return nil
 }
 
+//func (qs *QueryService) SetDataService(d querynode.DataServiceInterface) error {
+//	for _, v := range qs.queryNodeClient {
+//		err := v.SetDataService(d)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+//
+//func (qs *QueryService) SetIndexService(i querynode.IndexServiceInterface) error {
+//	for _, v := range qs.queryNodeClient {
+//		err := v.SetIndexService(i)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+
 func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	serviceComponentInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryServiceID,
@@ -114,7 +134,6 @@ func (qs *QueryService) GetStatisticsChannel() (string, error) {
 // TODO:: do addWatchDmChannel to query node after registerNode
 func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	fmt.Println("register query node =", req.Address)
-	// TODO:: add mutex
 	allocatedID := qs.numRegisterNode
 	qs.numRegisterNode++
 
@@ -139,7 +158,6 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 	}
 	qs.queryNodes = append(qs.queryNodes, node)
 
-	// TODO:: watch dm channels
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -271,7 +289,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 		segmentIDs := showSegmentResponse.SegmentIDs
 		segmentStates := make(map[UniqueID]*datapb.SegmentStatesResponse)
 		channel2id := make(map[string]int)
-		//id2channels := make(map[int][]string)
+		id2channels := make(map[int][]string)
 		id2segs := make(map[int][]UniqueID)
 		offset := 0
 
@@ -288,16 +306,13 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			for i, str := range state.StartPositions {
 				flatChannelName += str.ChannelName
 				channelNames = append(channelNames, str.ChannelName)
-				if i+1 < len(state.StartPositions) {
+				if i < len(state.StartPositions) {
 					flatChannelName += "/"
 				}
 			}
-			if flatChannelName == "" {
-				log.Fatal("segmentState's channel name is empty")
-			}
 			if _, ok := channel2id[flatChannelName]; !ok {
 				channel2id[flatChannelName] = offset
-				//id2channels[offset] = channelNames
+				id2channels[offset] = channelNames
 				id2segs[offset] = make([]UniqueID, 0)
 				id2segs[offset] = append(id2segs[offset], segmentID)
 				offset++
@@ -314,7 +329,7 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 				if segmentStates[v].State == datapb.SegmentState_SegmentFlushed {
 					selectedSegs = append(selectedSegs, v)
 				} else {
-					if i > 0 && segmentStates[selectedSegs[i-1]].State != datapb.SegmentState_SegmentFlushed {
+					if i > 0 && segmentStates[v-1].State != datapb.SegmentState_SegmentFlushed {
 						break
 					}
 					selectedSegs = append(selectedSegs, v)
