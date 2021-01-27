@@ -63,6 +63,7 @@ message ShowSegmentRequest {
   common.MsgBase base = 1;
   int64  collectionID = 2;
   int64  partitionID = 3;
+  int64  dbID = 4;
 }
 
 message ShowSegmentResponse {
@@ -148,8 +149,8 @@ message SegmentMsg{
 
 message CollectionStatsRequest{
   common.MsgBase base = 1;
-  string db_name = 2;
-  string collection_name = 3;
+  string dbID = 2;
+  string collectionID = 3;
 }
 
 message CollectionStatsResponse {
@@ -159,9 +160,9 @@ message CollectionStatsResponse {
 
 message PartitionStatsRequest{
   common.MsgBase base = 1;
-  string db_name = 2;
-  string collection_name = 3;
-  string partition_name = 4;
+  string dbID = 2;
+  string collectionID = 3;
+  string partitionID = 4;
 }
 
 message PartitionStatsResponse {

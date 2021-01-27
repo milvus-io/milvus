@@ -122,14 +122,14 @@ func (s *Server) Start() error {
 	}
 	s.ddHandler = newDDHandler(s.meta, s.segAllocator)
 	s.initSegmentInfoChannel()
+	if err = s.initMsgProducer(); err != nil {
+		return err
+	}
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
 	s.startServerLoop()
 	s.waitDataNodeRegister()
-	if err = s.initMsgProducer(); err != nil {
-		return err
-	}
 	s.state.Store(internalpb2.StateCode_HEALTHY)
 	log.Println("start success")
 	return nil
