@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
-	masterservice "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -33,7 +33,9 @@ type Server struct {
 
 func (s *Server) Init() error {
 	log.Println("query service init")
-	s.queryService.Init()
+	if err := s.queryService.Init(); err != nil {
+		panic(err)
+	}
 	s.queryService.SetEnableGrpc(true)
 	return nil
 }
@@ -153,7 +155,7 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*
 	return s.queryService.CreateQueryChannel()
 }
 
-func (s *Server) NewServer(ctx context.Context) *Server {
+func NewServer(ctx context.Context) *Server {
 	ctx1, cancel := context.WithCancel(ctx)
 	service, err := queryservice.NewQueryService(ctx)
 	if err != nil {

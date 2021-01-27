@@ -2,14 +2,22 @@ package grpcquerynode
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net"
 
 	"google.golang.org/grpc"
 
+	"github.com/zilliztech/milvus-distributed/internal/dataservice"
+	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
+	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
+	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/indexservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/querynode"
+	"github.com/zilliztech/milvus-distributed/internal/queryservice"
 )
 
 type Server struct {
@@ -17,28 +25,49 @@ type Server struct {
 	node       *querynode.QueryNode
 }
 
-func NewServer(ctx context.Context, queryNodeID uint64) *Server {
-	return &Server{
-		node: querynode.NewQueryNode(ctx, queryNodeID),
+func NewServer(ctx context.Context) *Server {
+	server := &Server{
+		node: querynode.NewQueryNodeWithoutID(ctx),
 	}
+
+	queryservice.Params.Init()
+	queryClient := grpcqueryserviceclient.NewClient(queryservice.Params.Address)
+	if err := server.node.SetQueryService(queryClient); err != nil {
+		panic(err)
+	}
+
+	indexservice.Params.Init()
+	indexClient := grpcindexserviceclient.NewClient(indexservice.Params.Address)
+	if err := server.node.SetIndexService(indexClient); err != nil {
+		panic(err)
+	}
+
+	dataservice.Params.Init()
+	log.Println("connect to data service, address =", fmt.Sprint(dataservice.Params.Address, ":", dataservice.Params.Port))
+	dataClient := grpcdataserviceclient.NewClient(fmt.Sprint(dataservice.Params.Address, ":", dataservice.Params.Port))
+	if err := server.node.SetDataService(dataClient); err != nil {
+		panic(err)
+	}
+
+	return server
 }
 
 func (s *Server) StartGrpcServer() {
-	// TODO: add address
-	lis, err := net.Listen("tcp", "")
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", querynode.Params.QueryNodePort))
 	if err != nil {
 		panic(err)
 	}
 
 	s.grpcServer = grpc.NewServer()
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
+	fmt.Println("start query node grpc server...")
 	if err = s.grpcServer.Serve(lis); err != nil {
 		panic(err)
 	}
 }
 
 func (s *Server) Init() error {
-	return s.Init()
+	return s.node.Init()
 }
 
 func (s *Server) Start() error {

@@ -94,7 +94,7 @@ proxynode: build-cpp
 querynode: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building query node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
 
 
 # Builds various components locally.
@@ -134,8 +134,10 @@ build-go: build-cpp
 	@echo "Building proxy node ..."
 	# TODO: fix me, why proxy node need cgo enabled
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/proxynode $(PWD)/cmd/proxy/node/proxy_node.go 1>/dev/null
+	@echo "Building query service ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/queryservice $(PWD)/cmd/queryservice/queryservice.go 1>/dev/null
 	@echo "Building query node ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/query_node.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/querynode $(PWD)/cmd/querynode/querynode.go 1>/dev/null
 	@echo "Building write node ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/writenode $(PWD)/cmd/writenode/writenode.go 1>/dev/null
 	@echo "Building binlog ..."
@@ -186,6 +188,7 @@ docker: verifiers
 # Builds each component and installs it to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/queryservice $(GOPATH)/bin/queryservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/master $(GOPATH)/bin/master
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxynode $(GOPATH)/bin/proxynode
@@ -206,6 +209,7 @@ clean:
 	@rm -rf $(GOPATH)/bin/master
 	@rm -rf $(GOPATH)/bin/proxynode
 	@rm -rf $(GOPATH)/bin/proxyservice
+	@rm -rf $(GOPATH)/bin/queryservice
 	@rm -rf $(GOPATH)/bin/querynode
 	@rm -rf $(GOPATH)/bin/writenode
 	@rm -rf $(GOPATH)/bin/singlenode

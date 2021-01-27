@@ -2,6 +2,7 @@ package queryservice
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -76,6 +77,26 @@ func (qs *QueryService) Stop() error {
 	return nil
 }
 
+//func (qs *QueryService) SetDataService(d querynode.DataServiceInterface) error {
+//	for _, v := range qs.queryNodeClient {
+//		err := v.SetDataService(d)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+//
+//func (qs *QueryService) SetIndexService(i querynode.IndexServiceInterface) error {
+//	for _, v := range qs.queryNodeClient {
+//		err := v.SetIndexService(i)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+
 func (qs *QueryService) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	serviceComponentInfo := &internalpb2.ComponentInfo{
 		NodeID:    Params.QueryServiceID,
@@ -112,6 +133,7 @@ func (qs *QueryService) GetStatisticsChannel() (string, error) {
 
 // TODO:: do addWatchDmChannel to query node after registerNode
 func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+	fmt.Println("register query node =", req.Address)
 	allocatedID := qs.numRegisterNode
 	qs.numRegisterNode++
 
@@ -134,7 +156,7 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 			nodeID: allocatedID,
 		}
 	}
-	qs.queryNodes[allocatedID] = node
+	qs.queryNodes = append(qs.queryNodes, node)
 
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{

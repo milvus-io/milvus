@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -10,16 +9,16 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zilliztech/milvus-distributed/internal/querynode"
+	grpcquerynode "github.com/zilliztech/milvus-distributed/internal/distributed/querynode"
 )
 
 func main() {
-
-	querynode.Init()
-	fmt.Println("QueryNodeID is", querynode.Params.QueryNodeID)
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := querynode.NewQueryNode(ctx, 0)
+	svr := grpcquerynode.NewServer(ctx)
+	if err := svr.Init(); err != nil {
+		panic(err)
+	}
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -34,12 +33,16 @@ func main() {
 		cancel()
 	}()
 
-	svr.Start()
+	if err := svr.Start(); err != nil {
+		panic(err)
+	}
 
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Stop()
+	if err := svr.Stop(); err != nil {
+		panic(err)
+	}
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

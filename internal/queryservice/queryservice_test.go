@@ -34,7 +34,3 @@ func TestQueryService_Init(t *testing.T) {
 
 	service.Stop()
 }
-
-//func TestQueryService_Load(t *testing.T) {
-//
-//}

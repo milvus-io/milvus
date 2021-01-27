@@ -49,13 +49,3 @@ type QueryServiceInterface interface {
 	CreateQueryChannel() (*querypb.CreateQueryChannelResponse, error)
 	GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error)
 }
-
-type QueryNodeInterface interface {
-	Component
-
-	AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error)
-	RemoveQueryChannel(in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
-	WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error)
-	ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error)
-}
