@@ -27,7 +27,6 @@ func newMetaService(ctx context.Context, replica collectionReplica, m MasterServ
 }
 
 func (mService *metaService) init() {
-	log.Println("Initing meta ...")
 	err := mService.loadCollections()
 	if err != nil {
 		log.Fatal("metaService init failed:", err)
