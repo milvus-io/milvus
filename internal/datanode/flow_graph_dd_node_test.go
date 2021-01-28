@@ -2,6 +2,7 @@ package datanode
 
 import (
 	"context"
+	"log"
 	"testing"
 	"time"
 
@@ -35,51 +36,57 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 	Params.MetaRootPath = testPath
 
-	Params.FlushDdBufferSize = 4
+	// Params.FlushDdBufferSize = 4
 	replica := newReplica()
-	idFactory := AllocatorFactory{}
-	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica, idFactory)
+	allocatorMock := NewAllocatorFactory()
+	ddNode := newDDNode(ctx, newMetaTable(), inFlushCh, replica, allocatorMock)
+	log.Print()
 
-	colID := UniqueID(0)
-	colName := "col-test-0"
+	collID := UniqueID(0)
+	collName := "col-test-0"
 	// create collection
-	createColReq := internalpb2.CreateCollectionRequest{
+	createCollReq := internalpb2.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kCreateCollection,
 			MsgID:     1,
 			Timestamp: 1,
 			SourceID:  1,
 		},
-		CollectionID: colID,
-		Schema:       make([]byte, 0),
+		CollectionID:   collID,
+		Schema:         make([]byte, 0),
+		CollectionName: collName,
+		DbName:         "DbName",
+		DbID:           UniqueID(0),
 	}
-	createColMsg := msgstream.CreateCollectionMsg{
+	createCollMsg := msgstream.CreateCollectionMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: Timestamp(1),
 			EndTimestamp:   Timestamp(1),
 			HashValues:     []uint32{uint32(0)},
 		},
-		CreateCollectionRequest: createColReq,
+		CreateCollectionRequest: createCollReq,
 	}
 
 	// drop collection
-	dropColReq := internalpb2.DropCollectionRequest{
+	dropCollReq := internalpb2.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_kDropCollection,
 			MsgID:     2,
 			Timestamp: 2,
 			SourceID:  2,
 		},
-		CollectionID:   colID,
-		CollectionName: colName,
+		CollectionID:   collID,
+		CollectionName: collName,
+		DbName:         "DbName",
+		DbID:           UniqueID(0),
 	}
-	dropColMsg := msgstream.DropCollectionMsg{
+	dropCollMsg := msgstream.DropCollectionMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: Timestamp(2),
 			EndTimestamp:   Timestamp(2),
 			HashValues:     []uint32{uint32(0)},
 		},
-		DropCollectionRequest: dropColReq,
+		DropCollectionRequest: dropCollReq,
 	}
 
 	partitionID := UniqueID(100)
@@ -92,10 +99,12 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 			Timestamp: 3,
 			SourceID:  3,
 		},
-		CollectionID:   colID,
+		CollectionID:   collID,
 		PartitionID:    partitionID,
-		CollectionName: colName,
+		CollectionName: collName,
 		PartitionName:  partitionName,
+		DbName:         "DbName",
+		DbID:           UniqueID(0),
 	}
 	createPartitionMsg := msgstream.CreatePartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -114,10 +123,12 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 			Timestamp: 4,
 			SourceID:  4,
 		},
-		CollectionID:   colID,
+		CollectionID:   collID,
 		PartitionID:    partitionID,
-		CollectionName: colName,
+		CollectionName: collName,
 		PartitionName:  partitionName,
+		DbName:         "DbName",
+		DbID:           UniqueID(0),
 	}
 	dropPartitionMsg := msgstream.DropPartitionMsg{
 		BaseMsg: msgstream.BaseMsg{
@@ -128,16 +139,17 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		DropPartitionRequest: dropPartitionReq,
 	}
 
+	replica.addSegment(1, collID, partitionID, make([]*internalpb2.MsgPosition, 0))
 	inFlushCh <- &flushMsg{
-		msgID:        1,
-		timestamp:    6,
+		msgID:        5,
+		timestamp:    5,
 		segmentIDs:   []UniqueID{1},
-		collectionID: UniqueID(1),
+		collectionID: collID,
 	}
 
 	tsMessages := make([]msgstream.TsMsg, 0)
-	tsMessages = append(tsMessages, msgstream.TsMsg(&createColMsg))
-	tsMessages = append(tsMessages, msgstream.TsMsg(&dropColMsg))
+	tsMessages = append(tsMessages, msgstream.TsMsg(&createCollMsg))
+	tsMessages = append(tsMessages, msgstream.TsMsg(&dropCollMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&createPartitionMsg))
 	tsMessages = append(tsMessages, msgstream.TsMsg(&dropPartitionMsg))
 	msgStream := flowgraph.GenerateMsgStreamMsg(tsMessages, Timestamp(0), Timestamp(3), make([]*internalpb2.MsgPosition, 0))
