@@ -41,6 +41,7 @@ func (s *segmentManager) seekSegment(positions []*internalPb.MsgPosition) error 
 	return nil
 }
 
+//TODO, index params
 func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, indexParam, error) {
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
@@ -53,15 +54,7 @@ func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID)
 	if err != nil {
 		return 0, nil, err
 	}
-	if len(response.IndexDescription.Params) <= 0 {
-		return 0, nil, errors.New("null index param")
-	}
-
-	var targetIndexParam = make(map[string]string)
-	for _, param := range response.IndexDescription.Params {
-		targetIndexParam[param.Key] = param.Value
-	}
-	return response.IndexID, targetIndexParam, nil
+	return response.IndexID, nil, nil
 }
 
 func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {

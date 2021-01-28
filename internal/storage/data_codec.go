@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	Ts  = "ts"
-	DDL = "ddl"
+	Ts              = "ts"
+	DDL             = "ddl"
+	indexParamsFile = "indexParams"
 )
 
 type (
@@ -633,10 +635,29 @@ func NewIndexCodec() *IndexCodec {
 	return &IndexCodec{}
 }
 
-func (indexCodec *IndexCodec) Serialize(blobs []*Blob) ([]*Blob, error) {
+func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string) ([]*Blob, error) {
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	blobs = append(blobs, &Blob{Key: indexParamsFile, Value: paramsBytes})
 	return blobs, nil
 }
 
-func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, error) {
-	return blobs, nil
+func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, error) {
+	var params map[string]string
+	for i := 0; i < len(blobs); i++ {
+		if blobs[i].Key != indexParamsFile {
+			continue
+		}
+		if err := json.Unmarshal(blobs[i].Value, &params); err != nil {
+			return nil, nil, err
+		}
+		blobs = append(blobs[:i], blobs[i+1:]...)
+		break
+	}
+	if params == nil {
+		return nil, nil, errors.New("can not find params blob")
+	}
+	return blobs, params, nil
 }

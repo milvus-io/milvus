@@ -480,14 +480,7 @@ func (t *DescribeSegmentReqTask) Execute() error {
 		return err
 	}
 	t.Rsp.IndexID = segIdxInfo.IndexID
-	indexInfo, err := t.core.MetaTable.GetIndexByID(segIdxInfo.IndexID)
-	if err != nil {
-		return err
-	}
-	t.Rsp.IndexDescription = &milvuspb.IndexDescription{
-		IndexName: Params.DefaultIndexName, // TODO: set index name
-		Params:    indexInfo.IndexParams,
-	}
+	t.Rsp.BuildID = segIdxInfo.BuildID
 	return nil
 }
 
