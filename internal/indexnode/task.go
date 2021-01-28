@@ -247,7 +247,7 @@ func (it *IndexBuildTask) Execute() error {
 		}
 
 		var indexCodec storage.IndexCodec
-		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs), indexParams)
+		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs))
 		if err != nil {
 			return err
 		}
