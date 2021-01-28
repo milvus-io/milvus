@@ -28,13 +28,13 @@ func TestTimeTick_Start(t *testing.T) {
 func TestTimeTick_Start2(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	masterAddr := Params.MasterAddress()
+	masterAddr := Params.MasterAddress
 	tsoAllocator, err := allocator.NewTimestampAllocator(ctx, masterAddr)
 	assert.Nil(t, err)
 	err = tsoAllocator.Start()
 	assert.Nil(t, err)
 
-	tt := newTimeTick(ctx, tsoAllocator, Params.TimeTickInterval(), checkFunc)
+	tt := newTimeTick(ctx, tsoAllocator, Params.TimeTickInterval, checkFunc)
 
 	defer func() {
 		cancel()

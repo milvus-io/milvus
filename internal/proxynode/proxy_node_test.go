@@ -345,7 +345,7 @@ func TestProxy_Search(t *testing.T) {
 		queryResultChannels := []string{"QueryResult"}
 		bufSize := 1024
 		queryResultMsgStream := pulsarms.NewPulsarMsgStream(ctx, int64(bufSize))
-		pulsarAddress := Params.PulsarAddress()
+		pulsarAddress := Params.PulsarAddress
 		queryResultMsgStream.SetPulsarClient(pulsarAddress)
 		assert.NotEqual(t, queryResultMsgStream, nil, "query result message stream should not be nil!")
 		queryResultMsgStream.CreatePulsarProducers(queryResultChannels)
@@ -417,7 +417,7 @@ func TestProxy_AssignSegID(t *testing.T) {
 	testNum := 1
 	futureTS := tsoutil.ComposeTS(time.Now().Add(time.Second*-1000).UnixNano()/int64(time.Millisecond), 0)
 	for i := 0; i < testNum; i++ {
-		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, Params.defaultPartitionTag(), int32(i), 200000, futureTS)
+		segID, err := proxyServer.segAssigner.GetSegmentID(collectionName, Params.DefaultPartitionTag, int32(i), 200000, futureTS)
 		assert.Nil(t, err)
 		fmt.Println("segID", segID)
 	}

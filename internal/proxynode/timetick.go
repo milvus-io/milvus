@@ -47,15 +47,15 @@ func newTimeTick(ctx context.Context,
 		cancel:       cancel,
 		tsoAllocator: tsoAllocator,
 		interval:     interval,
-		peerID:       Params.ProxyID(),
+		peerID:       Params.ProxyID,
 		checkFunc:    checkFunc,
 	}
 
-	t.tickMsgStream = pulsarms.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize())
-	pulsarAddress := Params.PulsarAddress()
+	t.tickMsgStream = pulsarms.NewPulsarMsgStream(t.ctx, Params.MsgStreamTimeTickBufSize)
+	pulsarAddress := Params.PulsarAddress
 
 	t.tickMsgStream.SetPulsarClient(pulsarAddress)
-	t.tickMsgStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames())
+	t.tickMsgStream.CreatePulsarProducers(Params.ProxyTimeTickChannelNames)
 	return t
 }
 
@@ -74,7 +74,7 @@ func (tt *timeTick) tick() error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{uint32(Params.ProxyID())},
+			HashValues: []uint32{uint32(Params.ProxyID)},
 		},
 		TimeTickMsg: internalpb2.TimeTickMsg{
 			Base: &commonpb.MsgBase{
