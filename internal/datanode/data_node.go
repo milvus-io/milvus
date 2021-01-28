@@ -16,7 +16,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
 
 const (
@@ -39,6 +38,7 @@ type (
 		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
 
 		SetMasterServiceInterface(ms MasterServiceInterface) error
+
 		SetDataServiceInterface(ds DataServiceInterface) error
 	}
 
@@ -55,6 +55,7 @@ type (
 	}
 
 	DataNode struct {
+		// GOOSE TODO: complete interface with component
 		ctx    context.Context
 		NodeID UniqueID
 		Role   string
@@ -79,8 +80,8 @@ func NewDataNode(ctx context.Context) *DataNode {
 	Params.Init()
 	node := &DataNode{
 		ctx:             ctx,
-		NodeID:          Params.NodeID, // GOOSE TODO How to init
-		Role:            typeutil.DataNodeRole,
+		NodeID:          Params.NodeID, // GOOSE TODO
+		Role:            "DataNode",    // GOOSE TODO
 		State:           internalpb2.StateCode_INITIALIZING,
 		dataSyncService: nil,
 		metaService:     nil,
@@ -106,7 +107,7 @@ func (node *DataNode) Init() error {
 
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_kNone,
+			MsgType:  commonpb.MsgType_kNone, //GOOSE TODO
 			SourceID: node.NodeID,
 		},
 		Address: &commonpb.Address{
@@ -117,10 +118,11 @@ func (node *DataNode) Init() error {
 
 	resp, err := node.dataService.RegisterNode(req)
 	if err != nil {
-		return errors.Errorf("Register node failed: %v", err)
+		return errors.Errorf("Init failed: %v", err)
 	}
 
 	for _, kv := range resp.InitParams.StartParams {
+		log.Println(kv)
 		switch kv.Key {
 		case "DDChannelName":
 			Params.DDChannelNames = []string{kv.Value}
@@ -148,7 +150,7 @@ func (node *DataNode) Init() error {
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 	node.replica = replica
 
-	// --- Opentracing ---
+	// Opentracing
 	cfg := &config.Configuration{
 		ServiceName: "data_node",
 		Sampler: &config.SamplerConfig{
@@ -165,6 +167,7 @@ func (node *DataNode) Init() error {
 	}
 	node.tracer = tracer
 	node.closer = closer
+
 	opentracing.SetGlobalTracer(node.tracer)
 
 	return nil
@@ -180,14 +183,12 @@ func (node *DataNode) Start() error {
 }
 
 func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	log.Println("Init insert channel names:", in.GetChannelNames())
 	Params.InsertChannelNames = append(Params.InsertChannelNames, in.GetChannelNames()...)
 
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
-	log.Println("DataNode current state:", node.State)
 	states := &internalpb2.ComponentStates{
 		State: &internalpb2.ComponentInfo{
 			NodeID:    Params.NodeID,

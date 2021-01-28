@@ -10,8 +10,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
 )
 
 type (
@@ -21,7 +19,7 @@ type (
 			ip   string
 			port int64
 		}
-		client     *datanode.Client
+		client     DataNodeClient
 		channelNum int
 	}
 	dataNodeCluster struct {
@@ -38,18 +36,11 @@ func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 	}
 }
 
-func (c *dataNodeCluster) Register(ip string, port int64, id int64) {
+func (c *dataNodeCluster) Register(dataNode *dataNode) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.checkDataNodeNotExist(ip, port) {
-		c.nodes = append(c.nodes, &dataNode{
-			id: id,
-			address: struct {
-				ip   string
-				port int64
-			}{ip: ip, port: port},
-			channelNum: 0,
-		})
+	if c.checkDataNodeNotExist(dataNode.address.ip, dataNode.address.port) {
+		c.nodes = append(c.nodes, dataNode)
 		if len(c.nodes) == Params.DataNodeNum {
 			close(c.finishCh)
 		}
@@ -120,6 +111,15 @@ func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegRequest) {
 	defer c.mu.RUnlock()
 	for _, node := range c.nodes {
 		if _, err := node.client.FlushSegments(request); err != nil {
+			log.Println(err.Error())
+			continue
+		}
+	}
+}
+
+func (c *dataNodeCluster) ShutDownClients() {
+	for _, node := range c.nodes {
+		if err := node.client.Stop(); err != nil {
 			log.Println(err.Error())
 			continue
 		}

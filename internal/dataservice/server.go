@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/distributed/datanode"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 
@@ -59,6 +61,13 @@ type MasterClient interface {
 	AllocTimestamp(in *masterpb.TsoRequest) (*masterpb.TsoResponse, error)
 	AllocID(in *masterpb.IDRequest) (*masterpb.IDResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
+}
+
+type DataNodeClient interface {
+	WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
+	GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error)
+	FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
+	Stop() error
 }
 
 type (
@@ -380,6 +389,7 @@ func (s *Server) waitDataNodeRegister() {
 }
 
 func (s *Server) Stop() error {
+	s.cluster.ShutDownClients()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
 	s.msgProducer.Close()
@@ -428,7 +438,11 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
-	s.cluster.Register(req.Address.Ip, req.Address.Port, req.Base.SourceID)
+	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	s.cluster.Register(node)
 	if s.ddChannelName == "" {
 		resp, err := s.masterClient.GetDdChannel()
 		if err != nil {
@@ -448,6 +462,25 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 		},
 	}
 	return ret, nil
+}
+
+func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
+	client := datanode.NewClient(fmt.Sprintf("%s:%d", ip, port))
+	if err := client.Init(); err != nil {
+		return nil, err
+	}
+	if err := client.Start(); err != nil {
+		return nil, err
+	}
+	return &dataNode{
+		id: id,
+		address: struct {
+			ip   string
+			port int64
+		}{ip: ip, port: port},
+		client:     client,
+		channelNum: 0,
+	}, nil
 }
 
 func (s *Server) Flush(req *datapb.FlushRequest) (*commonpb.Status, error) {
