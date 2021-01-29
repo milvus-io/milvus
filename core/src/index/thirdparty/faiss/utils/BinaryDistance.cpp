@@ -19,9 +19,8 @@
 #include <faiss/utils/utils.h>
 #include <faiss/FaissHook.h>
 #include <faiss/utils/distances.h>
-#include <faiss/utils/distances_avx.h>
-#include <faiss/utils/distances_avx512.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/jaccard-inl.h>
 #include <faiss/utils/substructure-inl.h>
 #include <faiss/utils/superstructure-inl.h>
 
@@ -103,7 +102,7 @@ int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-float bvec_jaccard_default (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) {
 #define fun_u64 accu_num += popcount64(a[i] & b[i]); accu_den += popcount64(a[i] | b[i])
 #define fun_u8(i) accu_num += lookup8bit[a[i] & b[i]]; accu_den += lookup8bit[a[i] | b[i]]
     int accu_num = 0;
@@ -112,117 +111,6 @@ float bvec_jaccard_default (const uint8_t* data1, const uint8_t* data2, const si
     return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 #undef fun_u64
 #undef fun_u8
-}
-
-float bvec_jaccard_512 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]) +
-                   popcount64(a[2] & b[2]) + popcount64(a[3] & b[3]) +
-                   popcount64(a[4] & b[4]) + popcount64(a[5] & b[5]) +
-                   popcount64(a[6] & b[6]) + popcount64(a[7] & b[7]);
-    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]) +
-                   popcount64(a[2] | b[2]) + popcount64(a[3] | b[3]) +
-                   popcount64(a[4] | b[4]) + popcount64(a[5] | b[5]) +
-                   popcount64(a[6] | b[6]) + popcount64(a[7] | b[7]);
-
-    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
-}
-
-float bvec_jaccard_256 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]) +
-                   popcount64(a[2] & b[2]) + popcount64(a[3] & b[3]);
-    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]) +
-                   popcount64(a[2] | b[2]) + popcount64(a[3] | b[3]);
-    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
-}
-
-float bvec_jaccard_128 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    int accu_num = popcount64(a[0] & b[0]) + popcount64(a[1] & b[1]);
-    int accu_den = popcount64(a[0] | b[0]) + popcount64(a[1] | b[1]);
-    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
-}
-
-float bvec_jaccard_64 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    int accu_num = popcount64(a[0] & b[0]);
-    int accu_den = popcount64(a[0] | b[0]);
-    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
-}
-
-Jaccard_Computer
-Get_Jaccard_Computer(size_t dim) {
-    if (support_avx512() && dim > 1024) {
-        return jaccard__AVX512;
-    }
-    if (support_avx2() && dim > 512) {
-        return jaccard__AVX2;
-    }
-    switch (dim) {
-        case 512: return bvec_jaccard_512;
-        case 256: return bvec_jaccard_256;
-        case 128: return bvec_jaccard_128;
-        case 64: return bvec_jaccard_64;
-        default: return bvec_jaccard_default;
-    }
-}
-
-int bvec_hamming_512 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]) +
-           popcount64(a[2] ^ b[2]) + popcount64(a[3] ^ b[3]) +
-           popcount64(a[4] ^ b[4]) + popcount64(a[5] ^ b[5]) +
-           popcount64(a[6] ^ b[6]) + popcount64(a[7] ^ b[7]);
-}
-
-int bvec_hamming_256 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]) +
-           popcount64(a[2] ^ b[2]) + popcount64(a[3] ^ b[3]);
-}
-
-int bvec_hamming_128 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    return popcount64(a[0] ^ b[0]) + popcount64(a[1] ^ b[1]);
-}
-
-int bvec_hamming_64 (const uint8_t* data1, const uint8_t* data2, const size_t n) {
-    auto a = reinterpret_cast<const uint64_t*>(data1);
-    auto b = reinterpret_cast<const uint64_t*>(data2);
-
-    return popcount64(a[0] ^ b[0]);
-}
-
-Hamming_Computer
-Get_Hamming_Computer(size_t dim) {
-    if (support_avx512() && dim > 1024) {
-        return xor_popcnt_AVX512VBMI_lookup;
-    }
-    if (support_avx2() && dim > 512) {
-        return xor_popcnt_AVX2_lookup;
-    }
-    switch (dim) {
-        case 512: return bvec_hamming_512;
-        case 256: return bvec_hamming_256;
-        case 128: return bvec_hamming_128;
-        case 64: return bvec_hamming_64;
-        default: return xor_popcnt;
-    }
 }
 
 static const size_t size_1M = 1 * 1024 * 1024;
@@ -404,17 +292,16 @@ void binary_distance_knn_mc (
 }
 
 
-template <class T2, class Computer>
+template <class C, class MetricComputer>
 void binary_distance_knn_hc (
-        Computer computer,
         int bytes_per_code,
-        T2 * ha,
+        HeapArray<C> * ha,
         const uint8_t * bs1,
         const uint8_t * bs2,
         size_t n2,
         const BitsetView& bitset = nullptr)
 {
-    typedef typename T2::T T1;
+    typedef typename C::T T;
     size_t k = ha->k;
 
     size_t l3_size = get_L3_Size();
@@ -423,17 +310,22 @@ void binary_distance_knn_hc (
     /*
      * Here is an empirical formula, and later we may propose a more reasonable strategy.
      */
-    if ((bytes_per_code + k * (sizeof(T1) + sizeof(int64_t))) * ha->nh * thread_max_num <= l3_size &&
+    if ((bytes_per_code + k * (sizeof(T) + sizeof(int64_t))) * ha->nh * thread_max_num <= l3_size &&
             (ha->nh < (n2 >> 11) + thread_max_num / 3)) {
         // init heap
         size_t thread_heap_size = ha->nh * k;
         size_t all_heap_size = thread_heap_size * thread_max_num;
-        T1 *value = new T1[all_heap_size];
+        T *value = new T[all_heap_size];
         int64_t *labels = new int64_t[all_heap_size];
-        T1 init_value = (typeid(T1) == typeid(float)) ? (1.0 / 0.0) : 0x7fffffff;
+        T init_value = (typeid(T) == typeid(float)) ? (1.0 / 0.0) : 0x7fffffff;
         for (int i = 0; i < all_heap_size; i++) {
             value[i] = init_value;
             labels[i] = -1;
+        }
+
+        MetricComputer *hc = new MetricComputer[ha->nh];
+        for (size_t i = 0; i < ha->nh; i++) {
+            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
         }
 
 #pragma omp parallel for
@@ -443,11 +335,11 @@ void binary_distance_knn_hc (
 
                 const uint8_t * bs2_ = bs2 + j * bytes_per_code;
                 for (size_t i = 0; i < ha->nh; i++) {
-                    T1 dis = computer(bs1 + i * bytes_per_code, bs2_, bytes_per_code);
-                    T1 * val_ = value + thread_no * thread_heap_size + i * k;
-                    int64_t * ids_ = labels + thread_no * thread_heap_size + i * k;
-                    if (  dis < val_[0]) {
-                        faiss::maxheap_swap_top<T1> (k, val_, ids_, dis, j);
+                    T dis = hc[i].compute (bs2_);
+                    T *val_ = value + thread_no * thread_heap_size + i * k;
+                    int64_t *ids_ = labels + thread_no * thread_heap_size + i * k;
+                    if (C::cmp(val_[0], dis)) {
+                        faiss::heap_swap_top<C>(k, val_, ids_, dis, j);
                     }
                 }
             }
@@ -456,20 +348,20 @@ void binary_distance_knn_hc (
         for (size_t t = 1; t < thread_max_num; t++) {
             // merge heap
             for (size_t i = 0; i < ha->nh; i++) {
-                T1 * __restrict value_x = value + i * k;
+                T * __restrict value_x = value + i * k;
                 int64_t * __restrict labels_x = labels + i * k;
-                T1 *value_x_t = value_x + t * thread_heap_size;
+                T *value_x_t = value_x + t * thread_heap_size;
                 int64_t *labels_x_t = labels_x + t * thread_heap_size;
                 for (size_t j = 0; j < k; j++) {
-                    if (value_x_t[j] < value_x[0]) {
-                        faiss::maxheap_swap_top<T1> (k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
+                    if (C::cmp(value_x[0], value_x_t[j])) {
+                        faiss::heap_swap_top<C>(k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
                     }
                 }
             }
         }
 
         // copy result
-        memcpy(ha->val, value, thread_heap_size * sizeof(T1));
+        memcpy(ha->val, value, thread_heap_size * sizeof(T));
         memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
 
         delete[] value;
@@ -484,16 +376,17 @@ void binary_distance_knn_hc (
             const size_t j1 = std::min(j0 + block_size, n2);
 #pragma omp parallel for
             for (size_t i = 0; i < ha->nh; i++) {
+                MetricComputer hc (bs1 + i * bytes_per_code, bytes_per_code);
+
                 const uint8_t *bs2_ = bs2 + j0 * bytes_per_code;
-                T1 dis;
-                T1 *__restrict bh_val_ = ha->val + i * k;
+                T dis;
+                T *__restrict bh_val_ = ha->val + i * k;
                 int64_t *__restrict bh_ids_ = ha->ids + i * k;
-                size_t j;
-                for (j = j0; j < j1; j++, bs2_ += bytes_per_code) {
+                for (size_t j = j0; j < j1; j++, bs2_ += bytes_per_code) {
                     if (!bitset || !bitset.test(j)) {
-                        dis = computer(bs1 + i * bytes_per_code, bs2_, bytes_per_code);
-                        if (dis < bh_val_[0]) {
-                            faiss::maxheap_swap_top<T1>(k, bh_val_, bh_ids_, dis, j);
+                        dis = hc.compute (bs2_);
+                        if (C::cmp(bh_val_[0], dis)) {
+                            faiss::heap_swap_top<C>(k, bh_val_, bh_ids_, dis, j);
                         }
                     }
                 }
@@ -504,10 +397,10 @@ void binary_distance_knn_hc (
     ha->reorder ();
 }
 
-template <class T1>
+template <class C>
 void binary_distance_knn_hc (
         MetricType metric_type,
-        T1 * ha,
+        HeapArray<C> * ha,
         const uint8_t * a,
         const uint8_t * b,
         size_t nb,
@@ -516,23 +409,74 @@ void binary_distance_knn_hc (
 {
     size_t dim = ncodes * 8;
     switch (metric_type) {
-        case METRIC_Jaccard: {
-            auto jaccard = Get_Jaccard_Computer(dim);
-            binary_distance_knn_hc(jaccard, ncodes, ha, a, b, nb, bitset);
-            break;
+    case METRIC_Jaccard: {
+        if (support_avx512() && ncodes > 128) {
+            binary_distance_knn_hc<C, faiss::JaccardComputerAVX512>
+                    (ncodes, ha, a, b, nb, bitset);
+        } else if (support_avx2() && ncodes > 64) {
+            binary_distance_knn_hc<C, faiss::JaccardComputerAVX2>
+                    (ncodes, ha, a, b, nb, bitset);
+        } else {
+            switch (ncodes) {
+#define binary_distance_knn_hc_jaccard(ncodes) \
+            case ncodes: \
+                binary_distance_knn_hc<C, faiss::JaccardComputer ## ncodes> \
+                    (ncodes, ha, a, b, nb, bitset); \
+                break;
+            binary_distance_knn_hc_jaccard(8);
+            binary_distance_knn_hc_jaccard(16);
+            binary_distance_knn_hc_jaccard(32);
+            binary_distance_knn_hc_jaccard(64);
+            binary_distance_knn_hc_jaccard(128);
+            binary_distance_knn_hc_jaccard(256);
+            binary_distance_knn_hc_jaccard(512);
+#undef binary_distence_knn_hc_jaccard
+            default:
+                binary_distance_knn_hc<C, faiss::JaccardComputerDefault>
+                        (ncodes, ha, a, b, nb, bitset);
+                break;
+            }
         }
-        case METRIC_Hamming: {
-            auto hamming = Get_Hamming_Computer(dim);
-            binary_distance_knn_hc(hamming, ncodes, ha, a, b, nb, bitset);
-            break;
+        break;
+    }
+
+    case METRIC_Hamming: {
+        if (support_avx512() && ncodes > 128) {
+            binary_distance_knn_hc<C, faiss::HammingComputerAVX512>
+                    (ncodes, ha, a, b, nb, bitset);
+        } else if (support_avx2() && ncodes > 64) {
+            binary_distance_knn_hc<C, faiss::HammingComputerAVX2>
+                    (ncodes, ha, a, b, nb, bitset);
+        } else {
+            switch (ncodes) {
+#define binary_distance_knn_hc_hamming(ncodes) \
+            case ncodes: \
+                binary_distance_knn_hc<C, faiss::HammingComputer ## ncodes> \
+                    (ncodes, ha, a, b, nb, bitset); \
+                break;
+            binary_distance_knn_hc_hamming(4);
+            binary_distance_knn_hc_hamming(8);
+            binary_distance_knn_hc_hamming(16);
+            binary_distance_knn_hc_hamming(20);
+            binary_distance_knn_hc_hamming(32);
+            binary_distance_knn_hc_hamming(64);
+#undef binary_distence_knn_hc_jaccard
+            default:
+                binary_distance_knn_hc<C, faiss::HammingComputerDefault>
+                        (ncodes, ha, a, b, nb, bitset);
+                break;
+            }
         }
-        default:
-            break;
+        break;
+    }
+
+    default:
+        break;
     }
 }
 
 template
-void binary_distance_knn_hc<int_maxheap_array_t>(
+void binary_distance_knn_hc<CMax<int, int64_t>>(
         MetricType metric_type,
         int_maxheap_array_t * ha,
         const uint8_t * a,
@@ -542,7 +486,7 @@ void binary_distance_knn_hc<int_maxheap_array_t>(
         const BitsetView& bitset);
 
 template
-void binary_distance_knn_hc<float_maxheap_array_t>(
+void binary_distance_knn_hc<CMax<float, int64_t>>(
         MetricType metric_type,
         float_maxheap_array_t * ha,
         const uint8_t * a,

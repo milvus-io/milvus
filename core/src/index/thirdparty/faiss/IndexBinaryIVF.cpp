@@ -377,7 +377,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     }
 
     uint32_t distance_to_code (const uint8_t *code) const override {
-        return hc.hamming (code);
+        return hc.compute (code);
     }
 
     size_t scan_codes (size_t n,
@@ -392,7 +392,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
             if (!bitset || !bitset.test(ids[j])) {
-                uint32_t dis = hc.hamming (codes);
+                uint32_t dis = hc.compute (codes);
                 if (dis < simi[0]) {
                     idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
                     heap_swap_top<C> (k, simi, idxi, dis, id);
@@ -412,7 +412,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     {
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            uint32_t dis = hc.hamming (codes);
+            uint32_t dis = hc.compute (codes);
             if (dis < radius) {
                 int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 result.add (dis, id);

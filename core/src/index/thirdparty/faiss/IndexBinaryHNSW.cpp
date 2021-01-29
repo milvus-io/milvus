@@ -260,12 +260,12 @@ struct FlatHammingDis : DistanceComputer {
 
   float operator () (idx_t i) override {
     ndis++;
-    return hc.hamming(b + i * code_size);
+    return hc.compute(b + i * code_size);
   }
 
   float symmetric_dis(idx_t i, idx_t j) override {
     return HammingComputerDefault(b + j * code_size, code_size)
-      .hamming(b + i * code_size);
+      .compute(b + i * code_size);
   }
 
 

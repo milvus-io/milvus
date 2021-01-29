@@ -40,28 +40,10 @@ namespace faiss {
             const uint8_t* data2,
             const size_t n);
 
-/**
- * Get a hamming function pointer
-*/
-    typedef int (*Hamming_Computer)(
+    extern float bvec_jaccard (
             const uint8_t* data1,
             const uint8_t* data2,
             const size_t n);
-
-    extern Hamming_Computer
-    Get_Hamming_Computer(size_t dim = 0);
-
-/**
- * Get a jaccard function pointer
-*/
-    typedef float (*Jaccard_Computer)(
-            const uint8_t* data1,
-            const uint8_t* data2,
-            const size_t n);
-
-    extern Jaccard_Computer
-    Get_Jaccard_Computer(size_t dim = 0);
-
 
     inline float Jaccard_2_Tanimoto (float jcd) {
         return -log2(1 - jcd);
@@ -97,10 +79,10 @@ namespace faiss {
  * @param ordered if != 0: order the results by decreasing distance
  *                (may be bottleneck for k/n > 0.01)
  */
-    template <class T1>
+    template <class C>
     void binary_distance_knn_hc (
             MetricType metric_type,
-            T1 * ha,
+            HeapArray<C> * ha,
             const uint8_t * a,
             const uint8_t * b,
             size_t nb,
@@ -109,7 +91,7 @@ namespace faiss {
 
 
     extern template
-    void binary_distance_knn_hc<int_maxheap_array_t>(
+    void binary_distance_knn_hc<CMax<int, int64_t>>(
             MetricType metric_type,
             int_maxheap_array_t * ha,
             const uint8_t * a,
@@ -119,7 +101,7 @@ namespace faiss {
             const BitsetView& bitset);
 
     extern template
-    void binary_distance_knn_hc<float_maxheap_array_t>(
+    void binary_distance_knn_hc<CMax<float, int64_t>>(
             MetricType metric_type,
             float_maxheap_array_t * ha,
             const uint8_t * a,

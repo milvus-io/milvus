@@ -1,4 +1,6 @@
 #include <faiss/utils/BinaryDistance.h>
+#include <faiss/utils/distances_avx.h>
+#include <faiss/utils/distances_avx512.h>
 
 namespace faiss {
 
@@ -335,10 +337,51 @@ struct JaccardComputer256 {
 
     };
 
+    struct JaccardComputerAVX2 {
+        const uint8_t *a;
+        int n;
+
+        JaccardComputerAVX2 () {}
+
+        JaccardComputerAVX2 (const uint8_t *a8, int code_size) {
+            set (a8, code_size);
+        }
+
+        void set (const uint8_t *a8, int code_size) {
+            a =  a8;
+            n = code_size;
+        }
+
+        float compute (const uint8_t *b8) const {
+            return jaccard__AVX2(a, b8, n);
+        }
+
+    };
+
+    struct JaccardComputerAVX512 {
+        const uint8_t *a;
+        int n;
+
+        JaccardComputerAVX512 () {}
+
+        JaccardComputerAVX512 (const uint8_t *a8, int code_size) {
+            set (a8, code_size);
+        }
+
+        void set (const uint8_t *a8, int code_size) {
+            a =  a8;
+            n = code_size;
+        }
+
+        float compute (const uint8_t *b8) const {
+            return jaccard__AVX512(a, b8, n);
+        }
+
+    };
+
     struct JaccardComputerDefault {
         const uint8_t *a;
         int n;
-        Jaccard_Computer computer_ptr;
 
         JaccardComputerDefault () {}
 
@@ -349,11 +392,10 @@ struct JaccardComputer256 {
         void set (const uint8_t *a8, int code_size) {
             a =  a8;
             n = code_size;
-            computer_ptr = Get_Jaccard_Computer(code_size * 8);
         }
 
         float compute (const uint8_t *b8) const {
-            return computer_ptr(a, b8, n);
+            return bvec_jaccard(a, b8, n);
         }
 
     };

@@ -409,7 +409,7 @@ void hamming_range_search_template (
 #pragma omp for
         for (size_t j = 0; j < nb; j++) {
             if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
-                int dis = hc.hamming (yi + j * code_size);
+                int dis = hc.compute (yi + j * code_size);
                 if (dis < radius) {
                     qres.add(dis, j);
                 }
@@ -565,7 +565,7 @@ static void hamming_dis_inner_loop (
     HammingComputer hc (ca, code_size);
 
     for (size_t j = 0; j < nb; j++) {
-        int ndiff = hc.hamming (cb);
+        int ndiff = hc.compute (cb);
         cb += code_size;
         if (ndiff < bh_val_[0]) {
             maxheap_swap_top<hamdis_t> (k, bh_val_, bh_ids_, ndiff, j);
