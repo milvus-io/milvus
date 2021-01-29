@@ -141,16 +141,9 @@ func (s *ServiceImpl) Stop() error {
 	s.tick.Close()
 	log.Println("close time tick")
 
-	var err error
-	nodeClients, err := s.nodeInfos.ObtainAllClients()
+	err := s.nodeInfos.ReleaseAllClients()
 	if err != nil {
-		return err
-	}
-	for _, nodeClient := range nodeClients {
-		err = nodeClient.Stop()
-		if err != nil {
-			return err
-		}
+		panic(err)
 	}
 	log.Println("stop all node clients ...")
 

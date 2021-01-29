@@ -79,6 +79,8 @@ func (table *GlobalNodeInfoTable) Register(id UniqueID, info *NodeInfo) error {
 }
 
 func (table *GlobalNodeInfoTable) createClients() error {
+	log.Println("infos: ", table.infos)
+	log.Println("clients: ", table.clients)
 	if len(table.clients) == len(table.infos) {
 		return nil
 	}
@@ -91,13 +93,33 @@ func (table *GlobalNodeInfoTable) createClients() error {
 			var err error
 			err = table.clients[nodeID].Init()
 			if err != nil {
-				return err
+				panic(err)
 			}
 			err = table.clients[nodeID].Start()
 			if err != nil {
-				return err
+				panic(err)
 			}
 		}
+	}
+
+	return nil
+}
+
+func (table *GlobalNodeInfoTable) ReleaseAllClients() error {
+	table.createClientMtx.Lock()
+	log.Println("get write lock")
+	defer func() {
+		table.createClientMtx.Unlock()
+		log.Println("release write lock")
+	}()
+
+	var err error
+	for id, client := range table.clients {
+		err = client.Stop()
+		if err != nil {
+			panic(err)
+		}
+		delete(table.clients, id)
 	}
 
 	return nil
