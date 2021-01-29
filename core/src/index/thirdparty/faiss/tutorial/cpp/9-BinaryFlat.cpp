@@ -46,6 +46,7 @@ int main() {
 #else
     faiss::IndexBinaryFlat index(d, faiss::MetricType::METRIC_Jaccard);
 #endif
+
     index.add(nb, xb);
     printf("ntotal = %ld d = %d\n", index.ntotal, index.d);
 
@@ -64,7 +65,7 @@ int main() {
             for(int j = 0; j < k; j++)
 #ifdef TEST_HAMMING
                 printf("%8ld %d\n", I[i * k + j], D[i * k + j]);
-#else 
+#else
                 printf("%8ld %.08f\n", I[i * k + j], d_float[i * k + j]);
 #endif
             printf("\n");
@@ -94,11 +95,11 @@ int main() {
                 for(int j = 0; j < k; j++)
 #ifdef TEST_HAMMING
                     printf("%8ld %d\n", I[i * k + j], D[i * k + j]);
-#else 
+#else
                     printf("%8ld %.08f\n", I[j + i * k], d_float[j + i * k]);
 #endif
                 printf("\n");
-            }
+
 #endif
         }
 
