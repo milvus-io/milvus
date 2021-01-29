@@ -89,7 +89,8 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop() error {
-	return s.Stop()
+	s.grpcServer.Stop()
+	return s.node.Stop()
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {

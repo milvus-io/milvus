@@ -17,7 +17,7 @@ import (
 const (
 	Ts              = "ts"
 	DDL             = "ddl"
-	indexParamsFile = "indexParams"
+	IndexParamsFile = "indexParams"
 )
 
 type (
@@ -640,14 +640,14 @@ func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string)
 	if err != nil {
 		return nil, err
 	}
-	blobs = append(blobs, &Blob{Key: indexParamsFile, Value: paramsBytes})
+	blobs = append(blobs, &Blob{Key: IndexParamsFile, Value: paramsBytes})
 	return blobs, nil
 }
 
 func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, error) {
 	var params map[string]string
 	for i := 0; i < len(blobs); i++ {
-		if blobs[i].Key != indexParamsFile {
+		if blobs[i].Key != IndexParamsFile {
 			continue
 		}
 		if err := json.Unmarshal(blobs[i].Value, &params); err != nil {

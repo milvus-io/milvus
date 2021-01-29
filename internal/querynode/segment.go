@@ -232,7 +232,7 @@ func (s *Segment) setIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValue
 	return nil
 }
 
-func (s *Segment) matchIndexParam(fieldID int64, indexParamKv []*commonpb.KeyValuePair) bool {
+func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 	s.paramMutex.RLock()
 	defer s.paramMutex.RUnlock()
 	fieldIndexParam := s.indexParam[fieldID]
@@ -241,12 +241,12 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParamKv []*commonpb.KeyVal
 	}
 	paramSize := len(s.indexParam)
 	matchCount := 0
-	for _, param := range indexParamKv {
-		value, ok := fieldIndexParam[param.Key]
+	for k, v := range indexParams {
+		value, ok := fieldIndexParam[k]
 		if !ok {
 			return false
 		}
-		if param.Value != value {
+		if v != value {
 			return false
 		}
 		matchCount++

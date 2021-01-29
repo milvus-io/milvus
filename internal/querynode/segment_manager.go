@@ -42,7 +42,7 @@ func (s *segmentManager) seekSegment(positions []*internalPb.MsgPosition) error 
 }
 
 //TODO, index params
-func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, indexParam, error) {
+func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, UniqueID, error) {
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_kDescribeSegment,
@@ -52,9 +52,9 @@ func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID)
 	}
 	response, err := s.masterClient.DescribeSegment(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, 0, err
 	}
-	return response.IndexID, nil, nil
+	return response.IndexID, response.BuildID, nil
 }
 
 func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID, segmentIDs []UniqueID, fieldIDs []int64) error {
@@ -70,16 +70,22 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		}
 	}
 	for _, segmentID := range segmentIDs {
-		indexID, indexParams, err := s.getIndexInfo(collectionID, segmentID)
-		if err != nil {
-			return err
+		// we don't need index id yet
+		_, buildID, err := s.getIndexInfo(collectionID, segmentID)
+		if err == nil {
+			// we don't need load vector fields
+			vectorFields, err := s.replica.getVecFieldsBySegmentID(segmentID)
+			if err != nil {
+				return err
+			}
+			fieldIDs = s.filterOutVectorFields(fieldIDs, vectorFields)
 		}
 		paths, srcFieldIDs, err := s.getInsertBinlogPaths(segmentID)
 		if err != nil {
 			return err
 		}
 
-		targetFields := s.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
+		targetFields := s.getTargetFields(paths, srcFieldIDs, fieldIDs)
 		// replace segment
 		err = s.replica.removeSegment(segmentID)
 		if err != nil {
@@ -93,11 +99,11 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		if err != nil {
 			return err
 		}
-		indexPaths, err := s.getIndexPaths(indexID)
+		indexPaths, err := s.getIndexPaths(buildID)
 		if err != nil {
 			return err
 		}
-		err = s.loadIndex(segmentID, indexPaths, indexParams)
+		err = s.loadIndex(segmentID, indexPaths)
 		if err != nil {
 			// TODO: return or continue?
 			return err
@@ -133,7 +139,17 @@ func (s *segmentManager) getInsertBinlogPaths(segmentID UniqueID) ([]*internalPb
 	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
-func (s *segmentManager) filterOutNeedlessFields(paths []*internalPb.StringList, srcFieldIDS []int64, dstFields []int64) map[int64]*internalPb.StringList {
+func (s *segmentManager) filterOutVectorFields(fieldIDs []int64, vectorFields map[int64]string) []int64 {
+	targetFields := make([]int64, 0)
+	for _, id := range fieldIDs {
+		if _, ok := vectorFields[id]; !ok {
+			targetFields = append(targetFields, id)
+		}
+	}
+	return targetFields
+}
+
+func (s *segmentManager) getTargetFields(paths []*internalPb.StringList, srcFieldIDS []int64, dstFields []int64) map[int64]*internalPb.StringList {
 	targetFields := make(map[int64]*internalPb.StringList)
 
 	containsFunc := func(s []int64, e int64) bool {
@@ -156,6 +172,11 @@ func (s *segmentManager) filterOutNeedlessFields(paths []*internalPb.StringList,
 
 func (s *segmentManager) loadSegmentFieldsData(segmentID UniqueID, targetFields map[int64]*internalPb.StringList) error {
 	for id, p := range targetFields {
+		if id == timestampFieldID {
+			// seg core doesn't need timestamp field
+			continue
+		}
+
 		paths := p.Values
 		blobs := make([]*storage.Blob, 0)
 		for _, path := range paths {
@@ -233,13 +254,14 @@ func (s *segmentManager) loadSegmentFieldsData(segmentID UniqueID, targetFields 
 	return nil
 }
 
-func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
+func (s *segmentManager) getIndexPaths(buildID UniqueID) ([]string, error) {
 	if s.indexClient == nil {
 		return nil, errors.New("null index service client")
 	}
 
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
-		IndexIDs: []UniqueID{indexID},
+		// TODO: rename indexIDs to buildIDs
+		IndexIDs: []UniqueID{buildID},
 	}
 	pathResponse, err := s.indexClient.GetIndexFilePaths(indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
@@ -253,7 +275,7 @@ func (s *segmentManager) getIndexPaths(indexID UniqueID) ([]string, error) {
 	return pathResponse.FilePaths[0].IndexFilePaths, nil
 }
 
-func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string, indexParam indexParam) error {
+func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string) error {
 	// get vector field ids from schema to load index
 	vecFieldIDs, err := s.replica.getVecFieldsBySegmentID(segmentID)
 	if err != nil {
@@ -261,7 +283,7 @@ func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string, inde
 	}
 	for id, name := range vecFieldIDs {
 		// non-blocking send
-		go s.sendLoadIndex(indexPaths, segmentID, id, name, indexParam)
+		go s.sendLoadIndex(indexPaths, segmentID, id, name)
 	}
 
 	return nil
@@ -270,25 +292,15 @@ func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string, inde
 func (s *segmentManager) sendLoadIndex(indexPaths []string,
 	segmentID int64,
 	fieldID int64,
-	fieldName string,
-	indexParams map[string]string) {
-	var indexParamsKV []*commonpb.KeyValuePair
-	for key, value := range indexParams {
-		indexParamsKV = append(indexParamsKV, &commonpb.KeyValuePair{
-			Key:   key,
-			Value: value,
-		})
-	}
-
+	fieldName string) {
 	loadIndexRequest := internalPb.LoadIndex{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_kSearchResult,
 		},
-		SegmentID:   segmentID,
-		FieldName:   fieldName,
-		FieldID:     fieldID,
-		IndexPaths:  indexPaths,
-		IndexParams: indexParamsKV,
+		SegmentID:  segmentID,
+		FieldName:  fieldName,
+		FieldID:    fieldID,
+		IndexPaths: indexPaths,
 	}
 
 	loadIndexMsg := &msgstream.LoadIndexMsg{

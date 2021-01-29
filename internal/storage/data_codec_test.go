@@ -313,7 +313,7 @@ func TestIndexCodec(t *testing.T) {
 	blobsInput, err := indexCodec.Serialize(blobs, indexParams)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 4, len(blobsInput))
-	assert.EqualValues(t, indexParamsFile, blobsInput[3])
+	assert.EqualValues(t, IndexParamsFile, blobsInput[3])
 	blobsOutput, indexParamsOutput, err := indexCodec.Deserialize(blobsInput)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, len(blobsOutput))

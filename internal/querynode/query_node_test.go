@@ -12,11 +12,15 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 )
 
 const ctxTimeInMillisecond = 5000
 const closeWithDeadline = true
+
+type queryServiceMock struct{}
 
 func setup() {
 	Params.Init()
@@ -131,6 +135,11 @@ func newQueryNodeMock() *QueryNode {
 	}
 
 	svr := NewQueryNode(ctx, 0)
+	err := svr.SetQueryService(&queryServiceMock{})
+	if err != nil {
+		panic(err)
+	}
+
 	return svr
 
 }
@@ -151,6 +160,17 @@ func refreshChannelNames() {
 	Params.SearchResultChannelNames = makeNewChannelNames(Params.SearchResultChannelNames, suffix)
 	Params.StatsChannelName = Params.StatsChannelName + suffix
 	Params.LoadIndexChannelNames = makeNewChannelNames(Params.LoadIndexChannelNames, suffix)
+}
+
+func (q *queryServiceMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+	return &querypb.RegisterNodeResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		InitParams: &internalpb2.InitParams{
+			NodeID: int64(1),
+		},
+	}, nil
 }
 
 func TestMain(m *testing.M) {

@@ -64,8 +64,8 @@ func (c *dataNodeCluster) GetNodeIDs() []int64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ret := make([]int64, len(c.nodes))
-	for i, node := range c.nodes {
-		ret[i] = node.id
+	for _, node := range c.nodes {
+		ret = append(ret, node.id)
 	}
 	return ret
 }

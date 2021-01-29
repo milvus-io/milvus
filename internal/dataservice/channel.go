@@ -49,14 +49,13 @@ func (cm *insertChannelManager) AllocChannels(collectionID UniqueID, groupNum in
 			group = make([]string, m)
 		}
 		for k := 0; k < len(group); k++ {
-			group[k] = Params.InsertChannelPrefixName + strconv.Itoa(cm.count)
+			group = append(group, Params.InsertChannelPrefixName+strconv.Itoa(cm.count))
 			cm.count++
 		}
 		i += int64(len(group))
 		j++
 		cg = append(cg, group)
 	}
-	cm.channelGroups[collectionID] = cg
 	return cg, nil
 }
 

@@ -59,7 +59,7 @@ func (s *Server) init() error {
 	proxyservice.Params.Init()
 
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.ServicePort)
+	s.startGrpcLoop(Params.ServicePort)
 	// wait for grpc server loop start
 	if err := <-s.grpcErrChan; err != nil {
 		return err

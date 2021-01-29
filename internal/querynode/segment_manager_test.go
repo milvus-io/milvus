@@ -137,7 +137,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	return paths, fieldIDs, nil
 }
 
-func generateIndex(segmentID UniqueID) ([]string, indexParam, error) {
+func generateIndex(segmentID UniqueID) ([]string, error) {
 	const (
 		msgLength = 1000
 		DIM       = 16
@@ -174,12 +174,12 @@ func generateIndex(segmentID UniqueID) ([]string, indexParam, error) {
 
 	index, err := indexnode.NewCIndex(typeParams, indexParams)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	option := &minioKV.Option{
@@ -193,26 +193,33 @@ func generateIndex(segmentID UniqueID) ([]string, indexParam, error) {
 
 	kv, err := minioKV.NewMinIOKV(context.Background(), option)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	//save index to minio
+	// save index to minio
 	binarySet, err := index.Serialize()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+
+	// serialize index params
+	var indexCodec storage.IndexCodec
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams)
+	if err != nil {
+		return nil, err
 	}
 
 	indexPaths := make([]string, 0)
-	for _, index := range binarySet {
-		path := strconv.Itoa(int(segmentID)) + "/" + index.Key
-		indexPaths = append(indexPaths, path)
-		err := kv.Save(path, string(index.Value))
+	for _, index := range serializedIndexBlobs {
+		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
+		indexPaths = append(indexPaths, p)
+		err := kv.Save(p, string(index.Value))
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
-	return indexPaths, indexParams, nil
+	return indexPaths, nil
 }
 
 func doInsert(ctx context.Context, collectionName string, partitionTag string, segmentID UniqueID) error {
@@ -328,11 +335,6 @@ func doInsert(ctx context.Context, collectionName string, partitionTag string, s
 		return err
 	}
 
-	//messages := insertStream.Consume()
-	//for _, msg := range messages.Msgs {
-	//
-	//}
-
 	return nil
 }
 
@@ -420,16 +422,16 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 	assert.NoError(t, err)
 
-	fieldsMap := node.segManager.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
+	fieldsMap := node.segManager.getTargetFields(paths, srcFieldIDs, fieldIDs)
 	assert.Equal(t, len(fieldsMap), 2)
 
 	err = node.segManager.loadSegmentFieldsData(segmentID, fieldsMap)
 	assert.NoError(t, err)
 
-	indexPaths, indexParams, err := generateIndex(segmentID)
+	indexPaths, err := generateIndex(segmentID)
 	assert.NoError(t, err)
 
-	err = node.segManager.loadIndex(segmentID, indexPaths, indexParams)
+	err = node.segManager.loadIndex(segmentID, indexPaths)
 	assert.NoError(t, err)
 
 	// do search
@@ -507,7 +509,7 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 //	//paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 //	//assert.NoError(t, err)
 //
-//	//fieldsMap := node.segManager.filterOutNeedlessFields(paths, srcFieldIDs, fieldIDs)
+//	//fieldsMap := node.segManager.getTargetFields(paths, srcFieldIDs, fieldIDs)
 //	//assert.Equal(t, len(fieldsMap), 2)
 //
 //	segmentIDToInsert := UniqueID(3)
