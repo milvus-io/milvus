@@ -266,8 +266,6 @@ const __m256i lookup = _mm256_setr_epi8(
         );
 
 int popcnt_AVX2_lookup(const uint8_t* data, const size_t n) {
-       // printf("avx 2\n");
-
         size_t i = 0;
 
         const __m256i low_mask = _mm256_set1_epi8(0x0f);
@@ -479,7 +477,7 @@ float
 jaccard__AVX2(const uint8_t * a, const uint8_t * b, size_t n) {
     int accu_num = and_popcnt_AVX2_lookup(a,b,n);
     int accu_den = or_popcnt_AVX2_lookup(a,b,n);
-    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 }
 
 #else

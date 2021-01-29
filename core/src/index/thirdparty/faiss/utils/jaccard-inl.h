@@ -23,9 +23,7 @@ namespace faiss {
             const uint64_t *b = (uint64_t *)b8;
             int accu_num = popcount64 (b[0] & a0);
             int accu_den = popcount64 (b[0] | a0);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -49,9 +47,7 @@ namespace faiss {
             const uint64_t *b = (uint64_t *)b8;
             int accu_num = popcount64 (b[0] & a0) + popcount64 (b[1] & a1);
             int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -77,9 +73,7 @@ namespace faiss {
                            popcount64 (b[2] & a2) + popcount64 (b[3] & a3);
             int accu_den = popcount64 (b[0] | a0) + popcount64 (b[1] | a1) +
                            popcount64 (b[2] | a2) + popcount64 (b[3] | a3);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -110,9 +104,7 @@ namespace faiss {
                            popcount64 (b[2] | a2) + popcount64 (b[3] | a3) +
                            popcount64 (b[4] | a4) + popcount64 (b[5] | a5) +
                            popcount64 (b[6] | a6) + popcount64 (b[7] | a7);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -154,9 +146,7 @@ namespace faiss {
                            popcount64 (b[10] | a10) + popcount64 (b[11] | a11) +
                            popcount64 (b[12] | a12) + popcount64 (b[13] | a13) +
                            popcount64 (b[14] | a14) + popcount64 (b[15] | a15);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -220,9 +210,7 @@ struct JaccardComputer256 {
                            popcount64 (b[26] | a26) + popcount64 (b[27] | a27) +
                            popcount64 (b[28] | a28) + popcount64 (b[29] | a29) +
                            popcount64 (b[30] | a30) + popcount64 (b[31] | a31);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };
@@ -330,9 +318,7 @@ struct JaccardComputer256 {
                            popcount64 (b[58] | a58) + popcount64 (b[59] | a59) +
                            popcount64 (b[60] | a60) + popcount64 (b[61] | a61) +
                            popcount64 (b[62] | a62) + popcount64 (b[63] | a63);
-            if (accu_num == 0)
-                return 1.0;
-            return 1.0 - (float)(accu_num) / (float)(accu_den);
+            return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
         }
 
     };

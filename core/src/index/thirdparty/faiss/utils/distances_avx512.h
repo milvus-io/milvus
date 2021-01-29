@@ -39,10 +39,10 @@ int
 xor_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 int
-OR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+or_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 int
-AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
+and_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n);
 
 float
 jaccard__AVX512(const uint8_t * a, const uint8_t * b, size_t n);

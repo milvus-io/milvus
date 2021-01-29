@@ -1,6 +1,6 @@
 
 // -*- c++ -*-
-#include <faiss/utils/distances.h>
+#include <faiss/utils/distances_avx.h>
 #include <faiss/utils/distances_avx512.h>
 #include <faiss/impl/FaissAssert.h>
 
@@ -273,7 +273,6 @@ popcnt_AVX512VBMI_lookup(const uint8_t* data, const size_t n) {
 
 
     int result = _mm512_hsum_epi64(acc);
-    uint8_t lookup8bit[256];
     for (/**/; i < n; i++) {
         result += lookup8bit[data[i]];
     }
@@ -320,7 +319,6 @@ xor_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const s
 
 
     int result = _mm512_hsum_epi64(acc);
-    uint8_t lookup8bit[256];
     for (/**/; i < n; i++) {
         result += lookup8bit[data1[i]^data2[i]];
     }
@@ -329,7 +327,7 @@ xor_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const s
 }
 
 int
-OR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
+or_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
 
     size_t i = 0;
 
@@ -367,7 +365,6 @@ OR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const si
 
 
     int result = _mm512_hsum_epi64(acc);
-    uint8_t lookup8bit[256];
     for (/**/; i < n; i++) {
         result += lookup8bit[data1[i]|data2[i]];
     }
@@ -376,7 +373,7 @@ OR_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const si
 }
 
 int
-AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
+and_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const size_t n) {
 
     size_t i = 0;
 
@@ -414,7 +411,6 @@ AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const s
 
 
     int result = _mm512_hsum_epi64(acc);
-    uint8_t lookup8bit[256];
     for (/**/; i < n; i++) {
         result += lookup8bit[data1[i]&data2[i]];
     }
@@ -424,9 +420,9 @@ AND_popcnt_AVX512VBMI_lookup(const uint8_t* data1, const uint8_t* data2, const s
 
 float
 jaccard__AVX512(const uint8_t * a, const uint8_t * b, size_t n) {
-    int accu_num = AND_popcnt_AVX512VBMI_lookup(a,b,n);
-    int accu_den = OR_popcnt_AVX512VBMI_lookup(a,b,n);
-    return (accu_den == 0) ? 1.0 : (1.0 - (float)(accu_num) / (float)(accu_den));
+    int accu_num = and_popcnt_AVX512VBMI_lookup(a,b,n);
+    int accu_den = or_popcnt_AVX512VBMI_lookup(a,b,n);
+    return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 }
 
 #else

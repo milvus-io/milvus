@@ -18,7 +18,6 @@
 #include <faiss/impl/FaissAssert.h>
 #include <faiss/utils/utils.h>
 #include <faiss/FaissHook.h>
-#include <faiss/utils/distances.h>
 #include <faiss/utils/hamming.h>
 #include <faiss/utils/jaccard-inl.h>
 #include <faiss/utils/substructure-inl.h>
