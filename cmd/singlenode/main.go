@@ -140,9 +140,8 @@ func InitQueryNode(wg *sync.WaitGroup) {
 
 func InitIndexBuilder(wg *sync.WaitGroup) {
 	defer wg.Done()
-	indexnode.Init()
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := indexnode.CreateIndexNode(ctx)
+	svr, err := indexnode.NewNodeImpl(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -159,6 +158,10 @@ func InitIndexBuilder(wg *sync.WaitGroup) {
 		sig = <-sc
 		cancel()
 	}()
+
+	if err := svr.Init(); err != nil {
+		log.Fatal("init builder server failed", zap.Error(err))
+	}
 
 	if err := svr.Start(); err != nil {
 		log.Fatal("run builder server failed", zap.Error(err))

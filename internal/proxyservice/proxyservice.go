@@ -43,30 +43,3 @@ func NewServiceImpl(ctx context.Context) (*ServiceImpl, error) {
 
 	return s, nil
 }
-
-// deprecated
-func CreateProxyService(ctx context.Context) (ProxyService, error) {
-	rand.Seed(time.Now().UnixNano())
-	ctx1, cancel := context.WithCancel(ctx)
-	s := &ServiceImpl{
-		ctx:    ctx1,
-		cancel: cancel,
-	}
-
-	s.allocator = NewNodeIDAllocator()
-	s.sched = NewTaskScheduler(ctx1)
-	s.nodeInfos = NewGlobalNodeInfoTable()
-	s.stateCode = internalpb2.StateCode_ABNORMAL
-	/*
-		s.state = &internalpb2.ComponentStates{
-			State: &internalpb2.ComponentInfo{
-				NodeID:    0,
-				Role:      "proxyservice",
-				StateCode: internalpb2.StateCode_INITIALIZING,
-			},
-			SubcomponentStates: nil,
-			Status:             &commonpb.Status{},
-		}
-	*/
-	return s, nil
-}

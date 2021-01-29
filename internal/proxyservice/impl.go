@@ -39,8 +39,9 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 
 	getConfigContentByName := func(fileName string) []byte {
 		_, fpath, _, _ := runtime.Caller(0)
-		configFile := path.Dir(fpath) + "/../../../configs/" + fileName
+		configFile := path.Dir(fpath) + "/../../configs/" + fileName
 		_, err := os.Stat(configFile)
+		log.Printf("configFile = %s", configFile)
 		if os.IsNotExist(err) {
 			runPath, err := os.Getwd()
 			if err != nil {

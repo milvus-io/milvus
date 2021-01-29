@@ -24,7 +24,6 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	grpcindexserver.Init()
 	svr, err := grpcindexserver.NewServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
@@ -43,14 +42,17 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Start(); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run builder server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Stop()
+	if err := svr.Stop(); err != nil {
+		log.Fatal("stop server failed", zap.Error(err))
+	}
+
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)

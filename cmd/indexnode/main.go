@@ -24,8 +24,7 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	grpcindexnode.Init()
-	svr, err := grpcindexnode.NewGrpcServer(ctx)
+	svr, err := grpcindexnode.NewServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -43,7 +42,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Start(); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run builder server failed", zap.Error(err))
 	}
 

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
@@ -16,18 +18,16 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
-
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
 	reqTimeoutInterval = time.Second * 10
 )
 
-type IndexService struct {
+type ServiceImpl struct {
 	nodeClients *PriorityQueue
 	nodeStates  map[UniqueID]*internalpb2.ComponentStates
-	state       internalpb2.StateCode
+	stateCode   internalpb2.StateCode
 
 	ID UniqueID
 
@@ -53,14 +53,18 @@ type IndexService struct {
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-func CreateIndexService(ctx context.Context) (*IndexService, error) {
+func NewServiceImpl(ctx context.Context) (*ServiceImpl, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	i := &IndexService{
+	i := &ServiceImpl{
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
 		nodeClients: &PriorityQueue{},
 	}
 
+	return i, nil
+}
+
+func (i *ServiceImpl) Init() error {
 	etcdAddress := Params.EtcdAddress
 	log.Println("etcd address = ", etcdAddress)
 	connectEtcdFn := func() error {
@@ -78,19 +82,19 @@ func CreateIndexService(ctx context.Context) (*IndexService, error) {
 	}
 	err := retry.Retry(10, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
 	i.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
-		return nil, err
+		return err
 	}
 
 	i.ID, err = i.idAllocator.AllocOne()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	connectMinIOFn := func() error {
@@ -111,33 +115,29 @@ func CreateIndexService(ctx context.Context) (*IndexService, error) {
 	}
 	err = retry.Retry(10, time.Millisecond*200, connectMinIOFn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.kv, i.metaTable)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return i, nil
-}
-
-func (i *IndexService) Init() error {
+	i.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 	return nil
 }
 
-func (i *IndexService) Start() error {
+func (i *ServiceImpl) Start() error {
 	i.sched.Start()
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Print("IndexService  closed.")
+	log.Print("ServiceImpl  start")
 
 	return nil
 }
 
-func (i *IndexService) Stop() error {
+func (i *ServiceImpl) Stop() error {
 	i.loopCancel()
 	i.sched.Close()
 	for _, cb := range i.closeCallbacks {
@@ -146,12 +146,16 @@ func (i *IndexService) Stop() error {
 	return nil
 }
 
-func (i *IndexService) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (i *ServiceImpl) UpdateStateCode(code internalpb2.StateCode) {
+	i.stateCode = code
+}
+
+func (i *ServiceImpl) GetComponentStates() (*internalpb2.ComponentStates, error) {
 
 	stateInfo := &internalpb2.ComponentInfo{
 		NodeID:    i.ID,
-		Role:      "IndexService",
-		StateCode: i.state,
+		Role:      "ServiceImpl",
+		StateCode: i.stateCode,
 	}
 
 	ret := &internalpb2.ComponentStates{
@@ -164,15 +168,15 @@ func (i *IndexService) GetComponentStates() (*internalpb2.ComponentStates, error
 	return ret, nil
 }
 
-func (i *IndexService) GetTimeTickChannel() (string, error) {
+func (i *ServiceImpl) GetTimeTickChannel() (string, error) {
 	return "", nil
 }
 
-func (i *IndexService) GetStatisticsChannel() (string, error) {
+func (i *ServiceImpl) GetStatisticsChannel() (string, error) {
 	return "", nil
 }
 
-func (i *IndexService) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -221,7 +225,7 @@ func (i *IndexService) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Buil
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
+func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -239,7 +243,7 @@ func (i *IndexService) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
+func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo
 
 	for _, indexID := range req.IndexIDs {
@@ -256,7 +260,7 @@ func (i *IndexService) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*i
 	return ret, nil
 }
 
-func (i *IndexService) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
+func (i *ServiceImpl) NotifyBuildIndex(nty *indexpb.BuildIndexNotification) (*commonpb.Status, error) {
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}

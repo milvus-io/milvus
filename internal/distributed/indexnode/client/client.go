@@ -3,8 +3,9 @@ package grpcindexnodeclient
 import (
 	"context"
 	"errors"
-	"log"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -13,15 +14,40 @@ import (
 )
 
 type Client struct {
-	grpcClient  indexpb.IndexNodeClient
-	nodeAddress string
+	grpcClient indexpb.IndexNodeClient
+	address    string
+	ctx        context.Context
 }
 
-func (c Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (c *Client) Init() error {
+	connectGrpcFunc := func() error {
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			return err
+		}
+		c.grpcClient = indexpb.NewIndexNodeClient(conn)
+		return nil
+	}
+	err := retry.Retry(10, time.Millisecond*200, connectGrpcFunc)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) Start() error {
+	return nil
+}
+
+func (c *Client) Stop() error {
+	return nil
+}
+
+func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
 }
 
-func (c Client) GetTimeTickChannel() (string, error) {
+func (c *Client) GetTimeTickChannel() (string, error) {
 	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
 
 	if err != nil {
@@ -33,7 +59,7 @@ func (c Client) GetTimeTickChannel() (string, error) {
 	return resp.Value, nil
 }
 
-func (c Client) GetStatisticsChannel() (string, error) {
+func (c *Client) GetStatisticsChannel() (string, error) {
 	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
 
 	if err != nil {
@@ -45,44 +71,15 @@ func (c Client) GetStatisticsChannel() (string, error) {
 	return resp.Value, nil
 }
 
-func (c Client) Init() error {
-	return nil
-}
-
-func (c Client) Start() error {
-	return nil
-}
-
-func (c Client) Stop() error {
-	return nil
-}
-
-func (c *Client) tryConnect() error {
-	if c.grpcClient != nil {
-		return nil
-	}
-	ctx1, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(ctx1, c.nodeAddress, grpc.WithInsecure(), grpc.WithBlock())
-	if err != nil {
-		log.Printf("Connect to IndexNode failed, error= %v", err)
-		return err
-	}
-	c.grpcClient = indexpb.NewIndexNodeClient(conn)
-	return nil
-}
-
 func (c *Client) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {
-
 	ctx := context.TODO()
-	c.tryConnect()
-
 	return c.grpcClient.BuildIndex(ctx, req)
 }
 
 func NewClient(nodeAddress string) (*Client, error) {
 
 	return &Client{
-		nodeAddress: nodeAddress,
+		address: nodeAddress,
+		ctx:     context.Background(),
 	}, nil
 }

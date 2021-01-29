@@ -14,7 +14,7 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := grpcproxynode.NewServer()
+	svr, err := grpcproxynode.NewServer(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}

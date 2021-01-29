@@ -16,7 +16,7 @@ import (
 var ctx context.Context
 var cancel func()
 
-var buildClient *IndexNode
+var buildClient *NodeImpl
 
 var masterPort = 53101
 var masterServer *master.Master
@@ -62,7 +62,7 @@ func startMaster(ctx context.Context) {
 
 func startBuilder(ctx context.Context) {
 	var err error
-	buildClient, err = CreateIndexNode(ctx)
+	buildClient, err = NewNodeImpl(ctx)
 	if err != nil {
 		log.Print("create builder failed", zap.Error(err))
 	}
