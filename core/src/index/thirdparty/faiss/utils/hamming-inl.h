@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-
+#include <faiss/utils/BinaryDistance.h>
 
 namespace faiss {
 
@@ -93,7 +93,7 @@ struct HammingComputer4 {
         a0 = *(uint32_t *)a;
     }
 
-    inline int hamming (const uint8_t *b) const {
+    inline int compute (const uint8_t *b) const {
         return popcount64 (*(uint32_t *)b ^ a0);
     }
 
@@ -113,7 +113,7 @@ struct HammingComputer8 {
         a0 = *(uint64_t *)a;
     }
 
-    inline int hamming (const uint8_t *b) const {
+    inline int compute (const uint8_t *b) const {
         return popcount64 (*(uint64_t *)b ^ a0);
     }
 
@@ -135,7 +135,7 @@ struct HammingComputer16 {
         a0 = a[0]; a1 = a[1];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return popcount64 (b[0] ^ a0) + popcount64 (b[1] ^ a1);
     }
@@ -160,7 +160,7 @@ struct HammingComputer20 {
         a0 = a[0]; a1 = a[1]; a2 = a[2];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return popcount64 (b[0] ^ a0) + popcount64 (b[1] ^ a1) +
             popcount64 (*(uint32_t*)(b + 2) ^ a2);
@@ -182,7 +182,7 @@ struct HammingComputer32 {
         a0 = a[0]; a1 = a[1]; a2 = a[2]; a3 = a[3];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return popcount64 (b[0] ^ a0) + popcount64 (b[1] ^ a1) +
             popcount64 (b[2] ^ a2) + popcount64 (b[3] ^ a3);
@@ -206,7 +206,7 @@ struct HammingComputer64 {
         a4 = a[4]; a5 = a[5]; a6 = a[6]; a7 = a[7];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return popcount64 (b[0] ^ a0) + popcount64 (b[1] ^ a1) +
             popcount64 (b[2] ^ a2) + popcount64 (b[3] ^ a3) +
@@ -216,7 +216,6 @@ struct HammingComputer64 {
 
 };
 
-// very inefficient...
 struct HammingComputerDefault {
     const uint8_t *a;
     int n;
@@ -232,11 +231,8 @@ struct HammingComputerDefault {
         n = code_size;
     }
 
-    int hamming (const uint8_t *b8) const {
-        int accu = 0;
-        for (int i = 0; i < n; i++)
-            accu += popcount64 (a[i] ^ b8[i]);
-        return accu;
+    int compute (const uint8_t *b8) const  {
+        return xor_popcnt(a, b8, n);
     }
 
 };
@@ -257,7 +253,7 @@ struct HammingComputerM8 {
         n = code_size / 8;
     }
 
-    int hamming (const uint8_t *b8) const {
+    int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         int accu = 0;
         for (int i = 0; i < n; i++)
@@ -284,7 +280,7 @@ struct HammingComputerM4 {
         n = code_size / 4;
     }
 
-    int hamming (const uint8_t *b8) const {
+    int compute (const uint8_t *b8) const {
         const uint32_t *b = (uint32_t *)b8;
         int accu = 0;
         for (int i = 0; i < n; i++)
@@ -345,7 +341,7 @@ struct GenHammingComputer8 {
         a0 = *(uint64_t *)a;
     }
 
-    inline int hamming (const uint8_t *b) const {
+    inline int compute (const uint8_t *b) const {
         return generalized_hamming_64 (*(uint64_t *)b ^ a0);
     }
 
@@ -360,7 +356,7 @@ struct GenHammingComputer16 {
         a0 = a[0]; a1 = a[1];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return generalized_hamming_64 (b[0] ^ a0) +
             generalized_hamming_64 (b[1] ^ a1);
@@ -377,7 +373,7 @@ struct GenHammingComputer32 {
         a0 = a[0]; a1 = a[1]; a2 = a[2]; a3 = a[3];
     }
 
-    inline int hamming (const uint8_t *b8) const {
+    inline int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         return generalized_hamming_64 (b[0] ^ a0) +
             generalized_hamming_64 (b[1] ^ a1) +
@@ -397,7 +393,7 @@ struct GenHammingComputerM8 {
         n = code_size / 8;
     }
 
-    int hamming (const uint8_t *b8) const {
+    int compute (const uint8_t *b8) const {
         const uint64_t *b = (uint64_t *)b8;
         int accu = 0;
         for (int i = 0; i < n; i++)
@@ -449,7 +445,7 @@ struct HCounterState {
         k(k) {}
 
   void update_counter(const uint8_t *y, size_t j) {
-    int32_t dis = hc.hamming(y);
+    int32_t dis = hc.compute(y);
 
     if (dis <= thres) {
       if (dis < thres) {

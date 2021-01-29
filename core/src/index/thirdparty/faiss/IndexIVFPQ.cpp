@@ -969,7 +969,7 @@ struct IVFPQScannerT: QueryTables {
 
         for (size_t j = 0; j < ncode; j++) {
             const uint8_t *b_code = codes;
-            int hd = hc.hamming (b_code);
+            int hd = hc.compute (b_code);
             if (hd < ht) {
                 n_hamming_pass ++;
                 PQDecoder decoder(codes, pq.nbits);
