@@ -281,68 +281,15 @@ struct HammingComputerDefault {
 
 };
 
-struct HammingComputerM8 {
-    const uint64_t *a;
-    int n;
-
-    HammingComputerM8 () {}
-
-    HammingComputerM8 (const uint8_t *a8, int code_size) {
-        set (a8, code_size);
-    }
-
-    void set (const uint8_t *a8, int code_size) {
-        assert (code_size % 8 == 0);
-        a =  (uint64_t *)a8;
-        n = code_size / 8;
-    }
-
-    int compute (const uint8_t *b8) const {
-        const uint64_t *b = (uint64_t *)b8;
-        int accu = 0;
-        for (int i = 0; i < n; i++)
-            accu += popcount64 (a[i] ^ b[i]);
-        return accu;
-    }
-
-};
-
-// even more inefficient!
-struct HammingComputerM4 {
-    const uint32_t *a;
-    int n;
-
-    HammingComputerM4 () {}
-
-    HammingComputerM4 (const uint8_t *a4, int code_size) {
-        set (a4, code_size);
-    }
-
-    void set (const uint8_t *a4, int code_size) {
-        assert (code_size % 4 == 0);
-        a =  (uint32_t *)a4;
-        n = code_size / 4;
-    }
-
-    int compute (const uint8_t *b8) const {
-        const uint32_t *b = (uint32_t *)b8;
-        int accu = 0;
-        for (int i = 0; i < n; i++)
-             accu += popcount64 (a[i] ^ b[i]);
-        return accu;
-    }
-
-};
-
 /***************************************************************************
  * Equivalence with a template class when code size is known at compile time
  **************************************************************************/
 
 // default template
 template<int CODE_SIZE>
-struct HammingComputer: HammingComputerM8 {
+struct HammingComputer: HammingComputerDefault {
     HammingComputer (const uint8_t *a, int code_size):
-    HammingComputerM8(a, code_size) {}
+        HammingComputerDefault(a, code_size) {}
 };
 
 #define SPECIALIZED_HC(CODE_SIZE)                     \
