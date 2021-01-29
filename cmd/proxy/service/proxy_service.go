@@ -29,6 +29,7 @@ func main() {
 	var sig os.Signal
 	go func() {
 		sig = <-sc
+		log.Println("receive stop signal")
 		cancel()
 	}()
 

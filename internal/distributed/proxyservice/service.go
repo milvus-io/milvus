@@ -2,7 +2,6 @@ package grpcproxyservice
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"strconv"
@@ -18,8 +17,9 @@ import (
 )
 
 type Server struct {
-	ctx context.Context
-	wg  sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -27,10 +27,12 @@ type Server struct {
 	impl *proxyservice.ServiceImpl
 }
 
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx1 context.Context) (*Server, error) {
+	ctx, cancel := context.WithCancel(ctx1)
 
 	server := &Server{
 		ctx:         ctx,
+		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
 
@@ -47,6 +49,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
+	log.Println("proxy service init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -57,6 +60,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 	proxyservice.Params.Init()
+	log.Println("init params done")
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
@@ -65,6 +69,7 @@ func (s *Server) init() error {
 		return err
 	}
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
+	log.Println("grpc init done ...")
 
 	if err := s.impl.Init(); err != nil {
 		return err
@@ -76,7 +81,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	fmt.Println("network port: ", grpcPort)
+	log.Println("network port: ", grpcPort)
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Printf("GrpcServer:failed to listen: %v", err)
@@ -99,7 +104,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	fmt.Println("proxy ServiceImpl start ...")
+	log.Println("proxy ServiceImpl start ...")
 	if err := s.impl.Start(); err != nil {
 		return err
 	}
@@ -107,10 +112,14 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	s.impl.Stop()
+	err := s.impl.Stop()
+	if err != nil {
+		return err
+	}
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
+	s.cancel()
 	s.wg.Wait()
 	return nil
 }

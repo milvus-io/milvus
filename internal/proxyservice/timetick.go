@@ -28,6 +28,7 @@ type (
 )
 
 func (tt *TimeTickImpl) Start() error {
+	log.Println("start time tick ...")
 	tt.wg.Add(1)
 	go func() {
 		defer tt.wg.Done()

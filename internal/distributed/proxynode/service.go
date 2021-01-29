@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	grpcproxyserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
+
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -18,7 +20,6 @@ import (
 	grpcdataservice "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	grcpmasterservice "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -38,7 +39,7 @@ type Server struct {
 	port int
 
 	//todo
-	proxyServiceClient *grpcproxyservice.Client
+	proxyServiceClient *grpcproxyserviceclient.Client
 
 	// todo InitParams Service addrs
 	masterServiceClient *grcpmasterservice.GrpcClient
@@ -91,12 +92,14 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
-		return nil
+		return err
 	}
+	log.Println("proxy node init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
+	log.Println("proxy node start done ...")
 	return nil
 }
 
@@ -113,6 +116,10 @@ func (s *Server) init() error {
 	Params.Port = funcutil.GetAvailablePort()
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
+	log.Println("proxy host: ", Params.IP)
+	log.Println("proxy port: ", Params.Port)
+	log.Println("proxy address: ", Params.Address)
+
 	defer func() {
 		if err != nil {
 			err2 := s.Stop()
@@ -126,18 +133,21 @@ func (s *Server) init() error {
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
+	log.Println("create grpc server ...")
 	if err != nil {
 		return err
 	}
 
-	s.proxyServiceClient = grpcproxyservice.NewClient(Params.ProxyServiceAddress)
+	s.proxyServiceClient = grpcproxyserviceclient.NewClient(Params.ProxyServiceAddress)
 	err = s.proxyServiceClient.Init()
 	if err != nil {
 		return err
 	}
 	s.impl.SetProxyServiceClient(s.proxyServiceClient)
+	log.Println("set proxy service client ...")
 
 	masterServiceAddr := Params.MasterAddress
+	log.Println("master address: ", masterServiceAddr)
 	timeout := 3 * time.Second
 	s.masterServiceClient, err = grcpmasterservice.NewGrpcClient(masterServiceAddr, timeout)
 	if err != nil {
@@ -148,33 +158,40 @@ func (s *Server) init() error {
 		return err
 	}
 	s.impl.SetMasterClient(s.masterServiceClient)
+	log.Println("set master client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
+	log.Println("data service address ...")
 	s.dataServiceClient = grpcdataservice.NewClient(dataServiceAddr)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		return err
 	}
-
 	s.impl.SetDataServiceClient(s.dataServiceClient)
+	log.Println("set data service address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
+	log.Println("index server address: ", indexServiceAddr)
 	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
 	}
 	s.impl.SetIndexServiceClient(s.indexServiceClient)
+	log.Println("set index service client ...")
 
-	queryServiceAddr := Params.QueryServiceAddress
-	s.queryServiceClient = grpcqueryserviceclient.NewClient(queryServiceAddr)
-	err = s.queryServiceClient.Init()
-	if err != nil {
-		return err
-	}
-	s.impl.SetQueryServiceClient(s.queryServiceClient)
+	// queryServiceAddr := Params.QueryServiceAddress
+	// log.Println("query service address: ", queryServiceAddr)
+	// s.queryServiceClient = grpcqueryserviceclient.NewClient(queryServiceAddr)
+	// err = s.queryServiceClient.Init()
+	// if err != nil {
+	// 	return err
+	// }
+	// s.impl.SetQueryServiceClient(s.queryServiceClient)
+	// log.Println("set query service client ...")
 
 	proxynode.Params.Init()
+	log.Println("init params done ...")
 	proxynode.Params.NetworkPort = Params.Port
 	proxynode.Params.IP = Params.IP
 	proxynode.Params.NetworkAddress = Params.Address
@@ -184,6 +201,7 @@ func (s *Server) init() error {
 	s.impl.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
 	if err := s.impl.Init(); err != nil {
+		log.Println("impl init error: ", err)
 		return err
 	}
 

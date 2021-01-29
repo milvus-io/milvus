@@ -53,7 +53,7 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 		if err != nil {
 			panic(err)
 		}
-		return data
+		return append(data, []byte("\n")...)
 	}
 
 	channelYamlContent := getConfigContentByName(ChannelYamlContent)
@@ -65,20 +65,35 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 	writeNodeYamlContent := getConfigContentByName(WriteNodeYamlContent)
 	milvusYamlContent := getConfigContentByName(MilvusYamlContent)
 
-	var allContent []byte
-	allContent = append(allContent, channelYamlContent...)
-	allContent = append(allContent, commonYamlContent...)
-	allContent = append(allContent, dataNodeYamlContent...)
-	allContent = append(allContent, masterYamlContent...)
-	allContent = append(allContent, proxyNodeYamlContent...)
-	allContent = append(allContent, queryNodeYamlContent...)
-	allContent = append(allContent, writeNodeYamlContent...)
-	allContent = append(allContent, milvusYamlContent...)
+	appendContent := func(key string, content []byte) {
+		s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{
+			Key:   StartParamsKey + "_" + key,
+			Value: string(content),
+		})
+	}
+	appendContent(ChannelYamlContent, channelYamlContent)
+	appendContent(CommonYamlContent, commonYamlContent)
+	appendContent(DataNodeYamlContent, dataNodeYamlContent)
+	appendContent(MasterYamlContent, masterYamlContent)
+	appendContent(ProxyNodeYamlContent, proxyNodeYamlContent)
+	appendContent(QueryNodeYamlContent, queryNodeYamlContent)
+	appendContent(WriteNodeYamlContent, writeNodeYamlContent)
+	appendContent(MilvusYamlContent, milvusYamlContent)
 
-	s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{
-		Key:   StartParamsKey,
-		Value: string(allContent),
-	})
+	// var allContent []byte
+	// allContent = append(allContent, channelYamlContent...)
+	// allContent = append(allContent, commonYamlContent...)
+	// allContent = append(allContent, dataNodeYamlContent...)
+	// allContent = append(allContent, masterYamlContent...)
+	// allContent = append(allContent, proxyNodeYamlContent...)
+	// allContent = append(allContent, queryNodeYamlContent...)
+	// allContent = append(allContent, writeNodeYamlContent...)
+	// allContent = append(allContent, milvusYamlContent...)
+
+	// s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{
+	// 	Key:   StartParamsKey,
+	// 	Value: string(allContent),
+	// })
 
 	return nil
 }
@@ -89,10 +104,12 @@ func (s *ServiceImpl) Init() error {
 	if err != nil {
 		return err
 	}
+	log.Println("fill node init params ...")
 
 	serviceTimeTickMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
 	serviceTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
 	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel})
+	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
 	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
 	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
@@ -100,9 +117,12 @@ func (s *ServiceImpl) Init() error {
 		"proxyservicesub", // TODO: add config
 		util.NewUnmarshalDispatcher(),
 		1024)
+	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)
+	log.Println("create soft time tick barrier ...")
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream)
+	log.Println("create time tick ...")
 
 	s.stateCode = internalpb2.StateCode_HEALTHY
 
@@ -111,12 +131,33 @@ func (s *ServiceImpl) Init() error {
 
 func (s *ServiceImpl) Start() error {
 	s.sched.Start()
+	log.Println("start scheduler ...")
 	return s.tick.Start()
 }
 
 func (s *ServiceImpl) Stop() error {
 	s.sched.Close()
+	log.Println("close scheduler ...")
 	s.tick.Close()
+	log.Println("close time tick")
+
+	var err error
+	nodeClients, err := s.nodeInfos.ObtainAllClients()
+	if err != nil {
+		panic(err)
+		return err
+	}
+	for _, nodeClient := range nodeClients {
+		err = nodeClient.Stop()
+		if err != nil {
+			panic(err)
+			return err
+		}
+	}
+	log.Println("stop all node clients ...")
+
+	s.cancel()
+
 	return nil
 }
 
@@ -238,7 +279,7 @@ func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateC
 
 	var err error
 
-	err = s.sched.RegisterNodeTaskQueue.Enqueue(t)
+	err = s.sched.InvalidateCollectionMetaCacheTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
 	}

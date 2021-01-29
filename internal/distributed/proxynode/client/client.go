@@ -1,4 +1,4 @@
-package grpcproxynode
+package grpcproxynodeclient
 
 import (
 	"context"
