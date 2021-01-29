@@ -20,12 +20,17 @@ const (
 	reqTimeoutInterval = time.Second * 10
 )
 
+func (node *NodeImpl) UpdateStateCode(code internalpb2.StateCode) {
+	node.stateCode = code
+}
+
 func (node *NodeImpl) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) CreateCollection(request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	log.Println("create collection: ", request)
+	ctx := context.Background()
 	cct := &CreateCollectionTask{
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
@@ -62,8 +67,9 @@ func (node *NodeImpl) CreateCollection(ctx context.Context, request *milvuspb.Cr
 	return cct.result, nil
 }
 
-func (node *NodeImpl) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) DropCollection(request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	log.Println("drop collection: ", request)
+	ctx := context.Background()
 	dct := &DropCollectionTask{
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
@@ -100,8 +106,9 @@ func (node *NodeImpl) DropCollection(ctx context.Context, request *milvuspb.Drop
 	return dct.result, nil
 }
 
-func (node *NodeImpl) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (node *NodeImpl) HasCollection(request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	log.Println("has collection: ", request)
+	ctx := context.Background()
 	hct := &HasCollectionTask{
 		Condition:            NewTaskCondition(ctx),
 		HasCollectionRequest: request,
@@ -142,16 +149,17 @@ func (node *NodeImpl) HasCollection(ctx context.Context, request *milvuspb.HasCo
 	return hct.result, nil
 }
 
-func (node *NodeImpl) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) LoadCollection(request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) ReleaseCollection(request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (node *NodeImpl) DescribeCollection(request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	log.Println("describe collection: ", request)
+	ctx := context.Background()
 	dct := &DescribeCollectionTask{
 		Condition:                 NewTaskCondition(ctx),
 		DescribeCollectionRequest: request,
@@ -192,12 +200,13 @@ func (node *NodeImpl) DescribeCollection(ctx context.Context, request *milvuspb.
 	return dct.result, nil
 }
 
-func (node *NodeImpl) GetCollectionStatistics(ctx context.Context, request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
+func (node *NodeImpl) GetCollectionStatistics(request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
+func (node *NodeImpl) ShowCollections(request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {
 	log.Println("show collections")
+	ctx := context.Background()
 	sct := &ShowCollectionsTask{
 		Condition:             NewTaskCondition(ctx),
 		ShowCollectionRequest: request,
@@ -238,8 +247,9 @@ func (node *NodeImpl) ShowCollections(ctx context.Context, request *milvuspb.Sho
 	return sct.result, nil
 }
 
-func (node *NodeImpl) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) CreatePartition(request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	log.Println("create partition", request)
+	ctx := context.Background()
 	cpt := &CreatePartitionTask{
 		Condition:              NewTaskCondition(ctx),
 		CreatePartitionRequest: request,
@@ -276,8 +286,9 @@ func (node *NodeImpl) CreatePartition(ctx context.Context, request *milvuspb.Cre
 	return cpt.result, nil
 }
 
-func (node *NodeImpl) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) DropPartition(request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	log.Println("drop partition: ", request)
+	ctx := context.Background()
 	dpt := &DropPartitionTask{
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
@@ -315,8 +326,9 @@ func (node *NodeImpl) DropPartition(ctx context.Context, request *milvuspb.DropP
 	return dpt.result, nil
 }
 
-func (node *NodeImpl) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (node *NodeImpl) HasPartition(request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	log.Println("has partition: ", request)
+	ctx := context.Background()
 	hpt := &HasPartitionTask{
 		Condition:           NewTaskCondition(ctx),
 		HasPartitionRequest: request,
@@ -360,20 +372,21 @@ func (node *NodeImpl) HasPartition(ctx context.Context, request *milvuspb.HasPar
 	return hpt.result, nil
 }
 
-func (node *NodeImpl) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) LoadPartitions(request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) ReleasePartitions(request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) GetPartitionStatistics(ctx context.Context, request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
+func (node *NodeImpl) GetPartitionStatistics(request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
+func (node *NodeImpl) ShowPartitions(request *milvuspb.ShowPartitionRequest) (*milvuspb.ShowPartitionResponse, error) {
 	log.Println("show partitions: ", request)
+	ctx := context.Background()
 	spt := &ShowPartitionsTask{
 		Condition:            NewTaskCondition(ctx),
 		ShowPartitionRequest: request,
@@ -416,8 +429,9 @@ func (node *NodeImpl) ShowPartitions(ctx context.Context, request *milvuspb.Show
 	return spt.result, nil
 }
 
-func (node *NodeImpl) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) CreateIndex(request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	log.Println("create index for: ", request)
+	ctx := context.Background()
 	cit := &CreateIndexTask{
 		Condition:          NewTaskCondition(ctx),
 		CreateIndexRequest: request,
@@ -455,8 +469,9 @@ func (node *NodeImpl) CreateIndex(ctx context.Context, request *milvuspb.CreateI
 	return cit.result, nil
 }
 
-func (node *NodeImpl) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (node *NodeImpl) DescribeIndex(request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	log.Println("Describe index for: ", request)
+	ctx := context.Background()
 	dit := &DescribeIndexTask{
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
@@ -498,8 +513,9 @@ func (node *NodeImpl) DescribeIndex(ctx context.Context, request *milvuspb.Descr
 	return dit.result, nil
 }
 
-func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
+func (node *NodeImpl) GetIndexState(request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
 	// log.Println("Describe index progress for: ", request)
+	ctx := context.Background()
 	dipt := &GetIndexStateTask{
 		Condition:         NewTaskCondition(ctx),
 		IndexStateRequest: request,
@@ -540,7 +556,8 @@ func (node *NodeImpl) GetIndexState(ctx context.Context, request *milvuspb.Index
 	return dipt.result, nil
 }
 
-func (node *NodeImpl) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
+func (node *NodeImpl) Insert(request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
+	ctx := context.Background()
 	span, ctx := opentracing.StartSpanFromContext(ctx, "insert grpc received")
 	defer span.Finish()
 	span.SetTag("collection name", request.CollectionName)
@@ -607,7 +624,8 @@ func (node *NodeImpl) Insert(ctx context.Context, request *milvuspb.InsertReques
 	return it.result, nil
 }
 
-func (node *NodeImpl) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (node *NodeImpl) Search(request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	ctx := context.Background()
 	span, ctx := opentracing.StartSpanFromContext(ctx, "search grpc received")
 	defer span.Finish()
 	span.SetTag("collection name", request.CollectionName)
@@ -664,10 +682,10 @@ func (node *NodeImpl) Search(ctx context.Context, request *milvuspb.SearchReques
 	return qt.result, nil
 }
 
-func (node *NodeImpl) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
+func (node *NodeImpl) Flush(request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
-func (node *NodeImpl) GetDdChannel(ctx context.Context, request *commonpb.Empty) (*milvuspb.StringResponse, error) {
+func (node *NodeImpl) GetDdChannel(request *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }

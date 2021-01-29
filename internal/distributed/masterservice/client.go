@@ -49,6 +49,7 @@ func (c *GrpcClient) Init() error {
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
 	return nil
 }
+
 func (c *GrpcClient) Start() error {
 	return nil
 }

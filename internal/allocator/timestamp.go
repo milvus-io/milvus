@@ -3,6 +3,9 @@ package allocator
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/retry"
+	"google.golang.org/grpc"
+
 	"log"
 	"time"
 
@@ -19,6 +22,12 @@ const (
 
 type TimestampAllocator struct {
 	Allocator
+
+	masterAddress string
+	masterConn    *grpc.ClientConn
+	masterClient  masterpb.MasterServiceClient
+
+	countPerRPC uint32
 	lastTsBegin Timestamp
 	lastTsEnd   Timestamp
 	PeerID      UniqueID
@@ -27,42 +36,69 @@ type TimestampAllocator struct {
 func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &TimestampAllocator{
-		Allocator: Allocator{reqs: make(chan request, maxConcurrentRequests),
-			ctx:           ctx1,
-			cancel:        cancel,
-			masterAddress: masterAddr,
-			countPerRPC:   tsCountPerRPC,
+		Allocator: Allocator{
+			Ctx:        ctx1,
+			CancelFunc: cancel,
 		},
+		masterAddress: masterAddr,
+		countPerRPC:   tsCountPerRPC,
 	}
-	a.tChan = &ticker{
-		updateInterval: time.Second,
+	a.TChan = &Ticker{
+		UpdateInterval: time.Second,
 	}
-	a.Allocator.syncFunc = a.syncTs
-	a.Allocator.processFunc = a.processFunc
-	a.Allocator.checkSyncFunc = a.checkSyncFunc
-	a.Allocator.pickCanDoFunc = a.pickCanDoFunc
+	a.Allocator.SyncFunc = a.syncTs
+	a.Allocator.ProcessFunc = a.processFunc
+	a.Allocator.CheckSyncFunc = a.checkSyncFunc
+	a.Allocator.PickCanDoFunc = a.pickCanDoFunc
+	a.Init()
 	return a, nil
 }
 
+func (ta *TimestampAllocator) Start() error {
+	connectMasterFn := func() error {
+		return ta.connectMaster()
+	}
+	err := retry.Retry(10, time.Millisecond*200, connectMasterFn)
+	if err != nil {
+		panic("Timestamp local allocator connect to master failed")
+	}
+	ta.Allocator.Start()
+	return nil
+}
+
+func (ta *TimestampAllocator) connectMaster() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, ta.masterAddress, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Printf("Connect to master failed, error= %v", err)
+		return err
+	}
+	log.Printf("Connected to master, master_addr=%s", ta.masterAddress)
+	ta.masterConn = conn
+	ta.masterClient = masterpb.NewMasterServiceClient(conn)
+	return nil
+}
+
 func (ta *TimestampAllocator) checkSyncFunc(timeout bool) bool {
-	return timeout || len(ta.toDoReqs) > 0
+	return timeout || len(ta.ToDoReqs) > 0
 }
 
 func (ta *TimestampAllocator) pickCanDoFunc() {
 	total := uint32(ta.lastTsEnd - ta.lastTsBegin)
 	need := uint32(0)
 	idx := 0
-	for _, req := range ta.toDoReqs {
-		tReq := req.(*tsoRequest)
+	for _, req := range ta.ToDoReqs {
+		tReq := req.(*TSORequest)
 		need += tReq.count
 		if need <= total {
-			ta.canDoReqs = append(ta.canDoReqs, req)
+			ta.CanDoReqs = append(ta.CanDoReqs, req)
 			idx++
 		} else {
 			break
 		}
 	}
-	ta.toDoReqs = ta.toDoReqs[idx:]
+	ta.ToDoReqs = ta.ToDoReqs[idx:]
 }
 
 func (ta *TimestampAllocator) syncTs() bool {
@@ -88,8 +124,8 @@ func (ta *TimestampAllocator) syncTs() bool {
 	return true
 }
 
-func (ta *TimestampAllocator) processFunc(req request) error {
-	tsoRequest := req.(*tsoRequest)
+func (ta *TimestampAllocator) processFunc(req Request) error {
+	tsoRequest := req.(*TSORequest)
 	tsoRequest.timestamp = ta.lastTsBegin
 	ta.lastTsBegin++
 	return nil
@@ -104,11 +140,11 @@ func (ta *TimestampAllocator) AllocOne() (Timestamp, error) {
 }
 
 func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
-	req := &tsoRequest{
-		baseRequest: baseRequest{done: make(chan error), valid: false},
+	req := &TSORequest{
+		BaseRequest: BaseRequest{Done: make(chan error), Valid: false},
 	}
 	req.count = count
-	ta.reqs <- req
+	ta.Reqs <- req
 	req.Wait()
 
 	if !req.IsValid() {

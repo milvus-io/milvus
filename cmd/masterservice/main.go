@@ -34,8 +34,8 @@ func main() {
 	cnt := 0
 
 	psc.Params.Init()
-	log.Printf("proxy service address : %s", psc.Params.NetworkAddress())
-	proxyService := psc.NewClient(psc.Params.NetworkAddress())
+	log.Printf("proxy service address : %s", psc.Params.ServiceAddress)
+	proxyService := psc.NewClient(psc.Params.ServiceAddress)
 
 	for cnt = 0; cnt < reTryCnt; cnt++ {
 		pxStates, err := proxyService.GetComponentStates()

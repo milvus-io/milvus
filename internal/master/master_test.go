@@ -8,14 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
-	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -25,6 +20,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
+	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -1110,110 +1106,110 @@ func TestMaster(t *testing.T) {
 		assert.Equal(t, dropCollectionReq.CollectionName, dropCollectionMsg.DropCollectionRequest.CollectionName)
 	})
 
-	t.Run("TestSegmentManager_RPC", func(t *testing.T) {
-		collName := "test_coll"
-		partitionName := "test_part"
-		schema := &schemapb.CollectionSchema{
-			Name:        collName,
-			Description: "test coll",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_INT32},
-				{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_VECTOR_FLOAT, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
-			},
-		}
-		schemaBytes, err := proto.Marshal(schema)
-		assert.Nil(t, err)
-		_, err = cli.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreateCollection,
-				MsgID:     1,
-				Timestamp: Timestamp(time.Now().Unix()),
-				SourceID:  1,
-			},
-			Schema: schemaBytes,
-		})
-		assert.Nil(t, err)
-		_, err = cli.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kCreatePartition,
-				MsgID:     2,
-				Timestamp: Timestamp(time.Now().Unix()),
-				SourceID:  1,
-			},
-			CollectionName: collName,
-			PartitionName:  partitionName,
-		})
-		assert.Nil(t, err)
-
-		resp, err := cli.AssignSegmentID(ctx, &datapb.AssignSegIDRequest{
-			NodeID:   1,
-			PeerRole: typeutil.ProxyNodeRole,
-			SegIDRequests: []*datapb.SegIDRequest{
-				{Count: 10000, ChannelName: "0", CollName: collName, PartitionName: partitionName},
-			},
-		})
-		assert.Nil(t, err)
-		assignments := resp.GetSegIDAssignments()
-		assert.EqualValues(t, 1, len(assignments))
-		assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
-		assert.EqualValues(t, collName, assignments[0].CollName)
-		assert.EqualValues(t, partitionName, assignments[0].PartitionName)
-		assert.EqualValues(t, "0", assignments[0].ChannelName)
-		assert.EqualValues(t, uint32(10000), assignments[0].Count)
-
-		// test stats
-		segID := assignments[0].SegID
-		pulsarAddress := Params.PulsarAddress
-		msgStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
-		msgStream.SetPulsarClient(pulsarAddress)
-		msgStream.CreatePulsarProducers([]string{Params.QueryNodeStatsChannelName})
-		msgStream.Start()
-		defer msgStream.Close()
-
-		err = msgStream.Produce(&ms.MsgPack{
-			BeginTs: 102,
-			EndTs:   104,
-			Msgs: []ms.TsMsg{
-				&ms.QueryNodeStatsMsg{
-					QueryNodeStats: internalpb2.QueryNodeStats{
-						Base: &commonpb.MsgBase{
-							MsgType:  commonpb.MsgType_kQueryNodeStats,
-							SourceID: 1,
-						},
-						SegStats: []*internalpb2.SegmentStats{
-							{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},
-						},
-					},
-					BaseMsg: ms.BaseMsg{
-						HashValues: []uint32{0},
-					},
-				},
-			},
-		})
-		assert.Nil(t, err)
-
-		time.Sleep(500 * time.Millisecond)
-		segMeta, err := svr.metaTable.GetSegmentByID(segID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, 1000000, segMeta.GetNumRows())
-		assert.EqualValues(t, int64(600000000), segMeta.GetMemSize())
-
-		reqDrop := milvuspb.DropCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kDropCollection,
-				MsgID:     1,
-				Timestamp: Timestamp(time.Now().Unix()),
-				SourceID:  1,
-			},
-			CollectionName: collName,
-		}
-
-		// DropCollection
-		st, err := cli.DropCollection(ctx, &reqDrop)
-		assert.Nil(t, err)
-		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
-	})
+	//t.Run("TestSegmentManager_RPC", func(t *testing.T) {
+	//	collName := "test_coll"
+	//	partitionName := "test_part"
+	//	schema := &schemapb.CollectionSchema{
+	//		Name:        collName,
+	//		Description: "test coll",
+	//		AutoID:      false,
+	//		Fields: []*schemapb.FieldSchema{
+	//			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_INT32},
+	//			{FieldID: 1, Name: "f1", IsPrimaryKey: false, DataType: schemapb.DataType_VECTOR_FLOAT, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+	//		},
+	//	}
+	//	schemaBytes, err := proto.Marshal(schema)
+	//	assert.Nil(t, err)
+	//	_, err = cli.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType:   commonpb.MsgType_kCreateCollection,
+	//			MsgID:     1,
+	//			Timestamp: Timestamp(time.Now().Unix()),
+	//			SourceID:  1,
+	//		},
+	//		Schema: schemaBytes,
+	//	})
+	//	assert.Nil(t, err)
+	//	_, err = cli.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType:   commonpb.MsgType_kCreatePartition,
+	//			MsgID:     2,
+	//			Timestamp: Timestamp(time.Now().Unix()),
+	//			SourceID:  1,
+	//		},
+	//		CollectionName: collName,
+	//		PartitionName:  partitionName,
+	//	})
+	//	assert.Nil(t, err)
+	//
+	//	resp, err := cli.AssignSegmentID(ctx, &datapb.AssignSegIDRequest{
+	//		NodeID:   1,
+	//		PeerRole: typeutil.ProxyNodeRole,
+	//		SegIDRequests: []*datapb.SegIDRequest{
+	//			{Count: 10000, ChannelName: "0", CollName: collName, PartitionName: partitionName},
+	//		},
+	//	})
+	//	assert.Nil(t, err)
+	//	assignments := resp.GetSegIDAssignments()
+	//	assert.EqualValues(t, 1, len(assignments))
+	//	assert.EqualValues(t, commonpb.ErrorCode_SUCCESS, assignments[0].Status.ErrorCode)
+	//	assert.EqualValues(t, collName, assignments[0].CollName)
+	//	assert.EqualValues(t, partitionName, assignments[0].PartitionName)
+	//	assert.EqualValues(t, "0", assignments[0].ChannelName)
+	//	assert.EqualValues(t, uint32(10000), assignments[0].Count)
+	//
+	//	// test stats
+	//	segID := assignments[0].SegID
+	//	pulsarAddress := Params.PulsarAddress
+	//	msgStream := pulsarms.NewPulsarMsgStream(ctx, 1024)
+	//	msgStream.SetPulsarClient(pulsarAddress)
+	//	msgStream.CreatePulsarProducers([]string{Params.QueryNodeStatsChannelName})
+	//	msgStream.Start()
+	//	defer msgStream.Close()
+	//
+	//	err = msgStream.Produce(&ms.MsgPack{
+	//		BeginTs: 102,
+	//		EndTs:   104,
+	//		Msgs: []ms.TsMsg{
+	//			&ms.QueryNodeStatsMsg{
+	//				QueryNodeStats: internalpb2.QueryNodeStats{
+	//					Base: &commonpb.MsgBase{
+	//						MsgType:  commonpb.MsgType_kQueryNodeStats,
+	//						SourceID: 1,
+	//					},
+	//					SegStats: []*internalpb2.SegmentStats{
+	//						{SegmentID: segID, MemorySize: 600000000, NumRows: 1000000, RecentlyModified: true},
+	//					},
+	//				},
+	//				BaseMsg: ms.BaseMsg{
+	//					HashValues: []uint32{0},
+	//				},
+	//			},
+	//		},
+	//	})
+	//	assert.Nil(t, err)
+	//
+	//	time.Sleep(500 * time.Millisecond)
+	//	segMeta, err := svr.metaTable.GetSegmentByID(segID)
+	//	assert.Nil(t, err)
+	//	assert.EqualValues(t, 1000000, segMeta.GetNumRows())
+	//	assert.EqualValues(t, int64(600000000), segMeta.GetMemSize())
+	//
+	//	reqDrop := milvuspb.DropCollectionRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType:   commonpb.MsgType_kDropCollection,
+	//			MsgID:     1,
+	//			Timestamp: Timestamp(time.Now().Unix()),
+	//			SourceID:  1,
+	//		},
+	//		CollectionName: collName,
+	//	}
+	//
+	//	// DropCollection
+	//	st, err := cli.DropCollection(ctx, &reqDrop)
+	//	assert.Nil(t, err)
+	//	assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
+	//})
 
 	cancel()
 	conn.Close()

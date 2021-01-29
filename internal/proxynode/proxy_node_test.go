@@ -86,7 +86,7 @@ func startMaster(ctx context.Context) {
 
 func startProxy(ctx context.Context) {
 
-	svr, err := CreateProxyNodeImpl(ctx)
+	svr, err := NewProxyNodeImpl(ctx)
 	proxyServer = svr
 	if err != nil {
 		log.Print("create proxynode failed", zap.Error(err))
@@ -130,7 +130,7 @@ func shutdown() {
 }
 
 func hasCollection(t *testing.T, name string) bool {
-	resp, err := proxyServer.HasCollection(ctx, &milvuspb.HasCollectionRequest{CollectionName: name})
+	resp, err := proxyServer.HasCollection(&milvuspb.HasCollectionRequest{CollectionName: name})
 	msg := "Has Collection " + name + " should succeed!"
 	assert.Nil(t, err, msg)
 	return resp.Value
@@ -181,7 +181,7 @@ func createCollection(t *testing.T, name string) {
 		CollectionName: name,
 		Schema:         schemaBytes,
 	}
-	resp, err := proxyServer.CreateCollection(ctx, req)
+	resp, err := proxyServer.CreateCollection(req)
 	assert.Nil(t, err)
 	msg := "Create Collection " + name + " should succeed!"
 	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
@@ -191,7 +191,7 @@ func dropCollection(t *testing.T, name string) {
 	req := &milvuspb.DropCollectionRequest{
 		CollectionName: name,
 	}
-	resp, err := proxyServer.DropCollection(ctx, req)
+	resp, err := proxyServer.DropCollection(req)
 	assert.Nil(t, err)
 	msg := "Drop Collection " + name + " should succeed! err :" + resp.Reason
 	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
@@ -210,7 +210,7 @@ func createIndex(t *testing.T, collectionName, fieldName string) {
 		},
 	}
 
-	resp, err := proxyServer.CreateIndex(ctx, req)
+	resp, err := proxyServer.CreateIndex(req)
 	assert.Nil(t, err)
 	msg := "Create Index for " + fieldName + " should succeed!"
 	assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
@@ -262,7 +262,7 @@ func TestProxy_DescribeCollection(t *testing.T) {
 			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
-				resp, err := proxyServer.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+				resp, err := proxyServer.DescribeCollection(&milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 				if err != nil {
 					t.Error(err)
 				}
@@ -288,7 +288,7 @@ func TestProxy_ShowCollections(t *testing.T) {
 			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
-				resp, err := proxyServer.ShowCollections(ctx, &milvuspb.ShowCollectionRequest{})
+				resp, err := proxyServer.ShowCollections(&milvuspb.ShowCollectionRequest{})
 				if err != nil {
 					t.Error(err)
 				}
@@ -321,7 +321,7 @@ func TestProxy_Insert(t *testing.T) {
 			createCollection(t, collectionName)
 			has := hasCollection(t, collectionName)
 			if has {
-				resp, err := proxyServer.Insert(ctx, req)
+				resp, err := proxyServer.Insert(req)
 				if err != nil {
 					t.Error(err)
 				}
@@ -397,7 +397,7 @@ func TestProxy_Search(t *testing.T) {
 			if !has {
 				createCollection(t, collectionName)
 			}
-			resp, err := proxyServer.Search(ctx, req)
+			resp, err := proxyServer.Search(req)
 			t.Logf("response of search collection %v: %v", i, resp)
 			assert.Nil(t, err)
 			dropCollection(t, collectionName)
@@ -458,7 +458,7 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 				PartitionName:  tag,
 			}
 
-			stb, err := proxyServer.HasPartition(ctx, preq)
+			stb, err := proxyServer.HasPartition(preq)
 			assert.Nil(t, err)
 			assert.Equal(t, stb.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 			assert.Equal(t, stb.Value, false)
@@ -467,11 +467,11 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 				CollectionName: collName,
 				PartitionName:  tag,
 			}
-			st, err := proxyServer.CreatePartition(ctx, cpreq)
+			st, err := proxyServer.CreatePartition(cpreq)
 			assert.Nil(t, err)
 			assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-			stb, err = proxyServer.HasPartition(ctx, preq)
+			stb, err = proxyServer.HasPartition(preq)
 			assert.Nil(t, err)
 			assert.Equal(t, stb.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 			assert.Equal(t, stb.Value, true)
@@ -480,7 +480,7 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 			//assert.Nil(t, err)
 			//assert.Equal(t, std.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 
-			sts, err := proxyServer.ShowPartitions(ctx, &milvuspb.ShowPartitionRequest{CollectionName: collName})
+			sts, err := proxyServer.ShowPartitions(&milvuspb.ShowPartitionRequest{CollectionName: collName})
 			assert.Nil(t, err)
 			assert.Equal(t, sts.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 			assert.True(t, len(sts.PartitionNames) >= 2)
@@ -490,7 +490,7 @@ func TestProxy_PartitionGRPC(t *testing.T) {
 				CollectionName: collName,
 				PartitionName:  tag,
 			}
-			st, err = proxyServer.DropPartition(ctx, dpreq)
+			st, err = proxyServer.DropPartition(dpreq)
 			assert.Nil(t, err)
 			assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		}()
@@ -544,7 +544,7 @@ func TestProxy_DescribeIndex(t *testing.T) {
 				CollectionName: collName,
 				FieldName:      fieldName,
 			}
-			resp, err := proxyServer.DescribeIndex(ctx, req)
+			resp, err := proxyServer.DescribeIndex(req)
 			assert.Nil(t, err)
 			msg := "Describe Index for " + fieldName + "should successed!"
 			assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
@@ -575,7 +575,7 @@ func TestProxy_GetIndexState(t *testing.T) {
 				CollectionName: collName,
 				FieldName:      fieldName,
 			}
-			resp, err := proxyServer.GetIndexState(ctx, req)
+			resp, err := proxyServer.GetIndexState(req)
 			assert.Nil(t, err)
 			msg := "Describe Index Progress for " + fieldName + "should succeed!"
 			assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS, msg)
