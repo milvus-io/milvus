@@ -2,72 +2,25 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	ms "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-
-	"github.com/zilliztech/milvus-distributed/internal/masterservice"
-
-	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	service := dataservice.NewGrpcService(ctx)
-
-	masterservice.Params.Init()
-	client, err := ms.NewGrpcClient(fmt.Sprintf("%s:%d", masterservice.Params.Address, masterservice.Params.Port), 30*time.Second)
+	svr, err := components.NewDataService(ctx)
 	if err != nil {
 		panic(err)
 	}
-	log.Println("master client create complete")
-	if err = client.Init(); err != nil {
+	if err = svr.Run(); err != nil {
 		panic(err)
-	}
-	if err = client.Start(); err != nil {
-		panic(err)
-	}
-	service.SetMasterClient(client)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	tctx, tcancel := context.WithTimeout(ctx, 30*time.Second)
-	defer func() {
-		if err = client.Stop(); err != nil {
-			panic(err)
-		}
-		ticker.Stop()
-		tcancel()
-	}()
-
-	for {
-		var states *internalpb2.ComponentStates
-		select {
-		case <-ticker.C:
-			states, err = client.GetComponentStates()
-			if err != nil {
-				continue
-			}
-		case <-tctx.Done():
-			panic("master timeout")
-		}
-		if states.State.StateCode == internalpb2.StateCode_INITIALIZING || states.State.StateCode == internalpb2.StateCode_HEALTHY {
-			break
-		}
 	}
 
-	if err = service.Init(); err != nil {
-		panic(err)
-	}
-	if err = service.Start(); err != nil {
-		panic(err)
-	}
 	sc := make(chan os.Signal)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -76,7 +29,7 @@ func main() {
 		syscall.SIGQUIT)
 	<-sc
 	cancel()
-	if err = service.Stop(); err != nil {
+	if err := svr.Stop(); err != nil {
 		panic(err)
 	}
 	log.Println("shut down data service")
