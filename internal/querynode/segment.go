@@ -23,17 +23,18 @@ import (
 )
 
 const (
-	segTypeInvalid = C.Invalid
-	segTypeGrowing = C.Growing
-	segTypeSealed  = C.Sealed
+	segTypeInvalid  = C.Invalid
+	segTypeGrowing  = C.Growing
+	segTypeSealed   = C.Sealed
+	segTypeIndexing = C.Indexing
 )
 
 type segmentType = C.SegmentType
 type indexParam = map[string]string
 
 type Segment struct {
-	segmentPtr   C.CSegmentInterface
-	segmentType  C.SegmentType
+	segmentPtr C.CSegmentInterface
+
 	segmentID    UniqueID
 	partitionTag string // TODO: use partitionID
 	partitionID  UniqueID
@@ -44,6 +45,9 @@ type Segment struct {
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
 
+	typeMu      sync.Mutex // guards builtIndex
+	segmentType C.SegmentType
+
 	paramMutex sync.RWMutex // guards indexParam
 	indexParam map[int64]indexParam
 }
@@ -53,20 +57,28 @@ func (s *Segment) ID() UniqueID {
 	return s.segmentID
 }
 
-func (s *Segment) Type() segmentType {
-	return s.segmentType
-}
-
-func (s *Segment) SetRecentlyModified(modify bool) {
+func (s *Segment) setRecentlyModified(modify bool) {
 	s.rmMutex.Lock()
 	defer s.rmMutex.Unlock()
 	s.recentlyModified = modify
 }
 
-func (s *Segment) GetRecentlyModified() bool {
+func (s *Segment) getRecentlyModified() bool {
 	s.rmMutex.Lock()
 	defer s.rmMutex.Unlock()
 	return s.recentlyModified
+}
+
+func (s *Segment) setType(segType segmentType) {
+	s.typeMu.Lock()
+	defer s.typeMu.Unlock()
+	s.segmentType = segType
+}
+
+func (s *Segment) getType() segmentType {
+	s.typeMu.Lock()
+	defer s.typeMu.Unlock()
+	return s.segmentType
 }
 
 func newSegment2(collection *Collection, segmentID int64, partitionTag string, collectionID UniqueID, segType segmentType) *Segment {
@@ -195,7 +207,7 @@ func (s *Segment) fillTargetEntry(plan *Plan,
 	return nil
 }
 
-// segment, err := loadIndexService.replica.getSegmentByID(segmentID)
+// segment, err := loadService.replica.getSegmentByID(segmentID)
 func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
 	var status C.CStatus
 
@@ -214,6 +226,8 @@ func (s *Segment) updateSegmentIndex(loadIndexInfo *LoadIndexInfo) error {
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("updateSegmentIndex failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
+
+	s.setType(segTypeIndexing)
 
 	return nil
 }
@@ -324,7 +338,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
-	s.SetRecentlyModified(true)
+	s.setRecentlyModified(true)
 	return nil
 }
 

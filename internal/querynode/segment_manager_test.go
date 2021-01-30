@@ -406,9 +406,8 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 	defer node.Stop()
 
 	ctx := node.queryNodeLoopCtx
-	node.loadIndexService = newLoadIndexService(ctx, node.replica)
-	node.segManager = newSegmentManager(ctx, nil, nil, nil, node.replica, nil, node.loadIndexService.loadIndexReqChan)
-	go node.loadIndexService.start()
+	node.loadService = newLoadService(ctx, nil, nil, nil, node.replica, nil)
+	go node.loadService.start()
 
 	collectionName := "collection0"
 	initTestMeta(t, node, collectionName, collectionID, 0)
@@ -422,16 +421,16 @@ func TestSegmentManager_load_release_and_search(t *testing.T) {
 	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 	assert.NoError(t, err)
 
-	fieldsMap := node.segManager.getTargetFields(paths, srcFieldIDs, fieldIDs)
+	fieldsMap := node.loadService.segManager.getTargetFields(paths, srcFieldIDs, fieldIDs)
 	assert.Equal(t, len(fieldsMap), 2)
 
-	err = node.segManager.loadSegmentFieldsData(segmentID, fieldsMap)
+	err = node.loadService.segManager.loadSegmentFieldsData(segmentID, fieldsMap)
 	assert.NoError(t, err)
 
 	indexPaths, err := generateIndex(segmentID)
 	assert.NoError(t, err)
 
-	err = node.segManager.loadIndex(segmentID, indexPaths)
+	err = node.loadService.segManager.loadIndex(segmentID, indexPaths)
 	assert.NoError(t, err)
 
 	// do search

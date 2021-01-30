@@ -36,6 +36,7 @@ NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type) {
             segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
             break;
         case Sealed:
+        case Indexing:
             segment = milvus::segcore::CreateSealedSegment(col->get_schema());
             break;
         default:

@@ -56,13 +56,11 @@ type QueryNode struct {
 	replica collectionReplica
 
 	// internal services
-	dataSyncService  *dataSyncService
-	metaService      *metaService
-	searchService    *searchService
-	loadIndexService *loadIndexService
-	statsService     *statsService
-
-	segManager *segmentManager
+	dataSyncService *dataSyncService
+	metaService     *metaService
+	searchService   *searchService
+	loadService     *loadService
+	statsService    *statsService
 
 	//opentracing
 	tracer opentracing.Tracer
@@ -86,7 +84,6 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 		metaService:     nil,
 		searchService:   nil,
 		statsService:    nil,
-		segManager:      nil,
 	}
 
 	var err error
@@ -128,7 +125,6 @@ func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
 		metaService:     nil,
 		searchService:   nil,
 		statsService:    nil,
-		segManager:      nil,
 	}
 
 	var err error
@@ -167,10 +163,6 @@ func Init() {
 
 func (node *QueryNode) Init() error {
 	Params.Init()
-	return nil
-}
-
-func (node *QueryNode) Start() error {
 	registerReq := &queryPb.RegisterNodeRequest{
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,
@@ -189,6 +181,10 @@ func (node *QueryNode) Start() error {
 	Params.QueryNodeID = response.InitParams.NodeID
 	fmt.Println("QueryNodeID is", Params.QueryNodeID)
 
+	if node.masterClient == nil {
+		log.Println("WARN: null master service detected")
+	}
+
 	if node.indexClient == nil {
 		log.Println("WARN: null index service detected")
 	}
@@ -197,20 +193,22 @@ func (node *QueryNode) Start() error {
 		log.Println("WARN: null data service detected")
 	}
 
-	// todo add connectMaster logic
+	return nil
+}
+
+func (node *QueryNode) Start() error {
 	// init services and manager
 	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
 	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
 	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
-	node.loadIndexService = newLoadIndexService(node.queryNodeLoopCtx, node.replica)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadIndexService.fieldStatsChan)
-	node.segManager = newSegmentManager(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream, node.loadIndexService.loadIndexReqChan)
+	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterClient, node.dataClient, node.indexClient, node.replica, node.dataSyncService.dmStream)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.fieldStatsChan)
 
 	// start services
 	go node.dataSyncService.start()
 	go node.searchService.start()
 	go node.metaService.start()
-	go node.loadIndexService.start()
+	go node.loadService.start()
 	go node.statsService.start()
 
 	node.stateCode.Store(internalpb2.StateCode_HEALTHY)
@@ -232,8 +230,8 @@ func (node *QueryNode) Stop() error {
 	if node.searchService != nil {
 		node.searchService.close()
 	}
-	if node.loadIndexService != nil {
-		node.loadIndexService.close()
+	if node.loadService != nil {
+		node.loadService.close()
 	}
 	if node.statsService != nil {
 		node.statsService.close()
@@ -457,7 +455,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	if in.LastSegmentState.State == datapb.SegmentState_SegmentGrowing {
 		segmentNum := len(segmentIDs)
 		positions := in.LastSegmentState.StartPositions
-		err = node.segManager.seekSegment(positions)
+		err = node.loadService.segManager.seekSegment(positions)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -468,7 +466,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 		segmentIDs = segmentIDs[:segmentNum-1]
 	}
 
-	err = node.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
+	err = node.loadService.segManager.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -493,7 +491,7 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 
 	// release all fields in the segments
 	for _, id := range in.SegmentIDs {
-		err := node.segManager.releaseSegment(id)
+		err := node.loadService.segManager.releaseSegment(id)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

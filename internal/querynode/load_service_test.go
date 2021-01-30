@@ -25,13 +25,13 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/storage"
 )
 
-func TestLoadIndexService_FloatVector(t *testing.T) {
+func TestLoadService_LoadIndex_FloatVector(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := rand.Int63n(1000000)
 	segmentID := rand.Int63n(1000000)
 	initTestMeta(t, node, "collection0", collectionID, segmentID)
 
-	// loadIndexService and statsService
+	// loadService and statsService
 	suffix := "-test-search" + strconv.FormatInt(rand.Int63n(1000000), 10)
 	oldSearchChannelNames := Params.SearchChannelNames
 	newSearchChannelNames := makeNewChannelNames(oldSearchChannelNames, suffix)
@@ -321,7 +321,7 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 			params := indexStats0.IndexParams
 			// sort index params by key
 			sort.Slice(indexParamsKV, func(i, j int) bool { return indexParamsKV[i].Key < indexParamsKV[j].Key })
-			indexEqual := node.loadIndexService.indexParamsEqual(params, indexParamsKV)
+			indexEqual := node.loadService.indexParamsEqual(params, indexParamsKV)
 			assert.Equal(t, indexEqual, true)
 		}
 
@@ -354,13 +354,13 @@ func TestLoadIndexService_FloatVector(t *testing.T) {
 	node.Stop()
 }
 
-func TestLoadIndexService_BinaryVector(t *testing.T) {
+func TestLoadService_LoadIndex_BinaryVector(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := rand.Int63n(1000000)
 	segmentID := rand.Int63n(1000000)
 	initTestMeta(t, node, "collection0", collectionID, segmentID, true)
 
-	// loadIndexService and statsService
+	// loadService and statsService
 	suffix := "-test-search-binary" + strconv.FormatInt(rand.Int63n(1000000), 10)
 	oldSearchChannelNames := Params.SearchChannelNames
 	newSearchChannelNames := makeNewChannelNames(oldSearchChannelNames, suffix)
@@ -640,7 +640,7 @@ func TestLoadIndexService_BinaryVector(t *testing.T) {
 			params := indexStats0.IndexParams
 			// sort index params by key
 			sort.Slice(indexParamsKV, func(i, j int) bool { return indexParamsKV[i].Key < indexParamsKV[j].Key })
-			indexEqual := node.loadIndexService.indexParamsEqual(params, indexParamsKV)
+			indexEqual := node.loadService.indexParamsEqual(params, indexParamsKV)
 			assert.Equal(t, indexEqual, true)
 		}
 

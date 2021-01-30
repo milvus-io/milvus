@@ -41,7 +41,6 @@ func (s *segmentManager) seekSegment(positions []*internalPb.MsgPosition) error 
 	return nil
 }
 
-//TODO, index params
 func (s *segmentManager) getIndexInfo(collectionID UniqueID, segmentID UniqueID) (UniqueID, UniqueID, error) {
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
@@ -73,7 +72,7 @@ func (s *segmentManager) loadSegment(collectionID UniqueID, partitionID UniqueID
 		// we don't need index id yet
 		_, buildID, err := s.getIndexInfo(collectionID, segmentID)
 		if err == nil {
-			// we don't need load vector fields
+			// we don't need load to vector fields
 			vectorFields, err := s.replica.getVecFieldsBySegmentID(segmentID)
 			if err != nil {
 				return err
@@ -229,11 +228,11 @@ func (s *segmentManager) loadSegmentFieldsData(segmentID UniqueID, targetFields 
 				numRows = fieldData.NumRows
 				data = fieldData.Data
 			case *storage.FloatVectorFieldData:
-				// segment to be loaded doesn't need vector field,
-				// so we ignore the type of vector field data
-				continue
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			case *storage.BinaryVectorFieldData:
-				continue
+				numRows = fieldData.NumRows
+				data = fieldData.Data
 			default:
 				return errors.New("unexpected field data type")
 			}
@@ -282,7 +281,7 @@ func (s *segmentManager) loadIndex(segmentID UniqueID, indexPaths []string) erro
 		return err
 	}
 	for id, name := range vecFieldIDs {
-		// non-blocking send
+		// non-blocking sending
 		go s.sendLoadIndex(indexPaths, segmentID, id, name)
 	}
 
