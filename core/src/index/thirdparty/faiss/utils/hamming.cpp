@@ -440,12 +440,7 @@ void hamming_range_search (
     case 8: HC(HammingComputer8); break;
     case 16: HC(HammingComputer16); break;
     case 32: HC(HammingComputer32); break;
-    default:
-        if (code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    default: HC(HammingComputerDefault);
     }
 #undef HC
 }
