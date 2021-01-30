@@ -28,8 +28,8 @@ namespace faiss {
 #define fast_loop_imp(fun_u64, fun_u8) \
     auto a = reinterpret_cast<const uint64_t*>(data1); \
     auto b = reinterpret_cast<const uint64_t*>(data2); \
-    int div = n / 8; \
-    int mod = n % 8; \
+    int div = code_size / 8; \
+    int mod = code_size % 8; \
     int i = 0, len = div; \
     switch(len & 7) { \
         default: \
@@ -60,7 +60,7 @@ namespace faiss {
         } \
     }
 
-int popcnt(const uint8_t* data, const size_t n) {
+int popcnt(const uint8_t* data, const size_t code_size) {
     auto data1 = data, data2 = data; // for the macro fast_loop_imp
 #define fun_u64 accu += popcount64(a[i])
 #define fun_u8(i) accu += lookup8bit[a[i]]
@@ -71,7 +71,7 @@ int popcnt(const uint8_t* data, const size_t n) {
 #undef fun_u8
 }
 
-int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] ^ b[i]);
 #define fun_u8(i) accu += lookup8bit[a[i] ^ b[i]];
     int accu = 0;
@@ -81,7 +81,7 @@ int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] | b[i])
 #define fun_u8(i) accu += lookup8bit[a[i] | b[i]]
     int accu = 0;
@@ -91,7 +91,7 @@ int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] & b[i])
 #define fun_u8(i) accu += lookup8bit[a[i] & b[i]]
     int accu = 0;
@@ -101,7 +101,16 @@ int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+bool is_subset(const uint8_t* data1, const uint8_t* data2, const size_t code_size) {
+#define fun_u64 if((a[i] & b[i]) != a[i]) return false
+#define fun_u8(i) if((a[i] & b[i]) != a[i]) return false
+    fast_loop_imp(fun_u64, fun_u8);
+    return true;
+#undef fun_u64
+#undef fun_u8
+}
+
+float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t code_size) {
 #define fun_u64 accu_num += popcount64(a[i] & b[i]); accu_den += popcount64(a[i] | b[i])
 #define fun_u8(i) accu_num += lookup8bit[a[i] & b[i]]; accu_den += lookup8bit[a[i] | b[i]]
     int accu_num = 0;
@@ -111,8 +120,6 @@ float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) 
 #undef fun_u64
 #undef fun_u8
 }
-
-static const size_t size_1M = 1 * 1024 * 1024;
 
 template <class T>
 static
@@ -130,7 +137,10 @@ void binary_distance_knn_mc(
     int thread_max_num = omp_get_max_threads();
     size_t l3_size = get_L3_Size();
 
-    if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
+    /*
+     * Later we may propose a more reasonable strategy.
+     */
+    if (n1 < n2) {
         size_t group_num = n1 * thread_max_num;
         size_t *match_num = new size_t[group_num];
         int64_t *match_data = new int64_t[group_num * k];

@@ -196,12 +196,8 @@ search_single_query(const IndexBinaryHash & index, const uint8_t *q,
     case 16: HC(HammingComputer16); break;
     case 20: HC(HammingComputer20); break;
     case 32: HC(HammingComputer32); break;
-    default:
-        if (index.code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    default: HC(HammingComputerDefault);
+
     }
 #undef HC
 }
@@ -416,12 +412,7 @@ search_1_query_multihash(const IndexBinaryMultiHash & index, const uint8_t *xi,
     case 16: HC(HammingComputer16); break;
     case 20: HC(HammingComputer20); break;
     case 32: HC(HammingComputer32); break;
-    default:
-        if (index.code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    default: HC(HammingComputerDefault);
     }
 #undef HC
 }

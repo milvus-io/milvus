@@ -1013,14 +1013,9 @@ struct IVFPQScannerT: QueryTables {
         HANDLE_CODE_SIZE(64);
 #undef HANDLE_CODE_SIZE
         default:
-            if (pq.code_size % 8 == 0)
-                scan_list_polysemous_hc
-                    <HammingComputerM8, SearchResultType>
-                    (ncode, codes, res, bitset);
-            else
-                scan_list_polysemous_hc
-                    <HammingComputerM4, SearchResultType>
-                    (ncode, codes, res, bitset);
+            scan_list_polysemous_hc
+                <HammingComputerDefault, SearchResultType>
+                (ncode, codes, res, bitset);
             break;
         }
     }

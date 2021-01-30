@@ -317,10 +317,8 @@ InvertedListScanner* IndexIVFSpectralHash::get_InvertedListScanner
         HANDLE_CODE_SIZE(64);
 #undef HANDLE_CODE_SIZE
         default:
-            if (code_size % 8 == 0) {
-                return new IVFScanner<HammingComputerM8>(this, store_pairs);
-            } else if (code_size % 4 == 0) {
-                return new IVFScanner<HammingComputerM4>(this, store_pairs);
+            if (code_size % 4 == 0) {
+                return new IVFScanner<HammingComputerDefault>(this, store_pairs);
             } else {
                 FAISS_THROW_MSG("not supported");
             }
