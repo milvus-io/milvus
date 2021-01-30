@@ -5,7 +5,6 @@ try {
     sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d minio'
     dir ('build/docker/deploy') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} pull'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d master'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxyservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexservice'

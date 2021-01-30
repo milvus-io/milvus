@@ -7,13 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/master"
+	"github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type RmqMsgStream struct {
 	isServing        int64
-	idAllocator      *master.GlobalIDAllocator
+	idAllocator      *masterservice.GlobalIDAllocator
 	ctx              context.Context
 	serverLoopWg     sync.WaitGroup
 	serverLoopCtx    context.Context
@@ -53,7 +53,7 @@ func (ms *RmqMsgStream) stopServerLoop() {
 func (ms *RmqMsgStream) tsLoop() {
 	defer ms.serverLoopWg.Done()
 
-	ms.tsoTicker = time.NewTicker(master.UpdateTimestampStep)
+	ms.tsoTicker = time.NewTicker(masterservice.UpdateTimestampStep)
 	defer ms.tsoTicker.Stop()
 
 	ctx, cancel := context.WithCancel(ms.serverLoopCtx)

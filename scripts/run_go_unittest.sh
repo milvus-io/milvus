@@ -17,9 +17,7 @@ echo $MILVUS_DIR
 go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
 # TODO: remove to distributed
 #go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/writenode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/master/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
 go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
