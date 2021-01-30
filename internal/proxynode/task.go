@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 
@@ -41,10 +43,10 @@ type BaseInsertTask = msgstream.InsertMsg
 type InsertTask struct {
 	BaseInsertTask
 	Condition
-	result                *milvuspb.InsertResponse
-	manipulationMsgStream *pulsarms.PulsarMsgStream
-	ctx                   context.Context
-	rowIDAllocator        *allocator.IDAllocator
+	dataServiceClient DataServiceClient
+	result            *milvuspb.InsertResponse
+	ctx               context.Context
+	rowIDAllocator    *allocator.IDAllocator
 }
 
 func (it *InsertTask) OnEnqueue() error {
@@ -161,8 +163,6 @@ func (it *InsertTask) Execute() error {
 	}
 	tsMsg.SetMsgContext(ctx)
 	span.LogFields(oplog.String("send msg", "send msg"))
-	msgPack.Msgs[0] = tsMsg
-	err = it.manipulationMsgStream.Produce(msgPack)
 
 	it.result = &milvuspb.InsertResponse{
 		Status: &commonpb.Status{
@@ -171,11 +171,45 @@ func (it *InsertTask) Execute() error {
 		RowIDBegin: rowIDBegin,
 		RowIDEnd:   rowIDEnd,
 	}
+
+	msgPack.Msgs[0] = tsMsg
+
+	stream, err := globalInsertChannelsMap.getInsertMsgStream(description.CollectionID)
+	if err != nil {
+		collectionInsertChannels, err := it.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert, // todo
+				MsgID:     it.Base.MsgID,            // todo
+				Timestamp: 0,                        // todo
+				SourceID:  Params.ProxyID,
+			},
+			DbID:         0, // todo
+			CollectionID: description.CollectionID,
+		})
+		if err != nil {
+			return err
+		}
+		err = globalInsertChannelsMap.createInsertMsgStream(description.CollectionID, collectionInsertChannels)
+		if err != nil {
+			return err
+		}
+	}
+	stream, err = globalInsertChannelsMap.getInsertMsgStream(description.CollectionID)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
 		span.LogFields(oplog.Error(err))
+		return err
 	}
+
+	err = stream.Produce(msgPack)
+	if err != nil {
+		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
+		it.result.Status.Reason = err.Error()
+		span.LogFields(oplog.Error(err))
+		return err
+	}
+
 	return nil
 }
 
@@ -188,10 +222,11 @@ func (it *InsertTask) PostExecute() error {
 type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	masterClient MasterClient
-	result       *commonpb.Status
-	ctx          context.Context
-	schema       *schemapb.CollectionSchema
+	masterClient      MasterClient
+	dataServiceClient DataServiceClient
+	result            *commonpb.Status
+	ctx               context.Context
+	schema            *schemapb.CollectionSchema
 }
 
 func (cct *CreateCollectionTask) OnEnqueue() error {
@@ -293,7 +328,37 @@ func (cct *CreateCollectionTask) PreExecute() error {
 func (cct *CreateCollectionTask) Execute() error {
 	var err error
 	cct.result, err = cct.masterClient.CreateCollection(cct.CreateCollectionRequest)
-	return err
+	if err != nil {
+		return err
+	}
+	if cct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
+		err = globalMetaCache.Sync(cct.CollectionName)
+		if err != nil {
+			return err
+		}
+		desc, err := globalMetaCache.Get(cct.CollectionName)
+		if err != nil {
+			return err
+		}
+		collectionInsertChannels, err := cct.dataServiceClient.GetInsertChannels(&datapb.InsertChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_kInsert, // todo
+				MsgID:     cct.Base.MsgID,           // todo
+				Timestamp: 0,                        // todo
+				SourceID:  Params.ProxyID,
+			},
+			DbID:         0, // todo
+			CollectionID: desc.CollectionID,
+		})
+		if err != nil {
+			return err
+		}
+		err = globalInsertChannelsMap.createInsertMsgStream(desc.CollectionID, collectionInsertChannels)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (cct *CreateCollectionTask) PostExecute() error {
@@ -303,9 +368,10 @@ func (cct *CreateCollectionTask) PostExecute() error {
 type DropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
-	masterClient MasterClient
-	result       *commonpb.Status
-	ctx          context.Context
+	masterClient      MasterClient
+	dataServiceClient DataServiceClient
+	result            *commonpb.Status
+	ctx               context.Context
 }
 
 func (dct *DropCollectionTask) OnEnqueue() error {
@@ -350,6 +416,11 @@ func (dct *DropCollectionTask) PreExecute() error {
 func (dct *DropCollectionTask) Execute() error {
 	var err error
 	dct.result, err = dct.masterClient.DropCollection(dct.DropCollectionRequest)
+	if dct.result.ErrorCode == commonpb.ErrorCode_SUCCESS {
+		_ = globalMetaCache.Sync(dct.CollectionName)
+		desc, _ := globalMetaCache.Get(dct.CollectionName)
+		_ = globalInsertChannelsMap.closeInsertMsgStream(desc.CollectionID)
+	}
 	return err
 }
 

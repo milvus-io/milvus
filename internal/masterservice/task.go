@@ -414,12 +414,9 @@ func (t *ShowPartitionReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *ShowPartitionReqTask) Execute() error {
-	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID)
+	coll, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName)
 	if err != nil {
 		return err
-	}
-	if coll.Schema.Name != t.Req.CollectionName {
-		return errors.Errorf("collection %s not exist", t.Req.CollectionName)
 	}
 	for _, partID := range coll.PartitionIDs {
 		partMeta, err := t.core.MetaTable.GetPartitionByID(partID)
