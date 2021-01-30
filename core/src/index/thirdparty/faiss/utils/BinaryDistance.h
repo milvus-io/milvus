@@ -110,6 +110,58 @@ namespace faiss {
             size_t ncodes,
             const BitsetView& bitset);
 
+    template <class C>
+    void binary_range_search(
+        MetricType metric_type,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t na,
+        size_t nb,
+        C::T radius,
+        size_t ncodes,
+        std::vector<faiss::RangeSearchPartialResult*>& result,
+        size_t buffer_size,
+        const BitsetView& bitset);
+
+    extern template
+    void binary_range_search<CMax<int, int64_t>>(
+        MetricType metric_type,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t na,
+        size_t nb,
+        int radius,
+        size_t ncodes,
+        std::vector<faiss::RangeSearchPartialResult*>& result,
+        size_t buffer_size,
+        const BitsetView& bitset);
+
+    extern template
+    void binary_range_search<CMax<float, int64_t>>(
+        MetricType metric_type,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t na,
+        size_t nb,
+        float radius,
+        size_t ncodes,
+        std::vector<faiss::RangeSearchPartialResult*>& result,
+        size_t buffer_size,
+        const BitsetView& bitset);
+
+    extern template
+    void binary_range_search<CMax<bool, int64_t>>(
+        MetricType metric_type,
+        const uint8_t * a,
+        const uint8_t * b,
+        size_t na,
+        size_t nb,
+        bool radius,
+        size_t ncodes,
+        std::vector<faiss::RangeSearchPartialResult*>& result,
+        size_t buffer_size,
+        const BitsetView& bitset);
+
 } // namespace faiss
 
 
