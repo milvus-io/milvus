@@ -132,6 +132,22 @@ func (m *InsertChannelsMap) closeInsertMsgStream(collID UniqueID) error {
 	return nil
 }
 
+func (m *InsertChannelsMap) getInsertChannels(collID UniqueID) ([]string, error) {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	loc, ok := m.collectionID2InsertChannels[collID]
+	if !ok {
+		return nil, errors.New("cannot find collection with id: " + strconv.Itoa(int(collID)))
+	}
+
+	if m.droppedBitMap[loc] != 0 {
+		return nil, errors.New("insert message stream already closed")
+	}
+	ret := append([]string(nil), m.insertChannels[loc]...)
+	return ret, nil
+}
+
 func (m *InsertChannelsMap) getInsertMsgStream(collID UniqueID) (msgstream.MsgStream, error) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()

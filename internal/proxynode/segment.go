@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -25,14 +24,12 @@ type Allocator = allocator.Allocator
 
 type segRequest struct {
 	allocator.BaseRequest
-	count         uint32
-	colName       string
-	partitionName string
-	collID        UniqueID
-	partitionID   UniqueID
-	segInfo       map[UniqueID]uint32
-	channelID     int32
-	timestamp     Timestamp
+	count       uint32
+	collID      UniqueID
+	partitionID UniqueID
+	segInfo     map[UniqueID]uint32
+	channelName string
+	timestamp   Timestamp
 }
 
 type segInfo struct {
@@ -44,9 +41,7 @@ type segInfo struct {
 type assignInfo struct {
 	collID         UniqueID
 	partitionID    UniqueID
-	collName       string
-	partitionName  string
-	channelID      int32
+	channelName    string
 	segID          UniqueID
 	segInfos       *list.List
 	segCapacity    uint32
@@ -122,7 +117,7 @@ func (info *assignInfo) IsActive(now time.Time) bool {
 
 type SegIDAssigner struct {
 	Allocator
-	assignInfos map[string]*list.List // collectionName -> *list.List
+	assignInfos map[UniqueID]*list.List // collectionID -> *list.List
 	segReqs     []*datapb.SegIDRequest
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
@@ -140,7 +135,7 @@ func NewSegIDAssigner(ctx context.Context, client DataServiceClient, getTickFunc
 		},
 		countPerRPC:   SegCountPerRPC,
 		serviceClient: client,
-		assignInfos:   make(map[string]*list.List),
+		assignInfos:   make(map[UniqueID]*list.List),
 		getTickFunc:   getTickFunc,
 	}
 	sa.TChan = &allocator.Ticker{
@@ -160,7 +155,6 @@ func (sa *SegIDAssigner) SetServiceClient(client DataServiceClient) {
 
 func (sa *SegIDAssigner) collectExpired() {
 	ts := sa.getTickFunc()
-	//now := time.Now()
 	for _, info := range sa.assignInfos {
 		for e := info.Front(); e != nil; e = e.Next() {
 			assign := e.Value.(*assignInfo)
@@ -176,36 +170,33 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 	if sa.ToDoReqs == nil {
 		return
 	}
-	records := make(map[string]map[string]map[int32]uint32)
+	records := make(map[UniqueID]map[UniqueID]map[string]uint32)
 	newTodoReqs := sa.ToDoReqs[0:0]
 	for _, req := range sa.ToDoReqs {
 		segRequest := req.(*segRequest)
-		colName := segRequest.colName
-		partitionName := segRequest.partitionName
-		channelID := segRequest.channelID
+		collID := segRequest.collID
+		partitionID := segRequest.partitionID
+		channelName := segRequest.channelName
 
-		if _, ok := records[colName]; !ok {
-			records[colName] = make(map[string]map[int32]uint32)
+		if _, ok := records[collID]; !ok {
+			records[collID] = make(map[UniqueID]map[string]uint32)
 		}
-		if _, ok := records[colName][partitionName]; !ok {
-			records[colName][partitionName] = make(map[int32]uint32)
-		}
-
-		if _, ok := records[colName][partitionName][channelID]; !ok {
-			records[colName][partitionName][channelID] = 0
+		if _, ok := records[collID][partitionID]; !ok {
+			records[collID][partitionID] = make(map[string]uint32)
 		}
 
-		records[colName][partitionName][channelID] += segRequest.count
-		assign := sa.getAssign(segRequest.colName, segRequest.partitionName, segRequest.channelID)
-		if assign == nil || assign.Capacity(segRequest.timestamp) < records[colName][partitionName][channelID] {
-			partitionID, _ := typeutil.Hash32String(segRequest.colName)
+		if _, ok := records[collID][partitionID][channelName]; !ok {
+			records[collID][partitionID][channelName] = 0
+		}
+
+		records[collID][partitionID][channelName] += segRequest.count
+		assign := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
+		if assign == nil || assign.Capacity(segRequest.timestamp) < records[collID][partitionID][channelName] {
 			sa.segReqs = append(sa.segReqs, &datapb.SegIDRequest{
-				ChannelName:   strconv.FormatUint(uint64(segRequest.channelID), 10),
-				Count:         segRequest.count,
-				CollName:      segRequest.colName,
-				PartitionName: segRequest.partitionName,
-				CollectionID:  0,
-				PartitionID:   partitionID,
+				ChannelName:  channelName,
+				Count:        segRequest.count,
+				CollectionID: collID,
+				PartitionID:  partitionID,
 			})
 			newTodoReqs = append(newTodoReqs, req)
 		} else {
@@ -215,15 +206,15 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 	sa.ToDoReqs = newTodoReqs
 }
 
-func (sa *SegIDAssigner) getAssign(colName, partitionName string, channelID int32) *assignInfo {
-	assignInfos, ok := sa.assignInfos[colName]
+func (sa *SegIDAssigner) getAssign(collID UniqueID, partitionID UniqueID, channelName string) *assignInfo {
+	assignInfos, ok := sa.assignInfos[collID]
 	if !ok {
 		return nil
 	}
 
 	for e := assignInfos.Front(); e != nil; e = e.Next() {
 		info := e.Value.(*assignInfo)
-		if info.partitionName != partitionName || info.channelID != channelID {
+		if info.partitionID != partitionID || info.channelName != channelName {
 			continue
 		}
 		return info
@@ -244,7 +235,7 @@ func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegIDRequest) bool 
 	if req1 == req2 {
 		return true
 	}
-	return req1.CollName == req2.CollName && req1.PartitionName == req2.PartitionName && req1.ChannelName == req2.ChannelName
+	return req1.CollectionID == req2.CollectionID && req1.PartitionID == req2.PartitionID && req1.ChannelName == req2.ChannelName
 }
 
 func (sa *SegIDAssigner) reduceSegReqs() {
@@ -305,19 +296,14 @@ func (sa *SegIDAssigner) syncSegments() bool {
 			log.Println("SyncSegment Error:", info.Status.Reason)
 			continue
 		}
-		// FIXME: use channelName
-		channel, err := strconv.Atoi(info.ChannelName)
-		if err != nil {
-			return false
-		}
-		assign := sa.getAssign(info.CollName, info.PartitionName, int32(channel))
+		assign := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
 		segInfo := &segInfo{
 			segID:      info.SegID,
 			count:      info.Count,
 			expireTime: info.ExpireTime,
 		}
 		if assign == nil {
-			colInfos, ok := sa.assignInfos[info.CollName]
+			colInfos, ok := sa.assignInfos[info.CollectionID]
 			if !ok {
 				colInfos = list.New()
 			}
@@ -325,15 +311,13 @@ func (sa *SegIDAssigner) syncSegments() bool {
 
 			segInfos.PushBack(segInfo)
 			assign = &assignInfo{
-				collID:        info.CollectionID,
-				partitionID:   info.PartitionID,
-				channelID:     int32(channel),
-				segInfos:      segInfos,
-				partitionName: info.PartitionName,
-				collName:      info.CollName,
+				collID:      info.CollectionID,
+				partitionID: info.PartitionID,
+				channelName: info.ChannelName,
+				segInfos:    segInfos,
 			}
 			colInfos.PushBack(assign)
-			sa.assignInfos[info.CollName] = colInfos
+			sa.assignInfos[info.CollectionID] = colInfos
 		} else {
 			assign.segInfos.PushBack(segInfo)
 		}
@@ -345,7 +329,7 @@ func (sa *SegIDAssigner) syncSegments() bool {
 
 func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
 	segRequest := req.(*segRequest)
-	assign := sa.getAssign(segRequest.colName, segRequest.partitionName, segRequest.channelID)
+	assign := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
 	if assign == nil {
 		return errors.New("Failed to GetSegmentID")
 	}
@@ -354,14 +338,14 @@ func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
 	return err
 }
 
-func (sa *SegIDAssigner) GetSegmentID(colName, partitionName string, channelID int32, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
+func (sa *SegIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
 	req := &segRequest{
-		BaseRequest:   allocator.BaseRequest{Done: make(chan error), Valid: false},
-		colName:       colName,
-		partitionName: partitionName,
-		channelID:     channelID,
-		count:         count,
-		timestamp:     ts,
+		BaseRequest: allocator.BaseRequest{Done: make(chan error), Valid: false},
+		collID:      collID,
+		partitionID: partitionID,
+		channelName: channelName,
+		count:       count,
+		timestamp:   ts,
 	}
 	sa.Reqs <- req
 	req.Wait()
