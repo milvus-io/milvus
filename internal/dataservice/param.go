@@ -67,6 +67,8 @@ func (p *ParamTable) Init() {
 	p.initDataNodeNum()
 	p.initSegmentInfoChannelName()
 	p.initDataServiceSubscriptionName()
+	p.initK2SChannelNames()
+	p.initSegmentFlushMetaPath()
 }
 
 func (p *ParamTable) initAddress() {
