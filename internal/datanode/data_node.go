@@ -56,6 +56,7 @@ type (
 
 	DataNode struct {
 		ctx    context.Context
+		cancel context.CancelFunc
 		NodeID UniqueID
 		Role   string
 		State  internalpb2.StateCode
@@ -77,8 +78,10 @@ type (
 func NewDataNode(ctx context.Context) *DataNode {
 
 	Params.Init()
+	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
-		ctx:             ctx,
+		ctx:             ctx2,
+		cancel:          cancel2,
 		NodeID:          Params.NodeID, // GOOSE TODO How to init
 		Role:            typeutil.DataNodeRole,
 		State:           internalpb2.StateCode_INITIALIZING,
@@ -216,7 +219,7 @@ func (node *DataNode) FlushSegments(in *datapb.FlushSegRequest) error {
 }
 
 func (node *DataNode) Stop() error {
-	<-node.ctx.Done()
+	node.cancel()
 
 	// close services
 	if node.dataSyncService != nil {
