@@ -21,7 +21,7 @@ func (c *Client) Init() error {
 		if err != nil {
 			return err
 		}
-		c.grpcClient = proxypb.NewProxyServiceClient(conn)
+		c.grpcClient = proxypb.NewProxyNodeServiceClient(conn)
 		return nil
 	}
 	err := retry.Retry(10, time.Millisecond*200, connectGrpcFunc)
