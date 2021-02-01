@@ -306,18 +306,17 @@ ClientTest::Test() {
     BuildSearchEntities(NQ, dim);
     GetEntityByID(collection_name, search_id_array_);
 //    SearchEntities(collection_name, TOP_K, NPROBE);
-//    SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     GetCollectionStats(collection_name);
 
-//    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
-//    DeleteByIds(collection_name, delete_ids);
-//    CompactCollection(collection_name);
-//
-//    LoadCollection(collection_name);
-//    SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
+    std::vector<int64_t> delete_ids = {search_id_array_[0], search_id_array_[1]};
+    DeleteByIds(collection_name, delete_ids);
+    CompactCollection(collection_name);
 
-//    DropIndex(collection_name);
-//    DropCollection(collection_name);
+    LoadCollection(collection_name);
+    SearchEntities(collection_name, TOP_K, NPROBE); // this line get two search error since we delete two entities
+
+    DropIndex(collection_name);
+    DropCollection(collection_name);
 }
