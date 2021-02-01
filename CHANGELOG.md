@@ -1,10 +1,12 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
+
 # Milvus 0.10.6 (TBD)
 ## Bug
 
 ## Feature
+-   \#4676 make metrics label configurable
 
 ## Improvement
 

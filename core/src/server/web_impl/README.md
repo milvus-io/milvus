@@ -41,7 +41,7 @@
 
 ## Overview
 
-With the RESTful API, you can use Milvus by sending HTTP requests to the Milvus server web port. The RESTful API is available as long as you have a running Milvus server. You can set the web port in the Milvus configuration file. Refer to [Milvus Configuration](https://www.milvus.io/docs/reference/milvus_config.md) for more information.
+With the RESTful API, you can use Milvus by sending HTTP requests to the Milvus server web port. The RESTful API is available as long as you have a running Milvus server. You can set the web port in the Milvus configuration file. Refer to [Milvus Configuration](https://www.milvus.io/docs/milvus_config.md) for more information.
 
 ## API Reference
 
@@ -690,7 +690,8 @@ Updates the index type and nlist of a collection.
 
 | Parameter    | Description                                                                                                                                                                                              | Required? |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/guides/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `index_type` | The type of indexing method to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/index.md) for detailed introduction of supported indexes. The default is "FLAT". | No        |
+| `metric_type`| The type of metric to query the collection. Please refer to [Milvus Indexes](https://www.milvus.io/docs/index.md) for detailed introduction of supported indexes.                                 | No        |
 | `params`     | The extra params of indexing method to query the collection. Please refer to [Index and search parameters](#Index-and-search-parameters) for detailed introduction of supported indexes.                                              | No        |
 
 ##### Query Parameters
@@ -1496,7 +1497,8 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 <tr><td>Body</td><td><pre><code>
 {
   "load": {
-     "collection_name": $string
+     "collection_name": $string,
+     "partition_tags": [$string, $string]
   }
 }
 </code></pre> </td></tr>
@@ -1515,7 +1517,7 @@ $ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json"
 ###### Request
 
 ```shell
-$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\"}}"
+$ curl -X PUT "http://127.0.0.1:19121/system/task" -H "accept: application/json" -d "{\"load\": {\"collection_name\": \"test_collection\", \"partition_tags\": [\"part_1\", \"part_2\"]}}"
 ```
 
 ###### Response
@@ -1562,7 +1564,7 @@ For each index type, the RESTful API has specific index parameters and search pa
 </tr>
 </table>
 
-For detailed information about the parameters above, refer to [Milvus Indexes](https://milvus.io/docs/guides/index.md)
+For detailed information about the parameters above, refer to [Milvus Indexes](https://milvus.io/docs/index.md)
 
 ## Error Codes
 
