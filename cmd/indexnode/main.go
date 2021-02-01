@@ -18,13 +18,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpcindexnode "github.com/zilliztech/milvus-distributed/internal/distributed/indexnode"
+	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+
 	"go.uber.org/zap"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := grpcindexnode.NewServer(ctx)
+	n, err := components.NewIndexNode(ctx)
 	if err != nil {
 		log.Print("create server failed", zap.Error(err))
 	}
@@ -42,14 +43,16 @@ func main() {
 		cancel()
 	}()
 
-	if err := svr.Run(); err != nil {
+	if err := n.Run(); err != nil {
 		log.Fatal("run builder server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()
 	log.Print("Got signal to exit", zap.String("signal", sig.String()))
 
-	svr.Stop()
+	if err := n.Stop(); err != nil {
+		log.Fatal("stop builder server failed", zap.Error(err))
+	}
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
