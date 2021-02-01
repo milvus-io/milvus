@@ -125,8 +125,19 @@ func (m *MasterService) Run() error {
 }
 
 func (m *MasterService) Stop() error {
-	_ = m.proxyService.Stop()
-	_ = m.indexService.Stop()
-	_ = m.dataService.Stop()
-	return m.svr.Stop()
+	if m != nil {
+		if m.proxyService != nil {
+			_ = m.proxyService.Stop()
+		}
+		if m.indexService != nil {
+			_ = m.indexService.Stop()
+		}
+		if m.dataService != nil {
+			_ = m.dataService.Stop()
+		}
+		if m.svr != nil {
+			return m.svr.Stop()
+		}
+	}
+	return nil
 }
