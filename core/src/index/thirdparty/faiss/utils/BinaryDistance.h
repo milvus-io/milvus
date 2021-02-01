@@ -16,39 +16,69 @@
 #include <stdint.h>
 #include <faiss/utils/BitsetView.h>
 #include <faiss/utils/Heap.h>
+#include <faiss/impl/AuxIndexStructures.h>
 
 /* The binary distance type */
 typedef float tadis_t;
 
 namespace faiss {
+    /**
+     * Calculate the number of bit 1
+     */
     extern int popcnt(
-            const uint8_t* data1,
-            const size_t n);
+            const uint8_t* data,
+            const size_t code_size);
 
+    /**
+     * Calculate the number of bit 1 after xor
+     */
     extern int xor_popcnt(
             const uint8_t* data1,
             const uint8_t* data2,
-            const size_t n);
+            const size_t code_size);
 
+    /**
+     * Calculate the number of bit 1 after or
+     */
     extern int or_popcnt(
             const uint8_t* data1,
             const uint8_t* data2,
-            const size_t n);
+            const size_t code_size);
 
+    /**
+     * Calculate the number of bit 1 after and
+     */
     extern int and_popcnt(
             const uint8_t* data1,
             const uint8_t* data2,
-            const size_t n);
+            const size_t code_size);
 
+    /**
+     * Judge whether data1 is a subset of data2
+     */
+    extern bool is_subset(
+            const uint8_t* data1,
+            const uint8_t* data2,
+            const size_t code_size);
+
+    /**
+     * Calculate Jaccard distance
+     */
     extern float bvec_jaccard (
             const uint8_t* data1,
             const uint8_t* data2,
-            const size_t n);
+            const size_t code_size);
 
+    /**
+     * Distance conversion between Jaccard and Tanimoto
+     */
     inline float Jaccard_2_Tanimoto (float jcd) {
         return -log2(1 - jcd);
     }
 
+    inline float Tanimoto_2_Jaccard (float tnmt) {
+        return 1 - pow(2.0, -tnmt);
+    }
  /** Return the k matched distances for a set of binary query vectors,
   * using an array.
   * @param a       queries, size ha->nh * ncodes
@@ -110,21 +140,21 @@ namespace faiss {
             size_t ncodes,
             const BitsetView& bitset);
 
-    template <class C>
+    template <class C, typename T>
     void binary_range_search(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,
         size_t na,
         size_t nb,
-        C::T radius,
+        T radius,
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
         const BitsetView& bitset);
 
     extern template
-    void binary_range_search<CMax<int, int64_t>>(
+    void binary_range_search<CMax<int, int64_t>, int>(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,
@@ -137,7 +167,7 @@ namespace faiss {
         const BitsetView& bitset);
 
     extern template
-    void binary_range_search<CMax<float, int64_t>>(
+    void binary_range_search<CMax<float, int64_t>, float>(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,
@@ -150,7 +180,7 @@ namespace faiss {
         const BitsetView& bitset);
 
     extern template
-    void binary_range_search<CMax<bool, int64_t>>(
+    void binary_range_search<CMin<bool, int64_t>, bool>(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,

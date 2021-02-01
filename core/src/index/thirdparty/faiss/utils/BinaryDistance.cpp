@@ -23,13 +23,15 @@
 #include <faiss/utils/substructure-inl.h>
 #include <faiss/utils/superstructure-inl.h>
 
+#include <faiss/utils/distances.h>
+
 namespace faiss {
 
 #define fast_loop_imp(fun_u64, fun_u8) \
     auto a = reinterpret_cast<const uint64_t*>(data1); \
     auto b = reinterpret_cast<const uint64_t*>(data2); \
-    int div = n / 8; \
-    int mod = n % 8; \
+    int div = code_size / 8; \
+    int mod = code_size % 8; \
     int i = 0, len = div; \
     switch(len & 7) { \
         default: \
@@ -60,7 +62,7 @@ namespace faiss {
         } \
     }
 
-int popcnt(const uint8_t* data, const size_t n) {
+int popcnt(const uint8_t* data, const size_t code_size) {
     auto data1 = data, data2 = data; // for the macro fast_loop_imp
 #define fun_u64 accu += popcount64(a[i])
 #define fun_u8(i) accu += lookup8bit[a[i]]
@@ -71,7 +73,7 @@ int popcnt(const uint8_t* data, const size_t n) {
 #undef fun_u8
 }
 
-int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] ^ b[i]);
 #define fun_u8(i) accu += lookup8bit[a[i] ^ b[i]];
     int accu = 0;
@@ -81,7 +83,7 @@ int xor_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] | b[i])
 #define fun_u8(i) accu += lookup8bit[a[i] | b[i]]
     int accu = 0;
@@ -91,7 +93,7 @@ int or_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
+int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t code_size) {
 #define fun_u64 accu += popcount64(a[i] & b[i])
 #define fun_u8(i) accu += lookup8bit[a[i] & b[i]]
     int accu = 0;
@@ -101,7 +103,16 @@ int and_popcnt(const uint8_t* data1, const uint8_t*data2, const size_t n) {
 #undef fun_u8
 }
 
-float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) {
+bool is_subset(const uint8_t* data1, const uint8_t* data2, const size_t code_size) {
+#define fun_u64 if((a[i] & b[i]) != a[i]) return false
+#define fun_u8(i) if((a[i] & b[i]) != a[i]) return false
+    fast_loop_imp(fun_u64, fun_u8);
+    return true;
+#undef fun_u64
+#undef fun_u8
+}
+
+float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t code_size) {
 #define fun_u64 accu_num += popcount64(a[i] & b[i]); accu_den += popcount64(a[i] | b[i])
 #define fun_u8(i) accu_num += lookup8bit[a[i] & b[i]]; accu_den += lookup8bit[a[i] | b[i]]
     int accu_num = 0;
@@ -111,8 +122,6 @@ float bvec_jaccard (const uint8_t* data1, const uint8_t* data2, const size_t n) 
 #undef fun_u64
 #undef fun_u8
 }
-
-static const size_t size_1M = 1 * 1024 * 1024;
 
 template <class T>
 static
@@ -130,7 +139,10 @@ void binary_distance_knn_mc(
     int thread_max_num = omp_get_max_threads();
     size_t l3_size = get_L3_Size();
 
-    if ((bytes_per_code + sizeof(size_t) + k * sizeof(int64_t)) * n1 < size_1M) {
+    /*
+     * Later we may propose a more reasonable strategy.
+     */
+    if (n1 < n2) {
         size_t group_num = n1 * thread_max_num;
         size_t *match_num = new size_t[group_num];
         int64_t *match_data = new int64_t[group_num * k];
@@ -494,142 +506,70 @@ void binary_distance_knn_hc<CMax<float, int64_t>>(
         const BitsetView& bitset);
 
 
-//(a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-template <class C, class MetricComputer>
+template <class C, typename T, class MetricComputer>
 void binary_range_search (
     const uint8_t * a,
     const uint8_t * b,
     size_t na,
     size_t nb,
-    C::T radius,
+    T radius,
     size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
     const BitsetView& bitset)
 {
-    typedef typename C::T T;
-    size_t k = ha->k;
 
-    size_t l3_size = get_L3_Size();
-    size_t thread_max_num = omp_get_max_threads();
+#pragma omp parallel
+    {
+        RangeSearchResult *tmp_res = new RangeSearchResult(na);
+        tmp_res->buffer_size = buffer_size;
+        auto pres = new RangeSearchPartialResult(tmp_res);
 
-    /*
-     * Here is an empirical formula, and later we may propose a more reasonable strategy.
-     */
-    if ((bytes_per_code + k * (sizeof(T) + sizeof(int64_t))) * ha->nh * thread_max_num <= l3_size &&
-            (ha->nh < (n2 >> 11) + thread_max_num / 3)) {
-        // init heap
-        size_t thread_heap_size = ha->nh * k;
-        size_t all_heap_size = thread_heap_size * thread_max_num;
-        T *value = new T[all_heap_size];
-        int64_t *labels = new int64_t[all_heap_size];
-        T init_value = (typeid(T) == typeid(float)) ? (1.0 / 0.0) : 0x7fffffff;
-        for (int i = 0; i < all_heap_size; i++) {
-            value[i] = init_value;
-            labels[i] = -1;
-        }
-
-        MetricComputer *hc = new MetricComputer[ha->nh];
-        for (size_t i = 0; i < ha->nh; i++) {
-            hc[i].set(bs1 + i * bytes_per_code, bytes_per_code);
-        }
+        MetricComputer mc(a, ncodes);
+        RangeQueryResult& qres = pres->new_result(0);
 
 #pragma omp parallel for
-        for (size_t j = 0; j < n2; j++) {
+        for (size_t j = 0; j < nb; j++) {
             if(!bitset || !bitset.test(j)) {
-                int thread_no = omp_get_thread_num();
-
-                const uint8_t * bs2_ = bs2 + j * bytes_per_code;
-                for (size_t i = 0; i < ha->nh; i++) {
-                    T dis = hc[i].compute (bs2_);
-                    T *val_ = value + thread_no * thread_heap_size + i * k;
-                    int64_t *ids_ = labels + thread_no * thread_heap_size + i * k;
-                    if (C::cmp(val_[0], dis)) {
-                        faiss::heap_swap_top<C>(k, val_, ids_, dis, j);
-                    }
+                T dist = mc.compute(b + j * ncodes);
+                if (C::cmp(radius, dist)) {
+                    qres.add(dist, j);
                 }
             }
         }
-
-        for (size_t t = 1; t < thread_max_num; t++) {
-            // merge heap
-            for (size_t i = 0; i < ha->nh; i++) {
-                T * __restrict value_x = value + i * k;
-                int64_t * __restrict labels_x = labels + i * k;
-                T *value_x_t = value_x + t * thread_heap_size;
-                int64_t *labels_x_t = labels_x + t * thread_heap_size;
-                for (size_t j = 0; j < k; j++) {
-                    if (C::cmp(value_x[0], value_x_t[j])) {
-                        faiss::heap_swap_top<C>(k, value_x, labels_x, value_x_t[j], labels_x_t[j]);
-                    }
-                }
-            }
-        }
-
-        // copy result
-        memcpy(ha->val, value, thread_heap_size * sizeof(T));
-        memcpy(ha->ids, labels, thread_heap_size * sizeof(int64_t));
-
-        delete[] value;
-        delete[] labels;
-
-    } else {
-        const size_t block_size = l3_size / bytes_per_code;
-
-        ha->heapify ();
-
-        for (size_t j0 = 0; j0 < n2; j0 += block_size) {
-            const size_t j1 = std::min(j0 + block_size, n2);
-#pragma omp parallel for
-            for (size_t i = 0; i < ha->nh; i++) {
-                MetricComputer hc (bs1 + i * bytes_per_code, bytes_per_code);
-
-                const uint8_t *bs2_ = bs2 + j0 * bytes_per_code;
-                T dis;
-                T *__restrict bh_val_ = ha->val + i * k;
-                int64_t *__restrict bh_ids_ = ha->ids + i * k;
-                for (size_t j = j0; j < j1; j++, bs2_ += bytes_per_code) {
-                    if (!bitset || !bitset.test(j)) {
-                        dis = hc.compute (bs2_);
-                        if (C::cmp(bh_val_[0], dis)) {
-                            faiss::heap_swap_top<C>(k, bh_val_, bh_ids_, dis, j);
-                        }
-                    }
-                }
-
-            }
-        }
+#pragma omp critical
+        result.push_back(pres);
     }
-    ha->reorder ();
 }
 
-template <class C>
+template <class C, typename T>
 void binary_range_search(
     MetricType metric_type,
     const uint8_t * a,
     const uint8_t * b,
     size_t na,
     size_t nb,
-    C::T radius,
+    T radius,
     size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
     const BitsetView& bitset) {
 
     switch (metric_type) {
+    case METRIC_Tanimoto:
     case METRIC_Jaccard: {
         if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, faiss::JaccardComputerAVX512>
+            binary_range_search<C, T, faiss::JaccardComputerAVX512>
                     (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else if (support_avx2() && ncodes > 64) {
-            binary_range_search<C, faiss::JaccardComputerAVX2>
-                    (ncodes, ha, a, b, nb, bitset);
+            binary_range_search<C, T, faiss::JaccardComputerAVX2>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else {
             switch (ncodes) {
 #define binary_range_search_jaccard(ncodes) \
             case ncodes: \
-                binary_range_search<C, faiss::JaccardComputer ## ncodes> \
-                    (ncodes, ha, a, b, nb, bitset); \
+                binary_range_search<C, T, faiss::JaccardComputer ## ncodes> \
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
                 break;
             binary_range_search_jaccard(8);
             binary_range_search_jaccard(16);
@@ -640,9 +580,19 @@ void binary_range_search(
             binary_range_search_jaccard(512);
 #undef binary_range_search_jaccard
             default:
-                binary_range_search<C, faiss::JaccardComputerDefault>
-                        (ncodes, ha, a, b, nb, bitset);
+                binary_range_search<C, T, faiss::JaccardComputerDefault>
+                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
                 break;
+            }
+        }
+        if (METRIC_Tanimoto == metric_type) {
+            for (auto &prspr: result) {
+                auto len = prspr->buffers.size() * prspr->buffer_size - prspr->buffer_size + prspr->wp;
+                for (auto &buf: prspr->buffers) {
+                    for (auto i = 0; i < prspr->buffer_size && i < len; ++ i)
+                        buf.dis[i] = Jaccard_2_Tanimoto(buf.dis[i]);
+                    len -= prspr->buffer_size;
+                }
             }
         }
         break;
@@ -650,28 +600,90 @@ void binary_range_search(
 
     case METRIC_Hamming: {
         if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, faiss::HammingComputerAVX512>
-                    (ncodes, ha, a, b, nb, bitset);
+            binary_range_search<C, T, faiss::HammingComputerAVX512>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else if (support_avx2() && ncodes > 64) {
-            binary_range_search<C, faiss::HammingComputerAVX2>
-                    (ncodes, ha, a, b, nb, bitset);
+            binary_range_search<C, T, faiss::HammingComputerAVX2>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else {
             switch (ncodes) {
 #define binary_range_search_hamming(ncodes) \
             case ncodes: \
-                binary_range_search<C, faiss::HammingComputer ## ncodes> \
-                    (ncodes, ha, a, b, nb, bitset); \
+                binary_range_search<C, T, faiss::HammingComputer ## ncodes> \
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
                 break;
-            binary_distance_knn_hc_hamming(4);
-            binary_distance_knn_hc_hamming(8);
-            binary_distance_knn_hc_hamming(16);
-            binary_distance_knn_hc_hamming(20);
-            binary_distance_knn_hc_hamming(32);
-            binary_distance_knn_hc_hamming(64);
+            binary_range_search_hamming(4);
+            binary_range_search_hamming(8);
+            binary_range_search_hamming(16);
+            binary_range_search_hamming(20);
+            binary_range_search_hamming(32);
+            binary_range_search_hamming(64);
 #undef binary_range_search_hamming
             default:
-                binary_distance_knn_hc<C, faiss::HammingComputerDefault>
-                        (ncodes, ha, a, b, nb, bitset);
+                binary_range_search<C, T, faiss::HammingComputerDefault>
+                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+                break;
+            }
+        }
+        break;
+    }
+
+    case METRIC_Superstructure: {
+        if (support_avx512() && ncodes > 128) {
+            binary_range_search<C, T, faiss::SuperstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+        } else if (support_avx2() && ncodes > 64) {
+            binary_range_search<C, T, faiss::SuperstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+        } else {
+            switch (ncodes) {
+#define binary_range_search_superstructure(ncodes) \
+            case ncodes: \
+                binary_range_search<C, T, faiss::SuperstructureComputer ## ncodes> \
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
+                break;
+            binary_range_search_superstructure(8);
+            binary_range_search_superstructure(16);
+            binary_range_search_superstructure(32);
+            binary_range_search_superstructure(64);
+            binary_range_search_superstructure(128);
+            binary_range_search_superstructure(256);
+            binary_range_search_superstructure(512);
+#undef binary_range_search_superstructure
+            default:
+                binary_range_search<C, T, faiss::SuperstructureComputerDefault>
+                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+                break;
+            }
+        }
+        break;
+    }
+
+    case METRIC_Substructure: {
+        if (support_avx512() && ncodes > 128) {
+            binary_range_search<C, T, faiss::SubstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+        } else if (support_avx2() && ncodes > 64) {
+            binary_range_search<C, T, faiss::SubstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+        } else {
+            switch (ncodes) {
+#define binary_range_search_substructure(ncodes) \
+            case ncodes: \
+                binary_range_search<C, T, faiss::SubstructureComputer ## ncodes> \
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
+                break;
+            binary_range_search_substructure(8);
+            binary_range_search_substructure(16);
+            binary_range_search_substructure(32);
+            binary_range_search_substructure(64);
+            binary_range_search_substructure(128);
+            binary_range_search_substructure(256);
+            binary_range_search_substructure(512);
+#undef binary_range_search_substructure
+            default:
+                binary_range_search<C, T, faiss::SubstructureComputerDefault>
+                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
                 break;
             }
         }
@@ -684,7 +696,20 @@ void binary_range_search(
 }
 
 template
-void binary_range_search<CMax<float, int64_t>>(
+void binary_range_search<CMax<int, int64_t>, int>(
+    MetricType metric_type,
+    const uint8_t * a,
+    const uint8_t * b,
+    size_t na,
+    size_t nb,
+    int radius,
+    size_t ncodes,
+    std::vector<faiss::RangeSearchPartialResult*>& result,
+    size_t buffer_size,
+    const BitsetView& bitset);
+
+template
+void binary_range_search<CMax<float, int64_t>, float>(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,
@@ -697,7 +722,7 @@ void binary_range_search<CMax<float, int64_t>>(
         const BitsetView& bitset);
 
 template
-void binary_range_search<CMax<bool, int64_t>>(
+void binary_range_search<CMin<bool, int64_t>, bool>(
         MetricType metric_type,
         const uint8_t * a,
         const uint8_t * b,

@@ -487,14 +487,7 @@ BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
         case 20: HC(HammingComputer20);
         case 32: HC(HammingComputer32);
         case 64: HC(HammingComputer64);
-        default:
-            if (code_size % 8 == 0) {
-                HC(HammingComputerM8);
-            } else if (code_size % 4 == 0) {
-                HC(HammingComputerM4);
-            } else {
-                HC(HammingComputerDefault);
-            }
+        default: HC(HammingComputerDefault);
     }
 #undef HC
 }
@@ -825,16 +818,8 @@ void search_knn_hamming_count_1 (
       HANDLE_CS(64);
 #undef HANDLE_CS
     default:
-        if (ivf.code_size % 8 == 0) {
-            search_knn_hamming_count<HammingComputerM8, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        } else if (ivf.code_size % 4 == 0) {
-            search_knn_hamming_count<HammingComputerM4, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        } else {
-            search_knn_hamming_count<HammingComputerDefault, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
-        }
+        search_knn_hamming_count<HammingComputerDefault, store_pairs>
+            (ivf, nx, x, keys, k, distances, labels, params, index_ivf_stats, bitset);
         break;
     }
 }

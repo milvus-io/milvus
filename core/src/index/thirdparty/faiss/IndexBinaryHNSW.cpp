@@ -312,11 +312,7 @@ DistanceComputer *IndexBinaryHNSW::get_distance_computer() const {
     case 64:
       return new FlatHammingDis<HammingComputer64>(*flat_storage);
     default:
-      if (code_size % 8 == 0) {
-        return new FlatHammingDis<HammingComputerM8>(*flat_storage);
-      } else if (code_size % 4 == 0) {
-        return new FlatHammingDis<HammingComputerM4>(*flat_storage);
-      }
+      break;
   }
 
   return new FlatHammingDis<HammingComputerDefault>(*flat_storage);

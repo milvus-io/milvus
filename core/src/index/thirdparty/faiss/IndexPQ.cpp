@@ -397,11 +397,8 @@ void IndexPQ::search_core_polysemous (idx_t n, const float *x, idx_t k,
                     (*this, dis_table_qi, q_code, k, heap_dis, heap_ids);
                 break;
             default:
-                if (pq.code_size % 8 == 0) {
-                    n_pass += polysemous_inner_loop<HammingComputerM8>
-                        (*this, dis_table_qi, q_code, k, heap_dis, heap_ids);
-                } else if (pq.code_size % 4 == 0) {
-                    n_pass += polysemous_inner_loop<HammingComputerM4>
+                if (pq.code_size % 4 == 0) {
+                    n_pass += polysemous_inner_loop<HammingComputerDefault>
                         (*this, dis_table_qi, q_code, k, heap_dis, heap_ids);
                 } else {
                     FAISS_THROW_FMT(
