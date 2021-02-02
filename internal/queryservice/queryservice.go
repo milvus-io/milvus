@@ -269,19 +269,22 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			log.Fatal("showSegment fail, v%", showSegmentResponse.Status.Reason)
 		}
 		segmentIDs := showSegmentResponse.SegmentIDs
-		segmentStates := make(map[UniqueID]*datapb.SegmentStatesResponse)
+		segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
 		channel2id := make(map[string]int)
 		//id2channels := make(map[int][]string)
 		id2segs := make(map[int][]UniqueID)
 		offset := 0
 
-		for _, segmentID := range segmentIDs {
-			state, err := qs.dataServiceClient.GetSegmentStates(&datapb.SegmentStatesRequest{
-				SegmentID: segmentID,
-			})
-			if err != nil {
-				log.Fatal("get segment states fail")
-			}
+		resp, err := qs.dataServiceClient.GetSegmentStates(&datapb.SegmentStatesRequest{
+			SegmentIDs: segmentIDs,
+		})
+
+		if err != nil {
+			log.Fatal("get segment states fail")
+		}
+
+		for _, state := range resp.States {
+			segmentID := state.SegmentID
 			segmentStates[segmentID] = state
 			var flatChannelName string
 			channelNames := make([]string, 0)

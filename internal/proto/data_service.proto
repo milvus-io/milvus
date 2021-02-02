@@ -82,17 +82,23 @@ enum SegmentState {
 
 message SegmentStatesRequest {
   common.MsgBase base = 1;
-  int64  segmentID = 2;
+  repeated int64  segmentIDs = 2;
+}
+
+message SegmentStateInfo {
+  int64 segmentID = 1;
+  SegmentState state = 2;
+  uint64 create_time = 3;
+  uint64 sealed_time = 4;
+  uint64 flushed_time = 5;
+  repeated internal.MsgPosition start_positions = 6;
+  repeated internal.MsgPosition end_positions = 7;
+  common.Status status = 8;
 }
 
 message SegmentStatesResponse {
-  SegmentState state = 1;
-  uint64 create_time = 2;
-  uint64 sealed_time = 3;
-  uint64 flushed_time = 4;
-  repeated internal.MsgPosition start_positions = 5;
-  repeated internal.MsgPosition end_positions = 6;
-  common.Status status = 7;
+  common.Status status = 1;
+  repeated SegmentStateInfo states = 2;
 }
 
 message InsertBinlogPathRequest {
@@ -128,15 +134,15 @@ message FlushSegRequest {
 }
 
 message SegmentInfo {
-  int64 segmentID=1;
-  int64 collectionID =2;
-  int64 partitionID=3;
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
   repeated string insert_channels = 4;
-  uint64 open_time=5;
+  uint64 open_time = 5;
   uint64 sealed_time = 6;
   uint64 flushed_time = 7;
-  int64 num_rows=8;
-  int64 mem_size=9;
+  int64 num_rows = 8;
+  int64 mem_size = 9;
   SegmentState state = 10;
   repeated internal.MsgPosition start_position = 11;
   repeated internal.MsgPosition end_position = 12;
@@ -171,41 +177,41 @@ message PartitionStatsResponse {
 }
 
 message FieldFlushMeta {
-    int64 fieldID = 1;
-    repeated string binlog_paths = 2;
+  int64 fieldID = 1;
+  repeated string binlog_paths = 2;
 }
 
 message SegmentFlushMeta{
-    int64 segmentID = 1;
-    bool is_flushed = 2;
-    repeated FieldFlushMeta fields = 5;
+  int64 segmentID = 1;
+  bool is_flushed = 2;
+  repeated FieldFlushMeta fields = 5;
 }
 
 message DDLFlushMeta {
-    int64 collectionID = 1;
-    repeated string binlog_paths = 2;
+  int64 collectionID = 1;
+  repeated string binlog_paths = 2;
 }
 
 service DataService {
 
-   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-   rpc Flush(FlushRequest) returns (common.Status) {}
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
+  rpc Flush(FlushRequest) returns (common.Status) {}
 
-   rpc AssignSegmentID(AssignSegIDRequest) returns (AssignSegIDResponse) {}
-   rpc ShowSegments(ShowSegmentRequest) returns (ShowSegmentResponse) {}
+  rpc AssignSegmentID(AssignSegIDRequest) returns (AssignSegIDResponse) {}
+  rpc ShowSegments(ShowSegmentRequest) returns (ShowSegmentResponse) {}
 
-   rpc GetSegmentStates(SegmentStatesRequest) returns (SegmentStatesResponse) {}
-   rpc GetInsertBinlogPaths(InsertBinlogPathRequest) returns (InsertBinlogPathsResponse) {}
+  rpc GetSegmentStates(SegmentStatesRequest) returns (SegmentStatesResponse) {}
+  rpc GetInsertBinlogPaths(InsertBinlogPathRequest) returns (InsertBinlogPathsResponse) {}
 
-   rpc GetInsertChannels(InsertChannelRequest) returns (internal.StringList) {}
-   rpc GetCollectionStatistics(CollectionStatsRequest) returns (CollectionStatsResponse) {}
-   rpc GetPartitionStatistics(PartitionStatsRequest) returns (PartitionStatsResponse) {}
+  rpc GetInsertChannels(InsertChannelRequest) returns (internal.StringList) {}
+  rpc GetCollectionStatistics(CollectionStatsRequest) returns (CollectionStatsResponse) {}
+  rpc GetPartitionStatistics(PartitionStatsRequest) returns (PartitionStatsResponse) {}
 
-   rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
-   rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
-   rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
+  rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
+  rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}
+  rpc GetStatisticsChannel(common.Empty) returns(milvus.StringResponse){}
 
-   rpc GetSegmentInfoChannel(common.Empty) returns (milvus.StringResponse){}
+  rpc GetSegmentInfoChannel(common.Empty) returns (milvus.StringResponse){}
 }
 
 service DataNode {

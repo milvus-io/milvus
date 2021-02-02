@@ -91,7 +91,7 @@ func (master *masterMock) ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvus
 
 type dataMock struct {
 	segmentIDs    []UniqueID
-	segmentStates map[UniqueID]*datapb.SegmentStatesResponse
+	segmentStates map[UniqueID]*datapb.SegmentStateInfo
 }
 
 func newDataMock() *dataMock {
@@ -110,23 +110,24 @@ func newDataMock() *dataMock {
 	segmentIDs = append(segmentIDs, 5)
 	segmentIDs = append(segmentIDs, 6)
 
-	fillStates := func(time uint64, position []*internalpb2.MsgPosition, state datapb.SegmentState) *datapb.SegmentStatesResponse {
-		return &datapb.SegmentStatesResponse{
+	fillStates := func(segmentID UniqueID, time uint64, position []*internalpb2.MsgPosition, state datapb.SegmentState) *datapb.SegmentStateInfo {
+		return &datapb.SegmentStateInfo{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
 			},
+			SegmentID:      segmentID,
 			State:          state,
 			CreateTime:     time,
 			StartPositions: position,
 		}
 	}
-	segmentStates := make(map[UniqueID]*datapb.SegmentStatesResponse)
-	segmentStates[1] = fillStates(1, positions1, datapb.SegmentState_SegmentFlushed)
-	segmentStates[2] = fillStates(2, positions2, datapb.SegmentState_SegmentFlushed)
-	segmentStates[3] = fillStates(3, positions1, datapb.SegmentState_SegmentFlushed)
-	segmentStates[4] = fillStates(4, positions2, datapb.SegmentState_SegmentFlushed)
-	segmentStates[5] = fillStates(5, positions1, datapb.SegmentState_SegmentGrowing)
-	segmentStates[6] = fillStates(6, positions2, datapb.SegmentState_SegmentGrowing)
+	segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
+	segmentStates[1] = fillStates(1, 1, positions1, datapb.SegmentState_SegmentFlushed)
+	segmentStates[2] = fillStates(2, 2, positions2, datapb.SegmentState_SegmentFlushed)
+	segmentStates[3] = fillStates(3, 3, positions1, datapb.SegmentState_SegmentFlushed)
+	segmentStates[4] = fillStates(4, 4, positions2, datapb.SegmentState_SegmentFlushed)
+	segmentStates[5] = fillStates(5, 5, positions1, datapb.SegmentState_SegmentGrowing)
+	segmentStates[6] = fillStates(6, 6, positions2, datapb.SegmentState_SegmentGrowing)
 
 	return &dataMock{
 		segmentIDs:    segmentIDs,
@@ -135,13 +136,24 @@ func newDataMock() *dataMock {
 }
 
 func (data *dataMock) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error) {
-	segmentID := req.SegmentID
-	for _, id := range data.segmentIDs {
-		if segmentID == id {
-			return data.segmentStates[id], nil
+	ret := &datapb.SegmentStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+	}
+	for _, segID := range req.SegmentIDs {
+		for _, segmentID := range data.segmentIDs {
+			if segmentID == segID {
+				ret.States = append(ret.States, data.segmentStates[segmentID])
+			}
 		}
 	}
-	return nil, errors.New("segment id not found")
+
+	if ret.States == nil {
+		return nil, errors.New("segment id not found")
+	}
+
+	return ret, nil
 }
 
 func TestQueryService_Init(t *testing.T) {

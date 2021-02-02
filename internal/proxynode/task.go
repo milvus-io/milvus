@@ -364,10 +364,9 @@ func (cct *CreateCollectionTask) PostExecute() error {
 type DropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
-	masterClient      MasterClient
-	dataServiceClient DataServiceClient
-	result            *commonpb.Status
-	ctx               context.Context
+	masterClient MasterClient
+	result       *commonpb.Status
+	ctx          context.Context
 }
 
 func (dct *DropCollectionTask) OnEnqueue() error {
@@ -1374,5 +1373,72 @@ func (dipt *GetIndexStateTask) Execute() error {
 }
 
 func (dipt *GetIndexStateTask) PostExecute() error {
+	return nil
+}
+
+type FlushTask struct {
+	Condition
+	*milvuspb.FlushRequest
+	dataServiceClient DataServiceClient
+	result            *commonpb.Status
+	ctx               context.Context
+}
+
+func (ft *FlushTask) OnEnqueue() error {
+	ft.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (ft *FlushTask) ID() UniqueID {
+	return ft.Base.MsgID
+}
+
+func (ft *FlushTask) SetID(uid UniqueID) {
+	ft.Base.MsgID = uid
+}
+
+func (ft *FlushTask) Type() commonpb.MsgType {
+	return ft.Base.MsgType
+}
+
+func (ft *FlushTask) BeginTs() Timestamp {
+	return ft.Base.Timestamp
+}
+
+func (ft *FlushTask) EndTs() Timestamp {
+	return ft.Base.Timestamp
+}
+
+func (ft *FlushTask) SetTs(ts Timestamp) {
+	ft.Base.Timestamp = ts
+}
+
+func (ft *FlushTask) PreExecute() error {
+	ft.Base.MsgType = commonpb.MsgType_kFlush
+	ft.Base.SourceID = Params.ProxyID
+	return nil
+}
+
+func (ft *FlushTask) Execute() error {
+	var err error
+	collID, err := globalMetaCache.GetCollectionID(ft.CollectionName)
+	if err != nil {
+		return err
+	}
+	flushReq := &datapb.FlushRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kFlush,
+			MsgID:     ft.Base.MsgID,
+			Timestamp: ft.Base.Timestamp,
+			SourceID:  ft.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
+	}
+	ft.result, err = ft.dataServiceClient.Flush(flushReq)
+	return err
+}
+
+func (ft *FlushTask) PostExecute() error {
 	return nil
 }

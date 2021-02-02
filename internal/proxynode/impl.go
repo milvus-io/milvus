@@ -80,7 +80,6 @@ func (node *NodeImpl) DropCollection(request *milvuspb.DropCollectionRequest) (*
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
 		masterClient:          node.masterClient,
-		dataServiceClient:     node.dataServiceClient,
 	}
 	var cancel func()
 	dct.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
