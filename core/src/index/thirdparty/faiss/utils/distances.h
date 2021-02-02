@@ -46,11 +46,6 @@ float fvec_Linf_sse (
         size_t d);
 #endif
 
-float fvec_jaccard (
-        const float * x,
-        const float * y,
-        size_t d);
-
 /** Compute pairwise distances between sets of vectors
  *
  * @param d     dimension of the vectors

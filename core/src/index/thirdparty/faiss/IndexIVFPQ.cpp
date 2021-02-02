@@ -969,7 +969,7 @@ struct IVFPQScannerT: QueryTables {
 
         for (size_t j = 0; j < ncode; j++) {
             const uint8_t *b_code = codes;
-            int hd = hc.hamming (b_code);
+            int hd = hc.compute (b_code);
             if (hd < ht) {
                 n_hamming_pass ++;
                 PQDecoder decoder(codes, pq.nbits);
@@ -1013,14 +1013,9 @@ struct IVFPQScannerT: QueryTables {
         HANDLE_CODE_SIZE(64);
 #undef HANDLE_CODE_SIZE
         default:
-            if (pq.code_size % 8 == 0)
-                scan_list_polysemous_hc
-                    <HammingComputerM8, SearchResultType>
-                    (ncode, codes, res, bitset);
-            else
-                scan_list_polysemous_hc
-                    <HammingComputerM4, SearchResultType>
-                    (ncode, codes, res, bitset);
+            scan_list_polysemous_hc
+                <HammingComputerDefault, SearchResultType>
+                (ncode, codes, res, bitset);
             break;
         }
     }

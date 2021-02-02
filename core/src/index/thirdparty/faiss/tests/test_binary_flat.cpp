@@ -51,9 +51,9 @@ TEST(BinaryFlat, accuracy) {
 
     for (size_t i = 0; i < nq; ++i) {
       faiss::HammingComputer8 hc(queries.data() + i * (d / 8), d / 8);
-      hamdis_t dist_min = hc.hamming(database.data());
+      hamdis_t dist_min = hc.compute(database.data());
       for (size_t j = 1; j < nb; ++j) {
-        hamdis_t dist = hc.hamming(database.data() + j * (d / 8));
+        hamdis_t dist = hc.compute(database.data() + j * (d / 8));
         if (dist < dist_min) {
           dist_min = dist;
         }

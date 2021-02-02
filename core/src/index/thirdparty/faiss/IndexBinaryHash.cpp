@@ -173,7 +173,7 @@ search_single_query_template(const IndexBinaryHash & index, const uint8_t *q,
         } else {
             const uint8_t *codes = il.vecs.data();
             for (size_t i = 0; i < nv; i++) {
-                int dis = hc.hamming (codes);
+                int dis = hc.compute (codes);
                 res.add(dis, il.ids[i]);
                 codes += code_size;
             }
@@ -196,12 +196,8 @@ search_single_query(const IndexBinaryHash & index, const uint8_t *q,
     case 16: HC(HammingComputer16); break;
     case 20: HC(HammingComputer20); break;
     case 32: HC(HammingComputer32); break;
-    default:
-        if (index.code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    default: HC(HammingComputerDefault);
+
     }
 #undef HC
 }
@@ -364,7 +360,7 @@ void verify_shortlist(
     const uint8_t *codes = index.xb.data();
 
     for (auto i: shortlist) {
-        int dis = hc.hamming (codes + i * code_size);
+        int dis = hc.compute (codes + i * code_size);
         res.add(dis, i);
     }
 }
@@ -416,12 +412,7 @@ search_1_query_multihash(const IndexBinaryMultiHash & index, const uint8_t *xi,
     case 16: HC(HammingComputer16); break;
     case 20: HC(HammingComputer20); break;
     case 32: HC(HammingComputer32); break;
-    default:
-        if (index.code_size % 8 == 0) {
-            HC(HammingComputerM8);
-        } else {
-            HC(HammingComputerDefault);
-        }
+    default: HC(HammingComputerDefault);
     }
 #undef HC
 }

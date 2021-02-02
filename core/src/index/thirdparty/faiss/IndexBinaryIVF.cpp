@@ -20,6 +20,7 @@
 
 #include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/hamming.h>
+#include <faiss/utils/jaccard-inl.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/Heap.h>
 #include <faiss/impl/AuxIndexStructures.h>
@@ -362,7 +363,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     }
 
     uint32_t distance_to_code (const uint8_t *code) const override {
-        return hc.hamming (code);
+        return hc.compute (code);
     }
 
     size_t scan_codes (size_t n,
@@ -377,7 +378,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
             if (!bitset || !bitset->test(ids[j])) {
-                uint32_t dis = hc.hamming (codes);
+                uint32_t dis = hc.compute (codes);
                 if (dis < simi[0]) {
                     idx_t id = store_pairs ? (list_no << 32 | j) : ids[j];
                     heap_swap_top<C> (k, simi, idxi, dis, id);
@@ -397,7 +398,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
     {
         size_t nup = 0;
         for (size_t j = 0; j < n; j++) {
-            uint32_t dis = hc.hamming (codes);
+            uint32_t dis = hc.compute (codes);
             if (dis < radius) {
                 int64_t id = store_pairs ? lo_build (list_no, j) : ids[j];
                 result.add (dis, id);
@@ -471,14 +472,7 @@ BinaryInvertedListScanner *select_IVFBinaryScannerL2 (size_t code_size) {
         case 20: HC(HammingComputer20);
         case 32: HC(HammingComputer32);
         case 64: HC(HammingComputer64);
-        default:
-            if (code_size % 8 == 0) {
-                HC(HammingComputerM8);
-            } else if (code_size % 4 == 0) {
-                HC(HammingComputerM4);
-            } else {
-                HC(HammingComputerDefault);
-            }
+        default: HC(HammingComputerDefault);
     }
 #undef HC
 }
@@ -798,16 +792,8 @@ void search_knn_hamming_count_1 (
       HANDLE_CS(64);
 #undef HANDLE_CS
     default:
-        if (ivf.code_size % 8 == 0) {
-            search_knn_hamming_count<HammingComputerM8, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, bitset);
-        } else if (ivf.code_size % 4 == 0) {
-            search_knn_hamming_count<HammingComputerM4, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, bitset);
-        } else {
-            search_knn_hamming_count<HammingComputerDefault, store_pairs>
-                (ivf, nx, x, keys, k, distances, labels, params, bitset);
-        }
+        search_knn_hamming_count<HammingComputerDefault, store_pairs>
+            (ivf, nx, x, keys, k, distances, labels, params, bitset);
         break;
     }
 }
@@ -856,7 +842,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                        params, bitset);
             if (metric_type == METRIC_Tanimoto) {
                 for (int i = 0; i < k * n; i++) {
-                    D[i] = -log2(1-D[i]);
+                    D[i] = Jaccard_2_Tanimoto(D[i]);
                 }
             }
             memcpy(distances, D, sizeof(float) * n * k);

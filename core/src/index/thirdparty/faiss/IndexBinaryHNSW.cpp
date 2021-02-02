@@ -260,12 +260,12 @@ struct FlatHammingDis : DistanceComputer {
 
   float operator () (idx_t i) override {
     ndis++;
-    return hc.hamming(b + i * code_size);
+    return hc.compute(b + i * code_size);
   }
 
   float symmetric_dis(idx_t i, idx_t j) override {
     return HammingComputerDefault(b + j * code_size, code_size)
-      .hamming(b + i * code_size);
+      .compute(b + i * code_size);
   }
 
 
@@ -312,11 +312,7 @@ DistanceComputer *IndexBinaryHNSW::get_distance_computer() const {
     case 64:
       return new FlatHammingDis<HammingComputer64>(*flat_storage);
     default:
-      if (code_size % 8 == 0) {
-        return new FlatHammingDis<HammingComputerM8>(*flat_storage);
-      } else if (code_size % 4 == 0) {
-        return new FlatHammingDis<HammingComputerM4>(*flat_storage);
-      }
+      break;
   }
 
   return new FlatHammingDis<HammingComputerDefault>(*flat_storage);

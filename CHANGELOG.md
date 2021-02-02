@@ -4,9 +4,11 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 0.10.6 (TBD)
 ## Bug
+-   \#4683 A negative zero may be returned if the metric_type is Tanimoto
+-   \#4678 Server crash on BinaryFlat if dimension is not a power of 2
 
 ## Feature
--   \#4676 make metrics label configurable
+-   \#4676 Support configurable metric labels for Prometheus
 
 ## Improvement
 
