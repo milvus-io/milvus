@@ -41,7 +41,6 @@ type collectionReplica interface {
 	getCollectionByID(collectionID UniqueID) (*Collection, error)
 	getCollectionByName(collectionName string) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
-	getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error)
 
 	// partition
 	// Partition tags in different collections are not unique,
@@ -67,8 +66,8 @@ type collectionReplica interface {
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	hasSegment(segmentID UniqueID) bool
+	getVecFieldsBySegmentID(segmentID UniqueID) (map[int64]string, error)
 	getSealedSegments() ([]UniqueID, []UniqueID)
-	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
 	freeAll()
 }
@@ -173,29 +172,6 @@ func (colReplica *collectionReplicaImpl) hasCollection(collectionID UniqueID) bo
 		}
 	}
 	return false
-}
-
-func (colReplica *collectionReplicaImpl) getVecFieldsByCollectionID(collectionID UniqueID) (map[int64]string, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	col, err := colReplica.getCollectionByIDPrivate(collectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	vecFields := make(map[int64]string)
-	for _, field := range col.Schema().Fields {
-		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
-			vecFields[field.FieldID] = field.Name
-		}
-	}
-
-	if len(vecFields) <= 0 {
-		return nil, errors.New("no vector field in segment " + strconv.FormatInt(collectionID, 10))
-	}
-
-	return vecFields, nil
 }
 
 //----------------------------------------------------------------------------------------------------- partition
@@ -508,10 +484,6 @@ func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	return colReplica.removeSegmentPrivate(segmentID)
-}
-
-func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID) error {
 	var targetPartition *Partition
 	var segmentIndex = -1
 
@@ -521,7 +493,6 @@ func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID
 				if s.ID() == segmentID {
 					targetPartition = p
 					segmentIndex = i
-					deleteSegment(colReplica.segments[s.ID()])
 				}
 			}
 		}
@@ -562,6 +533,34 @@ func (colReplica *collectionReplicaImpl) hasSegment(segmentID UniqueID) bool {
 	return ok
 }
 
+func (colReplica *collectionReplicaImpl) getVecFieldsBySegmentID(segmentID UniqueID) (map[int64]string, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	seg, err := colReplica.getSegmentByIDPrivate(segmentID)
+	if err != nil {
+		return nil, err
+	}
+	col, err2 := colReplica.getCollectionByIDPrivate(seg.collectionID)
+	if err2 != nil {
+		return nil, err2
+	}
+
+	vecFields := make(map[int64]string)
+	for _, field := range col.Schema().Fields {
+		if field.DataType == schemapb.DataType_VECTOR_BINARY || field.DataType == schemapb.DataType_VECTOR_FLOAT {
+			vecFields[field.FieldID] = field.Name
+		}
+	}
+
+	if len(vecFields) <= 0 {
+		return nil, errors.New("no vector field in segment " + strconv.FormatInt(segmentID, 10))
+	}
+
+	// return map[fieldID]fieldName
+	return vecFields, nil
+}
+
 func (colReplica *collectionReplicaImpl) getSealedSegments() ([]UniqueID, []UniqueID) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
@@ -578,28 +577,6 @@ func (colReplica *collectionReplicaImpl) getSealedSegments() ([]UniqueID, []Uniq
 	return collectionIDs, segmentIDs
 }
 
-func (colReplica *collectionReplicaImpl) replaceGrowingSegmentBySealedSegment(segment *Segment) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	targetSegment, ok := colReplica.segments[segment.ID()]
-	if ok {
-		if targetSegment.segmentType != segTypeGrowing {
-			return nil
-		}
-		deleteSegment(targetSegment)
-		targetSegment = segment
-	} else {
-		// add segment
-		targetPartition, err := colReplica.getPartitionByIDPrivate(segment.collectionID, segment.partitionID)
-		if err != nil {
-			return err
-		}
-		targetPartition.segments = append(targetPartition.segments, segment)
-		colReplica.segments[segment.ID()] = segment
-	}
-	return nil
-}
-
 //-----------------------------------------------------------------------------------------------------
 func (colReplica *collectionReplicaImpl) freeAll() {
 	colReplica.mu.Lock()
@@ -611,7 +588,4 @@ func (colReplica *collectionReplicaImpl) freeAll() {
 	for _, col := range colReplica.collections {
 		deleteCollection(col)
 	}
-
-	colReplica.segments = make(map[UniqueID]*Segment)
-	colReplica.collections = make([]*Collection, 0)
 }
