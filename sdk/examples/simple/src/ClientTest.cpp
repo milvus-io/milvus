@@ -306,7 +306,6 @@ ClientTest::Test() {
     BuildSearchEntities(NQ, dim);
     GetEntityByID(collection_name, search_id_array_);
 //    SearchEntities(collection_name, TOP_K, NPROBE);
-    SearchEntitiesByID(collection_name, TOP_K, NPROBE);
 
     CreateIndex(collection_name, INDEX_TYPE, NLIST);
     GetCollectionStats(collection_name);

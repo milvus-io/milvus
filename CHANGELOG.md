@@ -1,6 +1,17 @@
 # Changelog
 
 Please mark all change in change log and use the issue from GitHub
+
+# Milvus 0.10.6 (TBD)
+## Bug
+
+## Feature
+-   \#4676 make metrics label configurable
+
+## Improvement
+
+## Task
+
 # Milvus 0.10.5 (2021-01-07)
 ## Bug
 -   \#4296,#4554 Fix mishards add name-mismatched pod to read-only group
