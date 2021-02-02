@@ -159,7 +159,6 @@ func refreshChannelNames() {
 	Params.SearchChannelNames = makeNewChannelNames(Params.SearchChannelNames, suffix)
 	Params.SearchResultChannelNames = makeNewChannelNames(Params.SearchResultChannelNames, suffix)
 	Params.StatsChannelName = Params.StatsChannelName + suffix
-	Params.LoadIndexChannelNames = makeNewChannelNames(Params.LoadIndexChannelNames, suffix)
 }
 
 func (q *queryServiceMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
