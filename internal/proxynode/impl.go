@@ -207,7 +207,46 @@ func (node *NodeImpl) DescribeCollection(request *milvuspb.DescribeCollectionReq
 }
 
 func (node *NodeImpl) GetCollectionStatistics(request *milvuspb.CollectionStatsRequest) (*milvuspb.CollectionStatsResponse, error) {
-	panic("implement me")
+	log.Println("get collection statistics")
+	ctx := context.Background()
+	g := &GetCollectionsStatisticsTask{
+		Condition:              NewTaskCondition(ctx),
+		CollectionStatsRequest: request,
+		dataServiceClient:      node.dataServiceClient,
+	}
+	var cancel func()
+	g.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+
+	fn := func() error {
+		select {
+		case <-ctx.Done():
+			return errors.New("create collection timeout")
+		default:
+			return node.sched.DdQueue.Enqueue(g)
+		}
+	}
+	err := fn()
+	if err != nil {
+		return &milvuspb.CollectionStatsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	err = g.WaitToFinish()
+	if err != nil {
+		return &milvuspb.CollectionStatsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return g.result, nil
 }
 
 func (node *NodeImpl) ShowCollections(request *milvuspb.ShowCollectionRequest) (*milvuspb.ShowCollectionResponse, error) {

@@ -48,6 +48,7 @@ type DataServiceClient interface {
 	AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.AssignSegIDResponse, error)
 	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
 	Flush(req *datapb.FlushRequest) (*commonpb.Status, error)
+	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 
 	GetComponentStates() (*internalpb2.ComponentStates, error)
 }
