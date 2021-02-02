@@ -74,6 +74,8 @@ type DescribeChannelResponse struct {
 * Interface
 
 ``` go
+// Msg
+
 type MsgType uint32
 const {
   kInsert MsgType = 400
@@ -88,12 +90,12 @@ const {
 }
 
 type TsMsg interface {
-  SetTs(ts Timestamp)
-  BeginTs() Timestamp
-  EndTs() Timestamp
-  Type() MsgType
-  Marshal(*TsMsg) []byte
-  Unmarshal([]byte) *TsMsg
+    SetTs(ts Timestamp)
+    BeginTs() Timestamp
+    EndTs() Timestamp
+    Type() MsgType
+    Marshal(*TsMsg) interface{}
+    Unmarshal(interface{}) *TsMsg
 }
 
 type MsgPosition {
@@ -110,15 +112,71 @@ type MsgPack struct {
   EndPositions []MsgPosition
 }
 
-type MsgStream interface {
-  Produce(*MsgPack) error
-  Broadcast(*MsgPack) error
-  Consume() *MsgPack // message can be consumed exactly once
-  ShowChannelNames() []string
-  Seek(offset MsgPosition) error
+type RepackFunc(msgs []* TsMsg, hashKeys [][]int32) map[int32] *MsgPack
+```
+
+
+
+```go
+// Unmarshal
+
+// Interface
+type UnmarshalFunc func(interface{}) *TsMsg
+
+type UnmarshalDispatcher interface {
+    Unmarshal(interface{}, msgType commonpb.MsgType) (msgstream.TsMsg, error)
 }
 
-type RepackFunc(msgs []* TsMsg, hashKeys [][]int32) map[int32] *MsgPack
+type UnmarshalDispatcherFactory interface {
+    NewUnmarshalDispatcher() *UnmarshalDispatcher
+}
+
+// Proto & Mem Implementation
+type ProtoUDFactory struct {}
+func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *UnmarshalDispatcher
+
+type MemUDFactory struct {}
+func (mudf *MemUDFactory) NewUnmarshalDispatcher() *UnmarshalDispatcher
+```
+
+
+
+
+```go
+// MsgStream
+
+// Interface
+type MsgStream interface {
+    Start()
+    Close()
+    AsProducer(channels []string)
+    AsConsumer(channels []string, subName string)
+    Produce(*MsgPack) error
+    Broadcast(*MsgPack) error
+    Consume() *MsgPack // message can be consumed exactly once
+    Seek(mp *MsgPosition) error
+}
+
+type MsgStreamFactory interface {
+    NewMsgStream() *MsgStream
+    NewTtMsgStream() *MsgStream
+}
+
+// Pulsar
+type PulsarMsgStreamFactory interface {}
+func (pmsf *PulsarMsgStreamFactory) NewMsgStream() *MsgStream
+func (pmsf *PulsarMsgStreamFactory) NewTtMsgStream() *MsgStream
+
+// RockMQ
+type RmqMsgStreamFactory interface {}
+func (rmsf *RmqMsgStreamFactory) NewMsgStream() *MsgStream
+func (rmsf *RmqMsgStreamFactory) NewTtMsgStream() *MsgStream
+```
+
+
+
+```go
+// PulsarMsgStream
 
 type PulsarMsgStream struct {
   client *pulsar.Client
@@ -128,16 +186,17 @@ type PulsarMsgStream struct {
   unmarshal *UnmarshalDispatcher
 }
 
-func (ms *PulsarMsgStream) CreatePulsarProducers(topics []string)
-func (ms *PulsarMsgStream) CreatePulsarConsumers(subname string, topics []string, unmarshal *UnmarshalDispatcher)
-func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
+func (ms *PulsarMsgStream) Start() error
+func (ms *PulsarMsgStream) Close() error
+func (ms *PulsarMsgStream) AsProducer(channels []string)
+func (ms *PulsarMsgStream) AsConsumer(channels []string, subName string)
 func (ms *PulsarMsgStream) Produce(msgs *MsgPack) error
 func (ms *PulsarMsgStream) Broadcast(msgs *MsgPack) error
 func (ms *PulsarMsgStream) Consume() (*MsgPack, error)
-func (ms *PulsarMsgStream) Start() error
-func (ms *PulsarMsgStream) Close() error
+func (ms *PulsarMsgStream) Seek(mp *MsgPosition) error
+func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc)
 
-func NewPulsarMsgStream(ctx context.Context, pulsarAddr string) *PulsarMsgStream
+func NewPulsarMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarMsgStream
 
 
 type PulsarTtMsgStream struct {
@@ -151,35 +210,64 @@ type PulsarTtMsgStream struct {
   msgPacks []*MsgPack
 }
 
-func (ms *PulsarTtMsgStream) CreatePulsarProducers(topics []string)
-func (ms *PulsarTtMsgStream) CreatePulsarConsumers(subname string, topics []string, unmarshal *UnmarshalDispatcher)
-func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
+func (ms *PulsarTtMsgStream) Start() error
+func (ms *PulsarTtMsgStream) Close() error
+func (ms *PulsarTtMsgStream) AsProducer(channels []string)
+func (ms *PulsarTtMsgStream) AsConsumer(channels []string, subName string)
 func (ms *PulsarTtMsgStream) Produce(msgs *MsgPack) error
 func (ms *PulsarTtMsgStream) Broadcast(msgs *MsgPack) error
 func (ms *PulsarTtMsgStream) Consume() *MsgPack //return messages in one time tick
-func (ms *PulsarTtMsgStream) Start() error
-func (ms *PulsarTtMsgStream) Close() error
+func (ms *PulsarTtMsgStream) Seek(mp *MsgPosition) error
+func (ms *PulsarTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
 
-func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string) *PulsarTtMsgStream
-```
+func NewPulsarTtMsgStream(ctx context.Context, pulsarAddr string, bufferSize int64) *PulsarTtMsgStream
 
+// RmqMsgStream
 
-
-```go
-type MarshalFunc func(*TsMsg) []byte
-type UnmarshalFunc func([]byte) *TsMsg
-
-
-type UnmarshalDispatcher struct {
-	tempMap map[ReqType]UnmarshalFunc 
+type RmqMsgStream struct {
+    client *rockermq.RocksMQ
+    repackFunc RepackFunc
+    producers []string
+    consumers []string
+    subName string
+    unmarshal *UnmarshalDispatcher
 }
 
-func (dispatcher *MarshalDispatcher) Unmarshal([]byte) *TsMsg
-func (dispatcher *MarshalDispatcher) AddMsgTemplate(msgType MsgType, marshal MarshalFunc)
-func (dispatcher *MarshalDispatcher) addDefaultMsgTemplates()
+func (ms *RmqMsgStream) Start() error
+func (ms *RmqMsgStream) Close() error
+func (ms *RmqMsgStream) AsProducer(channels []string)
+func (ms *RmqMsgStream) AsConsumer(channels []string, subName string)
+func (ms *RmqMsgStream) Produce(msgs *MsgPack) error
+func (ms *RmqMsgStream) Broadcast(msgs *MsgPack) error
+func (ms *RmqMsgStream) Consume() (*MsgPack, error)
+func (ms *RmqMsgStream) Seek(mp *MsgPosition) error
+func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc)
 
-func NewUnmarshalDispatcher() *UnmarshalDispatcher
+func NewRmqMsgStream(ctx context.Context) *RmqMsgStream
+
+type RmqTtMsgStream struct {
+    client *rockermq.RocksMQ
+    repackFunc RepackFunc
+    producers []string
+    consumers []string
+    subName string
+    unmarshal *UnmarshalDispatcher
+}
+
+func (ms *RmqTtMsgStream) Start() error
+func (ms *RmqTtMsgStream) Close() error
+func (ms *RmqTtMsgStream) AsProducer(channels []string)
+func (ms *RmqTtMsgStream) AsConsumer(channels []string, subName string)
+func (ms *RmqTtMsgStream) Produce(msgs *MsgPack) error
+func (ms *RmqTtMsgStream) Broadcast(msgs *MsgPack) error
+func (ms *RmqTtMsgStream) Consume() (*MsgPack, error)
+func (ms *RmqTtMsgStream) Seek(mp *MsgPosition) error
+func (ms *RmqTtMsgStream) SetRepackFunc(repackFunc RepackFunc)
+
+func NewRmqTtMsgStream(ctx context.Context) *RmqTtMsgStream
 ```
+
+
 
 
 

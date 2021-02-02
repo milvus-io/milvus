@@ -285,7 +285,6 @@ func (node *NodeImpl) Start() error {
 func (node *NodeImpl) Stop() error {
 	node.cancel()
 
-	globalInsertChannelsMap.closeAllMsgStream()
 	node.tsoAllocator.Close()
 	node.idAllocator.Close()
 	node.segAssigner.Close()
