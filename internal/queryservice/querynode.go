@@ -6,17 +6,18 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 )
 
-type queryNode struct {
+type queryNodeInfo struct {
 	client         QueryNodeInterface
 	insertChannels string
 	nodeID         uint64
 	segments       []UniqueID
+	dmChannelNames []string
 }
 
-func (qn *queryNode) GetComponentStates() (*internalpb2.ComponentStates, error) {
+func (qn *queryNodeInfo) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return qn.client.GetComponentStates()
 }
 
-func (qn *queryNode) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
+func (qn *queryNodeInfo) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error) {
 	return qn.client.LoadSegments(in)
 }
