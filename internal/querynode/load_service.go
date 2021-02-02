@@ -47,6 +47,7 @@ type loadService struct {
 type loadIndex struct {
 	segmentID  UniqueID
 	fieldID    int64
+	fieldName  string
 	indexPaths []string
 }
 
@@ -261,7 +262,7 @@ func (s *loadService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]
 	if err != nil {
 		return err
 	}
-	err = loadIndexInfo.appendFieldInfo(l.fieldID)
+	err = loadIndexInfo.appendFieldInfo(l.fieldName, l.fieldID)
 	if err != nil {
 		return err
 	}
@@ -421,9 +422,10 @@ func (s *loadService) loadIndexImmediate(segment *Segment, indexPaths []string) 
 	if err != nil {
 		return err
 	}
-	for _, id := range vecFieldIDs {
+	for id, name := range vecFieldIDs {
 		l := &loadIndex{
 			segmentID:  segment.ID(),
+			fieldName:  name,
 			fieldID:    id,
 			indexPaths: indexPaths,
 		}
@@ -447,9 +449,10 @@ func (s *loadService) loadIndexDelayed(collectionID, segmentID UniqueID, indexPa
 	if err != nil {
 		return err
 	}
-	for _, id := range vecFieldIDs {
+	for id, name := range vecFieldIDs {
 		l := &loadIndex{
 			segmentID:  segmentID,
+			fieldName:  name,
 			fieldID:    id,
 			indexPaths: indexPaths,
 		}
@@ -484,18 +487,10 @@ func (s *loadService) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.S
 	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
-func (s *loadService) filterOutVectorFields(fieldIDs []int64, vectorFields []int64) []int64 {
-	containsFunc := func(s []int64, e int64) bool {
-		for _, a := range s {
-			if a == e {
-				return true
-			}
-		}
-		return false
-	}
+func (s *loadService) filterOutVectorFields(fieldIDs []int64, vectorFields map[int64]string) []int64 {
 	targetFields := make([]int64, 0)
 	for _, id := range fieldIDs {
-		if !containsFunc(vectorFields, id) {
+		if _, ok := vectorFields[id]; !ok {
 			targetFields = append(targetFields, id)
 		}
 	}

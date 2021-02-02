@@ -555,16 +555,11 @@ func (s *Server) AssignSegmentID(req *datapb.AssignSegIDRequest) (*datapb.Assign
 }
 
 func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, channelName string) error {
-	group, err := s.insertChannelMgr.GetChannelGroup(collectionID, channelName)
-	if err != nil {
-		return err
-	}
-
 	id, err := s.allocator.allocID()
 	if err != nil {
 		return err
 	}
-	segmentInfo, err := BuildSegment(collectionID, partitionID, id, group)
+	segmentInfo, err := BuildSegment(collectionID, partitionID, id, channelName)
 	if err != nil {
 		return err
 	}
@@ -683,16 +678,12 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 	if !s.checkStateIsHealthy() {
 		return nil, errors.New("server is initializing")
 	}
-	channelGroups, err := s.insertChannelMgr.GetChannels(req.CollectionID, s.cluster.GetNumOfNodes())
+	channels, err := s.insertChannelMgr.GetChannels(req.CollectionID)
 	if err != nil {
 		return nil, err
 	}
 
-	channels := make([]string, 0)
-	for _, group := range channelGroups {
-		channels = append(channels, group...)
-	}
-	s.cluster.WatchInsertChannels(channelGroups)
+	s.cluster.WatchInsertChannels(req.CollectionID, channels)
 	return channels, nil
 }
 

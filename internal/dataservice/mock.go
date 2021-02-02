@@ -4,6 +4,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
 	memkv "github.com/zilliztech/milvus-distributed/internal/kv/mem"
@@ -45,4 +49,28 @@ func newTestSchema() *schemapb.CollectionSchema {
 			{FieldID: 2, Name: "field2", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_VECTOR_FLOAT},
 		},
 	}
+}
+
+type mockDataNodeClient struct {
+}
+
+func newMockDataNodeClient() *mockDataNodeClient {
+	return &mockDataNodeClient{}
+}
+
+func (c *mockDataNodeClient) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
+}
+
+func (c *mockDataNodeClient) GetComponentStates(empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
+	// todo
+	return nil, nil
+}
+
+func (c *mockDataNodeClient) FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
+}
+
+func (c *mockDataNodeClient) Stop() error {
+	return nil
 }

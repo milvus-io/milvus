@@ -51,9 +51,10 @@ func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) er
 	return nil
 }
 
-func (li *LoadIndexInfo) appendFieldInfo(fieldID int64) error {
+func (li *LoadIndexInfo) appendFieldInfo(fieldName string, fieldID int64) error {
+	cFieldName := C.CString(fieldName)
 	cFieldID := C.long(fieldID)
-	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldID)
+	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldName, cFieldID)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

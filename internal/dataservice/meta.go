@@ -386,16 +386,16 @@ func (meta *meta) removeSegments(segIDs []UniqueID) error {
 	return meta.client.MultiRemove(segmentPaths)
 }
 
-func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
+func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) (*datapb.SegmentInfo, error) {
 	return &datapb.SegmentInfo{
-		SegmentID:      segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    partitionID,
-		InsertChannels: channelRange,
-		OpenTime:       0,
-		SealedTime:     0,
-		NumRows:        0,
-		MemSize:        0,
-		State:          datapb.SegmentState_SegmentGrowing,
+		SegmentID:     segmentID,
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		InsertChannel: channelName,
+		OpenTime:      0,
+		SealedTime:    0,
+		NumRows:       0,
+		MemSize:       0,
+		State:         datapb.SegmentState_SegmentGrowing,
 	}, nil
 }

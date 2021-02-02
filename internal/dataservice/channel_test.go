@@ -1,33 +1,21 @@
 package dataservice
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestChannelAllocation(t *testing.T) {
+func TestGetChannel(t *testing.T) {
 	Params.Init()
 	Params.InsertChannelNumPerCollection = 4
+	Params.InsertChannelPrefixName = "channel"
 	manager := newInsertChannelManager()
-	cases := []struct {
-		collectionID   UniqueID
-		groupNum       int
-		expectGroupNum int
-	}{
-		{1, 4, 4},
-		{1, 4, 4},
-		{2, 1, 1},
-		{3, 5, 4},
-	}
-	for _, c := range cases {
-		channels, err := manager.GetChannels(c.collectionID, c.expectGroupNum)
-		assert.Nil(t, err)
-		assert.EqualValues(t, c.expectGroupNum, len(channels))
-		total := 0
-		for _, channel := range channels {
-			total += len(channel)
-		}
-		assert.EqualValues(t, Params.InsertChannelNumPerCollection, total)
+	channels, err := manager.GetChannels(1)
+	assert.Nil(t, err)
+	assert.EqualValues(t, Params.InsertChannelNumPerCollection, len(channels))
+	for i := 0; i < len(channels); i++ {
+		assert.EqualValues(t, Params.InsertChannelPrefixName+strconv.Itoa(i), channels[i])
 	}
 }
