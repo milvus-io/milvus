@@ -395,14 +395,14 @@ func (s *loadService) seekSegment(positions []*internalpb2.MsgPosition) error {
 	return nil
 }
 
-func (s *loadService) getIndexPaths(buildID UniqueID) ([]string, error) {
+func (s *loadService) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
 	if s.indexClient == nil {
 		return nil, errors.New("null index service client")
 	}
 
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
 		// TODO: rename indexIDs to buildIDs
-		IndexIDs: []UniqueID{buildID},
+		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
 	pathResponse, err := s.indexClient.GetIndexFilePaths(indexFilePathRequest)
 	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {

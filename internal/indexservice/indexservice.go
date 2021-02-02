@@ -221,13 +221,13 @@ func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Build
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	ret.IndexID = t.indexID
+	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
 }
 
 func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	var indexStates []*indexpb.IndexInfo
-	for _, indexID := range req.IndexIDs {
+	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
 		if err != nil {
 			indexState.Reason = err.Error()
@@ -246,7 +246,7 @@ func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.
 func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo
 
-	for _, indexID := range req.IndexIDs {
+	for _, indexID := range req.IndexBuildIDs {
 		indexPathInfo, _ := i.metaTable.GetIndexFilePathInfo(indexID)
 		indexPaths = append(indexPaths, indexPathInfo)
 	}

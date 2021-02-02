@@ -54,7 +54,7 @@ func (bt *BaseTask) Notify(err error) {
 type IndexAddTask struct {
 	BaseTask
 	req               *indexpb.BuildIndexRequest
-	indexID           UniqueID
+	indexBuildID      UniqueID
 	idAllocator       *GlobalIDAllocator
 	buildQueue        TaskQueue
 	kv                kv.Base
@@ -69,7 +69,7 @@ func (it *IndexAddTask) SetID(ID UniqueID) {
 
 func (it *IndexAddTask) OnEnqueue() error {
 	var err error
-	it.indexID, err = it.idAllocator.AllocOne()
+	it.indexBuildID, err = it.idAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (it *IndexAddTask) PreExecute() error {
 	}
 	it.builderClient = builderClient
 	it.buildClientNodeID = nodeID
-	err := it.table.AddIndex(it.indexID, it.req)
+	err := it.table.AddIndex(it.indexBuildID, it.req)
 	if err != nil {
 		return err
 	}
@@ -93,8 +93,8 @@ func (it *IndexAddTask) PreExecute() error {
 
 func (it *IndexAddTask) Execute() error {
 	cmd := &indexpb.BuildIndexCmd{
-		IndexID: it.indexID,
-		Req:     it.req,
+		IndexBuildID: it.indexBuildID,
+		Req:          it.req,
 	}
 	log.Println("before index ...")
 	resp, err := it.builderClient.BuildIndex(cmd)

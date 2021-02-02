@@ -78,7 +78,7 @@ func (it *IndexBuildTask) SetID(ID UniqueID) {
 }
 
 func (it *IndexBuildTask) OnEnqueue() error {
-	it.SetID(it.cmd.IndexID)
+	it.SetID(it.cmd.IndexBuildID)
 	log.Printf("[IndexBuilderTask] Enqueue TaskID: %v", it.ID())
 	return nil
 }
@@ -106,7 +106,7 @@ func (it *IndexBuildTask) PostExecute() error {
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
-		IndexID:        it.cmd.IndexID,
+		IndexBuildID:   it.cmd.IndexBuildID,
 		NodeID:         it.nodeID,
 		IndexFilePaths: it.savePaths,
 	}
@@ -254,7 +254,7 @@ func (it *IndexBuildTask) Execute() error {
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.cmd.IndexID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+			return strconv.Itoa(int(it.cmd.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))

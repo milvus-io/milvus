@@ -93,7 +93,7 @@ func (idx *indexMock) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Build
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 			Reason:    "",
 		},
-		IndexID: idx.idxArray[len(idx.idxArray)-1],
+		IndexBuildID: idx.idxArray[len(idx.idxArray)-1],
 	}, nil
 }
 

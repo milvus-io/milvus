@@ -170,7 +170,7 @@ func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status,
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Println("index scheduler successfully with indexID = ", request.IndexID)
+	log.Println("index scheduler successfully with indexBuildID = ", request.IndexBuildID)
 	err = t.WaitToFinish()
 	log.Println("build index finish ...err = ", err)
 	if err != nil {
