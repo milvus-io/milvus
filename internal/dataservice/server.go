@@ -682,11 +682,7 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 	if !s.checkStateIsHealthy() {
 		return nil, errors.New("server is initializing")
 	}
-	contains, ret := s.insertChannelMgr.ContainsCollection(req.CollectionID)
-	if contains {
-		return ret, nil
-	}
-	channelGroups, err := s.insertChannelMgr.AllocChannels(req.CollectionID, s.cluster.GetNumOfNodes())
+	channelGroups, err := s.insertChannelMgr.GetChannels(req.CollectionID, s.cluster.GetNumOfNodes())
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +692,6 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 		channels = append(channels, group...)
 	}
 	s.cluster.WatchInsertChannels(channelGroups)
-
 	return channels, nil
 }
 

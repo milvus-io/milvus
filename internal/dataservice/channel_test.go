@@ -14,19 +14,14 @@ func TestChannelAllocation(t *testing.T) {
 		collectionID   UniqueID
 		groupNum       int
 		expectGroupNum int
-		success        bool
 	}{
-		{1, 4, 4, true},
-		{1, 4, 4, false},
-		{2, 1, 1, true},
-		{3, 5, 4, true},
+		{1, 4, 4},
+		{1, 4, 4},
+		{2, 1, 1},
+		{3, 5, 4},
 	}
 	for _, c := range cases {
-		channels, err := manager.AllocChannels(c.collectionID, c.expectGroupNum)
-		if !c.success {
-			assert.NotNil(t, err)
-			continue
-		}
+		channels, err := manager.GetChannels(c.collectionID, c.expectGroupNum)
 		assert.Nil(t, err)
 		assert.EqualValues(t, c.expectGroupNum, len(channels))
 		total := 0
