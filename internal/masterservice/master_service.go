@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -359,19 +358,22 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 			if !ok {
 				log.Printf("data node segment flush completed chan has colsed, exit loop")
 			}
-			fields, err := c.MetaTable.GetSegmentVectorFields(seg)
+			coll, err := c.MetaTable.GetCollectionBySegmentID(seg)
 			if err != nil {
-				log.Printf("GetSegmentVectorFields, error = %s ", err.Error())
+				log.Printf("GetCollectionBySegmentID, error = %s ", err.Error())
 			}
-			for _, f := range fields {
-				t := &CreateIndexTask{
-					core:        c,
-					segmentID:   seg,
-					indexName:   "index_" + strconv.FormatInt(f.FieldID, 10),
-					fieldSchema: f,
-					indexParams: nil,
+			for i, f := range coll.IndexParams {
+				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
+				if err == nil {
+					t := &CreateIndexTask{
+						core:        c,
+						segmentID:   seg,
+						indexName:   fmt.Sprintf("index_field_%d_%d", f.FiledID, i),
+						fieldSchema: fieldSch,
+						indexParams: nil,
+					}
+					c.indexTaskQueue <- t
 				}
-				c.indexTaskQueue <- t
 			}
 		}
 	}

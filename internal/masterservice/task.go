@@ -105,11 +105,23 @@ func (t *CreateCollectionReqTask) Execute() error {
 		Schema:       &schema,
 		CreateTime:   collTs,
 		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
+		IndexParams:  make([]*etcdpb.IndexParamsInfo, 0, 16),
 	}
 	partMeta := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
 		PartitionID:   partitionID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
+	}
+	for _, field := range schema.Fields {
+		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
+			if len(field.IndexParams) > 0 {
+				indexParam := &etcdpb.IndexParamsInfo{
+					FiledID:     field.FieldID,
+					IndexParams: field.IndexParams,
+				}
+				collMeta.IndexParams = append(collMeta.IndexParams, indexParam)
+			}
+		}
 	}
 
 	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta)

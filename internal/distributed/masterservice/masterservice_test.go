@@ -136,7 +136,12 @@ func TestGrpcService(t *testing.T) {
 					Description:  "vector",
 					DataType:     schemapb.DataType_VECTOR_FLOAT,
 					TypeParams:   nil,
-					IndexParams:  nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "ik1",
+							Value: "iv1",
+						},
+					},
 				},
 			},
 		}
@@ -403,11 +408,23 @@ func TestGrpcService(t *testing.T) {
 			DbName:         "",
 			CollectionName: "testColl",
 			FieldName:      "vector",
-			ExtraParams:    nil,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "ik1",
+					Value: "iv1",
+				},
+			},
 		}
+		collMeta, err := core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.IndexParams), 1)
 		rsp, err := cli.CreateIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_SUCCESS)
+		collMeta, err = core.MetaTable.GetCollectionByName("testColl")
+		assert.Nil(t, err)
+		assert.Equal(t, len(collMeta.IndexParams), 1)
+
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
 		assert.Equal(t, 3, len(binlogPathArray))
@@ -496,7 +513,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
 		assert.Equal(t, len(rsp.IndexDescriptions), 2)
 		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, cms.Params.DefaultIndexName)
-		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_100")
+		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_field_100_0")
 
 	})
 
