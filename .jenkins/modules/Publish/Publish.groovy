@@ -33,6 +33,10 @@ dir ('build/docker/deploy') {
             sh 'docker-compose build --force-rm queryservice'
             sh 'docker-compose push queryservice'
 
+            sh 'docker pull ${SOURCE_REPO}/dataservice:${SOURCE_TAG} || true'
+            sh 'docker-compose build --force-rm dataservice'
+            sh 'docker-compose push dataservice'
+
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
             sh 'docker pull ${SOURCE_REPO}/querynode:${SOURCE_TAG} || true'
             sh 'docker-compose build --force-rm querynode'

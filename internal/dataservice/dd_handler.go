@@ -57,11 +57,8 @@ func (handler *ddHandler) handleCreateCollection(msg *msgstream.CreateCollection
 }
 
 func (handler *ddHandler) handleDropCollection(msg *msgstream.DropCollectionMsg) error {
-	ids := handler.meta.GetSegmentsByCollectionID(msg.CollectionID)
-	for _, id := range ids {
-		if err := handler.meta.DropSegment(id); err != nil {
-			continue
-		}
+	segmentsOfCollection := handler.meta.GetSegmentsOfCollection(msg.CollectionID)
+	for _, id := range segmentsOfCollection {
 		handler.segmentAllocator.DropSegment(id)
 	}
 	if err := handler.meta.DropCollection(msg.CollectionID); err != nil {
@@ -71,11 +68,8 @@ func (handler *ddHandler) handleDropCollection(msg *msgstream.DropCollectionMsg)
 }
 
 func (handler *ddHandler) handleDropPartition(msg *msgstream.DropPartitionMsg) error {
-	ids := handler.meta.GetSegmentsByCollectionAndPartitionID(msg.CollectionID, msg.PartitionID)
-	for _, id := range ids {
-		if err := handler.meta.DropSegment(id); err != nil {
-			return err
-		}
+	segmentsOfPartition := handler.meta.GetSegmentsOfPartition(msg.CollectionID, msg.PartitionID)
+	for _, id := range segmentsOfPartition {
 		handler.segmentAllocator.DropSegment(id)
 	}
 	if err := handler.meta.DropPartition(msg.CollectionID, msg.PartitionID); err != nil {

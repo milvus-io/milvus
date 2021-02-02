@@ -178,3 +178,7 @@ func (s *Service) GetSegmentInfoChannel(ctx context.Context, empty *commonpb.Emp
 	resp.Value = channel
 	return resp, nil
 }
+
+func (s *Service) GetCount(ctx context.Context, request *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
+	return s.server.GetCount(request)
+}

@@ -51,6 +51,7 @@ type DataService interface {
 	GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error)
 	GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error)
 }
 
 type MasterClient interface {
@@ -606,7 +607,7 @@ func (s *Server) ShowSegments(req *datapb.ShowSegmentRequest) (*datapb.ShowSegme
 		resp.Status.Reason = "server is initializing"
 		return resp, nil
 	}
-	ids := s.meta.GetSegmentsByCollectionAndPartitionID(req.CollectionID, req.PartitionID)
+	ids := s.meta.GetSegmentsOfPartition(req.CollectionID, req.PartitionID)
 	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
 	resp.SegmentIDs = ids
 	return resp, nil
@@ -696,8 +697,25 @@ func (s *Server) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, 
 }
 
 func (s *Server) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
-	// todo implement
-	return nil, nil
+	resp := &datapb.CollectionStatsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	memsize, err := s.meta.GetMemSizeOfCollection(req.CollectionID)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "nums", Value: strconv.FormatInt(nums, 10)})
+	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "memsize", Value: strconv.FormatInt(memsize, 10)})
+	return resp, nil
 }
 
 func (s *Server) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*datapb.PartitionStatsResponse, error) {
@@ -707,4 +725,20 @@ func (s *Server) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*dat
 
 func (s *Server) GetSegmentInfoChannel() (string, error) {
 	return Params.SegmentInfoChannelName, nil
+}
+
+func (s *Server) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
+	resp := &datapb.CollectionCountResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+		},
+	}
+	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
+	if err != nil {
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+	resp.Count = nums
+	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
+	return resp, nil
 }

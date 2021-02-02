@@ -97,6 +97,17 @@ func (meta *meta) DropCollection(collID UniqueID) error {
 	if _, ok := meta.collID2Info[collID]; !ok {
 		return newErrCollectionNotFound(collID)
 	}
+	ids := make([]UniqueID, 0)
+	for i, info := range meta.segID2Info {
+		if info.CollectionID == collID {
+			delete(meta.segID2Info, i)
+			ids = append(ids, i)
+		}
+	}
+	if err := meta.removeSegments(ids); err != nil {
+		_ = meta.reloadFromKV()
+		return err
+	}
 	delete(meta.collID2Info, collID)
 	return nil
 }
@@ -116,6 +127,30 @@ func (meta *meta) GetCollection(collectionID UniqueID) (*collectionInfo, error) 
 		return nil, newErrCollectionNotFound(collectionID)
 	}
 	return collectionInfo, nil
+}
+
+func (meta *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+	var ret int64 = 0
+	for _, info := range meta.segID2Info {
+		if info.CollectionID == collectionID {
+			ret += info.NumRows
+		}
+	}
+	return ret, nil
+}
+
+func (meta *meta) GetMemSizeOfCollection(collectionID UniqueID) (int64, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+	var ret int64 = 0
+	for _, info := range meta.segID2Info {
+		if info.CollectionID == collectionID {
+			ret += info.MemSize
+		}
+	}
+	return ret, nil
 }
 
 func (meta *meta) AddSegment(segmentInfo *datapb.SegmentInfo) error {
@@ -152,6 +187,10 @@ func (meta *meta) DropSegment(segmentID UniqueID) error {
 		return newErrSegmentNotFound(segmentID)
 	}
 	delete(meta.segID2Info, segmentID)
+	if err := meta.removeSegmentInfo(segmentID); err != nil {
+		_ = meta.reloadFromKV()
+		return err
+	}
 	return nil
 }
 
@@ -240,7 +279,7 @@ func (meta *meta) SetSegmentState(segmentID UniqueID, state datapb.SegmentState)
 	return nil
 }
 
-func (meta *meta) GetSegmentsByCollectionID(collectionID UniqueID) []UniqueID {
+func (meta *meta) GetSegmentsOfCollection(collectionID UniqueID) []UniqueID {
 	meta.ddLock.RLock()
 	defer meta.ddLock.RUnlock()
 
@@ -253,7 +292,7 @@ func (meta *meta) GetSegmentsByCollectionID(collectionID UniqueID) []UniqueID {
 	return ret
 }
 
-func (meta *meta) GetSegmentsByCollectionAndPartitionID(collectionID, partitionID UniqueID) []UniqueID {
+func (meta *meta) GetSegmentsOfPartition(collectionID, partitionID UniqueID) []UniqueID {
 	meta.ddLock.RLock()
 	defer meta.ddLock.RUnlock()
 
@@ -291,7 +330,6 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 	if !ok {
 		return newErrCollectionNotFound(collID)
 	}
-
 	idx := -1
 	for i, id := range collection.Partitions {
 		if partitionID == id {
@@ -299,13 +337,35 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 			break
 		}
 	}
-
 	if idx == -1 {
 		return fmt.Errorf("cannot find partition id %d", partitionID)
 	}
 
+	ids := make([]UniqueID, 0)
+	for i, info := range meta.segID2Info {
+		if info.PartitionID == partitionID {
+			delete(meta.segID2Info, i)
+			ids = append(ids, i)
+		}
+	}
+	if err := meta.removeSegments(ids); err != nil {
+		_ = meta.reloadFromKV()
+		return err
+	}
 	collection.Partitions = append(collection.Partitions[:idx], collection.Partitions[idx+1:]...)
 	return nil
+}
+
+func (meta *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) (int64, error) {
+	meta.ddLock.RLock()
+	defer meta.ddLock.RUnlock()
+	var ret int64 = 0
+	for _, info := range meta.segID2Info {
+		if info.CollectionID == collectionID && info.PartitionID == partitionID {
+			ret += info.NumRows
+		}
+	}
+	return ret, nil
 }
 
 func (meta *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {
@@ -317,6 +377,15 @@ func (meta *meta) saveSegmentInfo(segmentInfo *datapb.SegmentInfo) error {
 func (meta *meta) removeSegmentInfo(segID UniqueID) error {
 	return meta.client.Remove("/segment/" + strconv.FormatInt(segID, 10))
 }
+
+func (meta *meta) removeSegments(segIDs []UniqueID) error {
+	segmentPaths := make([]string, len(segIDs))
+	for i, id := range segIDs {
+		segmentPaths[i] = "/segment/" + strconv.FormatInt(id, 10)
+	}
+	return meta.client.MultiRemove(segmentPaths)
+}
+
 func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelRange []string) (*datapb.SegmentInfo, error) {
 	return &datapb.SegmentInfo{
 		SegmentID:      segmentID,

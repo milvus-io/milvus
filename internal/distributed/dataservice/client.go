@@ -133,3 +133,7 @@ func (c *Client) GetSegmentInfoChannel() (string, error) {
 	}
 	return resp.Value, nil
 }
+
+func (c *Client) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {
+	return c.grpcClient.GetCount(context.Background(), req)
+}
