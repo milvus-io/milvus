@@ -72,7 +72,8 @@ namespace faiss {
      * Distance conversion between Jaccard and Tanimoto
      */
     inline float Jaccard_2_Tanimoto (float jcd) {
-        return -log2(1 - jcd);
+        // To avoid a negative zero in C language
+        return (jcd == 0.0) ? 0.0 : -log2(1 - jcd);
     }
 
  /** Return the k matched distances for a set of binary query vectors,

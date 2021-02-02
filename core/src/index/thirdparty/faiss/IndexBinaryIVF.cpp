@@ -842,7 +842,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                        params, bitset);
             if (metric_type == METRIC_Tanimoto) {
                 for (int i = 0; i < k * n; i++) {
-                    D[i] = -log2(1-D[i]);
+                    D[i] = Jaccard_2_Tanimoto(D[i]);
                 }
             }
             memcpy(distances, D, sizeof(float) * n * k);
