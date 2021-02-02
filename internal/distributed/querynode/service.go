@@ -5,78 +5,58 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"time"
+	"sync"
 
 	"google.golang.org/grpc"
 
-	"github.com/zilliztech/milvus-distributed/internal/dataservice"
-	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
-	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
-	grpcmasterserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/indexservice"
-	"github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	"github.com/zilliztech/milvus-distributed/internal/querynode"
-	"github.com/zilliztech/milvus-distributed/internal/queryservice"
+	qn "github.com/zilliztech/milvus-distributed/internal/querynode"
 )
 
 type Server struct {
+	node *qn.QueryNode
+
 	grpcServer *grpc.Server
-	node       *querynode.QueryNode
+	grpcError  error
+	grpcErrMux sync.Mutex
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewServer(ctx context.Context) *Server {
-	server := &Server{
-		node: querynode.NewQueryNodeWithoutID(ctx),
+func NewServer(ctx context.Context) (*Server, error) {
+	s := &Server{
+		ctx:  ctx,
+		node: qn.NewQueryNodeWithoutID(ctx),
 	}
 
-	queryservice.Params.Init()
-	queryClient := grpcqueryserviceclient.NewClient(queryservice.Params.Address)
-	if err := server.node.SetQueryService(queryClient); err != nil {
-		panic(err)
-	}
-
-	masterservice.Params.Init()
-	masterConnectTimeout := 10 * time.Second
-	masterClient, err := grpcmasterserviceclient.NewGrpcClient(masterservice.Params.Address, masterConnectTimeout)
-	if err != nil {
-		panic(err)
-	}
-	if err = server.node.SetMasterService(masterClient); err != nil {
-		panic(err)
-	}
-
-	indexservice.Params.Init()
-	indexClient := grpcindexserviceclient.NewClient(indexservice.Params.Address)
-	if err := server.node.SetIndexService(indexClient); err != nil {
-		panic(err)
-	}
-
-	dataservice.Params.Init()
-	log.Println("connect to data service, address =", fmt.Sprint(dataservice.Params.Address, ":", dataservice.Params.Port))
-	dataClient := grpcdataserviceclient.NewClient(fmt.Sprint(dataservice.Params.Address, ":", dataservice.Params.Port))
-	if err := server.node.SetDataService(dataClient); err != nil {
-		panic(err)
-	}
-
-	return server
-}
-
-func (s *Server) StartGrpcServer() {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", querynode.Params.QueryNodePort))
-	if err != nil {
-		panic(err)
-	}
-
+	qn.Params.Init()
 	s.grpcServer = grpc.NewServer()
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
-	fmt.Println("start query node grpc server...")
-	if err = s.grpcServer.Serve(lis); err != nil {
-		panic(err)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", qn.Params.QueryNodePort))
+	if err != nil {
+		return nil, err
 	}
+
+	go func() {
+		log.Println("start query node grpc server...")
+		if err = s.grpcServer.Serve(lis); err != nil {
+			s.grpcErrMux.Lock()
+			defer s.grpcErrMux.Unlock()
+			s.grpcError = err
+		}
+	}()
+
+	s.grpcErrMux.Lock()
+	err = s.grpcError
+	s.grpcErrMux.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Server) Init() error {
@@ -84,13 +64,30 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) Start() error {
-	go s.StartGrpcServer()
 	return s.node.Start()
 }
 
 func (s *Server) Stop() error {
-	s.grpcServer.Stop()
-	return s.node.Stop()
+	err := s.node.Stop()
+	s.cancel()
+	s.grpcServer.GracefulStop()
+	return err
+}
+
+func (s *Server) SetMasterService(master qn.MasterServiceInterface) error {
+	return s.node.SetMasterService(master)
+}
+
+func (s *Server) SetQueryService(query qn.QueryServiceInterface) error {
+	return s.node.SetQueryService(query)
+}
+
+func (s *Server) SetIndexService(index qn.IndexServiceInterface) error {
+	return s.node.SetIndexService(index)
+}
+
+func (s *Server) SetDataService(data qn.DataServiceInterface) error {
+	return s.node.SetDataService(data)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, in *commonpb.Empty) (*milvuspb.StringResponse, error) {

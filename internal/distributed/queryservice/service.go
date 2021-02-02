@@ -12,6 +12,7 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -119,6 +120,16 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *commonpb.Empty) 
 	}, nil
 }
 
+func (s *Server) SetMasterService(m queryservice.MasterServiceInterface) error {
+	s.queryService.SetMasterService(m)
+	return nil
+}
+
+func (s *Server) SetDataService(d queryservice.DataServiceInterface) error {
+	s.queryService.SetDataService(d)
+	return nil
+}
+
 func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return s.queryService.RegisterNode(req)
 }
@@ -157,7 +168,7 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*
 
 func NewServer(ctx context.Context) *Server {
 	ctx1, cancel := context.WithCancel(ctx)
-	service, err := queryservice.NewQueryService(ctx)
+	service, err := queryservice.NewQueryService(ctx1)
 	if err != nil {
 		log.Fatal(errors.New("create QueryService failed"))
 	}
