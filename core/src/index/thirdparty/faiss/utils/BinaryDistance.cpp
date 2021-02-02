@@ -512,8 +512,8 @@ void binary_range_search (
     const uint8_t * b,
     size_t na,
     size_t nb,
-    T radius,
     size_t ncodes,
+    T radius,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
     const BitsetView& bitset)
@@ -528,7 +528,7 @@ void binary_range_search (
         MetricComputer mc(a, ncodes);
         RangeQueryResult& qres = pres->new_result(0);
 
-#pragma omp parallel for
+#pragma omp for
         for (size_t j = 0; j < nb; j++) {
             if(!bitset || !bitset.test(j)) {
                 T dist = mc.compute(b + j * ncodes);
