@@ -98,7 +98,7 @@ func TestGrpcService(t *testing.T) {
 
 	var binlogLock sync.Mutex
 	binlogPathArray := make([]string, 0, 16)
-	core.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error) {
+	core.BuildIndexReq = func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair) (typeutil.UniqueID, error) {
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
 		binlogPathArray = append(binlogPathArray, binlog...)

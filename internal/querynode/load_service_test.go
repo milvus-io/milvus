@@ -853,7 +853,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 
 	// serialize index params
 	var indexCodec storage.IndexCodec
-	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams)
+	serializedIndexBlobs, err := indexCodec.Serialize(binarySet, indexParams, "index_test_name", 1234)
 	if err != nil {
 		return nil, err
 	}

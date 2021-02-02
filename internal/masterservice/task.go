@@ -628,7 +628,7 @@ func (t *CreateIndexTask) BuildIndex() error {
 			})
 		}
 	}
-	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams, idxID, t.indexName)
+	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams)
 	if err != nil {
 		return err
 	}
