@@ -105,12 +105,36 @@ void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
 
 void IndexBinaryFlat::range_search(faiss::IndexBinary::idx_t n,
                                    const uint8_t* x,
-                                   int radius,
+                                   float radius,
                                    std::vector<faiss::RangeSearchPartialResult*>& result,
                                    size_t buffer_size,
                                    const faiss::BitsetView& bitset)
 {
-    hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
+    switch (metric_type) {
+        case METRIC_Jaccard: {
+            binary_range_search<CMax<float, int64_t>, float>(METRIC_Jaccard, x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Tanimoto: {
+            binary_range_search<CMax<float, int64_t>, float>(METRIC_Tanimoto, x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Hamming: {
+            binary_range_search<CMax<int, int64_t>, int>(METRIC_Hamming, x, xb.data(), n, ntotal, static_cast<int>(radius), code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Superstructure: {
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Superstructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
+            break;
+        }
+        case METRIC_Substructure: {
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Substructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
+            break;
+        }
+        default:
+            break;
+    }
 }
+//hamming_range_search (x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
 
 }  // namespace faiss
