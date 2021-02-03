@@ -20,12 +20,15 @@ type DataService interface {
   AssignSegmentID(req AssignSegIDRequest) (AssignSegIDResponse, error)
   ShowSegments(req ShowSegmentRequest) (ShowSegmentResponse, error)
   GetSegmentStates(req SegmentStatesRequest) (SegmentStatesResponse, error)
+  GetSegmentInfo(req SegmentInfoRequest) (SegmentInfoResponse, error)
+
   GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
   
   GetInsertChannels(req InsertChannelRequest) ([]string, error)
 
   GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
   GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
+  
 }
 ```
 
@@ -139,7 +142,37 @@ type SegmentStatesResponse struct {
 }
 ```
 
+* *GetSegmentInfo*
 
+```go
+type SegmentInfoRequest  struct{
+  MsgBase
+  SegmentIDs [] UniqueID
+}
+```
+
+```go
+type SegmentInfo struct {
+	SegmentID            UniqueID
+	CollectionID         UniqueID
+	PartitionID          UniqueID
+	InsertChannel        string
+	OpenTime             Timestamp
+	SealedTime           Timestamp
+	FlushedTime          Timestamp
+	NumRows              int64
+	MemSize              int64
+	State                SegmentState
+	StartPosition        []Msgstream.MsgPosition
+	EndPosition          []Msgstream.MsgPosition
+}
+```
+
+```go
+type SegmentInfoResponse  struct{
+  infos []SegmentInfo
+}
+```
 
 * *GetInsertBinlogPaths*
 

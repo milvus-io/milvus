@@ -171,6 +171,34 @@ inline bool IndexState_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<IndexState>(
     IndexState_descriptor(), name, value);
 }
+enum SegmentState : int {
+  SegmentNone = 0,
+  SegmentNotExist = 1,
+  SegmentGrowing = 2,
+  SegmentSealed = 3,
+  SegmentFlushed = 4,
+  SegmentState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  SegmentState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool SegmentState_IsValid(int value);
+constexpr SegmentState SegmentState_MIN = SegmentNone;
+constexpr SegmentState SegmentState_MAX = SegmentFlushed;
+constexpr int SegmentState_ARRAYSIZE = SegmentState_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentState_descriptor();
+template<typename T>
+inline const std::string& SegmentState_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, SegmentState>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function SegmentState_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    SegmentState_descriptor(), enum_t_value);
+}
+inline bool SegmentState_Parse(
+    const std::string& name, SegmentState* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<SegmentState>(
+    SegmentState_descriptor(), name, value);
+}
 enum MsgType : int {
   kNone = 0,
   kCreateCollection = 100,
@@ -1668,6 +1696,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::IndexState> : ::std::
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::IndexState>() {
   return ::milvus::proto::common::IndexState_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::SegmentState> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::SegmentState>() {
+  return ::milvus::proto::common::SegmentState_descriptor();
 }
 template <> struct is_proto_enum< ::milvus::proto::common::MsgType> : ::std::true_type {};
 template <>

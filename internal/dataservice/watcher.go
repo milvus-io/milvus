@@ -94,7 +94,7 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 				log.Println(err.Error())
 				continue
 			}
-			if err = watcher.meta.SetSegmentState(id, datapb.SegmentState_SegmentSealed); err != nil {
+			if err = watcher.meta.SetSegmentState(id, commonpb.SegmentState_SegmentSealed); err != nil {
 				log.Println(err.Error())
 				continue
 			}

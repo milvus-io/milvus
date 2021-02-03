@@ -110,7 +110,7 @@ func newDataMock() *dataMock {
 	segmentIDs = append(segmentIDs, 5)
 	segmentIDs = append(segmentIDs, 6)
 
-	fillStates := func(segmentID UniqueID, time uint64, position []*internalpb2.MsgPosition, state datapb.SegmentState) *datapb.SegmentStateInfo {
+	fillStates := func(segmentID UniqueID, time uint64, position []*internalpb2.MsgPosition, state commonpb.SegmentState) *datapb.SegmentStateInfo {
 		return &datapb.SegmentStateInfo{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -122,12 +122,12 @@ func newDataMock() *dataMock {
 		}
 	}
 	segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
-	segmentStates[1] = fillStates(1, 1, positions1, datapb.SegmentState_SegmentFlushed)
-	segmentStates[2] = fillStates(2, 2, positions2, datapb.SegmentState_SegmentFlushed)
-	segmentStates[3] = fillStates(3, 3, positions1, datapb.SegmentState_SegmentFlushed)
-	segmentStates[4] = fillStates(4, 4, positions2, datapb.SegmentState_SegmentFlushed)
-	segmentStates[5] = fillStates(5, 5, positions1, datapb.SegmentState_SegmentGrowing)
-	segmentStates[6] = fillStates(6, 6, positions2, datapb.SegmentState_SegmentGrowing)
+	segmentStates[1] = fillStates(1, 1, positions1, commonpb.SegmentState_SegmentFlushed)
+	segmentStates[2] = fillStates(2, 2, positions2, commonpb.SegmentState_SegmentFlushed)
+	segmentStates[3] = fillStates(3, 3, positions1, commonpb.SegmentState_SegmentFlushed)
+	segmentStates[4] = fillStates(4, 4, positions2, commonpb.SegmentState_SegmentFlushed)
+	segmentStates[5] = fillStates(5, 5, positions1, commonpb.SegmentState_SegmentGrowing)
+	segmentStates[6] = fillStates(6, 6, positions2, commonpb.SegmentState_SegmentGrowing)
 
 	return &dataMock{
 		segmentIDs:    segmentIDs,

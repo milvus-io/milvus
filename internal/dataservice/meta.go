@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 
@@ -262,7 +264,7 @@ func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
 	return nil
 }
 
-func (meta *meta) SetSegmentState(segmentID UniqueID, state datapb.SegmentState) error {
+func (meta *meta) SetSegmentState(segmentID UniqueID, state commonpb.SegmentState) error {
 	meta.ddLock.Lock()
 	defer meta.ddLock.Unlock()
 
@@ -396,6 +398,6 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		SealedTime:    0,
 		NumRows:       0,
 		MemSize:       0,
-		State:         datapb.SegmentState_SegmentGrowing,
+		State:         commonpb.SegmentState_SegmentGrowing,
 	}, nil
 }

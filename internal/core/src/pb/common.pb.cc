@@ -150,7 +150,7 @@ static void InitDefaultsscc_info_Status_common_2eproto() {
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_Status_common_2eproto}, {}};
 
 static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_common_2eproto[7];
-static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[3];
+static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[4];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_common_2eproto = nullptr;
 
 const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_common_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -249,26 +249,28 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "PE\020\027\022\021\n\rOUT_OF_MEMORY\020\030\022\024\n\017DD_REQUEST_RA"
   "CE\020\350\007*N\n\nIndexState\022\010\n\004NONE\020\000\022\014\n\010UNISSUE"
   "D\020\001\022\016\n\nINPROGRESS\020\002\022\014\n\010FINISHED\020\003\022\n\n\006FAI"
-  "LED\020\004*\252\005\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kCreateC"
-  "ollection\020d\022\023\n\017kDropCollection\020e\022\022\n\016kHas"
-  "Collection\020f\022\027\n\023kDescribeCollection\020g\022\024\n"
-  "\020kShowCollections\020h\022\022\n\016kGetSysConfigs\020i\022"
-  "\025\n\020kCreatePartition\020\310\001\022\023\n\016kDropPartition"
-  "\020\311\001\022\022\n\rkHasPartition\020\312\001\022\027\n\022kDescribePart"
-  "ition\020\313\001\022\024\n\017kShowPartitions\020\314\001\022\021\n\014kShowS"
-  "egment\020\372\001\022\025\n\020kDescribeSegment\020\373\001\022\021\n\014kCre"
-  "ateIndex\020\254\002\022\023\n\016kDescribeIndex\020\255\002\022\014\n\007kIns"
-  "ert\020\220\003\022\014\n\007kDelete\020\221\003\022\013\n\006kFlush\020\222\003\022\014\n\007kSe"
-  "arch\020\364\003\022\022\n\rkSearchResult\020\365\003\022\023\n\016kGetIndex"
-  "State\020\366\003\022\035\n\030kGetCollectionStatistics\020\367\003\022"
-  "\034\n\027kGetPartitionStatistics\020\370\003\022\021\n\014kSegmen"
-  "tInfo\020\330\004\022\016\n\tkTimeTick\020\260\t\022\024\n\017kQueryNodeSt"
-  "ats\020\261\t\022\017\n\nkLoadIndex\020\262\t\022\017\n\nkRequestID\020\263\t"
-  "\022\020\n\013kRequestTSO\020\264\t\022\025\n\020kAllocateSegment\020\265"
-  "\t\022\027\n\022kSegmentStatistics\020\266\t\022\026\n\021kSegmentFl"
-  "ushDone\020\267\tBBZ@github.com/zilliztech/milv"
-  "us-distributed/internal/proto/commonpbb\006"
-  "proto3"
+  "LED\020\004*o\n\014SegmentState\022\017\n\013SegmentNone\020\000\022\023"
+  "\n\017SegmentNotExist\020\001\022\022\n\016SegmentGrowing\020\002\022"
+  "\021\n\rSegmentSealed\020\003\022\022\n\016SegmentFlushed\020\004*\252"
+  "\005\n\007MsgType\022\t\n\005kNone\020\000\022\025\n\021kCreateCollecti"
+  "on\020d\022\023\n\017kDropCollection\020e\022\022\n\016kHasCollect"
+  "ion\020f\022\027\n\023kDescribeCollection\020g\022\024\n\020kShowC"
+  "ollections\020h\022\022\n\016kGetSysConfigs\020i\022\025\n\020kCre"
+  "atePartition\020\310\001\022\023\n\016kDropPartition\020\311\001\022\022\n\r"
+  "kHasPartition\020\312\001\022\027\n\022kDescribePartition\020\313"
+  "\001\022\024\n\017kShowPartitions\020\314\001\022\021\n\014kShowSegment\020"
+  "\372\001\022\025\n\020kDescribeSegment\020\373\001\022\021\n\014kCreateInde"
+  "x\020\254\002\022\023\n\016kDescribeIndex\020\255\002\022\014\n\007kInsert\020\220\003\022"
+  "\014\n\007kDelete\020\221\003\022\013\n\006kFlush\020\222\003\022\014\n\007kSearch\020\364\003"
+  "\022\022\n\rkSearchResult\020\365\003\022\023\n\016kGetIndexState\020\366"
+  "\003\022\035\n\030kGetCollectionStatistics\020\367\003\022\034\n\027kGet"
+  "PartitionStatistics\020\370\003\022\021\n\014kSegmentInfo\020\330"
+  "\004\022\016\n\tkTimeTick\020\260\t\022\024\n\017kQueryNodeStats\020\261\t\022"
+  "\017\n\nkLoadIndex\020\262\t\022\017\n\nkRequestID\020\263\t\022\020\n\013kRe"
+  "questTSO\020\264\t\022\025\n\020kAllocateSegment\020\265\t\022\027\n\022kS"
+  "egmentStatistics\020\266\t\022\026\n\021kSegmentFlushDone"
+  "\020\267\tBBZ@github.com/zilliztech/milvus-dist"
+  "ributed/internal/proto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -284,7 +286,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 1806,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 1919,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 7, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 7, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -349,9 +351,26 @@ bool IndexState_IsValid(int value) {
   }
 }
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor() {
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentState_descriptor() {
   ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
   return file_level_enum_descriptors_common_2eproto[2];
+}
+bool SegmentState_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
+  return file_level_enum_descriptors_common_2eproto[3];
 }
 bool MsgType_IsValid(int value) {
   switch (value) {

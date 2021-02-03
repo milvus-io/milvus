@@ -266,6 +266,30 @@ message FlushRequest {
   repeated string collection_names = 3;
 }
 
+
+message PersistentSegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  uint64 open_time = 4;
+  uint64 sealed_time = 5;
+  uint64 flushed_time = 6;
+  int64 num_rows = 7;
+  int64 mem_size = 8;
+  common.SegmentState state = 9;
+}
+
+message PersistentSegmentInfoRequest {
+  common.MsgBase base = 1;
+  string dbName = 2;
+  string collectionName = 3;
+}
+
+message PersistentSegmentInfoResponse {
+  common.Status status = 1;
+  repeated PersistentSegmentInfo infos = 2;
+}
+
 service MilvusService {
   rpc CreateCollection(CreateCollectionRequest) returns (common.Status) {}
   rpc DropCollection(DropCollectionRequest) returns (common.Status) {}
@@ -293,6 +317,9 @@ service MilvusService {
   rpc Flush(FlushRequest) returns (common.Status) {}
 
   rpc GetDdChannel(common.Empty) returns (StringResponse) {}
+
+  rpc GetPersistentSegmentInfo(PersistentSegmentInfoRequest) returns (PersistentSegmentInfoResponse) {}
+
 }
 
 message RegisterLinkResponse {

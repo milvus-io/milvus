@@ -96,6 +96,8 @@ type ProxyNode interface {
   Insert(req InsertRequest) (InsertResponse, error)
   Search(req SearchRequest) (SearchResults, error)
   Flush(req FlushRequest) error
+  GetPersistentSegmentInfo(req PersistentSegmentInfoRequest) (PersistentSegmentInfoResponse, error)
+
 }
 ```
 
@@ -236,6 +238,36 @@ type FlushRequest struct {
 }
 ```
 
+
+* *GetPersistentSegmentInfo*
+
+```go
+type PersistentSegmentInfoRequest  struct{
+  MsgBase
+  DbName string
+  CollectionName string
+}
+```
+
+```go
+type PersistentSegmentInfo struct {
+	SegmentID            UniqueID
+	CollectionID         UniqueID
+	PartitionID          UniqueID
+	OpenTime             Timestamp
+	SealedTime           Timestamp
+	FlushedTime          Timestamp
+	NumRows              int64
+	MemSize              int64
+	State                SegmentState
+}
+```
+
+```go
+type PersistentSegmentInfoResponse  struct{
+  infos []SegmentInfo
+}
+```
 
 
 #### 6.1 Proxy Instance
