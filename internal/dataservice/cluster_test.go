@@ -33,7 +33,7 @@ func TestWatchChannels(t *testing.T) {
 				channelNum: 0,
 			})
 		}
-		cluster.WatchInsertChannels(c.channels)
+		cluster.WatchInsertChannels(c.collectionID, c.channels)
 		for i := 0; i < len(cluster.nodes); i++ {
 			assert.EqualValues(t, c.channelNums[i], cluster.nodes[i].channelNum)
 		}

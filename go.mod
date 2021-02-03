@@ -18,7 +18,6 @@ require (
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/go-kit/kit v0.9.0
-	github.com/gogo/protobuf v1.2.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.3.2
@@ -27,7 +26,6 @@ require (
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.5
-	github.com/modern-go/reflect2 v1.0.1
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/oklog/run v1.1.0
 	github.com/onsi/ginkgo v1.12.1 // indirect
@@ -59,7 +57,6 @@ require (
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
 	golang.org/x/net v0.0.0-20200904194848-62affa334b73
 	golang.org/x/sys v0.0.0-20200905004654-be1d3432aa8f // indirect
-	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	golang.org/x/tools v0.0.0-20200825202427-b303f430e36d // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect

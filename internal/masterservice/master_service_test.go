@@ -657,18 +657,10 @@ func TestMasterService(t *testing.T) {
 		rsp, err := core.DescribeIndex(req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_SUCCESS)
-
 		assert.Equal(t, len(rsp.IndexDescriptions), 3)
-		indexNames := make([]string, 0)
-		for _, d := range rsp.IndexDescriptions {
-			indexNames = append(indexNames, d.IndexName)
-		}
-
-		assert.ElementsMatch(t, indexNames, []string{
-			"index_field_100_0",
-			"index_field_100_1",
-			Params.DefaultIndexName,
-		})
+		assert.Equal(t, rsp.IndexDescriptions[0].IndexName, Params.DefaultIndexName)
+		assert.Equal(t, rsp.IndexDescriptions[1].IndexName, "index_field_100_0")
+		assert.Equal(t, rsp.IndexDescriptions[2].IndexName, "index_field_100_1")
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

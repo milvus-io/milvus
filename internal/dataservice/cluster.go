@@ -2,6 +2,7 @@ package dataservice
 
 import (
 	"log"
+	"sort"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -22,16 +23,18 @@ type (
 		channelNum int
 	}
 	dataNodeCluster struct {
-		mu       sync.RWMutex
-		finishCh chan struct{}
-		nodes    []*dataNode
+		mu                sync.RWMutex
+		finishCh          chan struct{}
+		nodes             []*dataNode
+		watchedCollection map[UniqueID]bool
 	}
 )
 
 func newDataNodeCluster(finishCh chan struct{}) *dataNodeCluster {
 	return &dataNodeCluster{
-		finishCh: finishCh,
-		nodes:    make([]*dataNode, 0),
+		finishCh:          finishCh,
+		nodes:             make([]*dataNode, 0),
+		watchedCollection: make(map[UniqueID]bool),
 	}
 }
 
@@ -69,9 +72,13 @@ func (c *dataNodeCluster) GetNodeIDs() []int64 {
 	return ret
 }
 
-func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
+func (c *dataNodeCluster) WatchInsertChannels(collectionID UniqueID, channels []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.watchedCollection[collectionID] {
+		return
+	}
+	sort.Slice(c.nodes, func(i, j int) bool { return c.nodes[i].channelNum < c.nodes[j].channelNum })
 	var groups [][]string
 	if len(channels) < len(c.nodes) {
 		groups = make([][]string, len(channels))
@@ -102,6 +109,7 @@ func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
 		}
 		c.nodes[i].channelNum += len(group)
 	}
+	c.watchedCollection[collectionID] = true
 }
 
 func (c *dataNodeCluster) GetDataNodeStates() ([]*internalpb2.ComponentInfo, error) {
@@ -145,4 +153,5 @@ func (c *dataNodeCluster) Clear() {
 	defer c.mu.Unlock()
 	c.finishCh = make(chan struct{})
 	c.nodes = make([]*dataNode, 0)
+	c.watchedCollection = make(map[UniqueID]bool)
 }

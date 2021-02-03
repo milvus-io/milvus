@@ -2,7 +2,6 @@ package datanode
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"time"
@@ -83,9 +82,9 @@ func NewDataNode(ctx context.Context) *DataNode {
 	node := &DataNode{
 		ctx:             ctx2,
 		cancel:          cancel2,
-		NodeID:          Params.NodeID, // GOOSE TODO: How to init
+		NodeID:          Params.NodeID, // GOOSE TODO How to init
 		Role:            typeutil.DataNodeRole,
-		State:           internalpb2.StateCode_INITIALIZING, // GOOSE TODO: atomic
+		State:           internalpb2.StateCode_INITIALIZING,
 		dataSyncService: nil,
 		metaService:     nil,
 		masterService:   nil,
@@ -97,26 +96,15 @@ func NewDataNode(ctx context.Context) *DataNode {
 }
 
 func (node *DataNode) SetMasterServiceInterface(ms MasterServiceInterface) error {
-	switch {
-	case ms == nil, node.masterService != nil:
-		return errors.New("Nil parameter or repeatly set")
-	default:
-		node.masterService = ms
-		return nil
-	}
+	node.masterService = ms
+	return nil
 }
 
 func (node *DataNode) SetDataServiceInterface(ds DataServiceInterface) error {
-	switch {
-	case ds == nil, node.dataService != nil:
-		return errors.New("Nil parameter or repeatly set")
-	default:
-		node.dataService = ds
-		return nil
-	}
+	node.dataService = ds
+	return nil
 }
 
-// Suppose dataservice is in INITIALIZING
 func (node *DataNode) Init() error {
 
 	req := &datapb.RegisterNodeRequest{
@@ -157,15 +145,11 @@ func (node *DataNode) Init() error {
 	}
 
 	var alloc allocator = newAllocatorImpl(node.masterService)
-
 	chanSize := 100
 	node.flushChan = make(chan *flushMsg, chanSize)
-
 	node.dataSyncService = newDataSyncService(node.ctx, node.flushChan, replica, alloc)
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
-
 	node.replica = replica
-	node.dataSyncService.initNodes()
 
 	// --- Opentracing ---
 	cfg := &config.Configuration{
@@ -190,38 +174,19 @@ func (node *DataNode) Init() error {
 }
 
 func (node *DataNode) Start() error {
+
+	go node.dataSyncService.start()
 	node.metaService.init()
+	node.State = internalpb2.StateCode_HEALTHY
+
 	return nil
 }
 
-// DataNode is HEALTHY until StartSync() is called
-func (node *DataNode) StartSync() {
-	node.dataSyncService.init()
-	go node.dataSyncService.start()
-	node.State = internalpb2.StateCode_HEALTHY
-}
-
 func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-	}
+	log.Println("Init insert channel names:", in.GetChannelNames())
+	Params.InsertChannelNames = append(Params.InsertChannelNames, in.GetChannelNames()...)
 
-	switch {
-
-	case node.State != internalpb2.StateCode_HEALTHY:
-		status.Reason = fmt.Sprintf("DataNode %d not healthy!", node.NodeID)
-		return status, errors.New(status.GetReason())
-
-	case len(Params.InsertChannelNames) != 0:
-		status.Reason = fmt.Sprintf("DataNode has %d already set insert channels!", node.NodeID)
-		return status, errors.New(status.GetReason())
-
-	default:
-		Params.InsertChannelNames = in.GetChannelNames()
-		status.ErrorCode = commonpb.ErrorCode_SUCCESS
-		node.StartSync()
-		return status, nil
-	}
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}, nil
 }
 
 func (node *DataNode) GetComponentStates() (*internalpb2.ComponentStates, error) {

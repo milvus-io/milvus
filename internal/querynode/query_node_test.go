@@ -20,6 +20,8 @@ import (
 const ctxTimeInMillisecond = 5000
 const closeWithDeadline = true
 
+const defaultPartitionID = UniqueID(2021)
+
 type queryServiceMock struct{}
 
 func setup() {
@@ -27,7 +29,7 @@ func setup() {
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
-func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
+func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
@@ -76,21 +78,18 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 		DataType:     schemapb.DataType_INT32,
 	}
 
-	collectionName := rand.Int63n(1000000)
 	schema := schemapb.CollectionSchema{
-		Name:   "collection-" + strconv.FormatInt(collectionName, 10),
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
 	}
 
-	collectionMeta := etcdpb.CollectionMeta{
-		ID:            collectionID,
-		Schema:        &schema,
-		CreateTime:    Timestamp(0),
-		SegmentIDs:    []UniqueID{0},
-		PartitionTags: []string{"default"},
+	collectionMeta := etcdpb.CollectionInfo{
+		ID:           collectionID,
+		Schema:       &schema,
+		CreateTime:   Timestamp(0),
+		PartitionIDs: []UniqueID{defaultPartitionID},
 	}
 
 	return &collectionMeta
@@ -111,10 +110,10 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	assert.Equal(t, collection.ID(), collectionID)
 	assert.Equal(t, node.replica.getCollectionNum(), 1)
 
-	err = node.replica.addPartition2(collection.ID(), collectionMeta.PartitionTags[0])
+	err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment2(segmentID, collectionMeta.PartitionTags[0], collectionID, segTypeGrowing)
+	err = node.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segTypeGrowing)
 	assert.NoError(t, err)
 }
 

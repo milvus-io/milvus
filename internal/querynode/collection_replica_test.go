@@ -61,18 +61,18 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	partitionTags := []string{"a", "b", "c"}
-	for _, tag := range partitionTags {
-		err := node.replica.addPartition2(collectionID, tag)
+	partitionIDs := []UniqueID{1, 2, 3}
+	for _, id := range partitionIDs {
+		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByTag(collectionID, tag)
+		partition, err := node.replica.getPartitionByID(collectionID, id)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, tag)
+		assert.Equal(t, partition.ID(), id)
 	}
 
 	partitionNum, err := node.replica.getPartitionNum(collectionID)
 	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(partitionTags)+1) // _default
+	assert.Equal(t, partitionNum, len(partitionIDs)+1) // _default
 	node.Stop()
 }
 
@@ -81,13 +81,13 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	partitionTags := []string{"a", "b", "c"}
-	for _, tag := range partitionTags {
-		err := node.replica.addPartition2(collectionID, tag)
+	partitionIDs := []UniqueID{1, 2, 3}
+	for _, id := range partitionIDs {
+		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByTag(collectionID, tag)
+		partition, err := node.replica.getPartitionByID(collectionID, id)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, tag)
+		assert.Equal(t, partition.ID(), id)
 	}
 	node.Stop()
 }
@@ -97,15 +97,15 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	partitionTags := []string{"a", "b", "c"}
+	partitionIDs := []UniqueID{1, 2, 3}
 
-	for _, tag := range partitionTags {
-		err := node.replica.addPartition2(collectionID, tag)
+	for _, id := range partitionIDs {
+		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByTag(collectionID, tag)
+		partition, err := node.replica.getPartitionByID(collectionID, id)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, tag)
-		err = node.replica.removePartition(collectionID, tag)
+		assert.Equal(t, partition.ID(), id)
+		err = node.replica.removePartition(collectionID, id)
 		assert.NoError(t, err)
 	}
 	node.Stop()
@@ -117,18 +117,18 @@ func TestCollectionReplica_addPartitionsByCollectionMeta(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collectionMeta.PartitionTags = []string{"p0", "p1", "p2"}
+	collectionMeta.PartitionIDs = []UniqueID{0, 1, 2}
 
 	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
 	assert.NoError(t, err)
 	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(collectionMeta.PartitionTags)+1)
-	hasPartition := node.replica.hasPartition(UniqueID(0), "p0")
+	assert.Equal(t, partitionNum, len(collectionMeta.PartitionIDs)+1)
+	hasPartition := node.replica.hasPartition(UniqueID(0), UniqueID(0))
 	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(1))
 	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(2))
 	assert.Equal(t, hasPartition, true)
 
 	node.Stop()
@@ -140,19 +140,19 @@ func TestCollectionReplica_removePartitionsByCollectionMeta(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collectionMeta.PartitionTags = []string{"p0"}
+	collectionMeta.PartitionIDs = []UniqueID{0}
 
 	err := node.replica.addPartitionsByCollectionMeta(collectionMeta)
 	assert.NoError(t, err)
 	partitionNum, err := node.replica.getPartitionNum(UniqueID(0))
 	assert.NoError(t, err)
-	assert.Equal(t, partitionNum, len(collectionMeta.PartitionTags)+1)
+	assert.Equal(t, partitionNum, len(collectionMeta.PartitionIDs)+1)
 
-	hasPartition := node.replica.hasPartition(UniqueID(0), "p0")
+	hasPartition := node.replica.hasPartition(UniqueID(0), UniqueID(0))
 	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(UniqueID(0), "p1")
+	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(1))
 	assert.Equal(t, hasPartition, false)
-	hasPartition = node.replica.hasPartition(UniqueID(0), "p2")
+	hasPartition = node.replica.hasPartition(UniqueID(0), UniqueID(2))
 	assert.Equal(t, hasPartition, false)
 
 	node.Stop()
@@ -165,12 +165,12 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
-	for _, tag := range collectionMeta.PartitionTags {
-		err := node.replica.addPartition2(collectionID, tag)
+	for _, id := range collectionMeta.PartitionIDs {
+		err := node.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
-		partition, err := node.replica.getPartitionByTag(collectionID, tag)
+		partition, err := node.replica.getPartitionByID(collectionID, id)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.partitionTag, tag)
+		assert.Equal(t, partition.ID(), id)
 		assert.NotNil(t, partition)
 	}
 	node.Stop()
@@ -182,11 +182,11 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	collectionMeta := genTestCollectionMeta(collectionID, false)
-	err := node.replica.addPartition2(collectionID, collectionMeta.PartitionTags[0])
+	err := node.replica.addPartition(collectionID, collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
-	hasPartition := node.replica.hasPartition(collectionID, "default")
+	hasPartition := node.replica.hasPartition(collectionID, defaultPartitionID)
 	assert.Equal(t, hasPartition, true)
-	hasPartition = node.replica.hasPartition(collectionID, "default1")
+	hasPartition = node.replica.hasPartition(collectionID, defaultPartitionID+1)
 	assert.Equal(t, hasPartition, false)
 	node.Stop()
 }
@@ -198,9 +198,8 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	const segmentNum = 3
-	tag := "default"
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
+		err := node.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -216,10 +215,9 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	const segmentNum = 3
-	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
+		err := node.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -237,10 +235,9 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	const segmentNum = 3
-	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
+		err := node.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -256,10 +253,9 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	initTestMeta(t, node, collectionID, 0)
 
 	const segmentNum = 3
-	tag := "default"
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment2(UniqueID(i), tag, collectionID, segTypeGrowing)
+		err := node.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
