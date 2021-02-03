@@ -55,7 +55,7 @@ type ProducerMessage struct {
 
 type ConsumerMessage struct {
 	msgID   UniqueID
-	payload []byte
+	Payload []byte
 }
 
 type Channel struct {
@@ -75,6 +75,8 @@ type RocksMQ struct {
 	idAllocator IDAllocator
 	produceMu   sync.Mutex
 	consumeMu   sync.Mutex
+
+	notify map[string][]Consumer
 	//ctx              context.Context
 	//serverLoopWg     sync.WaitGroup
 	//serverLoopCtx    context.Context
@@ -105,7 +107,14 @@ func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error) {
 		idAllocator: idAllocator,
 	}
 	rmq.channels = make(map[string]*Channel)
+	rmq.notify = make(map[string][]Consumer)
 	return rmq, nil
+}
+
+func NewProducerMessage(data []byte) *ProducerMessage {
+	return &ProducerMessage{
+		payload: data,
+	}
 }
 
 func (rmq *RocksMQ) checkKeyExist(key string) bool {
@@ -228,7 +237,15 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 	kvChannelEndID := channelName + "/end_id"
 	kvValues[kvChannelEndID] = strconv.FormatInt(idEnd, 10)
 
-	return rmq.kv.MultiSave(kvValues)
+	err = rmq.kv.MultiSave(kvValues)
+	if err != nil {
+		return err
+	}
+
+	for _, consumer := range rmq.notify[channelName] {
+		consumer.MsgNum <- msgLen
+	}
+	return nil
 }
 
 func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]ConsumerMessage, error) {
@@ -274,7 +291,7 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 		}
 		msg := ConsumerMessage{
 			msgID:   msgID,
-			payload: val.Data(),
+			Payload: val.Data(),
 		}
 		consumerMessage = append(consumerMessage, msg)
 		key.Free()
