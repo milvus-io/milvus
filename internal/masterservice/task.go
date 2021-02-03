@@ -147,26 +147,6 @@ func (t *CreateCollectionReqTask) Execute() error {
 		return err
 	}
 
-	ddPart := internalpb2.CreatePartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kCreatePartition,
-			MsgID:     t.Req.Base.MsgID, //TODO, msg id
-			Timestamp: t.Req.Base.Timestamp + 1,
-			SourceID:  t.Req.Base.SourceID,
-		},
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		PartitionName:  Params.DefaultPartitionName,
-		DbID:           0, //TODO, not used
-		CollectionID:   collMeta.ID,
-		PartitionID:    partMeta.PartitionID,
-	}
-
-	err = t.core.DdCreatePartitionReq(&ddPart)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
