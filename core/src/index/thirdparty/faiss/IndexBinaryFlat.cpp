@@ -116,7 +116,6 @@ void IndexBinaryFlat::range_search(faiss::IndexBinary::idx_t n,
             break;
         }
         case METRIC_Tanimoto: {
-            radius = Tanimoto_2_Jaccard(radius);
             binary_range_search<CMax<float, int64_t>, float>(METRIC_Tanimoto, x, xb.data(), n, ntotal, radius, code_size, result, buffer_size, bitset);
             break;
         }
@@ -125,11 +124,11 @@ void IndexBinaryFlat::range_search(faiss::IndexBinary::idx_t n,
             break;
         }
         case METRIC_Superstructure: {
-            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Superstructure, x, xb.data(), n, ntotal, static_cast<bool>(radius), code_size, result, buffer_size, bitset);
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Superstructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
             break;
         }
         case METRIC_Substructure: {
-            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Substructure, x, xb.data(), n, ntotal, static_cast<bool>(radius), code_size, result, buffer_size, bitset);
+            binary_range_search<CMin<bool, int64_t>, bool>(METRIC_Substructure, x, xb.data(), n, ntotal, false, code_size, result, buffer_size, bitset);
             break;
         }
         default:

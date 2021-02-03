@@ -470,7 +470,7 @@ void binary_distance_knn_hc (
             binary_distance_knn_hc_hamming(20);
             binary_distance_knn_hc_hamming(32);
             binary_distance_knn_hc_hamming(64);
-#undef binary_distance_knn_hc_jaccard
+#undef binary_distance_knn_hc_hamming
             default:
                 binary_distance_knn_hc<C, faiss::HammingComputerDefault>
                         (ncodes, ha, a, b, nb, bitset);
@@ -557,6 +557,7 @@ void binary_range_search(
 
     switch (metric_type) {
     case METRIC_Tanimoto:
+        radius = Tanimoto_2_Jaccard(radius);
     case METRIC_Jaccard: {
         if (support_avx512() && ncodes > 128) {
             binary_range_search<C, T, faiss::JaccardComputerAVX512>
