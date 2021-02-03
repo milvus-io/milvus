@@ -82,7 +82,11 @@ BinaryIDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const 
     }
     std::vector<faiss::RangeSearchPartialResult*> res;
     DynamicResultSegment result;
-    auto radius = config[IndexParams::range_search_radius].get<float>();
+    float radius = 0.0;
+    if (index_->metric_type != faiss::MetricType::METRIC_Substructure &&
+        index_->metric_type != faiss::METRIC_Superstructure) {
+        auto radius = config[IndexParams::range_search_radius].get<float>();
+    }
     auto buffer_size = config.contains(IndexParams::range_search_buffer_size)
                            ? config[IndexParams::range_search_buffer_size].get<size_t>()
                            : 16384;
