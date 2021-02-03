@@ -23,10 +23,10 @@ type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 type MsgStream interface {
 	Start()
 	Close()
+	Chan() <-chan *MsgPack
 
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
 	Consume() *MsgPack
-	Chan() <-chan *MsgPack
 	Seek(offset *MsgPosition) error
 }

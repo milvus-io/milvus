@@ -61,6 +61,8 @@ func TestSearch_Search(t *testing.T) {
 	}
 
 	query := milvuspb.SearchRequest{
+		CollectionName:   "collection0",
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -93,7 +95,8 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
@@ -134,12 +137,12 @@ func TestSearch_Search(t *testing.T) {
 					Timestamp: uint64(10 + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
-				PartitionID:  defaultPartitionID,
-				SegmentID:    int64(0),
-				ChannelID:    "0",
-				Timestamps:   []uint64{uint64(i + 1000)},
-				RowIDs:       []int64{int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(0),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000)},
+				RowIDs:        []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},
@@ -179,11 +182,11 @@ func TestSearch_Search(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 
@@ -253,6 +256,8 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	}
 
 	query := milvuspb.SearchRequest{
+		CollectionName:   "collection0",
+		PartitionNames:   []string{"default"},
 		Dsl:              dslString,
 		PlaceholderGroup: placeGroupByte,
 	}
@@ -285,7 +290,8 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	searchStream.SetPulsarClient(pulsarURL)
 	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
@@ -330,12 +336,12 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionID: UniqueID(0),
-				PartitionID:  defaultPartitionID,
-				SegmentID:    int64(segmentID),
-				ChannelID:    "0",
-				Timestamps:   []uint64{uint64(i + 1000)},
-				RowIDs:       []int64{int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(segmentID),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000)},
+				RowIDs:        []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},
@@ -375,11 +381,11 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 

@@ -3,7 +3,6 @@ package proxynode
 import (
 	"log"
 	"sort"
-	"strconv"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
@@ -181,6 +180,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 		partitionID := insertRequest.PartitionID
 		partitionName := insertRequest.PartitionName
 		proxyID := insertRequest.Base.SourceID
+		channelNames := channelNamesMap[collectionID]
 		for index, key := range keys {
 			ts := insertRequest.Timestamps[index]
 			rowID := insertRequest.RowIDs[index]
@@ -191,6 +191,7 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				result[key] = &msgPack
 			}
 			segmentID := getSegmentID(reqID, key)
+			channelID := channelNames[int(key)%len(channelNames)]
 			sliceRequest := internalpb2.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_kInsert,
@@ -204,7 +205,8 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				PartitionName:  partitionName,
 				SegmentID:      segmentID,
 				// todo rename to ChannelName
-				ChannelID:  strconv.FormatInt(int64(key), 10),
+				// ChannelID:  strconv.FormatInt(int64(key), 10),
+				ChannelID:  channelID,
 				Timestamps: []uint64{ts},
 				RowIDs:     []int64{rowID},
 				RowData:    []*commonpb.Blob{row},

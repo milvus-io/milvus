@@ -42,7 +42,8 @@ func (sService *statsService) start() {
 	msgStreamURL := Params.PulsarAddress
 	producerChannels := []string{Params.StatsChannelName}
 
-	statsStream := pulsarms.NewPulsarMsgStream(sService.ctx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	statsStream := pulsarms.NewPulsarMsgStream(sService.ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	statsStream.SetPulsarClient(msgStreamURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 

@@ -27,7 +27,8 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	pulsarURL := Params.PulsarAddress
 
-	statsStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	statsStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	statsStream.SetPulsarClient(pulsarURL)
 	statsStream.CreatePulsarProducers(producerChannels)
 

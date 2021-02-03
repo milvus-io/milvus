@@ -10,17 +10,18 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
+
+type MarshalType = msgstream.MarshalType
 
 type InsertTask struct {
 	Tag string
 	msgstream.InsertMsg
 }
 
-func (tt *InsertTask) Marshal(input msgstream.TsMsg) ([]byte, error) {
+func (tt *InsertTask) Marshal(input msgstream.TsMsg) (MarshalType, error) {
 	testMsg := input.(*InsertTask)
 	insertRequest := &testMsg.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
@@ -30,9 +31,13 @@ func (tt *InsertTask) Marshal(input msgstream.TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (tt *InsertTask) Unmarshal(input []byte) (msgstream.TsMsg, error) {
+func (tt *InsertTask) Unmarshal(input MarshalType) (msgstream.TsMsg, error) {
 	insertRequest := internalpb2.InsertRequest{}
-	err := proto.Unmarshal(input, &insertRequest)
+	in, err := msgstream.ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &insertRequest)
 	testMsg := &InsertTask{InsertMsg: msgstream.InsertMsg{InsertRequest: insertRequest}}
 	testMsg.Tag = testMsg.InsertRequest.PartitionName
 	if err != nil {
@@ -135,18 +140,19 @@ func TestStream_task_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(1, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(3, 3))
 
-	inputStream := NewPulsarMsgStream(context.Background(), 100)
+	factory := msgstream.ProtoUDFactory{}
+	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
 	inputStream.SetPulsarClient(pulsarAddress)
 	inputStream.CreatePulsarProducers(producerChannels)
 	inputStream.SetRepackFunc(newRepackFunc)
 	inputStream.Start()
 
-	outputStream := NewPulsarMsgStream(context.Background(), 100)
+	dispatcher := factory.NewUnmarshalDispatcher()
+	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, dispatcher)
 	outputStream.SetPulsarClient(pulsarAddress)
-	unmarshalDispatcher := util.NewUnmarshalDispatcher()
 	testTask := InsertTask{}
-	unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
-	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName, unmarshalDispatcher, 100)
+	dispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
+	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
 	outputStream.Start()
 
 	err := inputStream.Produce(&msgPack)

@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
 type MsgType = commonpb.MsgType
+type MarshalType = interface{}
 
 type TsMsg interface {
 	GetMsgContext() context.Context
@@ -18,8 +20,8 @@ type TsMsg interface {
 	EndTs() Timestamp
 	Type() MsgType
 	HashKeys() []uint32
-	Marshal(TsMsg) ([]byte, error)
-	Unmarshal([]byte) (TsMsg, error)
+	Marshal(TsMsg) (MarshalType, error)
+	Unmarshal(MarshalType) (TsMsg, error)
 	Position() *MsgPosition
 	SetPosition(*MsgPosition)
 }
@@ -52,6 +54,15 @@ func (bm *BaseMsg) SetPosition(position *MsgPosition) {
 	bm.MsgPosition = position
 }
 
+func ConvertToByteArray(input interface{}) ([]byte, error) {
+	switch output := input.(type) {
+	case []byte:
+		return output, nil
+	default:
+		return nil, errors.New("Cannot convert interface{} to []byte")
+	}
+}
+
 /////////////////////////////////////////Insert//////////////////////////////////////////
 type InsertMsg struct {
 	BaseMsg
@@ -70,7 +81,7 @@ func (it *InsertMsg) SetMsgContext(ctx context.Context) {
 	it.MsgCtx = ctx
 }
 
-func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
+func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 	insertMsg := input.(*InsertMsg)
 	insertRequest := &insertMsg.InsertRequest
 	mb, err := proto.Marshal(insertRequest)
@@ -80,9 +91,13 @@ func (it *InsertMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (it *InsertMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	insertRequest := internalpb2.InsertRequest{}
-	err := proto.Unmarshal(input, &insertRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &insertRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +136,7 @@ func (fl *FlushCompletedMsg) SetMsgContext(ctx context.Context) {
 	fl.MsgCtx = ctx
 }
 
-func (fl *FlushCompletedMsg) Marshal(input TsMsg) ([]byte, error) {
+func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushCompletedMsgTask := input.(*FlushCompletedMsg)
 	flushCompletedMsg := &flushCompletedMsgTask.SegmentFlushCompletedMsg
 	mb, err := proto.Marshal(flushCompletedMsg)
@@ -131,9 +146,13 @@ func (fl *FlushCompletedMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (fl *FlushCompletedMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	flushCompletedMsg := internalpb2.SegmentFlushCompletedMsg{}
-	err := proto.Unmarshal(input, &flushCompletedMsg)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &flushCompletedMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +181,7 @@ func (fl *FlushMsg) SetMsgContext(ctx context.Context) {
 	fl.MsgCtx = ctx
 }
 
-func (fl *FlushMsg) Marshal(input TsMsg) ([]byte, error) {
+func (fl *FlushMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushMsgTask := input.(*FlushMsg)
 	flushMsg := &flushMsgTask.FlushMsg
 	mb, err := proto.Marshal(flushMsg)
@@ -172,9 +191,13 @@ func (fl *FlushMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (fl *FlushMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (fl *FlushMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	flushMsg := internalpb2.FlushMsg{}
-	err := proto.Unmarshal(input, &flushMsg)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &flushMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +226,7 @@ func (dt *DeleteMsg) SetMsgContext(ctx context.Context) {
 	dt.MsgCtx = ctx
 }
 
-func (dt *DeleteMsg) Marshal(input TsMsg) ([]byte, error) {
+func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
 	deleteMsg := input.(*DeleteMsg)
 	deleteRequest := &deleteMsg.DeleteRequest
 	mb, err := proto.Marshal(deleteRequest)
@@ -214,9 +237,13 @@ func (dt *DeleteMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (dt *DeleteMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	deleteRequest := internalpb2.DeleteRequest{}
-	err := proto.Unmarshal(input, &deleteRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &deleteRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +283,7 @@ func (st *SearchMsg) SetMsgContext(ctx context.Context) {
 	st.MsgCtx = ctx
 }
 
-func (st *SearchMsg) Marshal(input TsMsg) ([]byte, error) {
+func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
 	mb, err := proto.Marshal(searchRequest)
@@ -266,9 +293,13 @@ func (st *SearchMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (st *SearchMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (st *SearchMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	searchRequest := internalpb2.SearchRequest{}
-	err := proto.Unmarshal(input, &searchRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &searchRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +328,7 @@ func (srt *SearchResultMsg) SetMsgContext(ctx context.Context) {
 	srt.MsgCtx = ctx
 }
 
-func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
+func (srt *SearchResultMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchResultTask := input.(*SearchResultMsg)
 	searchResultRequest := &searchResultTask.SearchResults
 	mb, err := proto.Marshal(searchResultRequest)
@@ -307,9 +338,13 @@ func (srt *SearchResultMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (srt *SearchResultMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	searchResultRequest := internalpb2.SearchResults{}
-	err := proto.Unmarshal(input, &searchResultRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &searchResultRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +373,7 @@ func (tst *TimeTickMsg) SetMsgContext(ctx context.Context) {
 	tst.MsgCtx = ctx
 }
 
-func (tst *TimeTickMsg) Marshal(input TsMsg) ([]byte, error) {
+func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
 	timeTickTask := input.(*TimeTickMsg)
 	timeTick := &timeTickTask.TimeTickMsg
 	mb, err := proto.Marshal(timeTick)
@@ -348,9 +383,13 @@ func (tst *TimeTickMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (tst *TimeTickMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	timeTickMsg := internalpb2.TimeTickMsg{}
-	err := proto.Unmarshal(input, &timeTickMsg)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &timeTickMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +419,7 @@ func (qs *QueryNodeStatsMsg) SetMsgContext(ctx context.Context) {
 	qs.MsgCtx = ctx
 }
 
-func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) ([]byte, error) {
+func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	queryNodeSegStatsTask := input.(*QueryNodeStatsMsg)
 	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeStats
 	mb, err := proto.Marshal(queryNodeSegStats)
@@ -390,9 +429,13 @@ func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (qs *QueryNodeStatsMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (qs *QueryNodeStatsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	queryNodeSegStats := internalpb2.QueryNodeStats{}
-	err := proto.Unmarshal(input, &queryNodeSegStats)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &queryNodeSegStats)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +462,7 @@ func (ss *SegmentStatisticsMsg) SetMsgContext(ctx context.Context) {
 	ss.MsgCtx = ctx
 }
 
-func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) ([]byte, error) {
+func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	segStatsTask := input.(*SegmentStatisticsMsg)
 	segStats := &segStatsTask.SegmentStatistics
 	mb, err := proto.Marshal(segStats)
@@ -429,9 +472,13 @@ func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (ss *SegmentStatisticsMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	segStats := internalpb2.SegmentStatistics{}
-	err := proto.Unmarshal(input, &segStats)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &segStats)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +515,7 @@ func (cc *CreateCollectionMsg) SetMsgContext(ctx context.Context) {
 	cc.MsgCtx = ctx
 }
 
-func (cc *CreateCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
+func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createCollectionMsg := input.(*CreateCollectionMsg)
 	createCollectionRequest := &createCollectionMsg.CreateCollectionRequest
 	mb, err := proto.Marshal(createCollectionRequest)
@@ -478,9 +525,13 @@ func (cc *CreateCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (cc *CreateCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	createCollectionRequest := internalpb2.CreateCollectionRequest{}
-	err := proto.Unmarshal(input, &createCollectionRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &createCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +559,7 @@ func (dc *DropCollectionMsg) SetMsgContext(ctx context.Context) {
 	dc.MsgCtx = ctx
 }
 
-func (dc *DropCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
+func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropCollectionMsg := input.(*DropCollectionMsg)
 	dropCollectionRequest := &dropCollectionMsg.DropCollectionRequest
 	mb, err := proto.Marshal(dropCollectionRequest)
@@ -518,9 +569,13 @@ func (dc *DropCollectionMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (dc *DropCollectionMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	dropCollectionRequest := internalpb2.DropCollectionRequest{}
-	err := proto.Unmarshal(input, &dropCollectionRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &dropCollectionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +604,7 @@ func (cc *CreatePartitionMsg) Type() MsgType {
 	return cc.Base.MsgType
 }
 
-func (cc *CreatePartitionMsg) Marshal(input TsMsg) ([]byte, error) {
+func (cc *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	createPartitionMsg := input.(*CreatePartitionMsg)
 	createPartitionRequest := &createPartitionMsg.CreatePartitionRequest
 	mb, err := proto.Marshal(createPartitionRequest)
@@ -559,9 +614,13 @@ func (cc *CreatePartitionMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (cc *CreatePartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (cc *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	createPartitionRequest := internalpb2.CreatePartitionRequest{}
-	err := proto.Unmarshal(input, &createPartitionRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &createPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +649,7 @@ func (dc *DropPartitionMsg) Type() MsgType {
 	return dc.Base.MsgType
 }
 
-func (dc *DropPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
+func (dc *DropPartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropPartitionMsg := input.(*DropPartitionMsg)
 	dropPartitionRequest := &dropPartitionMsg.DropPartitionRequest
 	mb, err := proto.Marshal(dropPartitionRequest)
@@ -600,9 +659,13 @@ func (dc *DropPartitionMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (dc *DropPartitionMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (dc *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	dropPartitionRequest := internalpb2.DropPartitionRequest{}
-	err := proto.Unmarshal(input, &dropPartitionRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &dropPartitionRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +694,7 @@ func (lim *LoadIndexMsg) SetMsgContext(ctx context.Context) {
 	lim.MsgCtx = ctx
 }
 
-func (lim *LoadIndexMsg) Marshal(input TsMsg) ([]byte, error) {
+func (lim *LoadIndexMsg) Marshal(input TsMsg) (MarshalType, error) {
 	loadIndexMsg := input.(*LoadIndexMsg)
 	loadIndexRequest := &loadIndexMsg.LoadIndex
 	mb, err := proto.Marshal(loadIndexRequest)
@@ -641,9 +704,13 @@ func (lim *LoadIndexMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (lim *LoadIndexMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (lim *LoadIndexMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	loadIndexRequest := internalpb2.LoadIndex{}
-	err := proto.Unmarshal(input, &loadIndexRequest)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &loadIndexRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +737,7 @@ func (sim *SegmentInfoMsg) SetMsgContext(ctx context.Context) {
 	sim.MsgCtx = ctx
 }
 
-func (sim *SegmentInfoMsg) Marshal(input TsMsg) ([]byte, error) {
+func (sim *SegmentInfoMsg) Marshal(input TsMsg) (MarshalType, error) {
 	segInfoMsg := input.(*SegmentInfoMsg)
 	mb, err := proto.Marshal(&segInfoMsg.SegmentMsg)
 	if err != nil {
@@ -679,9 +746,13 @@ func (sim *SegmentInfoMsg) Marshal(input TsMsg) ([]byte, error) {
 	return mb, nil
 }
 
-func (sim *SegmentInfoMsg) Unmarshal(input []byte) (TsMsg, error) {
+func (sim *SegmentInfoMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	segMsg := datapb.SegmentMsg{}
-	err := proto.Unmarshal(input, &segMsg)
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &segMsg)
 	if err != nil {
 		return nil, err
 	}

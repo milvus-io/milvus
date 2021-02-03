@@ -9,8 +9,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
-
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -96,6 +95,7 @@ func (s *ServiceImpl) fillNodeInitParams() error {
 }
 
 func (s *ServiceImpl) Init() error {
+	dispatcherFactory := msgstream.ProtoUDFactory{}
 
 	err := s.fillNodeInitParams()
 	if err != nil {
@@ -103,17 +103,15 @@ func (s *ServiceImpl) Init() error {
 	}
 	log.Println("fill node init params ...")
 
-	serviceTimeTickMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024)
+	serviceTimeTickMsgStream := pulsarms.NewPulsarTtMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
 	serviceTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
 	serviceTimeTickMsgStream.CreatePulsarProducers([]string{Params.ServiceTimeTickChannel})
 	log.Println("create service time tick producer channel: ", []string{Params.ServiceTimeTickChannel})
 
-	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024)
+	nodeTimeTickMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
 	nodeTimeTickMsgStream.SetPulsarClient(Params.PulsarAddress)
 	nodeTimeTickMsgStream.CreatePulsarConsumers(Params.NodeTimeTickChannel,
-		"proxyservicesub", // TODO: add config
-		util.NewUnmarshalDispatcher(),
-		1024)
+		"proxyservicesub") // TODO: add config
 	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
 
 	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)

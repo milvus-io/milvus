@@ -2,7 +2,6 @@ package datanode
 
 import (
 	"context"
-	"encoding/binary"
 	"math"
 	"testing"
 	"time"
@@ -42,116 +41,15 @@ func TestDataSyncService_Start(t *testing.T) {
 	allocFactory := AllocatorFactory{}
 	sync := newDataSyncService(ctx, flushChan, replica, allocFactory)
 	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
+	sync.init()
 	go sync.start()
-
-	// test data generate
-	// GOOSE TODO orgnize
-	const DIM = 2
-	const N = 1
-	var rawData []byte
-
-	// Float vector
-	var fvector = [DIM]float32{1, 2}
-	for _, ele := range fvector {
-		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-
-	// Binary vector
-	// Dimension of binary vector is 32
-	var bvector = [4]byte{255, 255, 255, 0}
-	for _, ele := range bvector {
-		bs := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bs, uint32(ele))
-		rawData = append(rawData, bs...)
-	}
-
-	// Bool
-	bb := make([]byte, 4)
-	var fieldBool = true
-	var fieldBoolInt uint32
-	if fieldBool {
-		fieldBoolInt = 1
-	} else {
-		fieldBoolInt = 0
-	}
-
-	binary.LittleEndian.PutUint32(bb, fieldBoolInt)
-	rawData = append(rawData, bb...)
-
-	// int8
-	var dataInt8 int8 = 100
-	bint8 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint8, uint32(dataInt8))
-	rawData = append(rawData, bint8...)
-
-	// int16
-	var dataInt16 int16 = 200
-	bint16 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint16, uint32(dataInt16))
-	rawData = append(rawData, bint16...)
-
-	// int32
-	var dataInt32 int32 = 300
-	bint32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint32, uint32(dataInt32))
-	rawData = append(rawData, bint32...)
-
-	// int64
-	var dataInt64 int64 = 300
-	bint64 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bint64, uint32(dataInt64))
-	rawData = append(rawData, bint64...)
-
-	// float32
-	var datafloat float32 = 1.1
-	bfloat32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bfloat32, math.Float32bits(datafloat))
-	rawData = append(rawData, bfloat32...)
-
-	// float64
-	var datafloat64 float64 = 2.2
-	bfloat64 := make([]byte, 8)
-	binary.LittleEndian.PutUint64(bfloat64, math.Float64bits(datafloat64))
-	rawData = append(rawData, bfloat64...)
 
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,
 	}
-
-	// messages generate
-	const MSGLENGTH = 1
-	insertMessages := make([]msgstream.TsMsg, 0)
-	for i := 0; i < MSGLENGTH; i++ {
-		var msg msgstream.TsMsg = &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{
-					uint32(i),
-				},
-			},
-			InsertRequest: internalpb2.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_kInsert,
-					MsgID:     UniqueID(0),
-					Timestamp: Timestamp(i + 1000),
-					SourceID:  0,
-				},
-				CollectionName: "col1",
-				PartitionName:  "default",
-				SegmentID:      UniqueID(1),
-				ChannelID:      "0",
-				Timestamps:     []Timestamp{Timestamp(i + 1000)},
-				RowIDs:         []UniqueID{UniqueID(i)},
-
-				RowData: []*commonpb.Blob{
-					{Value: rawData},
-				},
-			},
-		}
-		insertMessages = append(insertMessages, msg)
-	}
+	dataFactory := NewDataFactory()
+	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2)
 
 	msgPack := msgstream.MsgPack{
 		BeginTs: timeRange.timestampMin,
@@ -184,11 +82,12 @@ func TestDataSyncService_Start(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	factory := msgstream.ProtoUDFactory{}
+	insertStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	insertStream.SetPulsarClient(pulsarURL)
 	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
 	ddStream.SetPulsarClient(pulsarURL)
 	ddStream.CreatePulsarProducers(ddChannels)
 
@@ -208,6 +107,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// dataSync
 	Params.FlushInsertBufferSize = 1
+	<-sync.ctx.Done()
 
 	sync.close()
 }

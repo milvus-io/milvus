@@ -24,14 +24,14 @@ type ParamTable struct {
 	DefaultRecordSize     int64
 	SegIDAssignExpiration int64
 
-	InsertChannelPrefixName       string
-	InsertChannelNumPerCollection int64
-	StatisticsChannelName         string
-	TimeTickChannelName           string
-	DataNodeNum                   int
-	SegmentInfoChannelName        string
-	DataServiceSubscriptionName   string
-	K2SChannelNames               []string
+	InsertChannelPrefixName     string
+	InsertChannelNum            int64
+	StatisticsChannelName       string
+	TimeTickChannelName         string
+	DataNodeNum                 int
+	SegmentInfoChannelName      string
+	DataServiceSubscriptionName string
+	K2SChannelNames             []string
 
 	SegmentFlushMetaPath string
 }
@@ -61,7 +61,7 @@ func (p *ParamTable) Init() {
 	p.initDefaultRecordSize()
 	p.initSegIDAssignExpiration()
 	p.initInsertChannelPrefixName()
-	p.initInsertChannelNumPerCollection()
+	p.initInsertChannelNum()
 	p.initStatisticsChannelName()
 	p.initTimeTickChannelName()
 	p.initDataNodeNum()
@@ -150,8 +150,8 @@ func (p *ParamTable) initInsertChannelPrefixName() {
 	}
 }
 
-func (p *ParamTable) initInsertChannelNumPerCollection() {
-	p.InsertChannelNumPerCollection = p.ParseInt64("dataservice.insertChannelNumPerCollection")
+func (p *ParamTable) initInsertChannelNum() {
+	p.InsertChannelNum = p.ParseInt64("dataservice.insertChannelNum")
 }
 
 func (p *ParamTable) initStatisticsChannelName() {

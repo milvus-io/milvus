@@ -19,7 +19,7 @@ func TestPartition_Segments(t *testing.T) {
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := node.replica.addSegment(UniqueID(i), targetPartition.ID(), collection.ID(), segTypeGrowing)
+		err := node.replica.addSegment2(UniqueID(i), targetPartition.partitionTag, collection.ID(), segTypeGrowing)
 		assert.NoError(t, err)
 	}
 
@@ -28,7 +28,7 @@ func TestPartition_Segments(t *testing.T) {
 }
 
 func TestPartition_newPartition(t *testing.T) {
-	partitionID := defaultPartitionID
-	partition := newPartition(partitionID)
-	assert.Equal(t, partition.ID(), defaultPartitionID)
+	partitionTag := "default"
+	partition := newPartition2(partitionTag)
+	assert.Equal(t, partition.partitionTag, partitionTag)
 }
