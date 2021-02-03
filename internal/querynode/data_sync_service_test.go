@@ -16,7 +16,7 @@ import (
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
 	node := newQueryNodeMock()
-	initTestMeta(t, node, "collection0", 0, 0)
+	initTestMeta(t, node, 0, 0)
 	// test data generate
 	const msgLength = 10
 	const DIM = 16
@@ -61,12 +61,12 @@ func TestDataSyncService_Start(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionName: "collection0",
-				PartitionName:  "default",
-				SegmentID:      int64(0),
-				ChannelID:      "0",
-				Timestamps:     []uint64{uint64(i + 1000), uint64(i + 1000)},
-				RowIDs:         []int64{int64(i), int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(0),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000), uint64(i + 1000)},
+				RowIDs:        []int64{int64(i), int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 					{Value: rawData},

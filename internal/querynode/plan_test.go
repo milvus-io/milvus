@@ -12,9 +12,8 @@ import (
 )
 
 func TestPlan_Plan(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 
@@ -32,9 +31,8 @@ func TestPlan_Plan(t *testing.T) {
 }
 
 func TestPlan_PlaceholderGroup(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 

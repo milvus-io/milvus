@@ -20,7 +20,7 @@ import (
 
 func TestSearch_Search(t *testing.T) {
 	node := newQueryNodeMock()
-	initTestMeta(t, node, "collection0", 0, 0)
+	initTestMeta(t, node, 0, 0)
 
 	pulsarURL := Params.PulsarAddress
 
@@ -136,12 +136,12 @@ func TestSearch_Search(t *testing.T) {
 					Timestamp: uint64(10 + 1000),
 					SourceID:  0,
 				},
-				CollectionName: "collection0",
-				PartitionName:  "default",
-				SegmentID:      int64(0),
-				ChannelID:      "0",
-				Timestamps:     []uint64{uint64(i + 1000)},
-				RowIDs:         []int64{int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(0),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000)},
+				RowIDs:        []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},
@@ -214,7 +214,7 @@ func TestSearch_Search(t *testing.T) {
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
 	node := NewQueryNode(context.Background(), 0)
-	initTestMeta(t, node, "collection0", 0, 0)
+	initTestMeta(t, node, 0, 0)
 
 	pulsarURL := Params.PulsarAddress
 
@@ -334,12 +334,12 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 					Timestamp: uint64(i + 1000),
 					SourceID:  0,
 				},
-				CollectionName: "collection0",
-				PartitionName:  "default",
-				SegmentID:      int64(segmentID),
-				ChannelID:      "0",
-				Timestamps:     []uint64{uint64(i + 1000)},
-				RowIDs:         []int64{int64(i)},
+				CollectionID:  UniqueID(0),
+				PartitionName: "default",
+				SegmentID:     int64(segmentID),
+				ChannelID:     "0",
+				Timestamps:    []uint64{uint64(i + 1000)},
+				RowIDs:        []int64{int64(i)},
 				RowData: []*commonpb.Blob{
 					{Value: rawData},
 				},

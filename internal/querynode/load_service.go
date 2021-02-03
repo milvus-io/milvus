@@ -47,7 +47,6 @@ type loadService struct {
 type loadIndex struct {
 	segmentID  UniqueID
 	fieldID    int64
-	fieldName  string
 	indexPaths []string
 }
 
@@ -231,7 +230,7 @@ func (s *loadService) loadIndex(indexPath []string) ([][]byte, indexParam, error
 		// get index params when detecting indexParamPrefix
 		if path.Base(p) == storage.IndexParamsFile {
 			indexCodec := storage.NewIndexCodec()
-			_, indexParams, err = indexCodec.Deserialize([]*storage.Blob{
+			_, indexParams, _, _, err = indexCodec.Deserialize([]*storage.Blob{
 				{
 					Key:   storage.IndexParamsFile,
 					Value: []byte(indexPiece),
@@ -262,7 +261,7 @@ func (s *loadService) updateSegmentIndex(indexParams indexParam, bytesIndex [][]
 	if err != nil {
 		return err
 	}
-	err = loadIndexInfo.appendFieldInfo(l.fieldName, l.fieldID)
+	err = loadIndexInfo.appendFieldInfo(l.fieldID)
 	if err != nil {
 		return err
 	}
@@ -422,10 +421,9 @@ func (s *loadService) loadIndexImmediate(segment *Segment, indexPaths []string) 
 	if err != nil {
 		return err
 	}
-	for id, name := range vecFieldIDs {
+	for _, id := range vecFieldIDs {
 		l := &loadIndex{
 			segmentID:  segment.ID(),
-			fieldName:  name,
 			fieldID:    id,
 			indexPaths: indexPaths,
 		}
@@ -449,10 +447,9 @@ func (s *loadService) loadIndexDelayed(collectionID, segmentID UniqueID, indexPa
 	if err != nil {
 		return err
 	}
-	for id, name := range vecFieldIDs {
+	for _, id := range vecFieldIDs {
 		l := &loadIndex{
 			segmentID:  segmentID,
-			fieldName:  name,
 			fieldID:    id,
 			indexPaths: indexPaths,
 		}
@@ -487,10 +484,18 @@ func (s *loadService) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb2.S
 	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
-func (s *loadService) filterOutVectorFields(fieldIDs []int64, vectorFields map[int64]string) []int64 {
+func (s *loadService) filterOutVectorFields(fieldIDs []int64, vectorFields []int64) []int64 {
+	containsFunc := func(s []int64, e int64) bool {
+		for _, a := range s {
+			if a == e {
+				return true
+			}
+		}
+		return false
+	}
 	targetFields := make([]int64, 0)
 	for _, id := range fieldIDs {
-		if _, ok := vectorFields[id]; !ok {
+		if !containsFunc(vectorFields, id) {
 			targetFields = append(targetFields, id)
 		}
 	}

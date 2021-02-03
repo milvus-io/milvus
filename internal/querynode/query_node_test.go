@@ -27,7 +27,7 @@ func setup() {
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
-func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
+func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
@@ -76,8 +76,9 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinar
 		DataType:     schemapb.DataType_INT32,
 	}
 
+	collectionName := rand.Int63n(1000000)
 	schema := schemapb.CollectionSchema{
-		Name:   collectionName,
+		Name:   "collection-" + strconv.FormatInt(collectionName, 10),
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
@@ -95,19 +96,18 @@ func genTestCollectionMeta(collectionName string, collectionID UniqueID, isBinar
 	return &collectionMeta
 }
 
-func initTestMeta(t *testing.T, node *QueryNode, collectionName string, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
+func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
 	isBinary := false
 	if len(optional) > 0 {
 		isBinary = optional[0]
 	}
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, isBinary)
+	collectionMeta := genTestCollectionMeta(collectionID, isBinary)
 
 	var err = node.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.NoError(t, err)
 
-	collection, err := node.replica.getCollectionByName(collectionName)
+	collection, err := node.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 	assert.Equal(t, node.replica.getCollectionNum(), 1)
 

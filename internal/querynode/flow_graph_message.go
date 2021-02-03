@@ -14,7 +14,7 @@ type key2SegMsg struct {
 }
 
 type ddMsg struct {
-	collectionRecords map[string][]metaOperateRecord
+	collectionRecords map[UniqueID][]metaOperateRecord
 	partitionRecords  map[string][]metaOperateRecord
 	gcRecord          *gcRecord
 	timeRange         TimeRange

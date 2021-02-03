@@ -37,7 +37,7 @@ func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
 	}
 
 	var ddMsg = ddMsg{
-		collectionRecords: make(map[string][]metaOperateRecord),
+		collectionRecords: make(map[UniqueID][]metaOperateRecord),
 		partitionRecords:  make(map[string][]metaOperateRecord),
 		timeRange: TimeRange{
 			timestampMin: msMsg.TimestampMin(),
@@ -108,8 +108,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 		return
 	}
 
-	collectionName := schema.Name
-	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
+	ddNode.ddMsg.collectionRecords[collectionID] = append(ddNode.ddMsg.collectionRecords[collectionID],
 		metaOperateRecord{
 			createOrDrop: true,
 			timestamp:    msg.Base.Timestamp,
@@ -125,8 +124,7 @@ func (ddNode *ddNode) dropCollection(msg *msgstream.DropCollectionMsg) {
 	//	return
 	//}
 
-	collectionName := msg.CollectionName
-	ddNode.ddMsg.collectionRecords[collectionName] = append(ddNode.ddMsg.collectionRecords[collectionName],
+	ddNode.ddMsg.collectionRecords[collectionID] = append(ddNode.ddMsg.collectionRecords[collectionID],
 		metaOperateRecord{
 			createOrDrop: false,
 			timestamp:    msg.Base.Timestamp,

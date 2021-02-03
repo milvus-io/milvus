@@ -8,11 +8,10 @@ import (
 
 func TestPartition_Segments(t *testing.T) {
 	node := newQueryNodeMock()
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionName, collectionID, 0)
+	initTestMeta(t, node, collectionID, 0)
 
-	collection, err := node.replica.getCollectionByName(collectionName)
+	collection, err := node.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 
 	partitions := collection.Partitions()

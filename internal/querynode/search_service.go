@@ -238,14 +238,13 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 		span.LogFields(oplog.Error(err))
 		return errors.New("unmarshal query failed")
 	}
-	collectionName := query.CollectionName
+	collectionID := searchMsg.CollectionID
 	partitionTagsInQuery := query.PartitionNames
-	collection, err := ss.replica.getCollectionByName(collectionName)
+	collection, err := ss.replica.getCollectionByID(collectionID)
 	if err != nil {
 		span.LogFields(oplog.Error(err))
 		return err
 	}
-	collectionID := collection.ID()
 	dsl := query.Dsl
 	plan, err := createPlan(*collection, dsl)
 	if err != nil {

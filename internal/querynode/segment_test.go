@@ -15,12 +15,10 @@ import (
 
 //-------------------------------------------------------------------------------------- constructor and destructor
 func TestSegment_newSegment(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -31,12 +29,10 @@ func TestSegment_newSegment(t *testing.T) {
 }
 
 func TestSegment_deleteSegment(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -49,12 +45,10 @@ func TestSegment_deleteSegment(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- stats functions
 func TestSegment_getRowCount(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -98,12 +92,10 @@ func TestSegment_getRowCount(t *testing.T) {
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -153,12 +145,10 @@ func TestSegment_getDeletedCount(t *testing.T) {
 }
 
 func TestSegment_getMemSize(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -203,12 +193,10 @@ func TestSegment_getMemSize(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- dm & search functions
 func TestSegment_segmentInsert(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
 	segment := newSegment2(collection, segmentID, Params.DefaultPartitionTag, collectionID, segTypeGrowing)
@@ -247,12 +235,10 @@ func TestSegment_segmentInsert(t *testing.T) {
 }
 
 func TestSegment_segmentDelete(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -298,12 +284,10 @@ func TestSegment_segmentDelete(t *testing.T) {
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -381,12 +365,10 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -421,12 +403,10 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 }
 
 func TestSegment_segmentPreDelete(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -470,12 +450,10 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 }
 
 func TestSegment_segmentLoadFieldData(t *testing.T) {
-	collectionName := "collection0"
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionName, collectionID, false)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)

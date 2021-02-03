@@ -23,9 +23,9 @@ type Collection struct {
 	partitions    []*Partition
 }
 
-func (c *Collection) Name() string {
-	return c.schema.Name
-}
+//func (c *Collection) Name() string {
+//	return c.schema.Name
+//}
 
 func (c *Collection) ID() UniqueID {
 	return c.id
@@ -43,9 +43,6 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
-
-		const char*
-		GetCollectionName(CCollection collection);
 	*/
 	schemaBlob := proto.MarshalTextString(schema)
 
