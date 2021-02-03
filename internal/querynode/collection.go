@@ -23,10 +23,6 @@ type Collection struct {
 	partitions    []*Partition
 }
 
-//func (c *Collection) Name() string {
-//	return c.schema.Name
-//}
-
 func (c *Collection) ID() UniqueID {
 	return c.id
 }

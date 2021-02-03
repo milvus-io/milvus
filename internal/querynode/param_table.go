@@ -58,10 +58,9 @@ type ParamTable struct {
 	StatsChannelName     string
 	StatsReceiveBufSize  int64
 
-	GracefulTime        int64
-	MsgChannelSubName   string
-	DefaultPartitionTag string
-	SliceIndex          int
+	GracefulTime      int64
+	MsgChannelSubName string
+	SliceIndex        int
 }
 
 var Params ParamTable
@@ -133,7 +132,6 @@ func (p *ParamTable) Init() {
 
 	p.initGracefulTime()
 	p.initMsgChannelSubName()
-	p.initDefaultPartitionTag()
 	p.initSliceIndex()
 
 	p.initFlowGraphMaxQueueLength()
@@ -456,15 +454,6 @@ func (p *ParamTable) initDDChannelNames() {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 	p.DDChannelNames = ret
-}
-
-func (p *ParamTable) initDefaultPartitionTag() {
-	defaultTag, err := p.Load("common.defaultPartitionTag")
-	if err != nil {
-		panic(err)
-	}
-
-	p.DefaultPartitionTag = defaultTag
 }
 
 func (p *ParamTable) initSliceIndex() {

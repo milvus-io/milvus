@@ -15,7 +15,7 @@ type key2SegMsg struct {
 
 type ddMsg struct {
 	collectionRecords map[UniqueID][]metaOperateRecord
-	partitionRecords  map[string][]metaOperateRecord
+	partitionRecords  map[UniqueID][]metaOperateRecord
 	gcRecord          *gcRecord
 	timeRange         TimeRange
 }
@@ -63,17 +63,16 @@ type DeletePreprocessData struct {
 	count         int32
 }
 
-// TODO: replace partitionWithID by partition id
+// TODO: delete collection id
 type partitionWithID struct {
-	partitionTag string
+	partitionID  UniqueID
 	collectionID UniqueID
 }
 
 type gcRecord struct {
 	// collections and partitions to be dropped
 	collections []UniqueID
-	// TODO: use partition id
-	partitions []partitionWithID
+	partitions  []partitionWithID
 }
 
 func (ksMsg *key2SegMsg) TimeTick() Timestamp {
