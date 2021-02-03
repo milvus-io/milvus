@@ -263,7 +263,7 @@ message SearchResults {
 message FlushRequest {
   common.MsgBase base = 1;
   string db_name = 2;
-  string collection_name = 3;
+  repeated string collection_names = 3;
 }
 
 service MilvusService {

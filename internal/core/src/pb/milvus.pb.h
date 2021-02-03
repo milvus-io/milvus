@@ -6689,10 +6689,27 @@ class FlushRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kCollectionNamesFieldNumber = 3,
     kDbNameFieldNumber = 2,
-    kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
   };
+  // repeated string collection_names = 3;
+  int collection_names_size() const;
+  void clear_collection_names();
+  const std::string& collection_names(int index) const;
+  std::string* mutable_collection_names(int index);
+  void set_collection_names(int index, const std::string& value);
+  void set_collection_names(int index, std::string&& value);
+  void set_collection_names(int index, const char* value);
+  void set_collection_names(int index, const char* value, size_t size);
+  std::string* add_collection_names();
+  void add_collection_names(const std::string& value);
+  void add_collection_names(std::string&& value);
+  void add_collection_names(const char* value);
+  void add_collection_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& collection_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_collection_names();
+
   // string db_name = 2;
   void clear_db_name();
   const std::string& db_name() const;
@@ -6703,17 +6720,6 @@ class FlushRequest :
   std::string* mutable_db_name();
   std::string* release_db_name();
   void set_allocated_db_name(std::string* db_name);
-
-  // string collection_name = 3;
-  void clear_collection_name();
-  const std::string& collection_name() const;
-  void set_collection_name(const std::string& value);
-  void set_collection_name(std::string&& value);
-  void set_collection_name(const char* value);
-  void set_collection_name(const char* value, size_t size);
-  std::string* mutable_collection_name();
-  std::string* release_collection_name();
-  void set_allocated_collection_name(std::string* collection_name);
 
   // .milvus.proto.common.MsgBase base = 1;
   bool has_base() const;
@@ -6728,8 +6734,8 @@ class FlushRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> collection_names_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -12613,55 +12619,69 @@ inline void FlushRequest::set_allocated_db_name(std::string* db_name) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.FlushRequest.db_name)
 }
 
-// string collection_name = 3;
-inline void FlushRequest::clear_collection_name() {
-  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+// repeated string collection_names = 3;
+inline int FlushRequest::collection_names_size() const {
+  return collection_names_.size();
 }
-inline const std::string& FlushRequest::collection_name() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FlushRequest.collection_name)
-  return collection_name_.GetNoArena();
+inline void FlushRequest::clear_collection_names() {
+  collection_names_.Clear();
 }
-inline void FlushRequest::set_collection_name(const std::string& value) {
-  
-  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.FlushRequest.collection_name)
+inline const std::string& FlushRequest::collection_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FlushRequest.collection_names)
+  return collection_names_.Get(index);
 }
-inline void FlushRequest::set_collection_name(std::string&& value) {
-  
-  collection_name_.SetNoArena(
-    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.FlushRequest.collection_name)
+inline std::string* FlushRequest::mutable_collection_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.FlushRequest.collection_names)
+  return collection_names_.Mutable(index);
 }
-inline void FlushRequest::set_collection_name(const char* value) {
+inline void FlushRequest::set_collection_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.FlushRequest.collection_names)
+  collection_names_.Mutable(index)->assign(value);
+}
+inline void FlushRequest::set_collection_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.FlushRequest.collection_names)
+  collection_names_.Mutable(index)->assign(std::move(value));
+}
+inline void FlushRequest::set_collection_names(int index, const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  
-  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.FlushRequest.collection_name)
+  collection_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.FlushRequest.collection_names)
 }
-inline void FlushRequest::set_collection_name(const char* value, size_t size) {
-  
-  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
-      ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.FlushRequest.collection_name)
+inline void FlushRequest::set_collection_names(int index, const char* value, size_t size) {
+  collection_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.FlushRequest.collection_names)
 }
-inline std::string* FlushRequest::mutable_collection_name() {
-  
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.FlushRequest.collection_name)
-  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+inline std::string* FlushRequest::add_collection_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.FlushRequest.collection_names)
+  return collection_names_.Add();
 }
-inline std::string* FlushRequest::release_collection_name() {
-  // @@protoc_insertion_point(field_release:milvus.proto.milvus.FlushRequest.collection_name)
-  
-  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+inline void FlushRequest::add_collection_names(const std::string& value) {
+  collection_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.FlushRequest.collection_names)
 }
-inline void FlushRequest::set_allocated_collection_name(std::string* collection_name) {
-  if (collection_name != nullptr) {
-    
-  } else {
-    
-  }
-  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.FlushRequest.collection_name)
+inline void FlushRequest::add_collection_names(std::string&& value) {
+  collection_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.FlushRequest.collection_names)
+}
+inline void FlushRequest::add_collection_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  collection_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.FlushRequest.collection_names)
+}
+inline void FlushRequest::add_collection_names(const char* value, size_t size) {
+  collection_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.FlushRequest.collection_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+FlushRequest::collection_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.FlushRequest.collection_names)
+  return collection_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+FlushRequest::mutable_collection_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.FlushRequest.collection_names)
+  return &collection_names_;
 }
 
 // -------------------------------------------------------------------
