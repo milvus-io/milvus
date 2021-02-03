@@ -249,12 +249,28 @@ func TestMasterService(t *testing.T) {
 
 		msg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
-		assert.Equal(t, len(msg.Msgs), 1)
+		assert.True(t, len(msg.Msgs) == 2 || len(msg.Msgs) == 1)
+
 		createMsg, ok := (msg.Msgs[0]).(*ms.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err := core.MetaTable.GetCollectionByName("testColl")
 		assert.Nil(t, err)
 		assert.Equal(t, createMsg.CollectionID, createMeta.ID)
+		assert.Equal(t, len(createMeta.PartitionIDs), 1)
+
+		if len(msg.Msgs) == 2 {
+			createPart, ok := (msg.Msgs[1]).(*ms.CreatePartitionMsg)
+			assert.True(t, ok)
+			assert.Equal(t, createPart.CollectionName, "testColl")
+			assert.Equal(t, createPart.PartitionID, createMeta.PartitionIDs[0])
+		} else {
+			msg, ok = <-ddStream.Chan()
+			assert.True(t, ok)
+			createPart, ok := (msg.Msgs[0]).(*ms.CreatePartitionMsg)
+			assert.True(t, ok)
+			assert.Equal(t, createPart.CollectionName, "testColl")
+			assert.Equal(t, createPart.PartitionID, createMeta.PartitionIDs[0])
+		}
 
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101

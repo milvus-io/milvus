@@ -2,12 +2,9 @@ package proxynode
 
 import (
 	"context"
-	"errors"
 	"log"
 	"strconv"
 	"time"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -592,110 +589,4 @@ func (node *NodeImpl) Flush(request *milvuspb.FlushRequest) (*commonpb.Status, e
 
 func (node *NodeImpl) GetDdChannel(request *commonpb.Empty) (*milvuspb.StringResponse, error) {
 	panic("implement me")
-}
-
-func (node *NodeImpl) GetPersistentSegmentInfo(req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error) {
-	resp := &milvuspb.PersistentSegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-		},
-	}
-	segments, err := node.getSegmentsOfCollection(req.DbName, req.CollectionName)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	infoResp, err := node.dataServiceClient.GetSegmentInfo(&datapb.SegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kSegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyID,
-		},
-		SegmentIDs: segments,
-	})
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	if infoResp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		resp.Status.Reason = infoResp.Status.Reason
-		return resp, nil
-	}
-	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
-	for i, info := range infoResp.Infos {
-		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
-			SegmentID:    info.SegmentID,
-			CollectionID: info.CollectionID,
-			PartitionID:  info.PartitionID,
-			OpenTime:     info.OpenTime,
-			SealedTime:   info.SealedTime,
-			FlushedTime:  info.FlushedTime,
-			NumRows:      info.NumRows,
-			MemSize:      info.MemSize,
-			State:        info.State,
-		}
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_SUCCESS
-	resp.Infos = persistentInfos
-	return resp, nil
-}
-
-func (node *NodeImpl) getSegmentsOfCollection(dbName string, collectionName string) ([]UniqueID, error) {
-	describeCollectionResponse, err := node.masterClient.DescribeCollection(&milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kDescribeCollection,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyID,
-		},
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if describeCollectionResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return nil, errors.New(describeCollectionResponse.Status.Reason)
-	}
-	collectionID := describeCollectionResponse.CollectionID
-	showPartitionsResp, err := node.masterClient.ShowPartitions(&milvuspb.ShowPartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_kShowPartitions,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyID,
-		},
-		DbName:         dbName,
-		CollectionName: collectionName,
-		CollectionID:   collectionID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if showPartitionsResp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return nil, errors.New(showPartitionsResp.Status.Reason)
-	}
-
-	ret := make([]UniqueID, 0)
-	for _, partitionID := range showPartitionsResp.PartitionIDs {
-		showSegmentResponse, err := node.masterClient.ShowSegments(&milvuspb.ShowSegmentRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kShowSegment,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  Params.ProxyID,
-			},
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if showSegmentResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return nil, errors.New(showSegmentResponse.Status.Reason)
-		}
-		ret = append(ret, showSegmentResponse.SegmentIDs...)
-	}
-	return ret, nil
 }

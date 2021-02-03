@@ -9,11 +9,13 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	PulsarAddress          string
-	MasterAddress          string
-	NodeTimeTickChannel    []string
-	ServiceTimeTickChannel string
-	DataServiceAddress     string
+	PulsarAddress           string
+	MasterAddress           string
+	NodeTimeTickChannel     []string
+	ServiceTimeTickChannel  string
+	DataServiceAddress      string
+	InsertChannelPrefixName string
+	InsertChannelNum        int64
 }
 
 var Params ParamTable
@@ -21,11 +23,17 @@ var Params ParamTable
 func (pt *ParamTable) Init() {
 	pt.BaseTable.Init()
 
+	if err := pt.LoadYaml("advanced/data_service.yaml"); err != nil {
+		panic(err)
+	}
+
 	pt.initPulsarAddress()
 	pt.initMasterAddress()
 	pt.initNodeTimeTickChannel()
 	pt.initServiceTimeTickChannel()
 	pt.initDataServiceAddress()
+	pt.initInsertChannelPrefixName()
+	pt.initInsertChannelNum()
 }
 
 func (pt *ParamTable) initPulsarAddress() {
@@ -64,4 +72,16 @@ func (pt *ParamTable) initServiceTimeTickChannel() {
 func (pt *ParamTable) initDataServiceAddress() {
 	// NOT USED NOW
 	pt.DataServiceAddress = "TODO: read from config"
+}
+
+func (pt *ParamTable) initInsertChannelNum() {
+	pt.InsertChannelNum = pt.ParseInt64("dataservice.insertChannelNum")
+}
+
+func (pt *ParamTable) initInsertChannelPrefixName() {
+	var err error
+	pt.InsertChannelPrefixName, err = pt.Load("msgChannel.chanNamePrefix.dataServiceInsertChannel")
+	if err != nil {
+		panic(err)
+	}
 }
