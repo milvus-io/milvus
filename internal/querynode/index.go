@@ -29,7 +29,7 @@ func (s *Segment) buildIndex(collection *Collection) commonpb.Status {
 	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}
 }
 
-func (s *Segment) dropIndex(fieldName string) commonpb.Status {
+func (s *Segment) dropIndex(fieldID int64) commonpb.Status {
 	// WARN: Not support yet
 
 	return commonpb.Status{ErrorCode: commonpb.ErrorCode_SUCCESS}

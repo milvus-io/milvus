@@ -310,17 +310,15 @@ func TestIndexCodec(t *testing.T) {
 	indexParams := map[string]string{
 		"k1": "v1", "k2": "v2",
 	}
-	blobsInput, err := indexCodec.Serialize(blobs, indexParams, "index_test_name", 1234)
+	blobsInput, err := indexCodec.Serialize(blobs, indexParams)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 4, len(blobsInput))
-	assert.EqualValues(t, IndexParamsFile, blobsInput[3].Key)
-	blobsOutput, indexParamsOutput, indexName, indexID, err := indexCodec.Deserialize(blobsInput)
+	assert.EqualValues(t, IndexParamsFile, blobsInput[3])
+	blobsOutput, indexParamsOutput, err := indexCodec.Deserialize(blobsInput)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, len(blobsOutput))
 	for i := 0; i < 3; i++ {
 		assert.EqualValues(t, blobs[i], blobsOutput[i])
 	}
 	assert.EqualValues(t, indexParams, indexParamsOutput)
-	assert.EqualValues(t, "index_test_name", indexName)
-	assert.EqualValues(t, 1234, indexID)
 }

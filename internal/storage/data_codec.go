@@ -635,16 +635,8 @@ func NewIndexCodec() *IndexCodec {
 	return &IndexCodec{}
 }
 
-func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string, indexName string, indexID UniqueID) ([]*Blob, error) {
-	paramsBytes, err := json.Marshal(struct {
-		Params    map[string]string
-		IndexName string
-		IndexID   UniqueID
-	}{
-		Params:    params,
-		IndexName: indexName,
-		IndexID:   indexID,
-	})
+func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string) ([]*Blob, error) {
+	paramsBytes, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
@@ -652,27 +644,20 @@ func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string,
 	return blobs, nil
 }
 
-func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, string, UniqueID, error) {
-	var file *Blob
+func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, error) {
+	var params map[string]string
 	for i := 0; i < len(blobs); i++ {
 		if blobs[i].Key != IndexParamsFile {
 			continue
 		}
-		file = blobs[i]
+		if err := json.Unmarshal(blobs[i].Value, &params); err != nil {
+			return nil, nil, err
+		}
 		blobs = append(blobs[:i], blobs[i+1:]...)
 		break
 	}
-	if file == nil {
-		return nil, nil, "", -1, errors.New("can not find params blob")
+	if params == nil {
+		return nil, nil, errors.New("can not find params blob")
 	}
-	info := struct {
-		Params    map[string]string
-		IndexName string
-		IndexID   UniqueID
-	}{}
-	if err := json.Unmarshal(file.Value, &info); err != nil {
-		return nil, nil, "", -1, errors.New("json unmarshal error: " + err.Error())
-	}
-
-	return blobs, info.Params, info.IndexName, info.IndexID, nil
+	return blobs, params, nil
 }
