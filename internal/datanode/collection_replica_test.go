@@ -7,103 +7,95 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func initTestReplicaMeta(t *testing.T, replica collectionReplica, collectionName string, collectionID UniqueID, segmentID UniqueID) {
-	// GOOSE TODO remove
-	Factory := &MetaFactory{}
-	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
-
-	var err = replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
-	require.NoError(t, err)
-
-	collection, err := replica.getCollectionByName(collectionName)
-	require.NoError(t, err)
-	assert.Equal(t, collection.Name(), collectionName)
-	assert.Equal(t, collection.ID(), collectionID)
-	assert.Equal(t, replica.getCollectionNum(), 1)
-
-}
-
 func TestReplica_Collection(t *testing.T) {
 	Factory := &MetaFactory{}
-	collMetaMock := Factory.CollectionMetaFactory(0, "collection0")
+	collID := UniqueID(100)
+	collMetaMock := Factory.CollectionMetaFactory(collID, "test-coll-name-0")
 
-	t.Run("Test add collection", func(t *testing.T) {
-
+	t.Run("get_collection_num", func(t *testing.T) {
 		replica := newReplica()
-		assert.False(t, replica.hasCollection(0))
-		num := replica.getCollectionNum()
-		assert.Equal(t, 0, num)
+		assert.Zero(t, replica.getCollectionNum())
 
-		err := replica.addCollection(0, collMetaMock.GetSchema())
+		replica = new(ReplicaImpl)
+		assert.Zero(t, replica.getCollectionNum())
+
+		replica = &ReplicaImpl{
+			collections: map[UniqueID]*Collection{
+				0: {id: 0},
+				1: {id: 1},
+				2: {id: 2},
+			},
+		}
+		assert.Equal(t, 3, replica.getCollectionNum())
+	})
+
+	t.Run("add_collection", func(t *testing.T) {
+		replica := newReplica()
+		require.Zero(t, replica.getCollectionNum())
+
+		err := replica.addCollection(collID, nil)
+		assert.Error(t, err)
+		assert.Zero(t, replica.getCollectionNum())
+
+		err = replica.addCollection(collID, collMetaMock.Schema)
 		assert.NoError(t, err)
-
-		assert.True(t, replica.hasCollection(0))
-		num = replica.getCollectionNum()
-		assert.Equal(t, 1, num)
-
-		coll, err := replica.getCollectionByID(0)
+		assert.Equal(t, 1, replica.getCollectionNum())
+		assert.True(t, replica.hasCollection(collID))
+		coll, err := replica.getCollectionByID(collID)
 		assert.NoError(t, err)
 		assert.NotNil(t, coll)
-		assert.Equal(t, UniqueID(0), coll.ID())
-		assert.Equal(t, "collection0", coll.Name())
-		assert.Equal(t, collMetaMock.GetSchema(), coll.Schema())
+		assert.Equal(t, collID, coll.GetID())
+		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
+		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
 
-		coll, err = replica.getCollectionByName("collection0")
+		sameID := collID
+		otherSchema := Factory.CollectionMetaFactory(sameID, "test-coll-name-1").GetSchema()
+		err = replica.addCollection(sameID, otherSchema)
+		assert.Error(t, err)
+
+	})
+
+	t.Run("remove_collection", func(t *testing.T) {
+		replica := newReplica()
+		require.False(t, replica.hasCollection(collID))
+		require.Zero(t, replica.getCollectionNum())
+
+		err := replica.removeCollection(collID)
+		assert.NoError(t, err)
+
+		err = replica.addCollection(collID, collMetaMock.Schema)
+		require.NoError(t, err)
+		require.True(t, replica.hasCollection(collID))
+		require.Equal(t, 1, replica.getCollectionNum())
+
+		err = replica.removeCollection(collID)
+		assert.NoError(t, err)
+		assert.False(t, replica.hasCollection(collID))
+		assert.Zero(t, replica.getCollectionNum())
+		err = replica.removeCollection(collID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("get_collection_by_id", func(t *testing.T) {
+		replica := newReplica()
+		require.False(t, replica.hasCollection(collID))
+
+		coll, err := replica.getCollectionByID(collID)
+		assert.Error(t, err)
+		assert.Nil(t, coll)
+
+		err = replica.addCollection(collID, collMetaMock.Schema)
+		require.NoError(t, err)
+		require.True(t, replica.hasCollection(collID))
+		require.Equal(t, 1, replica.getCollectionNum())
+
+		coll, err = replica.getCollectionByID(collID)
 		assert.NoError(t, err)
 		assert.NotNil(t, coll)
-		assert.Equal(t, UniqueID(0), coll.ID())
-		assert.Equal(t, "collection0", coll.Name())
-		assert.Equal(t, collMetaMock.GetSchema(), coll.Schema())
-
-		collID, err := replica.getCollectionIDByName("collection0")
-		assert.NoError(t, err)
-		assert.Equal(t, UniqueID(0), collID)
-
+		assert.Equal(t, collID, coll.GetID())
+		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
+		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
 	})
-
-	t.Run("Test remove collection", func(t *testing.T) {
-		replica := newReplica()
-		err := replica.addCollection(0, collMetaMock.GetSchema())
-		require.NoError(t, err)
-
-		numsBefore := replica.getCollectionNum()
-		coll, err := replica.getCollectionByID(0)
-		require.NotNil(t, coll)
-		require.NoError(t, err)
-
-		err = replica.removeCollection(0)
-		assert.NoError(t, err)
-		numsAfter := replica.getCollectionNum()
-		assert.Equal(t, 1, numsBefore-numsAfter)
-
-		coll, err = replica.getCollectionByID(0)
-		assert.Nil(t, coll)
-		assert.Error(t, err)
-		err = replica.removeCollection(999999999)
-		assert.Error(t, err)
-	})
-
-	t.Run("Test errors", func(t *testing.T) {
-		replica := newReplica()
-		require.False(t, replica.hasCollection(0))
-		require.Equal(t, 0, replica.getCollectionNum())
-
-		coll, err := replica.getCollectionByName("Name-not-exist")
-		assert.Error(t, err)
-		assert.Nil(t, coll)
-
-		coll, err = replica.getCollectionByID(0)
-		assert.Error(t, err)
-		assert.Nil(t, coll)
-
-		collID, err := replica.getCollectionIDByName("Name-not-exist")
-		assert.Error(t, err)
-		assert.Zero(t, collID)
-
-		err = replica.removeCollection(0)
-		assert.Error(t, err)
-	})
-
 }
 
 func TestReplica_Segment(t *testing.T) {

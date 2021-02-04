@@ -27,8 +27,10 @@ type Server struct {
 }
 
 func New(ctx context.Context) (*Server, error) {
+	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
-		ctx: ctx,
+		ctx:    ctx1,
+		cancel: cancel,
 	}
 
 	s.core = dn.NewDataNode(s.ctx)
@@ -76,6 +78,7 @@ func (s *Server) Start() error {
 
 func (s *Server) Stop() error {
 	err := s.core.Stop()
+	s.cancel()
 	s.grpcServer.GracefulStop()
 	return err
 }
@@ -89,7 +92,7 @@ func (s *Server) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelR
 }
 
 func (s *Server) FlushSegments(ctx context.Context, in *datapb.FlushSegRequest) (*commonpb.Status, error) {
-	if s.core.State != internalpb2.StateCode_HEALTHY {
+	if s.core.State.Load().(internalpb2.StateCode) != internalpb2.StateCode_HEALTHY {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 			Reason:    "DataNode isn't healthy.",

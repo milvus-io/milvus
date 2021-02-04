@@ -34,7 +34,7 @@ type (
 	insertBufferNode struct {
 		BaseNode
 		insertBuffer *insertBuffer
-		replica      collectionReplica
+		replica      Replica
 		flushMeta    *metaTable
 
 		minIOKV     kv.Base
@@ -417,7 +417,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		if ibNode.insertBuffer.full(currentSegID) {
 			log.Printf(". Insert Buffer full, auto flushing (%v) rows of data...", ibNode.insertBuffer.size(currentSegID))
 
-			err = ibNode.flushSegment(currentSegID, msg.GetPartitionID(), collection.ID())
+			err = ibNode.flushSegment(currentSegID, msg.GetPartitionID(), collection.GetID())
 			if err != nil {
 				log.Printf("flush segment (%v) fail: %v", currentSegID, err)
 			}
@@ -617,7 +617,7 @@ func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (
 }
 
 func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
-	replica collectionReplica, alloc allocator) *insertBufferNode {
+	replica Replica, alloc allocator) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

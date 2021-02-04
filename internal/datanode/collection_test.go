@@ -6,24 +6,41 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCollection_newCollection(t *testing.T) {
-	collectionName := "collection0"
-	collectionID := UniqueID(1)
+func TestCollection_Group(t *testing.T) {
 	Factory := &MetaFactory{}
-	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
-	assert.Equal(t, collection.ID(), collectionID)
-}
+	collName := "collection0"
+	collID := UniqueID(1)
+	collMeta := Factory.CollectionMetaFactory(collID, collName)
 
-func TestCollection_deleteCollection(t *testing.T) {
-	collectionName := "collection0"
-	collectionID := UniqueID(1)
-	Factory := &MetaFactory{}
-	collectionMeta := Factory.CollectionMetaFactory(collectionID, collectionName)
+	t.Run("new_collection_nil_schema", func(t *testing.T) {
+		coll, err := newCollection(collID, nil)
+		assert.Error(t, err)
+		assert.Nil(t, coll)
+	})
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.Name(), collectionName)
-	assert.Equal(t, collection.ID(), collectionID)
+	t.Run("new_collection_right_schema", func(t *testing.T) {
+		coll, err := newCollection(collID, collMeta.Schema)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		assert.Equal(t, collName, coll.GetName())
+		assert.Equal(t, collID, coll.GetID())
+		assert.Equal(t, collMeta.Schema, coll.GetSchema())
+		assert.Equal(t, *collMeta.Schema, *coll.GetSchema())
+	})
+
+	t.Run("getters", func(t *testing.T) {
+		coll := new(Collection)
+		assert.Empty(t, coll.GetName())
+		assert.Empty(t, coll.GetID())
+		assert.Empty(t, coll.GetSchema())
+
+		coll, err := newCollection(collID, collMeta.Schema)
+		assert.NoError(t, err)
+		assert.Equal(t, collName, coll.GetName())
+		assert.Equal(t, collID, coll.GetID())
+		assert.Equal(t, collMeta.Schema, coll.GetSchema())
+		assert.Equal(t, *collMeta.Schema, *coll.GetSchema())
+	})
+
 }

@@ -26,7 +26,7 @@ type ddNode struct {
 
 	idAllocator allocator
 	kv          kv.Base
-	replica     collectionReplica
+	replica     Replica
 	flushMeta   *metaTable
 }
 
@@ -367,7 +367,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 }
 
 func newDDNode(ctx context.Context, flushMeta *metaTable,
-	inFlushCh chan *flushMsg, replica collectionReplica, alloc allocator) *ddNode {
+	inFlushCh chan *flushMsg, replica Replica, alloc allocator) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 

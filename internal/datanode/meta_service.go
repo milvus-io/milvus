@@ -14,11 +14,11 @@ import (
 
 type metaService struct {
 	ctx          context.Context
-	replica      collectionReplica
+	replica      Replica
 	masterClient MasterServiceInterface
 }
 
-func newMetaService(ctx context.Context, replica collectionReplica, m MasterServiceInterface) *metaService {
+func newMetaService(ctx context.Context, replica Replica, m MasterServiceInterface) *metaService {
 	return &metaService{
 		ctx:          ctx,
 		replica:      replica,
