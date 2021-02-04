@@ -1,21 +1,21 @@
 package proxynode
 
 import (
+	"context"
 	"errors"
 	"log"
 	"math"
 	"strconv"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 )
@@ -1511,5 +1511,315 @@ func (ft *FlushTask) Execute() error {
 }
 
 func (ft *FlushTask) PostExecute() error {
+	return nil
+}
+
+type LoadCollectionTask struct {
+	Condition
+	*milvuspb.LoadCollectionRequest
+	queryserviceClient QueryServiceClient
+	result             *commonpb.Status
+	ctx                context.Context
+}
+
+func (lct *LoadCollectionTask) OnEnqueue() error {
+	lct.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (lct *LoadCollectionTask) ID() UniqueID {
+	return lct.Base.MsgID
+}
+
+func (lct *LoadCollectionTask) SetID(uid UniqueID) {
+	lct.Base.MsgID = uid
+}
+
+func (lct *LoadCollectionTask) Type() commonpb.MsgType {
+	return lct.Base.MsgType
+}
+
+func (lct *LoadCollectionTask) BeginTs() Timestamp {
+	return lct.Base.Timestamp
+}
+
+func (lct *LoadCollectionTask) EndTs() Timestamp {
+	return lct.Base.Timestamp
+}
+
+func (lct *LoadCollectionTask) SetTs(ts Timestamp) {
+	lct.Base.Timestamp = ts
+}
+
+func (lct *LoadCollectionTask) PreExecute() error {
+	lct.Base.MsgType = commonpb.MsgType_kLoadCollection
+	lct.Base.SourceID = Params.ProxyID
+
+	collName := lct.CollectionName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (lct *LoadCollectionTask) Execute() (err error) {
+	collID, err := globalMetaCache.GetCollectionID(lct.CollectionName)
+	if err != nil {
+		return err
+	}
+	request := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kLoadCollection,
+			MsgID:     lct.Base.MsgID,
+			Timestamp: lct.Base.Timestamp,
+			SourceID:  lct.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
+	}
+	lct.result, err = lct.queryserviceClient.LoadCollection(request)
+	return err
+}
+
+func (lct *LoadCollectionTask) PostExecute() error {
+	return nil
+}
+
+type ReleaseCollectionTask struct {
+	Condition
+	*milvuspb.ReleaseCollectionRequest
+	queryserviceClient QueryServiceClient
+	result             *commonpb.Status
+	ctx                context.Context
+}
+
+func (rct *ReleaseCollectionTask) OnEnqueue() error {
+	rct.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (rct *ReleaseCollectionTask) ID() UniqueID {
+	return rct.Base.MsgID
+}
+
+func (rct *ReleaseCollectionTask) SetID(uid UniqueID) {
+	rct.Base.MsgID = uid
+}
+
+func (rct *ReleaseCollectionTask) Type() commonpb.MsgType {
+	return rct.Base.MsgType
+}
+
+func (rct *ReleaseCollectionTask) BeginTs() Timestamp {
+	return rct.Base.Timestamp
+}
+
+func (rct *ReleaseCollectionTask) EndTs() Timestamp {
+	return rct.Base.Timestamp
+}
+
+func (rct *ReleaseCollectionTask) SetTs(ts Timestamp) {
+	rct.Base.Timestamp = ts
+}
+
+func (rct *ReleaseCollectionTask) PreExecute() error {
+	rct.Base.MsgType = commonpb.MsgType_kReleaseCollection
+	rct.Base.SourceID = Params.ProxyID
+
+	collName := rct.CollectionName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (rct *ReleaseCollectionTask) Execute() (err error) {
+	collID, err := globalMetaCache.GetCollectionID(rct.CollectionName)
+	if err != nil {
+		return err
+	}
+	request := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kReleaseCollection,
+			MsgID:     rct.Base.MsgID,
+			Timestamp: rct.Base.Timestamp,
+			SourceID:  rct.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
+	}
+	rct.result, err = rct.queryserviceClient.ReleaseCollection(request)
+	return err
+}
+
+func (rct *ReleaseCollectionTask) PostExecute() error {
+	return nil
+}
+
+type LoadPartitionTask struct {
+	Condition
+	*milvuspb.LoadPartitonRequest
+	queryserviceClient QueryServiceClient
+	result             *commonpb.Status
+	ctx                context.Context
+}
+
+func (lpt *LoadPartitionTask) OnEnqueue() error {
+	lpt.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (lpt *LoadPartitionTask) ID() UniqueID {
+	return lpt.Base.MsgID
+}
+
+func (lpt *LoadPartitionTask) SetID(uid UniqueID) {
+	lpt.Base.MsgID = uid
+}
+
+func (lpt *LoadPartitionTask) Type() commonpb.MsgType {
+	return lpt.Base.MsgType
+}
+
+func (lpt *LoadPartitionTask) BeginTs() Timestamp {
+	return lpt.Base.Timestamp
+}
+
+func (lpt *LoadPartitionTask) EndTs() Timestamp {
+	return lpt.Base.Timestamp
+}
+
+func (lpt *LoadPartitionTask) SetTs(ts Timestamp) {
+	lpt.Base.Timestamp = ts
+}
+
+func (lpt *LoadPartitionTask) PreExecute() error {
+	lpt.Base.MsgType = commonpb.MsgType_kLoadPartition
+	lpt.Base.SourceID = Params.ProxyID
+
+	collName := lpt.CollectionName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (lpt *LoadPartitionTask) Execute() (err error) {
+	var partitionIDs []int64
+	collID, err := globalMetaCache.GetCollectionID(lpt.CollectionName)
+	if err != nil {
+		return err
+	}
+	for _, partitionName := range lpt.PartitionNames {
+		partitionID, err := globalMetaCache.GetPartitionID(lpt.CollectionName, partitionName)
+		if err != nil {
+			return err
+		}
+		partitionIDs = append(partitionIDs, partitionID)
+	}
+	request := &querypb.LoadPartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kLoadPartition,
+			MsgID:     lpt.Base.MsgID,
+			Timestamp: lpt.Base.Timestamp,
+			SourceID:  lpt.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
+		PartitionIDs: partitionIDs,
+	}
+	lpt.result, err = lpt.queryserviceClient.LoadPartitions(request)
+	return err
+}
+
+func (lpt *LoadPartitionTask) PostExecute() error {
+	return nil
+}
+
+type ReleasePartitionTask struct {
+	Condition
+	*milvuspb.ReleasePartitionRequest
+	queryserviceClient QueryServiceClient
+	result             *commonpb.Status
+	ctx                context.Context
+}
+
+func (rpt *ReleasePartitionTask) OnEnqueue() error {
+	rpt.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (rpt *ReleasePartitionTask) ID() UniqueID {
+	return rpt.Base.MsgID
+}
+
+func (rpt *ReleasePartitionTask) SetID(uid UniqueID) {
+	rpt.Base.MsgID = uid
+}
+
+func (rpt *ReleasePartitionTask) Type() commonpb.MsgType {
+	return rpt.Base.MsgType
+}
+
+func (rpt *ReleasePartitionTask) BeginTs() Timestamp {
+	return rpt.Base.Timestamp
+}
+
+func (rpt *ReleasePartitionTask) EndTs() Timestamp {
+	return rpt.Base.Timestamp
+}
+
+func (rpt *ReleasePartitionTask) SetTs(ts Timestamp) {
+	rpt.Base.Timestamp = ts
+}
+
+func (rpt *ReleasePartitionTask) PreExecute() error {
+	rpt.Base.MsgType = commonpb.MsgType_kReleasePartition
+	rpt.Base.SourceID = Params.ProxyID
+
+	collName := rpt.CollectionName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (rpt *ReleasePartitionTask) Execute() (err error) {
+	var partitionIDs []int64
+	collID, err := globalMetaCache.GetCollectionID(rpt.CollectionName)
+	if err != nil {
+		return err
+	}
+	for _, partitionName := range rpt.PartitionNames {
+		partitionID, err := globalMetaCache.GetPartitionID(rpt.CollectionName, partitionName)
+		if err != nil {
+			return err
+		}
+		partitionIDs = append(partitionIDs, partitionID)
+	}
+	request := &querypb.ReleasePartitionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kReleasePartition,
+			MsgID:     rpt.Base.MsgID,
+			Timestamp: rpt.Base.Timestamp,
+			SourceID:  rpt.Base.SourceID,
+		},
+		DbID:         0,
+		CollectionID: collID,
+		PartitionIDs: partitionIDs,
+	}
+	rpt.result, err = rpt.queryserviceClient.ReleasePartitions(request)
+	return err
+}
+
+func (rpt *ReleasePartitionTask) PostExecute() error {
 	return nil
 }

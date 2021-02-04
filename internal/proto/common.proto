@@ -83,6 +83,8 @@ enum MsgType {
     kDescribeCollection = 103;
     kShowCollections = 104;
     kGetSysConfigs = 105;
+    kLoadCollection = 106;
+    kReleaseCollection = 107;
 
     /* Definition Requests: partition */
     kCreatePartition = 200;
@@ -90,6 +92,8 @@ enum MsgType {
     kHasPartition = 202;
     kDescribePartition = 203;
     kShowPartitions = 204;
+    kLoadPartition = 205;
+    kReleasePartition = 206;
 
     /* Define Requests: segment */
     kShowSegment = 250;
