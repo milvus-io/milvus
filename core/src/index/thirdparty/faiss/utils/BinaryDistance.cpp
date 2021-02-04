@@ -420,10 +420,7 @@ void binary_distance_knn_hc (
 {
     switch (metric_type) {
     case METRIC_Jaccard: {
-        if (support_avx512() && ncodes > 128) {
-            binary_distance_knn_hc<C, faiss::JaccardComputerAVX512>
-                    (ncodes, ha, a, b, nb, bitset);
-        } else if (support_avx2() && ncodes > 64) {
+        if (support_avx2() && ncodes > 64) {
             binary_distance_knn_hc<C, faiss::JaccardComputerAVX2>
                     (ncodes, ha, a, b, nb, bitset);
         } else {
@@ -451,10 +448,7 @@ void binary_distance_knn_hc (
     }
 
     case METRIC_Hamming: {
-        if (support_avx512() && ncodes > 128) {
-            binary_distance_knn_hc<C, faiss::HammingComputerAVX512>
-                    (ncodes, ha, a, b, nb, bitset);
-        } else if (support_avx2() && ncodes > 64) {
+        if (support_avx2() && ncodes > 64) {
             binary_distance_knn_hc<C, faiss::HammingComputerAVX2>
                     (ncodes, ha, a, b, nb, bitset);
         } else {
@@ -559,10 +553,7 @@ void binary_range_search(
     case METRIC_Tanimoto:
         radius = Tanimoto_2_Jaccard(radius);
     case METRIC_Jaccard: {
-        if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, T, faiss::JaccardComputerAVX512>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else if (support_avx2() && ncodes > 64) {
+        if (support_avx2() && ncodes > 64) {
             binary_range_search<C, T, faiss::JaccardComputerAVX2>
                     (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else {
@@ -600,10 +591,7 @@ void binary_range_search(
     }
 
     case METRIC_Hamming: {
-        if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, T, faiss::HammingComputerAVX512>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else if (support_avx2() && ncodes > 64) {
+        if (support_avx2() && ncodes > 64) {
             binary_range_search<C, T, faiss::HammingComputerAVX2>
                     (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
         } else {
@@ -630,63 +618,47 @@ void binary_range_search(
     }
 
     case METRIC_Superstructure: {
-        if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, T, faiss::SuperstructureComputerDefault>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else if (support_avx2() && ncodes > 64) {
-            binary_range_search<C, T, faiss::SuperstructureComputerDefault>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else {
-            switch (ncodes) {
+        switch (ncodes) {
 #define binary_range_search_superstructure(ncodes) \
-            case ncodes: \
-                binary_range_search<C, T, faiss::SuperstructureComputer ## ncodes> \
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
-                break;
-            binary_range_search_superstructure(8);
-            binary_range_search_superstructure(16);
-            binary_range_search_superstructure(32);
-            binary_range_search_superstructure(64);
-            binary_range_search_superstructure(128);
-            binary_range_search_superstructure(256);
-            binary_range_search_superstructure(512);
+        case ncodes: \
+            binary_range_search<C, T, faiss::SuperstructureComputer ## ncodes> \
+                (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
+            break;
+        binary_range_search_superstructure(8);
+        binary_range_search_superstructure(16);
+        binary_range_search_superstructure(32);
+        binary_range_search_superstructure(64);
+        binary_range_search_superstructure(128);
+        binary_range_search_superstructure(256);
+        binary_range_search_superstructure(512);
 #undef binary_range_search_superstructure
-            default:
-                binary_range_search<C, T, faiss::SuperstructureComputerDefault>
-                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-                break;
-            }
+        default:
+            binary_range_search<C, T, faiss::SuperstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+            break;
         }
         break;
     }
 
     case METRIC_Substructure: {
-        if (support_avx512() && ncodes > 128) {
-            binary_range_search<C, T, faiss::SubstructureComputerDefault>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else if (support_avx2() && ncodes > 64) {
-            binary_range_search<C, T, faiss::SubstructureComputerDefault>
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-        } else {
-            switch (ncodes) {
+        switch (ncodes) {
 #define binary_range_search_substructure(ncodes) \
-            case ncodes: \
-                binary_range_search<C, T, faiss::SubstructureComputer ## ncodes> \
-                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
-                break;
-            binary_range_search_substructure(8);
-            binary_range_search_substructure(16);
-            binary_range_search_substructure(32);
-            binary_range_search_substructure(64);
-            binary_range_search_substructure(128);
-            binary_range_search_substructure(256);
-            binary_range_search_substructure(512);
+        case ncodes: \
+            binary_range_search<C, T, faiss::SubstructureComputer ## ncodes> \
+                (a, b, na, nb, ncodes, radius, result, buffer_size, bitset); \
+            break;
+        binary_range_search_substructure(8);
+        binary_range_search_substructure(16);
+        binary_range_search_substructure(32);
+        binary_range_search_substructure(64);
+        binary_range_search_substructure(128);
+        binary_range_search_substructure(256);
+        binary_range_search_substructure(512);
 #undef binary_range_search_substructure
-            default:
-                binary_range_search<C, T, faiss::SubstructureComputerDefault>
-                        (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
-                break;
-            }
+        default:
+            binary_range_search<C, T, faiss::SubstructureComputerDefault>
+                    (a, b, na, nb, ncodes, radius, result, buffer_size, bitset);
+            break;
         }
         break;
     }
