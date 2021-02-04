@@ -134,7 +134,10 @@ func (s *Server) Start() error {
 		return err
 	}
 	s.statsHandler = newStatsHandler(s.meta)
-	s.segAllocator = newSegmentAllocator(s.meta, s.allocator)
+	s.segAllocator, err = newSegmentAllocator(s.meta, s.allocator)
+	if err != nil {
+		return err
+	}
 	s.ddHandler = newDDHandler(s.meta, s.segAllocator)
 	s.initSegmentInfoChannel()
 	if err = s.loadMetaFromMaster(); err != nil {
@@ -170,25 +173,22 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initSegmentInfoChannel() {
-	factory := msgstream.ProtoUDFactory{}
-	segmentInfoStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	segmentInfoStream.SetPulsarClient(Params.PulsarAddress)
-	segmentInfoStream.CreatePulsarProducers([]string{Params.SegmentInfoChannelName})
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	segmentInfoStream, _ := factory.NewMsgStream(s.ctx)
+	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
 	s.segmentInfoStream = segmentInfoStream
 	s.segmentInfoStream.Start()
 }
 func (s *Server) initMsgProducer() error {
-	factory := msgstream.ProtoUDFactory{}
-	ttMsgStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	ttMsgStream.SetPulsarClient(Params.PulsarAddress)
-	ttMsgStream.CreatePulsarConsumers([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	ttMsgStream, _ := factory.NewMsgStream(s.ctx)
+	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
 	s.ttMsgStream = ttMsgStream
 	s.ttMsgStream.Start()
 	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
-	k2sStream := pulsarms.NewPulsarMsgStream(s.ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	k2sStream.SetPulsarClient(Params.PulsarAddress)
-	k2sStream.CreatePulsarProducers(Params.K2SChannelNames)
+	k2sStream, _ := factory.NewMsgStream(s.ctx)
+	k2sStream.AsProducer(Params.K2SChannelNames)
 	s.k2sMsgStream = k2sStream
 	s.k2sMsgStream.Start()
 	k2sMsgWatcher := timesync.NewMsgTimeTickWatcher(s.k2sMsgStream)
@@ -308,10 +308,9 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := msgstream.ProtoUDFactory{}
-	statsStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	statsStream.SetPulsarClient(Params.PulsarAddress)
-	statsStream.CreatePulsarConsumers([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	statsStream, _ := factory.NewMsgStream(ctx)
+	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -335,10 +334,9 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 
 func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := msgstream.ProtoUDFactory{}
-	flushStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	flushStream.SetPulsarClient(Params.PulsarAddress)
-	flushStream.CreatePulsarConsumers([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	flushStream, _ := factory.NewMsgStream(ctx)
+	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
 	flushStream.Start()
 	defer flushStream.Close()
 	for {
@@ -371,10 +369,9 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := msgstream.ProtoUDFactory{}
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarConsumers([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream.AsConsumer([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
 	ddStream.Start()
 	defer ddStream.Close()
 	for {

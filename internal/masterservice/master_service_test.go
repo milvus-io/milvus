@@ -105,6 +105,17 @@ func (idx *indexMock) getFileArray() []string {
 	return ret
 }
 
+func consumeMsgChan(timeout time.Duration, targetChan <-chan *ms.MsgPack) {
+	for {
+		select {
+		case <-time.After(timeout):
+			return
+		case <-targetChan:
+
+		}
+	}
+}
+
 func TestMasterService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -146,23 +157,19 @@ func TestMasterService(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
-	factory := ms.ProtoUDFactory{}
-	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
-	proxyTimeTickStream.CreatePulsarProducers([]string{Params.ProxyTimeTickChannel})
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	proxyTimeTickStream, _ := factory.NewMsgStream(ctx)
+	proxyTimeTickStream.AsProducer([]string{Params.ProxyTimeTickChannel})
 
-	dataServiceSegmentStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	dataServiceSegmentStream.SetPulsarClient(Params.PulsarAddress)
-	dataServiceSegmentStream.CreatePulsarProducers([]string{Params.DataServiceSegmentChannel})
+	dataServiceSegmentStream, _ := factory.NewMsgStream(ctx)
+	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
 
-	timeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	timeTickStream.SetPulsarClient(Params.PulsarAddress)
-	timeTickStream.CreatePulsarConsumers([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream, _ := factory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarConsumers([]string{Params.DdChannel}, Params.MsgChannelSubName)
+	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
 
 	time.Sleep(time.Second)
@@ -405,6 +412,7 @@ func TestMasterService(t *testing.T) {
 			CollectionName: "testColl",
 			PartitionName:  "testPartition",
 		}
+		consumeMsgChan(time.Second, ddStream.Chan())
 		status, err := core.CreatePartition(req)
 		assert.Nil(t, err)
 		assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_SUCCESS)

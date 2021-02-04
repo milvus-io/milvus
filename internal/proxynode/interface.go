@@ -23,6 +23,7 @@ type MasterClient interface {
 	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 }
 
 type IndexServiceClient interface {
@@ -43,6 +44,7 @@ type QueryServiceClient interface {
 	//GetSearchChannelNames() ([]string, error)
 	//GetSearchResultChannels() ([]string, error)
 	GetComponentStates() (*internalpb2.ComponentStates, error)
+	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
 
 type DataServiceClient interface {
@@ -94,4 +96,7 @@ type ProxyNode interface {
 	Flush(request *milvuspb.FlushRequest) (*commonpb.Status, error)
 
 	GetDdChannel(request *commonpb.Empty) (*milvuspb.StringResponse, error)
+
+	GetQuerySegmentInfo(req *milvuspb.QuerySegmentInfoRequest) (*milvuspb.QuerySegmentInfoResponse, error)
+	GetPersistentSegmentInfo(req *milvuspb.PersistentSegmentInfoRequest) (*milvuspb.PersistentSegmentInfoResponse, error)
 }

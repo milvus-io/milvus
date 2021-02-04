@@ -17,7 +17,8 @@ func TestAllocSegment(t *testing.T) {
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
+	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
+	assert.Nil(t, err)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
@@ -67,7 +68,8 @@ func TestSealSegment(t *testing.T) {
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
+	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
+	assert.Nil(t, err)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
@@ -103,7 +105,8 @@ func TestExpireSegment(t *testing.T) {
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
+	segAllocator, err := newSegmentAllocator(meta, mockAllocator)
+	assert.Nil(t, err)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()

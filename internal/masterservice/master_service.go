@@ -402,7 +402,6 @@ func (c *Core) tsLoop() {
 	}
 }
 func (c *Core) setMsgStreams() error {
-	dispatcherFactory := ms.ProtoUDFactory{}
 
 	if Params.PulsarAddress == "" {
 		return errors.Errorf("PulsarAddress is empty")
@@ -415,26 +414,25 @@ func (c *Core) setMsgStreams() error {
 	if Params.ProxyTimeTickChannel == "" {
 		return errors.Errorf("ProxyTimeTickChannel is empty")
 	}
-	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
-	proxyTimeTickStream.CreatePulsarConsumers([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
+
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
+	proxyTimeTickStream, _ := factory.NewMsgStream(c.ctx)
+	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
 	proxyTimeTickStream.Start()
 
 	// master time tick channel
 	if Params.TimeTickChannel == "" {
 		return errors.Errorf("TimeTickChannel is empty")
 	}
-	timeTickStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	timeTickStream.SetPulsarClient(Params.PulsarAddress)
-	timeTickStream.CreatePulsarProducers([]string{Params.TimeTickChannel})
+	timeTickStream, _ := factory.NewMsgStream(c.ctx)
+	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 
 	// master dd channel
 	if Params.DdChannel == "" {
 		return errors.Errorf("DdChannel is empty")
 	}
-	ddStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(Params.PulsarAddress)
-	ddStream.CreatePulsarProducers([]string{Params.DdChannel})
+	ddStream, _ := factory.NewMsgStream(c.ctx)
+	ddStream.AsProducer([]string{Params.DdChannel})
 
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
@@ -567,9 +565,8 @@ func (c *Core) setMsgStreams() error {
 	if Params.DataServiceSegmentChannel == "" {
 		return errors.Errorf("DataServiceSegmentChannel is empty")
 	}
-	dataServiceStream := pulsarms.NewPulsarMsgStream(c.ctx, 1024, 1024, dispatcherFactory.NewUnmarshalDispatcher())
-	dataServiceStream.SetPulsarClient(Params.PulsarAddress)
-	dataServiceStream.CreatePulsarConsumers([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
+	dataServiceStream, _ := factory.NewMsgStream(c.ctx)
+	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
 	dataServiceStream.Start()
 	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
 	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)

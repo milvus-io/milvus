@@ -290,6 +290,27 @@ message PersistentSegmentInfoResponse {
   repeated PersistentSegmentInfo infos = 2;
 }
 
+message QuerySegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 mem_size = 4;
+  int64 num_rows = 5;
+  string index_name = 6;
+  int64 indexID = 7;
+}
+
+message QuerySegmentInfoRequest {
+  common.MsgBase base = 1;
+  string dbName = 2;
+  string collectionName = 3;
+}
+
+message QuerySegmentInfoResponse {
+  common.Status status = 1;
+  repeated QuerySegmentInfo infos = 2;
+}
+
 service MilvusService {
   rpc CreateCollection(CreateCollectionRequest) returns (common.Status) {}
   rpc DropCollection(DropCollectionRequest) returns (common.Status) {}
@@ -319,6 +340,7 @@ service MilvusService {
   rpc GetDdChannel(common.Empty) returns (StringResponse) {}
 
   rpc GetPersistentSegmentInfo(PersistentSegmentInfoRequest) returns (PersistentSegmentInfoResponse) {}
+  rpc GetQuerySegmentInfo(QuerySegmentInfoRequest) returns (QuerySegmentInfoResponse) {}
 
 }
 

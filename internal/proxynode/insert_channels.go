@@ -83,7 +83,6 @@ type InsertChannelsMap struct {
 func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []string) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	factory := msgstream.ProtoUDFactory{}
 
 	_, ok := m.collectionID2InsertChannels[collID]
 	if ok {
@@ -101,9 +100,10 @@ func (m *InsertChannelsMap) createInsertMsgStream(collID UniqueID, channels []st
 	}
 	m.insertChannels = append(m.insertChannels, channels)
 	m.collectionID2InsertChannels[collID] = len(m.insertChannels) - 1
-	stream := pulsarms.NewPulsarMsgStream(context.Background(), Params.MsgStreamInsertBufSize, 1024, factory.NewUnmarshalDispatcher())
-	stream.SetPulsarClient(Params.PulsarAddress)
-	stream.CreatePulsarProducers(channels)
+
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamInsertBufSize, 1024)
+	stream, _ := factory.NewMsgStream(context.Background())
+	stream.AsProducer(channels)
 	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, m.nodeInstance.segAssigner, true)
 	}

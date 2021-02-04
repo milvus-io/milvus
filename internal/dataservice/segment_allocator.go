@@ -71,7 +71,7 @@ type (
 	}
 )
 
-func newSegmentAllocator(meta *meta, allocator allocator) *segmentAllocatorImpl {
+func newSegmentAllocator(meta *meta, allocator allocator) (*segmentAllocatorImpl, error) {
 	segmentAllocator := &segmentAllocatorImpl{
 		mt:                     meta,
 		segments:               make(map[UniqueID]*segmentStatus),
@@ -80,7 +80,7 @@ func newSegmentAllocator(meta *meta, allocator allocator) *segmentAllocatorImpl 
 		segmentThresholdFactor: Params.SegmentSizeFactor,
 		allocator:              allocator,
 	}
-	return segmentAllocator
+	return segmentAllocator, nil
 }
 
 func (allocator *segmentAllocatorImpl) OpenSegment(segmentInfo *datapb.SegmentInfo) error {
