@@ -48,4 +48,5 @@ type QueryServiceInterface interface {
 	ReleasePartitions(req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
 	CreateQueryChannel() (*querypb.CreateQueryChannelResponse, error)
 	GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error)
+	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }

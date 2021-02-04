@@ -35,6 +35,7 @@ type QueryNodeInterface interface {
 	WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error)
 	ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
 
 type QueryService struct {
@@ -459,6 +460,28 @@ func (qs *QueryService) GetPartitionStates(req *querypb.PartitionStatesRequest) 
 			ErrorCode: commonpb.ErrorCode_SUCCESS,
 		},
 		PartitionDescriptions: states,
+	}, nil
+}
+
+func (qs *QueryService) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	segmentInfos := make([]*querypb.SegmentInfo, 0)
+	for _, node := range qs.queryNodes {
+		segmentInfo, err := node.client.GetSegmentInfo(req)
+		if err != nil {
+			return &querypb.SegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    err.Error(),
+				},
+			}, err
+		}
+		segmentInfos = append(segmentInfos, segmentInfo.Infos...)
+	}
+	return &querypb.SegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Infos: segmentInfos,
 	}, nil
 }
 

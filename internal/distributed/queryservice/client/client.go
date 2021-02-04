@@ -122,3 +122,7 @@ func (c *Client) CreateQueryChannel() (*querypb.CreateQueryChannelResponse, erro
 func (c *Client) GetPartitionStates(req *querypb.PartitionStatesRequest) (*querypb.PartitionStatesResponse, error) {
 	return c.grpcClient.GetPartitionStates(context.TODO(), req)
 }
+
+func (c *Client) GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return c.grpcClient.GetSegmentInfo(context.TODO(), req)
+}

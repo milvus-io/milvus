@@ -38,6 +38,7 @@ type Node interface {
 	WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.Status, error)
 	ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error)
+	GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error)
 }
 
 type QueryService = typeutil.QueryServiceInterface
@@ -496,5 +497,31 @@ func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*comm
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}, nil
+}
+
+func (node *QueryNode) GetSegmentInfo(in *queryPb.SegmentInfoRequest) (*queryPb.SegmentInfoResponse, error) {
+	infos := make([]*queryPb.SegmentInfo, 0)
+	for _, id := range in.SegmentIDs {
+		segment, err := node.replica.getSegmentByID(id)
+		if err != nil {
+			continue
+		}
+		info := &queryPb.SegmentInfo{
+			SegmentID:    segment.ID(),
+			CollectionID: segment.collectionID,
+			PartitionID:  segment.partitionID,
+			MemSize:      segment.getMemSize(),
+			NumRows:      segment.getRowCount(),
+			IndexName:    segment.getIndexName(),
+			IndexID:      segment.getIndexID(),
+		}
+		infos = append(infos, info)
+	}
+	return &queryPb.SegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Infos: infos,
 	}, nil
 }

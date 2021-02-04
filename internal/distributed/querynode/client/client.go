@@ -96,3 +96,7 @@ func (c *Client) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status,
 func (c *Client) ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	return c.grpcClient.ReleaseSegments(context.TODO(), in)
 }
+
+func (c *Client) GetSegmentInfo(in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return c.grpcClient.GetSegmentInfo(context.TODO(), in)
+}

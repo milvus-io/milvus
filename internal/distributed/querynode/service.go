@@ -156,3 +156,7 @@ func (s *Server) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegment
 	// ignore ctx
 	return s.node.ReleaseSegments(in)
 }
+
+func (s *Server) GetSegmentInfo(ctx context.Context, in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
+	return s.node.GetSegmentInfo(in)
+}

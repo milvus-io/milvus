@@ -47,8 +47,10 @@ type Segment struct {
 	typeMu      sync.Mutex // guards builtIndex
 	segmentType C.SegmentType
 
-	paramMutex sync.RWMutex // guards indexParam
+	paramMutex sync.RWMutex // guards index
 	indexParam map[int64]indexParam
+	indexName  string
+	indexID    UniqueID
 }
 
 //-------------------------------------------------------------------------------------- common interfaces
@@ -66,6 +68,30 @@ func (s *Segment) getRecentlyModified() bool {
 	s.rmMutex.Lock()
 	defer s.rmMutex.Unlock()
 	return s.recentlyModified
+}
+
+func (s *Segment) setIndexName(name string) {
+	s.rmMutex.Lock()
+	defer s.rmMutex.Unlock()
+	s.indexName = name
+}
+
+func (s *Segment) getIndexName() string {
+	s.rmMutex.Lock()
+	defer s.rmMutex.Unlock()
+	return s.indexName
+}
+
+func (s *Segment) setIndexID(id UniqueID) {
+	s.rmMutex.Lock()
+	defer s.rmMutex.Unlock()
+	s.indexID = id
+}
+
+func (s *Segment) getIndexID() UniqueID {
+	s.rmMutex.Lock()
+	defer s.rmMutex.Unlock()
+	return s.indexID
 }
 
 func (s *Segment) setType(segType segmentType) {

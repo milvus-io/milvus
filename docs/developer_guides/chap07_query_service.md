@@ -26,6 +26,7 @@ type QueryService interface {
   ReleasePartitions(req ReleasePartitionRequest) error
   
   CreateQueryChannel() (CreateQueryChannelResponse, error)
+  GetSegmentInfo(req SegmentInfoRequest) (SegmentInfoResponse, error)
 }
 ```
 
@@ -166,7 +167,28 @@ type CreateQueryChannelResponse struct {
 }
 ```
 
+* *GetSegmentInfo* *
 
+```go
+type SegmentInfo struct {
+  segmentID UniqueID
+  collectionID UniqueID
+  partitionID UniqueID
+  mem_size int64
+  num_rows int64
+  index_name string
+  indexID UniqueID
+}
+
+type SegmentInfoRequest struct {
+  MsgBase
+  SegmentIDs []UniqueID
+}
+
+type SegmentInfoResponse struct {
+  infos []SegmentInfo
+}
+```
 
 #### 8.2 Query Channel
 
