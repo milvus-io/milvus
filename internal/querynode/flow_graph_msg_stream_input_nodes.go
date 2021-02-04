@@ -9,18 +9,13 @@ import (
 )
 
 func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph.InputNode {
-	factory := msgstream.ProtoUDFactory{}
-	receiveBufSize := Params.InsertReceiveBufSize
-	pulsarBufSize := Params.InsertPulsarBufSize
-
-	msgStreamURL := Params.PulsarAddress
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.InsertReceiveBufSize, Params.InsertPulsarBufSize)
 
 	consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
-	insertStream.SetPulsarClient(msgStreamURL)
-	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
+	insertStream, _ := factory.NewTtMsgStream(ctx)
+	insertStream.AsConsumer(consumeChannels, consumeSubName)
 
 	var stream msgstream.MsgStream = insertStream
 	dsService.dmStream = stream
@@ -33,18 +28,13 @@ func (dsService *dataSyncService) newDmInputNode(ctx context.Context) *flowgraph
 }
 
 func (dsService *dataSyncService) newDDInputNode(ctx context.Context) *flowgraph.InputNode {
-	factory := msgstream.ProtoUDFactory{}
-	receiveBufSize := Params.DDReceiveBufSize
-	pulsarBufSize := Params.DDPulsarBufSize
-
-	msgStreamURL := Params.PulsarAddress
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.DDReceiveBufSize, Params.DDPulsarBufSize)
 
 	consumeChannels := Params.DDChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	ddStream := pulsarms.NewPulsarTtMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
-	ddStream.SetPulsarClient(msgStreamURL)
-	ddStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
+	ddStream, _ := factory.NewTtMsgStream(ctx)
+	ddStream.AsConsumer(consumeChannels, consumeSubName)
 
 	var stream msgstream.MsgStream = ddStream
 	dsService.ddStream = stream

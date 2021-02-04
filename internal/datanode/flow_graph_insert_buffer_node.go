@@ -664,26 +664,23 @@ func newInsertBufferNode(ctx context.Context, flushMeta *metaTable,
 	}
 	minioPrefix := Params.InsertBinlogRootPath
 
-	factory := msgstream.ProtoUDFactory{}
+	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
 
 	//input stream, data node time tick
-	wTt := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	wTt.SetPulsarClient(Params.PulsarAddress)
-	wTt.CreatePulsarProducers([]string{Params.TimeTickChannelName})
+	wTt, _ := factory.NewMsgStream(ctx)
+	wTt.AsProducer([]string{Params.TimeTickChannelName})
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
 	// update statistics channel
-	segS := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	segS.SetPulsarClient(Params.PulsarAddress)
-	segS.CreatePulsarProducers([]string{Params.SegmentStatisticsChannelName})
+	segS, _ := factory.NewMsgStream(ctx)
+	segS.AsProducer([]string{Params.SegmentStatisticsChannelName})
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
 	// segment flush completed channel
-	cf := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
-	cf.SetPulsarClient(Params.PulsarAddress)
-	cf.CreatePulsarProducers([]string{Params.CompleteFlushChannelName})
+	cf, _ := factory.NewMsgStream(ctx)
+	cf.AsProducer([]string{Params.CompleteFlushChannelName})
 	var completeFlushStream msgstream.MsgStream = cf
 	completeFlushStream.Start()
 

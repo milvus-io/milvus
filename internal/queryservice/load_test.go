@@ -228,10 +228,10 @@ func TestLoadCollection(t *testing.T) {
 	//
 	//insertStream := pulsarms.NewPulsarMsgStream(context.Background(), receiveBufSize)
 	//insertStream.SetPulsarClient(pulsarAddress)
-	//insertStream.CreatePulsarProducers(insertChannels)
+	//insertStream.AsProducer(insertChannels)
 	//ddStream := pulsarms.NewPulsarMsgStream(context.Background(), receiveBufSize)
 	//ddStream.SetPulsarClient(pulsarAddress)
-	//ddStream.CreatePulsarProducers(ddChannels)
+	//ddStream.AsProducer(ddChannels)
 	//
 	//var insertMsgStream msgstream.MsgStream = insertStream
 	//insertMsgStream.Start()
@@ -246,7 +246,7 @@ func TestLoadCollection(t *testing.T) {
 	//consumeStream := pulsarms.NewPulsarTtMsgStream(context.Background(), receiveBufSize)
 	//consumeStream.SetPulsarClient(pulsarAddress)
 	//unmarshalDispatcher := util.NewUnmarshalDispatcher()
-	//consumeStream.CreatePulsarConsumers(insertChannels, "test", unmarshalDispatcher, pulsarBufSize)
+	//consumeStream.AsConsumer(insertChannels, "test", unmarshalDispatcher, pulsarBufSize)
 	//consumeStream.Start()
 	//
 	//for i := 0; i < 10; i++ {
