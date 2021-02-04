@@ -23,6 +23,7 @@ type MasterClient interface {
 	CreateIndex(in *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 	DescribeIndex(in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 	ShowSegments(in *milvuspb.ShowSegmentRequest) (*milvuspb.ShowSegmentResponse, error)
+	DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 }
 
 type IndexServiceClient interface {

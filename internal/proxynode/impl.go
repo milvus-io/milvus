@@ -442,8 +442,10 @@ func (node *NodeImpl) GetIndexState(request *milvuspb.IndexStateRequest) (*milvu
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	dipt := &GetIndexStateTask{
-		Condition:         NewTaskCondition(ctx),
-		IndexStateRequest: request,
+		Condition:             NewTaskCondition(ctx),
+		IndexStateRequest:     request,
+		indexServiceClient:    node.indexServiceClient,
+		masterClientInterface: node.masterClient,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dipt)
