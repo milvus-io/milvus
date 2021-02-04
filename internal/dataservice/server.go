@@ -141,9 +141,9 @@ func (s *Server) Start() error {
 	if err = s.loadMetaFromMaster(); err != nil {
 		return err
 	}
-	s.startServerLoop()
 	s.waitDataNodeRegister()
 	s.cluster.WatchInsertChannels(s.insertChannels)
+	s.startServerLoop()
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
