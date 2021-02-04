@@ -1,7 +1,6 @@
 package proxynode
 
 import (
-	"context"
 	"errors"
 	"log"
 	"math"
@@ -1519,7 +1518,6 @@ type LoadCollectionTask struct {
 	*milvuspb.LoadCollectionRequest
 	queryserviceClient QueryServiceClient
 	result             *commonpb.Status
-	ctx                context.Context
 }
 
 func (lct *LoadCollectionTask) OnEnqueue() error {
@@ -1592,7 +1590,6 @@ type ReleaseCollectionTask struct {
 	*milvuspb.ReleaseCollectionRequest
 	queryserviceClient QueryServiceClient
 	result             *commonpb.Status
-	ctx                context.Context
 }
 
 func (rct *ReleaseCollectionTask) OnEnqueue() error {
@@ -1665,7 +1662,6 @@ type LoadPartitionTask struct {
 	*milvuspb.LoadPartitonRequest
 	queryserviceClient QueryServiceClient
 	result             *commonpb.Status
-	ctx                context.Context
 }
 
 func (lpt *LoadPartitionTask) OnEnqueue() error {
@@ -1747,7 +1743,6 @@ type ReleasePartitionTask struct {
 	*milvuspb.ReleasePartitionRequest
 	queryserviceClient QueryServiceClient
 	result             *commonpb.Status
-	ctx                context.Context
 }
 
 func (rpt *ReleasePartitionTask) OnEnqueue() error {

@@ -94,7 +94,6 @@ type (
 		ddChannelName     string
 		segmentInfoStream msgstream.MsgStream
 		insertChannels    []string
-		ttBarrier         timesync.TimeTickBarrier
 	}
 )
 
@@ -178,23 +177,23 @@ func (s *Server) initSegmentInfoChannel() {
 	s.segmentInfoStream.Start()
 }
 func (s *Server) initMsgProducer() error {
-	var err error
 	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	if s.ttMsgStream, err = factory.NewMsgStream(s.ctx); err != nil {
-		return err
-	}
-	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
+	ttMsgStream, _ := factory.NewMsgStream(s.ctx)
+	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
+	s.ttMsgStream = ttMsgStream
 	s.ttMsgStream.Start()
-	if s.k2sMsgStream, err = factory.NewMsgStream(s.ctx); err != nil {
-		return err
-	}
-	s.k2sMsgStream.AsProducer(Params.K2SChannelNames)
-	s.k2sMsgStream.Start()
+	timeTickBarrier := timesync.NewHardTimeTickBarrier(s.ttMsgStream, s.cluster.GetNodeIDs())
 	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
+	k2sStream, _ := factory.NewMsgStream(s.ctx)
+	k2sStream.AsProducer(Params.K2SChannelNames)
+	s.k2sMsgStream = k2sStream
+	s.k2sMsgStream.Start()
 	k2sMsgWatcher := timesync.NewMsgTimeTickWatcher(s.k2sMsgStream)
-	if s.msgProducer, err = timesync.NewTimeSyncMsgProducer(s.ttBarrier, dataNodeTTWatcher, k2sMsgWatcher); err != nil {
+	producer, err := timesync.NewTimeSyncMsgProducer(timeTickBarrier, dataNodeTTWatcher, k2sMsgWatcher)
+	if err != nil {
 		return err
 	}
+	s.msgProducer = producer
 	s.msgProducer.Start(s.ctx)
 	return nil
 }
@@ -298,11 +297,10 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(3)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
 	go s.startDDChannel(s.serverLoopCtx)
-	go s.startTTBarrier(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -388,12 +386,6 @@ func (s *Server) startDDChannel(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (s *Server) startTTBarrier(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	s.ttBarrier = timesync.NewHardTimeTickBarrier(ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
-	s.ttBarrier.StartBackgroundLoop()
 }
 
 func (s *Server) waitDataNodeRegister() {

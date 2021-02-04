@@ -8,8 +8,6 @@ import (
 
 type queryNodeInfo struct {
 	client         QueryNodeInterface
-	insertChannels string
-	nodeID         uint64
 	segments       []UniqueID
 	dmChannelNames []string
 }
@@ -24,4 +22,22 @@ func (qn *queryNodeInfo) LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb
 
 func (qn *queryNodeInfo) GetSegmentInfo(in *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
 	return qn.client.GetSegmentInfo(in)
+}
+
+func (qn *queryNodeInfo) WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return qn.client.WatchDmChannels(in)
+}
+
+func (qn *queryNodeInfo) AddDmChannels(channels []string) {
+	qn.dmChannelNames = append(qn.dmChannelNames, channels...)
+}
+
+func newQueryNodeInfo(client QueryNodeInterface) *queryNodeInfo {
+	segments := make([]UniqueID, 0)
+	dmChannelNames := make([]string, 0)
+	return &queryNodeInfo{
+		client:         client,
+		segments:       segments,
+		dmChannelNames: dmChannelNames,
+	}
 }

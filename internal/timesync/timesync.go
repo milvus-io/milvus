@@ -18,7 +18,7 @@ type (
 
 	TimeTickBarrier interface {
 		GetTimeTick() (Timestamp, error)
-		StartBackgroundLoop()
+		StartBackgroundLoop(ctx context.Context)
 	}
 
 	softTimeTickBarrier struct {
@@ -38,7 +38,7 @@ type (
 	}
 )
 
-func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
+func NewSoftTimeTickBarrier(ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier {
 	if len(peerIds) <= 0 {
 		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!\n")
 		return nil
@@ -49,7 +49,6 @@ func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 	sttbarrier.ttStream = ttStream
 	sttbarrier.outTt = make(chan Timestamp, 1024)
 	sttbarrier.peer2LastTt = make(map[UniqueID]Timestamp)
-	sttbarrier.ctx = ctx
 	for _, id := range peerIds {
 		sttbarrier.peer2LastTt[id] = Timestamp(0)
 	}
@@ -80,11 +79,12 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	}
 }
 
-func (ttBarrier *softTimeTickBarrier) StartBackgroundLoop() {
+func (ttBarrier *softTimeTickBarrier) StartBackgroundLoop(ctx context.Context) {
+	ttBarrier.ctx = ctx
 	for {
 		select {
-		case <-ttBarrier.ctx.Done():
-			log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+		case <-ctx.Done():
+			log.Printf("[TtBarrierStart] %s\n", ctx.Err())
 			return
 		default:
 		}
@@ -137,13 +137,14 @@ func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	}
 }
 
-func (ttBarrier *hardTimeTickBarrier) StartBackgroundLoop() {
+func (ttBarrier *hardTimeTickBarrier) StartBackgroundLoop(ctx context.Context) {
+	ttBarrier.ctx = ctx
 	// Last timestamp synchronized
 	state := Timestamp(0)
 	for {
 		select {
-		case <-ttBarrier.ctx.Done():
-			log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+		case <-ctx.Done():
+			log.Printf("[TtBarrierStart] %s\n", ctx.Err())
 			return
 		default:
 		}
@@ -187,7 +188,7 @@ func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {
 	return tempMin
 }
 
-func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
+func NewHardTimeTickBarrier(ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier {
 	if len(peerIds) <= 0 {
 		log.Printf("[newSoftTimeTickBarrier] Error: peerIds is empty!")
 		return nil
@@ -198,7 +199,6 @@ func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 	sttbarrier.outTt = make(chan Timestamp, 1024)
 
 	sttbarrier.peer2Tt = make(map[UniqueID]Timestamp)
-	sttbarrier.ctx = ctx
 	for _, id := range peerIds {
 		sttbarrier.peer2Tt[id] = Timestamp(0)
 	}

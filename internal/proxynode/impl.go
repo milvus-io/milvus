@@ -132,11 +132,63 @@ func (node *NodeImpl) HasCollection(request *milvuspb.HasCollectionRequest) (*mi
 }
 
 func (node *NodeImpl) LoadCollection(request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	panic("implement me")
+	log.Println("load collection: ", request)
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+
+	lct := &LoadCollectionTask{
+		Condition:             NewTaskCondition(ctx),
+		LoadCollectionRequest: request,
+		queryserviceClient:    node.queryServiceClient,
+	}
+
+	err := node.sched.DdQueue.Enqueue(lct)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	err = lct.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return lct.result, nil
 }
 
 func (node *NodeImpl) ReleaseCollection(request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	panic("implement me")
+	log.Println("release collection: ", request)
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+
+	rct := &ReleaseCollectionTask{
+		Condition:                NewTaskCondition(ctx),
+		ReleaseCollectionRequest: request,
+		queryserviceClient:       node.queryServiceClient,
+	}
+
+	err := node.sched.DdQueue.Enqueue(rct)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	err = rct.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return rct.result, nil
 }
 
 func (node *NodeImpl) DescribeCollection(request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -332,11 +384,63 @@ func (node *NodeImpl) HasPartition(request *milvuspb.HasPartitionRequest) (*milv
 }
 
 func (node *NodeImpl) LoadPartitions(request *milvuspb.LoadPartitonRequest) (*commonpb.Status, error) {
-	panic("implement me")
+	log.Println("load partitions: ", request)
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+
+	lpt := &LoadPartitionTask{
+		Condition:           NewTaskCondition(ctx),
+		LoadPartitonRequest: request,
+		queryserviceClient:  node.queryServiceClient,
+	}
+
+	err := node.sched.DdQueue.Enqueue(lpt)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	err = lpt.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return lpt.result, nil
 }
 
 func (node *NodeImpl) ReleasePartitions(request *milvuspb.ReleasePartitionRequest) (*commonpb.Status, error) {
-	panic("implement me")
+	log.Println("load partitions: ", request)
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+
+	rpt := &ReleasePartitionTask{
+		Condition:               NewTaskCondition(ctx),
+		ReleasePartitionRequest: request,
+		queryserviceClient:      node.queryServiceClient,
+	}
+
+	err := node.sched.DdQueue.Enqueue(rpt)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	err = rpt.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return rpt.result, nil
 }
 
 func (node *NodeImpl) GetPartitionStatistics(request *milvuspb.PartitionStatsRequest) (*milvuspb.PartitionStatsResponse, error) {
