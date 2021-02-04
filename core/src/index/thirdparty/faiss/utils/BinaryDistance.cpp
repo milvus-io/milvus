@@ -419,46 +419,56 @@ void binary_distance_knn_hc (
     size_t dim = ncodes * 8;
     switch (metric_type) {
     case METRIC_Jaccard: {
-        switch (ncodes) {
-#define binary_distance_knn_hc_jaccard(ncodes) \
-        case ncodes: \
-            binary_distance_knn_hc<C, faiss::JaccardComputer ## ncodes> \
-                (ncodes, ha, a, b, nb, bitset); \
-            break;
-        binary_distance_knn_hc_jaccard(8);
-        binary_distance_knn_hc_jaccard(16);
-        binary_distance_knn_hc_jaccard(32);
-        binary_distance_knn_hc_jaccard(64);
-        binary_distance_knn_hc_jaccard(128);
-        binary_distance_knn_hc_jaccard(256);
-        binary_distance_knn_hc_jaccard(512);
-#undef binary_distence_knn_hc_jaccard
-        default:
-            binary_distance_knn_hc<C, faiss::JaccardComputerDefault>
+        if (support_avx2() && ncodes > 64) {
+            binary_distance_knn_hc<C, faiss::JaccardComputerAVX2>
                     (ncodes, ha, a, b, nb, bitset);
-            break;
+        } else {
+            switch (ncodes) {
+#define binary_distance_knn_hc_jaccard(ncodes) \
+            case ncodes: \
+                binary_distance_knn_hc<C, faiss::JaccardComputer ## ncodes> \
+                    (ncodes, ha, a, b, nb, bitset); \
+                break;
+            binary_distance_knn_hc_jaccard(8);
+            binary_distance_knn_hc_jaccard(16);
+            binary_distance_knn_hc_jaccard(32);
+            binary_distance_knn_hc_jaccard(64);
+            binary_distance_knn_hc_jaccard(128);
+            binary_distance_knn_hc_jaccard(256);
+            binary_distance_knn_hc_jaccard(512);
+#undef binary_distence_knn_hc_jaccard
+            default:
+                binary_distance_knn_hc<C, faiss::JaccardComputerDefault>
+                        (ncodes, ha, a, b, nb, bitset);
+                break;
+            }
         }
         break;
     }
 
     case METRIC_Hamming: {
-        switch (ncodes) {
-#define binary_distance_knn_hc_hamming(ncodes) \
-        case ncodes: \
-            binary_distance_knn_hc<C, faiss::HammingComputer ## ncodes> \
-                (ncodes, ha, a, b, nb, bitset); \
-            break;
-        binary_distance_knn_hc_hamming(4);
-        binary_distance_knn_hc_hamming(8);
-        binary_distance_knn_hc_hamming(16);
-        binary_distance_knn_hc_hamming(20);
-        binary_distance_knn_hc_hamming(32);
-        binary_distance_knn_hc_hamming(64);
-#undef binary_distence_knn_hc_jaccard
-        default:
-            binary_distance_knn_hc<C, faiss::HammingComputerDefault>
+        if (support_avx2() && ncodes > 64) {
+            binary_distance_knn_hc<C, faiss::HammingComputerAVX2>
                     (ncodes, ha, a, b, nb, bitset);
-            break;
+        } else {
+            switch (ncodes) {
+#define binary_distance_knn_hc_hamming(ncodes) \
+            case ncodes: \
+                binary_distance_knn_hc<C, faiss::HammingComputer ## ncodes> \
+                    (ncodes, ha, a, b, nb, bitset); \
+                break;
+            binary_distance_knn_hc_hamming(4);
+            binary_distance_knn_hc_hamming(8);
+            binary_distance_knn_hc_hamming(16);
+            binary_distance_knn_hc_hamming(20);
+            binary_distance_knn_hc_hamming(32);
+            binary_distance_knn_hc_hamming(64);
+#undef binary_distence_knn_hc_jaccard
+            default:
+                binary_distance_knn_hc<C, faiss::HammingComputerDefault>
+                        (ncodes, ha, a, b, nb, bitset);
+                break;
+            }
         }
         break;
     }
