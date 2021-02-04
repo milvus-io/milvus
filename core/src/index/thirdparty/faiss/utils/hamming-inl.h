@@ -6,9 +6,11 @@
  */
 
 #include <faiss/utils/BinaryDistance.h>
+#include <faiss/utils/distances_avx.h>
 
 namespace faiss {
 
+extern const uint8_t lookup8bit[256];
 
 inline BitstringWriter::BitstringWriter(uint8_t *code, int code_size):
     code (code), code_size (code_size), i(0)
@@ -233,6 +235,27 @@ struct HammingComputerDefault {
 
     int compute (const uint8_t *b8) const  {
         return xor_popcnt(a, b8, n);
+    }
+
+};
+
+struct HammingComputerAVX2 {
+    const uint8_t *a;
+    int n;
+
+    HammingComputerAVX2 () {}
+
+    HammingComputerAVX2 (const uint8_t *a8, int code_size) {
+        set (a8, code_size);
+    }
+
+    void set (const uint8_t *a8, int code_size) {
+        a =  a8;
+        n = code_size;
+    }
+
+    int compute (const uint8_t *b8) const  {
+        return xor_popcnt_AVX2_lookup(a, b8, n);
     }
 
 };

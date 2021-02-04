@@ -8,9 +8,10 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4678 Server crash on BinaryFlat if dimension is not a power of 2
 
 ## Feature
--   \#4676 Support configurable metric labels for Prometheus
 
 ## Improvement
+-   \#1970 Improve the performance of BinaryFlat by AVX2
+-   \#4676 Support configurable metric labels cluster and instance for Prometheus
 
 ## Task
 
