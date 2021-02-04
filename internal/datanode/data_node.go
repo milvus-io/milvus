@@ -208,8 +208,8 @@ func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*common
 
 	switch {
 
-	case node.State != internalpb2.StateCode_HEALTHY:
-		status.Reason = fmt.Sprintf("DataNode %d not healthy!", node.NodeID)
+	case node.State != internalpb2.StateCode_INITIALIZING:
+		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
 		return status, errors.New(status.GetReason())
 
 	case len(Params.InsertChannelNames) != 0:
