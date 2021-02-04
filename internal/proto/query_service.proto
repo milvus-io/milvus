@@ -124,7 +124,7 @@ message LoadSegmentRequest {
   int64 partitionID = 4;
   repeated int64 segmentIDs = 5;
   repeated int64 fieldIDs = 6;
-  data.SegmentStateInfo last_segment_state = 7;
+  repeated data.SegmentStateInfo segment_states = 7;
 }
 
 message ReleaseSegmentRequest {

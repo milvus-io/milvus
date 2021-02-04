@@ -445,18 +445,20 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	}
 
 	// segments are ordered before LoadSegments calling
-	if in.LastSegmentState.State == commonpb.SegmentState_SegmentGrowing {
-		segmentNum := len(segmentIDs)
-		position := in.LastSegmentState.StartPosition
-		err = node.loadService.seekSegment(position)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
+	for i, state := range in.SegmentStates {
+		if state.State == commonpb.SegmentState_SegmentGrowing {
+			position := state.StartPosition
+			err = node.loadService.seekSegment(position)
+			if err != nil {
+				status := &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+					Reason:    err.Error(),
+				}
+				return status, err
 			}
-			return status, err
+			segmentIDs = segmentIDs[:i]
+			break
 		}
-		segmentIDs = segmentIDs[:segmentNum-1]
 	}
 
 	err = node.loadService.loadSegment(collectionID, partitionID, segmentIDs, fieldIDs)
