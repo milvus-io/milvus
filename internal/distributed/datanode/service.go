@@ -76,7 +76,6 @@ func (s *Server) Start() error {
 
 func (s *Server) Stop() error {
 	err := s.core.Stop()
-	s.cancel()
 	s.grpcServer.GracefulStop()
 	return err
 }
