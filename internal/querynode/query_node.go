@@ -446,8 +446,8 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	// segments are ordered before LoadSegments calling
 	if in.LastSegmentState.State == commonpb.SegmentState_SegmentGrowing {
 		segmentNum := len(segmentIDs)
-		positions := in.LastSegmentState.StartPositions
-		err = node.loadService.seekSegment(positions)
+		position := in.LastSegmentState.StartPosition
+		err = node.loadService.seekSegment(position)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

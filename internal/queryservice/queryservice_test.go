@@ -115,10 +115,10 @@ func newDataMock() *dataMock {
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_SUCCESS,
 			},
-			SegmentID:      segmentID,
-			State:          state,
-			CreateTime:     time,
-			StartPositions: position,
+			SegmentID:  segmentID,
+			State:      state,
+			CreateTime: time,
+			// StartPositions: position,
 		}
 	}
 	segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)

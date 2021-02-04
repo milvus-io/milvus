@@ -179,8 +179,8 @@ message SegmentStatisticsUpdates {
   int64 NumRows = 3;
   uint64 create_time = 4;
   uint64 end_time = 5;
-  repeated internal.MsgPosition start_positions = 6;
-  repeated internal.MsgPosition end_positions = 7;
+  internal.MsgPosition start_position = 6;
+  internal.MsgPosition end_position = 7;
   bool isNewSegment = 8;
 }
 

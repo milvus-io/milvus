@@ -112,7 +112,7 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 		partitionID := msg.GetPartitionID()
 
 		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, iMsg.startPositions)
+			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
 			if err != nil {
 				log.Println("Error: add segment error", err)
 			}
@@ -134,13 +134,22 @@ func (ibNode *insertBufferNode) Operate(in []*Msg) []*Msg {
 			uniqueSeg[currentSegID] = true
 		}
 	}
+
 	segIDs := make([]UniqueID, 0, len(uniqueSeg))
 	for id := range uniqueSeg {
 		segIDs = append(segIDs, id)
 	}
-	err := ibNode.updateSegStatistics(segIDs)
-	if err != nil {
-		log.Println("Error: update segment statistics error, ", err)
+
+	if len(segIDs) > 0 {
+		switch {
+		case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
+			log.Println("Warning: insert Msg StartPosition empty")
+		default:
+			err := ibNode.updateSegStatistics(segIDs, iMsg.startPositions[0])
+			if err != nil {
+				log.Println("Error: update segment statistics error, ", err)
+			}
+		}
 	}
 
 	// iMsg is insertMsg
@@ -579,7 +588,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	return ibNode.timeTickStream.Produce(&msgPack)
 }
 
-func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
+func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID, currentPosition *internalpb2.MsgPosition) error {
 	log.Println("Updating segments statistics...")
 	statsUpdates := make([]*internalpb2.SegmentStatisticsUpdates, 0, len(segIDs))
 	for _, segID := range segIDs {
@@ -588,6 +597,8 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 			log.Println("Error get segment", segID, "statistics updates", err)
 			continue
 		}
+		updates.StartPosition.Timestamp = currentPosition.GetTimestamp()
+		updates.StartPosition.MsgID = currentPosition.GetMsgID()
 		statsUpdates = append(statsUpdates, updates)
 	}
 
@@ -603,7 +614,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 
 	var msg msgstream.TsMsg = &msgstream.SegmentStatisticsMsg{
 		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
+			HashValues: []uint32{0}, // GOOSE TODO
 		},
 		SegmentStatistics: segStats,
 	}

@@ -383,7 +383,7 @@ func (s *loadService) releaseSegment(segmentID UniqueID) error {
 	return err
 }
 
-func (s *loadService) seekSegment(positions []*internalpb2.MsgPosition) error {
+func (s *loadService) seekSegment(position *internalpb2.MsgPosition) error {
 	// TODO: open seek
 	//for _, position := range positions {
 	//	err := s.dmStream.Seek(position)

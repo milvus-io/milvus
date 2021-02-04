@@ -648,8 +648,8 @@ func (s *Server) GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.Seg
 			state.CreateTime = segmentInfo.OpenTime
 			state.SealedTime = segmentInfo.SealedTime
 			state.FlushedTime = segmentInfo.FlushedTime
-			state.StartPositions = segmentInfo.StartPosition
-			state.EndPositions = segmentInfo.EndPosition
+			state.StartPosition = segmentInfo.StartPosition
+			state.EndPosition = segmentInfo.EndPosition
 		}
 		resp.States = append(resp.States, state)
 	}
