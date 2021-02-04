@@ -1,12 +1,8 @@
 package flowgraph
 
 import (
-	"fmt"
 	"log"
 
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/opentracing/opentracing-go"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
@@ -34,28 +30,6 @@ func (inNode *InputNode) Operate([]*Msg) []*Msg {
 
 	msgPack := (*inNode.inStream).Consume()
 
-	var childs []opentracing.Span
-	tracer := opentracing.GlobalTracer()
-	if tracer != nil && msgPack != nil {
-		for _, msg := range msgPack.Msgs {
-			if msg.Type() == commonpb.MsgType_kInsert {
-				var child opentracing.Span
-				ctx := msg.GetMsgContext()
-				if parent := opentracing.SpanFromContext(ctx); parent != nil {
-					child = tracer.StartSpan(fmt.Sprintf("through msg input node, start time = %d", msg.BeginTs()),
-						opentracing.FollowsFrom(parent.Context()))
-				} else {
-					child = tracer.StartSpan(fmt.Sprintf("through msg input node, start time = %d", msg.BeginTs()))
-				}
-				child.SetTag("hash keys", msg.HashKeys())
-				child.SetTag("start time", msg.BeginTs())
-				child.SetTag("end time", msg.EndTs())
-				msg.SetMsgContext(opentracing.ContextWithSpan(ctx, child))
-				childs = append(childs, child)
-			}
-		}
-	}
-
 	// TODO: add status
 	if msgPack == nil {
 		log.Println("null msg pack")
@@ -67,10 +41,6 @@ func (inNode *InputNode) Operate([]*Msg) []*Msg {
 		timestampMin:   msgPack.BeginTs,
 		timestampMax:   msgPack.EndTs,
 		startPositions: msgPack.StartPositions,
-	}
-
-	for _, child := range childs {
-		child.Finish()
 	}
 
 	return []*Msg{&msgStreamMsg}

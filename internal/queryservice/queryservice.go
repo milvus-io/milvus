@@ -24,7 +24,7 @@ type MasterServiceInterface interface {
 
 type DataServiceInterface interface {
 	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
-	GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error)
+	GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error)
 }
 
 type QueryNodeInterface interface {
@@ -188,10 +188,17 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 		DbID:         req.DbID,
 		CollectionID: req.CollectionID,
 	}
-	dmChannels, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
+	resp, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
+	if resp == nil {
+		err = errors.New("get insert channels resp is nil")
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		err = errors.New(resp.Status.Reason)
+	}
 	if err != nil {
 		return fn(err), err
 	}
+	dmChannels := resp.Values
 
 	// get partitionIDs
 	showPartitionRequest := &milvuspb.ShowPartitionRequest{
@@ -428,10 +435,16 @@ func (qs *QueryService) LoadPartitions(req *querypb.LoadPartitionRequest) (*comm
 			CollectionID: collectionID,
 		}
 
-		dmChannels, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
-		if err != nil {
+		resp, err := qs.dataServiceClient.GetInsertChannels(&channelRequest)
+		if resp == nil {
+			err = errors.New("get insert channels resp is nil")
 			return fn(err), err
 		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			err = errors.New(resp.Status.Reason)
+			return fn(err), err
+		}
+		dmChannels := resp.Values
 		for _, partitionID := range partitionIDs {
 			loadSegmentRequest := &querypb.LoadSegmentRequest{
 				CollectionID: collectionID,

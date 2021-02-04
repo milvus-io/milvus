@@ -12,10 +12,6 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	oplog "github.com/opentracing/opentracing-go/log"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/util"
@@ -247,48 +243,11 @@ func (ms *PulsarMsgStream) Produce(msgPack *MsgPack) error {
 
 			msg := &pulsar.ProducerMessage{Payload: m}
 
-			var child opentracing.Span
-			if v.Msgs[i].Type() == commonpb.MsgType_kInsert ||
-				v.Msgs[i].Type() == commonpb.MsgType_kSearch ||
-				v.Msgs[i].Type() == commonpb.MsgType_kSearchResult {
-				tracer := opentracing.GlobalTracer()
-				ctx := v.Msgs[i].GetMsgContext()
-				if ctx == nil {
-					ctx = context.Background()
-				}
-
-				if parent := opentracing.SpanFromContext(ctx); parent != nil {
-					child = tracer.StartSpan("start send pulsar msg",
-						opentracing.FollowsFrom(parent.Context()))
-				} else {
-					child = tracer.StartSpan("start send pulsar msg")
-				}
-				child.SetTag("hash keys", v.Msgs[i].HashKeys())
-				child.SetTag("start time", v.Msgs[i].BeginTs())
-				child.SetTag("end time", v.Msgs[i].EndTs())
-				child.SetTag("msg type", v.Msgs[i].Type())
-				msg.Properties = make(map[string]string)
-				err = tracer.Inject(child.Context(), opentracing.TextMap, &propertiesReaderWriter{msg.Properties})
-				if err != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-					return err
-				}
-				child.LogFields(oplog.String("inject success", "inject success"))
-			}
-
 			if _, err := ms.producers[k].Send(
 				context.Background(),
 				msg,
 			); err != nil {
-				if child != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-				}
 				return err
-			}
-			if child != nil {
-				child.Finish()
 			}
 		}
 	}
@@ -309,48 +268,13 @@ func (ms *PulsarMsgStream) Broadcast(msgPack *MsgPack) error {
 		}
 
 		msg := &pulsar.ProducerMessage{Payload: m}
-		var child opentracing.Span
-		if v.Type() == commonpb.MsgType_kInsert ||
-			v.Type() == commonpb.MsgType_kSearch ||
-			v.Type() == commonpb.MsgType_kSearchResult {
-			tracer := opentracing.GlobalTracer()
-			ctx := v.GetMsgContext()
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			if parent := opentracing.SpanFromContext(ctx); parent != nil {
-				child = tracer.StartSpan("start send pulsar msg",
-					opentracing.FollowsFrom(parent.Context()))
-			} else {
-				child = tracer.StartSpan("start send pulsar msg, start time: %d")
-			}
-			child.SetTag("hash keys", v.HashKeys())
-			child.SetTag("start time", v.BeginTs())
-			child.SetTag("end time", v.EndTs())
-			child.SetTag("msg type", v.Type())
-			msg.Properties = make(map[string]string)
-			err = tracer.Inject(child.Context(), opentracing.TextMap, &propertiesReaderWriter{msg.Properties})
-			if err != nil {
-				child.LogFields(oplog.Error(err))
-				child.Finish()
-				return err
-			}
-			child.LogFields(oplog.String("inject success", "inject success"))
-		}
 		for i := 0; i < producerLen; i++ {
 			if _, err := ms.producers[i].Send(
 				context.Background(),
 				msg,
 			); err != nil {
-				if child != nil {
-					child.LogFields(oplog.Error(err))
-					child.Finish()
-				}
 				return err
 			}
-		}
-		if child != nil {
-			child.Finish()
 		}
 	}
 	return nil
@@ -411,23 +335,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 					continue
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
-				if tsMsg.Type() == commonpb.MsgType_kSearch ||
-					tsMsg.Type() == commonpb.MsgType_kSearchResult {
-					tracer := opentracing.GlobalTracer()
-					spanContext, err := tracer.Extract(opentracing.HTTPHeaders, &propertiesReaderWriter{pulsarMsg.Properties()})
-					if err != nil {
-						log.Println("extract message err")
-						log.Println(err.Error())
-					}
-					span := opentracing.StartSpan("pulsar msg received",
-						ext.RPCServerOption(spanContext))
-					span.SetTag("msg type", tsMsg.Type())
-					span.SetTag("hash keys", tsMsg.HashKeys())
-					span.SetTag("start time", tsMsg.BeginTs())
-					span.SetTag("end time", tsMsg.EndTs())
-					tsMsg.SetMsgContext(opentracing.ContextWithSpan(context.Background(), span))
-					span.Finish()
-				}
 				if err != nil {
 					log.Printf("Failed to unmarshal tsMsg, error = %v", err)
 					continue
@@ -521,8 +428,6 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 	ms.unsolvedBuf = make(map[Consumer][]TsMsg)
 	isChannelReady := make(map[Consumer]bool)
 	eofMsgTimeStamp := make(map[Consumer]Timestamp)
-	spans := make(map[Timestamp]opentracing.Span)
-	ctxs := make(map[Timestamp]context.Context)
 	for _, consumer := range ms.consumers {
 		ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
 	}
@@ -558,22 +463,8 @@ func (ms *PulsarTtMsgStream) bufMsgPackToChannel() {
 						timeTickMsg = v
 						continue
 					}
-					var ctx context.Context
-					var span opentracing.Span
-					if v.Type() == commonpb.MsgType_kInsert {
-						if _, ok := spans[v.BeginTs()]; !ok {
-							span, ctx = opentracing.StartSpanFromContext(v.GetMsgContext(), "after find time tick")
-							ctxs[v.BeginTs()] = ctx
-							spans[v.BeginTs()] = span
-						}
-					}
 					if v.EndTs() <= timeStamp {
 						timeTickBuf = append(timeTickBuf, v)
-						if v.Type() == commonpb.MsgType_kInsert {
-							v.SetMsgContext(ctxs[v.BeginTs()])
-							spans[v.BeginTs()].Finish()
-							delete(spans, v.BeginTs())
-						}
 					} else {
 						tempBuffer = append(tempBuffer, v)
 					}
@@ -642,23 +533,6 @@ func (ms *PulsarTtMsgStream) findTimeTick(consumer Consumer,
 				ChannelName: filepath.Base(pulsarMsg.Topic()),
 				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
 			})
-
-			if tsMsg.Type() == commonpb.MsgType_kInsert {
-				tracer := opentracing.GlobalTracer()
-				spanContext, err := tracer.Extract(opentracing.HTTPHeaders, &propertiesReaderWriter{pulsarMsg.Properties()})
-				if err != nil {
-					log.Println("extract message err")
-					log.Println(err.Error())
-				}
-				span := opentracing.StartSpan("pulsar msg received",
-					ext.RPCServerOption(spanContext))
-				span.SetTag("hash keys", tsMsg.HashKeys())
-				span.SetTag("start time", tsMsg.BeginTs())
-				span.SetTag("end time", tsMsg.EndTs())
-				span.SetTag("msg type", tsMsg.Type())
-				tsMsg.SetMsgContext(opentracing.ContextWithSpan(context.Background(), span))
-				span.Finish()
-			}
 
 			mu.Lock()
 			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)

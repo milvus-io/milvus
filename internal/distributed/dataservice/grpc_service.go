@@ -105,20 +105,7 @@ func (s *Service) GetInsertBinlogPaths(ctx context.Context, request *datapb.Inse
 }
 
 func (s *Service) GetInsertChannels(ctx context.Context, request *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
-	resp := &internalpb2.StringList{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channels, err := s.server.GetInsertChannels(request)
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	resp.Values = channels
-	return resp, nil
+	return s.server.GetInsertChannels(request)
 }
 
 func (s *Service) GetCollectionStatistics(ctx context.Context, request *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
@@ -134,53 +121,15 @@ func (s *Service) GetComponentStates(ctx context.Context, empty *commonpb.Empty)
 }
 
 func (s *Service) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.server.GetTimeTickChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	resp.Value = channel
-	return resp, nil
+	return s.server.GetTimeTickChannel()
 }
 
 func (s *Service) GetStatisticsChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.server.GetStatisticsChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	resp.Value = channel
-	return resp, nil
+	return s.server.GetStatisticsChannel()
 }
 
 func (s *Service) GetSegmentInfoChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	resp := &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_SUCCESS,
-		},
-	}
-	channel, err := s.server.GetSegmentInfoChannel()
-	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Value = channel
-	return resp, nil
+	return s.server.GetSegmentInfoChannel()
 }
 
 func (s *Service) GetCount(ctx context.Context, request *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {

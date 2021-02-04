@@ -34,13 +34,13 @@ import (
 //  masterpb2 -> masterpb (master_service)
 
 type ProxyServiceInterface interface {
-	GetTimeTickChannel() (string, error)
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error
+	GetTimeTickChannel() (*milvuspb.StringResponse, error)
+	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
 type DataServiceInterface interface {
 	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
-	GetSegmentInfoChannel() (string, error)
+	GetSegmentInfoChannel() (*milvuspb.StringResponse, error)
 }
 
 type IndexServiceInterface interface {
@@ -608,11 +608,11 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 	if err != nil {
 		return err
 	}
-	Params.ProxyTimeTickChannel = rsp
+	Params.ProxyTimeTickChannel = rsp.Value
 	log.Printf("proxy time tick channel name = %s", Params.ProxyTimeTickChannel)
 
 	c.InvalidateCollectionMetaCache = func(ts typeutil.Timestamp, dbName string, collectionName string) error {
-		err := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
+		status, _ := s.InvalidateCollectionMetaCache(&proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
 				MsgID:     0,
@@ -622,8 +622,11 @@ func (c *Core) SetProxyService(s ProxyServiceInterface) error {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
-		if err != nil {
-			return err
+		if status == nil {
+			return errors.New("invalidate collection metacache resp is nil")
+		}
+		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+			return errors.New(status.Reason)
 		}
 		return nil
 	}
@@ -635,7 +638,7 @@ func (c *Core) SetDataService(s DataServiceInterface) error {
 	if err != nil {
 		return err
 	}
-	Params.DataServiceSegmentChannel = rsp
+	Params.DataServiceSegmentChannel = rsp.Value
 	log.Printf("data service segment channel name = %s", Params.DataServiceSegmentChannel)
 
 	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {

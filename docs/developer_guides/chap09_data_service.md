@@ -23,8 +23,9 @@ type DataService interface {
   GetSegmentInfo(req SegmentInfoRequest) (SegmentInfoResponse, error)
 
   GetInsertBinlogPaths(req InsertBinlogPathRequest) (InsertBinlogPathsResponse, error)
-  
-  GetInsertChannels(req InsertChannelRequest) ([]string, error)
+
+  GetSegmentInfoChannel(req InsertChannelRequest) (StringResponse, error)
+  GetInsertChannels(req InsertChannelRequest) (StringList, error)
 
   GetCollectionStatistics(req CollectionStatsRequest) (CollectionStatsResponse, error)
   GetPartitionStatistics(req PartitionStatsRequest) (PartitionStatsResponse, error)
@@ -253,14 +254,36 @@ type InsertRequest struct {
 ```go
 type DataNode interface {
   Service
+
+  GetComponentStates() (ComponentStates, error)
+  GetTimeTickChannel() (StringResponse, error)
+  GetStatisticsChannel() (StringResponse, error)
   
-  WatchDmChannels(req WatchDmChannelRequest) error
+  WatchDmChannels(WatchDmChannelRequest) error
+  FlushSegments(FlushSegRequest) (Status, error)
   //WatchDdChannel(channelName string) error
   //SetTimeTickChannel(channelName string) error
   //SetStatisticsChannel(channelName string) error
   
-  FlushSegments(req FlushSegRequest) error
+  SetMasterServiceInterface(MasterServiceInterface) error
+  SetDataServiceInterface(DataServiceInterface) error
 }
+```
+
+```go
+type DataServiceInterface interface {
+  GetComponentStates() (ComponentStates, error)
+  RegisterNode(RegisterNodeRequest) (RegisterNodeResponse, error)
+}
+```
+```go
+type MasterServiceInterface interface {
+  GetComponentStates() (ComponentStates, error)
+  AllocID(IDRequest) (IDResponse, error)
+  ShowCollections(ShowCollectionRequest) (ShowCollectionResponse, error)
+  DescribeCollection(DescribeCollectionRequest) (DescribeCollectionResponse, error)
+}
+
 ```
 
 

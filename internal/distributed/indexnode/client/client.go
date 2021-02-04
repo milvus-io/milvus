@@ -2,8 +2,9 @@ package grpcindexnodeclient
 
 import (
 	"context"
-	"errors"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/retry"
 
@@ -47,28 +48,12 @@ func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
 }
 
-func (c *Client) GetTimeTickChannel() (string, error) {
-	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
-
-	if err != nil {
-		return "", err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return "", errors.New(resp.Status.Reason)
-	}
-	return resp.Value, nil
+func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
 }
 
-func (c *Client) GetStatisticsChannel() (string, error) {
-	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
-
-	if err != nil {
-		return "", err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return "", errors.New(resp.Status.Reason)
-	}
-	return resp.Value, nil
+func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
 }
 
 func (c *Client) BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error) {

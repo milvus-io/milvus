@@ -2,8 +2,9 @@ package dataservice
 
 import (
 	"context"
-	"errors"
 	"time"
+
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
 	"google.golang.org/grpc"
 
@@ -58,26 +59,12 @@ func (c *Client) GetComponentStates() (*internalpb2.ComponentStates, error) {
 	return c.grpcClient.GetComponentStates(context.Background(), &commonpb.Empty{})
 }
 
-func (c *Client) GetTimeTickChannel() (string, error) {
-	resp, err := c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
-	if err != nil {
-		return "", err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return "", errors.New(resp.Status.Reason)
-	}
-	return resp.Value, nil
+func (c *Client) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetTimeTickChannel(context.Background(), &commonpb.Empty{})
 }
 
-func (c *Client) GetStatisticsChannel() (string, error) {
-	resp, err := c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
-	if err != nil {
-		return "", err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return "", errors.New(resp.Status.Reason)
-	}
-	return resp.Value, nil
+func (c *Client) GetStatisticsChannel() (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetStatisticsChannel(context.Background(), &commonpb.Empty{})
 }
 
 func (c *Client) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
@@ -104,15 +91,8 @@ func (c *Client) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*dat
 	return c.grpcClient.GetInsertBinlogPaths(context.Background(), req)
 }
 
-func (c *Client) GetInsertChannels(req *datapb.InsertChannelRequest) ([]string, error) {
-	resp, err := c.grpcClient.GetInsertChannels(context.Background(), req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return nil, errors.New(resp.Status.Reason)
-	}
-	return resp.Values, nil
+func (c *Client) GetInsertChannels(req *datapb.InsertChannelRequest) (*internalpb2.StringList, error) {
+	return c.grpcClient.GetInsertChannels(context.Background(), req)
 }
 
 func (c *Client) GetCollectionStatistics(req *datapb.CollectionStatsRequest) (*datapb.CollectionStatsResponse, error) {
@@ -123,15 +103,8 @@ func (c *Client) GetPartitionStatistics(req *datapb.PartitionStatsRequest) (*dat
 	return c.grpcClient.GetPartitionStatistics(context.Background(), req)
 }
 
-func (c *Client) GetSegmentInfoChannel() (string, error) {
-	resp, err := c.grpcClient.GetSegmentInfoChannel(context.Background(), &commonpb.Empty{})
-	if err != nil {
-		return "", err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-		return "", errors.New(resp.Status.Reason)
-	}
-	return resp.Value, nil
+func (c *Client) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
+	return c.grpcClient.GetSegmentInfoChannel(context.Background(), &commonpb.Empty{})
 }
 
 func (c *Client) GetCount(req *datapb.CollectionCountRequest) (*datapb.CollectionCountResponse, error) {

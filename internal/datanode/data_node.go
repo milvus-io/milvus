@@ -7,10 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
-	"github.com/uber/jaeger-client-go/config"
-
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
@@ -33,8 +29,8 @@ type (
 
 		// Component
 		GetComponentStates() (*internalpb2.ComponentStates, error)
-		GetTimeTickChannel() (string, error)   // This function has no effect
-		GetStatisticsChannel() (string, error) // This function has no effect
+		GetTimeTickChannel() (*milvuspb.StringResponse, error)   // This function has no effect
+		GetStatisticsChannel() (*milvuspb.StringResponse, error) // This function has no effect
 
 		WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error)
 		FlushSegments(in *datapb.FlushSegRequest) (*commonpb.Status, error)
@@ -72,7 +68,6 @@ type (
 		flushChan chan *flushMsg
 		replica   collectionReplica
 
-		tracer opentracing.Tracer
 		closer io.Closer
 	}
 )
@@ -176,25 +171,6 @@ func (node *DataNode) Init() error {
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 
 	node.replica = replica
-
-	// --- Opentracing ---
-	cfg := &config.Configuration{
-		ServiceName: "data_node",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-		Reporter: &config.ReporterConfig{
-			LogSpans: true,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer(config.Logger(jaeger.StdLogger))
-	if err != nil {
-		return errors.Errorf("ERROR: cannot init Jaeger: %v\n", err)
-	}
-	node.tracer = tracer
-	node.closer = closer
-	opentracing.SetGlobalTracer(node.tracer)
 
 	return nil
 }

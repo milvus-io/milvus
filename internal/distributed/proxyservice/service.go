@@ -133,23 +133,11 @@ func (s *Server) RegisterNode(ctx context.Context, request *proxypb.RegisterNode
 }
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{}, s.impl.InvalidateCollectionMetaCache(request)
+	return s.impl.InvalidateCollectionMetaCache(request)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, empty *commonpb.Empty) (*milvuspb.StringResponse, error) {
-	channel, err := s.impl.GetTimeTickChannel()
-	if err != nil {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			},
-			Value: "",
-		}, nil
-	}
-	return &milvuspb.StringResponse{
-		Value: channel,
-	}, nil
+	return s.impl.GetTimeTickChannel()
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {

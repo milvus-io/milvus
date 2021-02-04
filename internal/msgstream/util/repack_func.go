@@ -53,9 +53,6 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			}
 
 			insertMsg := &msgstream.InsertMsg{
-				BaseMsg: BaseMsg{
-					MsgCtx: request.GetMsgContext(),
-				},
 				InsertRequest: sliceRequest,
 			}
 			result[key].Msgs = append(result[key].Msgs, insertMsg)
@@ -102,9 +99,6 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 			}
 
 			deleteMsg := &msgstream.DeleteMsg{
-				BaseMsg: BaseMsg{
-					MsgCtx: request.GetMsgContext(),
-				},
 				DeleteRequest: sliceRequest,
 			}
 			result[key].Msgs = append(result[key].Msgs, deleteMsg)

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+
 	grpcproxynodeclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode/client"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
@@ -25,7 +27,7 @@ type NodeClient interface {
 	Start() error
 	Stop() error
 
-	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error
+	InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
 type GlobalNodeInfoTable struct {

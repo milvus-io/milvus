@@ -20,9 +20,6 @@ import (
 	"log"
 	"sync/atomic"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
-
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -62,7 +59,6 @@ type QueryNode struct {
 	statsService    *statsService
 
 	//opentracing
-	tracer opentracing.Tracer
 	closer io.Closer
 
 	// clients
@@ -84,20 +80,6 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 		searchService:   nil,
 		statsService:    nil,
 	}
-
-	var err error
-	cfg := &config.Configuration{
-		ServiceName: "query_node",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	node.tracer, node.closer, err = cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(node.tracer)
 
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)
@@ -125,20 +107,6 @@ func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
 		searchService:   nil,
 		statsService:    nil,
 	}
-
-	var err error
-	cfg := &config.Configuration{
-		ServiceName: "query_node",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	node.tracer, node.closer, err = cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(node.tracer)
 
 	segmentsMap := make(map[int64]*Segment)
 	collections := make([]*Collection, 0)

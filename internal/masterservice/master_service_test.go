@@ -28,14 +28,21 @@ type proxyMock struct {
 	mutex     sync.Mutex
 }
 
-func (p *proxyMock) GetTimeTickChannel() (string, error) {
-	return fmt.Sprintf("proxy-time-tick-%d", p.randVal), nil
+func (p *proxyMock) GetTimeTickChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: fmt.Sprintf("proxy-time-tick-%d", p.randVal),
+	}, nil
 }
-func (p *proxyMock) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) error {
+func (p *proxyMock) InvalidateCollectionMetaCache(request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
-	return nil
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}, nil
 }
 func (p *proxyMock) GetCollArray() []string {
 	p.mutex.Lock()
@@ -72,8 +79,13 @@ func (d *dataMock) GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*d
 	return rst, nil
 }
 
-func (d *dataMock) GetSegmentInfoChannel() (string, error) {
-	return fmt.Sprintf("segment-info-channel-%d", d.randVal), nil
+func (d *dataMock) GetSegmentInfoChannel() (*milvuspb.StringResponse, error) {
+	return &milvuspb.StringResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_SUCCESS,
+		},
+		Value: fmt.Sprintf("segment-info-channel-%d", d.randVal),
+	}, nil
 }
 
 type indexMock struct {

@@ -19,9 +19,6 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
-
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -57,7 +54,6 @@ type NodeImpl struct {
 	manipulationMsgStream msgstream.MsgStream
 	queryMsgStream        msgstream.MsgStream
 
-	tracer opentracing.Tracer
 	closer io.Closer
 
 	// Add callback functions at different stages
@@ -106,7 +102,6 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 }
 
 func (node *NodeImpl) Init() error {
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchBufSize, 1024)
 
 	// todo wait for proxyservice state changed to Healthy
 
@@ -135,6 +130,8 @@ func (node *NodeImpl) Init() error {
 	if err != nil {
 		return err
 	}
+
+	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchBufSize, 1024)
 
 	// wait for dataservice state changed to Healthy
 	if node.dataServiceClient != nil {
@@ -181,19 +178,6 @@ func (node *NodeImpl) Init() error {
 	//if err != nil {
 	//	return err
 	//}
-
-	cfg := &config.Configuration{
-		ServiceName: "proxynode",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	node.tracer, node.closer, err = cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(node.tracer)
 
 	node.queryMsgStream, _ = factory.NewMsgStream(node.ctx)
 	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
