@@ -5,7 +5,7 @@ services:
     image: ${TARGET_REPO}/proxyservice:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/proxyservice/DockerFile
+      dockerfile: build/docker/deploy/proxyservice/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/proxyservice:${SOURCE_TAG}
     networks:
@@ -15,7 +15,7 @@ services:
     image: ${TARGET_REPO}/proxynode:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/proxynode/DockerFile
+      dockerfile: build/docker/deploy/proxynode/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/proxynode:${SOURCE_TAG}
     environment: 
@@ -30,7 +30,7 @@ services:
     image: ${TARGET_REPO}/queryservice:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/queryservice/DockerFile
+      dockerfile: build/docker/deploy/queryservice/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/queryservice:${SOURCE_TAG}
     environment:
@@ -45,7 +45,7 @@ services:
     image: ${TARGET_REPO}/querynode:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/querynode/DockerFile
+      dockerfile: build/docker/deploy/querynode/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
     environment: 
@@ -60,7 +60,7 @@ services:
     image: ${TARGET_REPO}/datanode:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/datanode/DockerFile
+      dockerfile: build/docker/deploy/datanode/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/datanode:${SOURCE_TAG}
     environment: 
@@ -75,7 +75,7 @@ services:
     image: ${TARGET_REPO}/indexservice:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/indexservice/DockerFile
+      dockerfile: build/docker/deploy/indexservice/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/indexservice:${SOURCE_TAG}
     environment:
@@ -89,7 +89,7 @@ services:
     image: ${TARGET_REPO}/indexnode:${TARGET_TAG}
     build:
       context: ../../../
-      dockerfile: build/docker/deploy/indexnode/DockerFile
+      dockerfile: build/docker/deploy/indexnode/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/indexnode:${SOURCE_TAG}
     environment:
