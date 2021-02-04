@@ -47,17 +47,19 @@ func newSearchService(ctx context.Context, replica collectionReplica) *searchSer
 
 	msgStreamURL := Params.PulsarAddress
 
-	factory := pulsarms.NewFactory(msgStreamURL, receiveBufSize, pulsarBufSize)
+	factory := msgstream.ProtoUDFactory{}
 
 	consumeChannels := Params.SearchChannelNames
 	consumeSubName := Params.MsgChannelSubName
-	searchStream, _ := factory.NewMsgStream(ctx)
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	searchStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
+	searchStream.SetPulsarClient(msgStreamURL)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 	var inputStream msgstream.MsgStream = searchStream
 
 	producerChannels := Params.SearchResultChannelNames
-	searchResultStream, _ := factory.NewMsgStream(ctx)
-	searchResultStream.AsProducer(producerChannels)
+	searchResultStream := pulsarms.NewPulsarMsgStream(ctx, receiveBufSize, pulsarBufSize, factory.NewUnmarshalDispatcher())
+	searchResultStream.SetPulsarClient(msgStreamURL)
+	searchResultStream.CreatePulsarProducers(producerChannels)
 	var outputStream msgstream.MsgStream = searchResultStream
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)

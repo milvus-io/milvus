@@ -13,7 +13,7 @@ import (
 type serviceTimeNode struct {
 	baseNode
 	replica           collectionReplica
-	timeTickMsgStream msgstream.MsgStream
+	timeTickMsgStream *pulsarms.PulsarMsgStream
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -78,9 +78,10 @@ func newServiceTimeNode(ctx context.Context, replica collectionReplica) *service
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.SearchReceiveBufSize, 1024)
-	timeTimeMsgStream, _ := factory.NewMsgStream(ctx)
-	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
+	factory := msgstream.ProtoUDFactory{}
+	timeTimeMsgStream := pulsarms.NewPulsarMsgStream(ctx, Params.SearchReceiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	timeTimeMsgStream.SetPulsarClient(Params.PulsarAddress)
+	timeTimeMsgStream.CreatePulsarProducers([]string{Params.QueryTimeTickChannelName})
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,

@@ -146,19 +146,23 @@ func TestMasterService(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	proxyTimeTickStream, _ := factory.NewMsgStream(ctx)
-	proxyTimeTickStream.AsProducer([]string{Params.ProxyTimeTickChannel})
+	factory := ms.ProtoUDFactory{}
+	proxyTimeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	proxyTimeTickStream.SetPulsarClient(Params.PulsarAddress)
+	proxyTimeTickStream.CreatePulsarProducers([]string{Params.ProxyTimeTickChannel})
 
-	dataServiceSegmentStream, _ := factory.NewMsgStream(ctx)
-	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
+	dataServiceSegmentStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	dataServiceSegmentStream.SetPulsarClient(Params.PulsarAddress)
+	dataServiceSegmentStream.CreatePulsarProducers([]string{Params.DataServiceSegmentChannel})
 
-	timeTickStream, _ := factory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	timeTickStream.SetPulsarClient(Params.PulsarAddress)
+	timeTickStream.CreatePulsarConsumers([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream, _ := factory.NewMsgStream(ctx)
-	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
+	ddStream := pulsarms.NewPulsarMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	ddStream.SetPulsarClient(Params.PulsarAddress)
+	ddStream.CreatePulsarConsumers([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
 
 	time.Sleep(time.Second)

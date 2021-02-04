@@ -93,9 +93,10 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	searchStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	searchStream.AsProducer(searchProducerChannels)
+	factory := msgstream.ProtoUDFactory{}
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	searchStream.SetPulsarClient(pulsarURL)
+	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
@@ -179,11 +180,13 @@ func TestSearch_Search(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	insertStream.AsProducer(insertChannels)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	ddStream.AsProducer(ddChannels)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()
@@ -283,9 +286,10 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	searchStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	searchStream.AsProducer(searchProducerChannels)
+	factory := msgstream.ProtoUDFactory{}
+	searchStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	searchStream.SetPulsarClient(pulsarURL)
+	searchStream.CreatePulsarProducers(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
@@ -373,11 +377,13 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	insertStream.AsProducer(insertChannels)
+	insertStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	insertStream.SetPulsarClient(pulsarURL)
+	insertStream.CreatePulsarProducers(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
-	ddStream.AsProducer(ddChannels)
+	ddStream := pulsarms.NewPulsarMsgStream(node.queryNodeLoopCtx, receiveBufSize, 1024, factory.NewUnmarshalDispatcher())
+	ddStream.SetPulsarClient(pulsarURL)
+	ddStream.CreatePulsarProducers(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
 	insertMsgStream.Start()

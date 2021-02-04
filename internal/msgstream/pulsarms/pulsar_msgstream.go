@@ -52,12 +52,7 @@ type PulsarMsgStream struct {
 	pulsarBufSize    int64
 }
 
-func newPulsarMsgStream(ctx context.Context,
-	address string,
-	receiveBufSize int64,
-	pulsarBufSize int64,
-	unmarshal UnmarshalDispatcher) (*PulsarMsgStream, error) {
-
+func NewPulsarMsgStream(ctx context.Context, receiveBufSize int64, pulsarBufSize int64, unmarshal UnmarshalDispatcher) *PulsarMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	producers := make([]Producer, 0)
 	consumers := make([]Consumer, 0)
@@ -71,17 +66,19 @@ func newPulsarMsgStream(ctx context.Context,
 		unmarshal:        unmarshal,
 		pulsarBufSize:    pulsarBufSize,
 	}
+	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
+	return stream
+}
+
+func (ms *PulsarMsgStream) SetPulsarClient(address string) {
 	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: address})
 	if err != nil {
 		log.Printf("Set pulsar client failed, error = %v", err)
-		return nil, err
 	}
-	stream.client = client
-	stream.receiveBuf = make(chan *MsgPack, receiveBufSize)
-	return stream, nil
+	ms.client = client
 }
 
-func (ms *PulsarMsgStream) AsProducer(channels []string) {
+func (ms *PulsarMsgStream) CreatePulsarProducers(channels []string) {
 	for i := 0; i < len(channels); i++ {
 		fn := func() error {
 			pp, err := ms.client.CreateProducer(pulsar.ProducerOptions{Topic: channels[i]})
@@ -103,7 +100,7 @@ func (ms *PulsarMsgStream) AsProducer(channels []string) {
 	}
 }
 
-func (ms *PulsarMsgStream) AsConsumer(channels []string,
+func (ms *PulsarMsgStream) CreatePulsarConsumers(channels []string,
 	subName string) {
 	for i := 0; i < len(channels); i++ {
 		fn := func() error {
@@ -482,12 +479,7 @@ type PulsarTtMsgStream struct {
 	lastTimeStamp Timestamp
 }
 
-func NewPulsarTtMsgStream(ctx context.Context,
-	address string,
-	receiveBufSize int64,
-	pulsarBufSize int64,
-	unmarshal msgstream.UnmarshalDispatcher) (*PulsarTtMsgStream, error) {
-
+func NewPulsarTtMsgStream(ctx context.Context, receiveBufSize int64, pulsarBufSize int64, unmarshal msgstream.UnmarshalDispatcher) *PulsarTtMsgStream {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	pulsarMsgStream := PulsarMsgStream{
 		ctx:           streamCtx,
@@ -495,17 +487,10 @@ func NewPulsarTtMsgStream(ctx context.Context,
 		pulsarBufSize: pulsarBufSize,
 		unmarshal:     unmarshal,
 	}
-
-	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: address})
-	if err != nil {
-		log.Printf("Set pulsar client failed, error = %v", err)
-		return nil, err
-	}
-	pulsarMsgStream.client = client
 	pulsarMsgStream.receiveBuf = make(chan *MsgPack, receiveBufSize)
 	return &PulsarTtMsgStream{
 		PulsarMsgStream: pulsarMsgStream,
-	}, nil
+	}
 }
 
 func (ms *PulsarTtMsgStream) Start() {

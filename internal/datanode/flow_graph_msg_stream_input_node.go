@@ -15,9 +15,11 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	insertStream, _ := factory.NewTtMsgStream(ctx)
-	insertStream.AsConsumer(consumeChannels, consumeSubName)
+	factory := msgstream.ProtoUDFactory{}
+	insertStream := pulsarms.NewPulsarTtMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	insertStream.SetPulsarClient(Params.PulsarAddress)
+
+	insertStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	var stream msgstream.MsgStream = insertStream
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
@@ -30,9 +32,10 @@ func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
 	maxParallelism := Params.FlowGraphMaxParallelism
 	consumeSubName := Params.MsgChannelSubName
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	tmpStream, _ := factory.NewTtMsgStream(ctx)
-	tmpStream.AsConsumer(Params.DDChannelNames, consumeSubName)
+	factory := msgstream.ProtoUDFactory{}
+	tmpStream := pulsarms.NewPulsarTtMsgStream(ctx, 1024, 1024, factory.NewUnmarshalDispatcher())
+	tmpStream.SetPulsarClient(Params.PulsarAddress)
+	tmpStream.CreatePulsarConsumers(Params.DDChannelNames, consumeSubName)
 
 	var stream msgstream.MsgStream = tmpStream
 	node := flowgraph.NewInputNode(&stream, "ddInputNode", maxQueueLength, maxParallelism)

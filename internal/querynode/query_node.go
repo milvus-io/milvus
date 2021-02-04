@@ -333,11 +333,11 @@ func (node *QueryNode) AddQueryChannel(in *queryPb.AddQueryChannelsRequest) (*co
 	// add request channel
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
-	resultStream.AsProducer(producerChannels)
+	resultStream.CreatePulsarProducers(producerChannels)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -382,12 +382,12 @@ func (node *QueryNode) RemoveQueryChannel(in *queryPb.RemoveQueryChannelsRequest
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
 	// TODO: searchStream.RemovePulsarConsumers(producerChannels)
-	searchStream.AsConsumer(consumeChannels, consumeSubName)
+	searchStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	// remove result channel
 	producerChannels := []string{in.ResultChannelID}
 	// TODO: resultStream.RemovePulsarProducer(producerChannels)
-	resultStream.AsProducer(producerChannels)
+	resultStream.CreatePulsarProducers(producerChannels)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,
@@ -420,7 +420,7 @@ func (node *QueryNode) WatchDmChannels(in *queryPb.WatchDmChannelsRequest) (*com
 	// add request channel
 	consumeChannels := in.ChannelIDs
 	consumeSubName := Params.MsgChannelSubName
-	fgDMMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	fgDMMsgStream.CreatePulsarConsumers(consumeChannels, consumeSubName)
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

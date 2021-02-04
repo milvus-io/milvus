@@ -141,16 +141,18 @@ func TestStream_task_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getInsertTask(3, 3))
 
 	factory := msgstream.ProtoUDFactory{}
-	inputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, factory.NewUnmarshalDispatcher())
-	inputStream.AsProducer(producerChannels)
+	inputStream := NewPulsarMsgStream(context.Background(), 100, 100, factory.NewUnmarshalDispatcher())
+	inputStream.SetPulsarClient(pulsarAddress)
+	inputStream.CreatePulsarProducers(producerChannels)
 	inputStream.SetRepackFunc(newRepackFunc)
 	inputStream.Start()
 
 	dispatcher := factory.NewUnmarshalDispatcher()
-	outputStream, _ := newPulsarMsgStream(context.Background(), pulsarAddress, 100, 100, dispatcher)
+	outputStream := NewPulsarMsgStream(context.Background(), 100, 100, dispatcher)
+	outputStream.SetPulsarClient(pulsarAddress)
 	testTask := InsertTask{}
 	dispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, testTask.Unmarshal)
-	outputStream.AsConsumer(consumerChannels, consumerSubName)
+	outputStream.CreatePulsarConsumers(consumerChannels, consumerSubName)
 	outputStream.Start()
 
 	err := inputStream.Produce(&msgPack)
@@ -159,7 +161,7 @@ func TestStream_task_Insert(t *testing.T) {
 	}
 	receiveCount := 0
 	for {
-		result := outputStream.Consume()
+		result := (*outputStream).Consume()
 		if len(result.Msgs) > 0 {
 			msgs := result.Msgs
 			for _, v := range msgs {
