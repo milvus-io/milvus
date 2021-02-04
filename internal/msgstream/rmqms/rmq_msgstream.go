@@ -16,6 +16,17 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
+type TsMsg = msgstream.TsMsg
+type MsgPack = msgstream.MsgPack
+type MsgType = msgstream.MsgType
+type UniqueID = msgstream.UniqueID
+type BaseMsg = msgstream.BaseMsg
+type Timestamp = msgstream.Timestamp
+type IntPrimaryKey = msgstream.IntPrimaryKey
+type TimeTickMsg = msgstream.TimeTickMsg
+type QueryNodeStatsMsg = msgstream.QueryNodeStatsMsg
+type RepackFunc = msgstream.RepackFunc
+
 type RmqMsgStream struct {
 	isServing        int64
 	ctx              context.Context
@@ -23,7 +34,6 @@ type RmqMsgStream struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 
-	rmq        *rocksmq.RocksMQ
 	repackFunc msgstream.RepackFunc
 	consumers  []rocksmq.Consumer
 	producers  []string
@@ -35,17 +45,18 @@ type RmqMsgStream struct {
 	streamCancel func()
 }
 
-func NewRmqMsgStream(ctx context.Context, rmq *rocksmq.RocksMQ, receiveBufSize int64) *RmqMsgStream {
+func newRmqMsgStream(ctx context.Context, receiveBufSize int64,
+	unmarshal msgstream.UnmarshalDispatcher) (*RmqMsgStream, error) {
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	receiveBuf := make(chan *msgstream.MsgPack, receiveBufSize)
 	stream := &RmqMsgStream{
 		ctx:          streamCtx,
-		rmq:          nil,
 		receiveBuf:   receiveBuf,
+		unmarshal:    unmarshal,
 		streamCancel: streamCancel,
 	}
 
-	return stream
+	return stream, nil
 }
 
 func (ms *RmqMsgStream) Start() {
@@ -59,25 +70,32 @@ func (ms *RmqMsgStream) Start() {
 func (ms *RmqMsgStream) Close() {
 }
 
-func (ms *RmqMsgStream) CreateProducers(channels []string) error {
-	for _, channel := range channels {
-		// TODO(yhz): Here may allow to create an existing channel
-		if err := ms.rmq.CreateChannel(channel); err != nil {
-			return err
-		}
-	}
-	return nil
+type propertiesReaderWriter struct {
+	ppMap map[string]string
 }
 
-func (ms *RmqMsgStream) CreateConsumers(channels []string, groupName string) error {
+func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
+	ms.repackFunc = repackFunc
+}
+
+func (ms *RmqMsgStream) AsProducer(channels []string) {
+	for _, channel := range channels {
+		// TODO(yhz): Here may allow to create an existing channel
+		if err := rocksmq.Rmq.CreateChannel(channel); err != nil {
+			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
+			panic(errMsg)
+		}
+	}
+}
+
+func (ms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	for _, channelName := range channels {
-		if err := ms.rmq.CreateConsumerGroup(groupName, channelName); err != nil {
-			return err
+		if err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName); err != nil {
+			panic(err.Error())
 		}
 		msgNum := make(chan int)
 		ms.consumers = append(ms.consumers, rocksmq.Consumer{GroupName: groupName, ChannelName: channelName, MsgNum: msgNum})
 	}
-	return nil
 }
 
 func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
@@ -172,7 +190,30 @@ func (ms *RmqMsgStream) Produce(pack *msgstream.MsgPack) error {
 			}
 			msg := make([]rocksmq.ProducerMessage, 0)
 			msg = append(msg, *rocksmq.NewProducerMessage(m))
-			if err := ms.rmq.Produce(ms.producers[k], msg); err != nil {
+			if err := rocksmq.Rmq.Produce(ms.producers[k], msg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (ms *RmqMsgStream) Broadcast(msgPack *MsgPack) error {
+	producerLen := len(ms.producers)
+	for _, v := range msgPack.Msgs {
+		mb, err := v.Marshal(v)
+		if err != nil {
+			return err
+		}
+		m, err := msgstream.ConvertToByteArray(mb)
+		if err != nil {
+			return err
+		}
+		msg := make([]rocksmq.ProducerMessage, 0)
+		msg = append(msg, *rocksmq.NewProducerMessage(m))
+
+		for i := 0; i < producerLen; i++ {
+			if err := rocksmq.Rmq.Produce(ms.producers[i], msg); err != nil {
 				return err
 			}
 		}
@@ -221,7 +262,7 @@ func (ms *RmqMsgStream) bufMsgPackToChannel() {
 				}
 
 				msgNum := value.Interface().(int)
-				rmqMsg, err := ms.rmq.Consume(ms.consumers[chosen].GroupName, ms.consumers[chosen].ChannelName, msgNum)
+				rmqMsg, err := rocksmq.Rmq.Consume(ms.consumers[chosen].GroupName, ms.consumers[chosen].ChannelName, msgNum)
 				if err != nil {
 					log.Printf("Failed to consume message in rocksmq, error = %v", err)
 					continue
@@ -261,5 +302,23 @@ func (ms *RmqMsgStream) bufMsgPackToChannel() {
 }
 
 func (ms *RmqMsgStream) Chan() <-chan *msgstream.MsgPack {
-	return nil
+	return ms.receiveBuf
+}
+
+func (ms *RmqMsgStream) Seek(offset *msgstream.MsgPosition) error {
+	for i := 0; i < len(ms.consumers); i++ {
+		if ms.consumers[i].ChannelName == offset.ChannelName {
+			messageID, err := strconv.ParseInt(offset.MsgID, 10, 64)
+			if err != nil {
+				return err
+			}
+			err = rocksmq.Rmq.Seek(ms.consumers[i].GroupName, ms.consumers[i].ChannelName, messageID)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	return errors.New("msgStream seek fail")
 }

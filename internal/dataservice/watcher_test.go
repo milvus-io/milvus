@@ -21,7 +21,7 @@ func TestDataNodeTTWatcher(t *testing.T) {
 	allocator := newMockAllocator()
 	meta, err := newMemoryMeta(allocator)
 	assert.Nil(t, err)
-	segAllocator, err := newSegmentAllocator(meta, allocator)
+	segAllocator := newSegmentAllocator(meta, allocator)
 	assert.Nil(t, err)
 	watcher := newDataNodeTimeTickWatcher(meta, segAllocator, cluster)
 
