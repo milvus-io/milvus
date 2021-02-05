@@ -839,7 +839,7 @@ func (c *Core) DropCollection(in *milvuspb.DropCollectionRequest) (*commonpb.Sta
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-			Reason:    "Create collection failed: " + err.Error(),
+			Reason:    "Drop collection failed: " + err.Error(),
 		}, nil
 	}
 	return &commonpb.Status{

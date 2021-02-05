@@ -2,17 +2,12 @@ package proxyservice
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
-
-	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 )
 
 type TaskEnum = int
@@ -73,7 +68,6 @@ func (t *RegisterLinkTask) PreExecute() error {
 
 func (t *RegisterLinkTask) Execute() error {
 	info, err := t.nodeInfos.Pick()
-	fmt.Println("info: ", info)
 	if err != nil {
 		return err
 	}
@@ -135,6 +129,7 @@ func (t *RegisterNodeTask) PostExecute() error {
 type InvalidateCollectionMetaCacheTask struct {
 	Condition
 	request   *proxypb.InvalidateCollMetaCacheRequest
+	response  *commonpb.Status
 	nodeInfos *GlobalNodeInfoTable
 }
 
@@ -156,6 +151,9 @@ func (t *InvalidateCollectionMetaCacheTask) Execute() error {
 		if status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			return errors.New(status.Reason)
 		}
+	}
+	t.response = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
 	}
 	return nil
 }

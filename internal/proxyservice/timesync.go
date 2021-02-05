@@ -83,8 +83,8 @@ func (ttBarrier *softTimeTickBarrier) Start() error {
 			case ttmsgs := <-ttBarrier.ttStream.Chan():
 				//log.Println("ttmsgs: ", ttmsgs)
 				ttBarrier.peerMtx.RLock()
-				//log.Println("peer2LastTt map: ", ttBarrier.peer2LastTt)
-				//log.Println("len(ttmsgs.Msgs): ", len(ttmsgs.Msgs))
+				log.Println("peer2LastTt map: ", ttBarrier.peer2LastTt)
+				log.Println("len(ttmsgs.Msgs): ", len(ttmsgs.Msgs))
 				if len(ttmsgs.Msgs) > 0 {
 					for _, timetickmsg := range ttmsgs.Msgs {
 						ttmsg := timetickmsg.(*ms.TimeTickMsg)
