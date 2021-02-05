@@ -20,7 +20,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
-	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -46,10 +45,6 @@ type DataServiceInterface interface {
 
 type IndexServiceInterface interface {
 	BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
-}
-
-type QueryServiceInterface interface {
-	ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
 }
 
 type Interface interface {
@@ -152,17 +147,14 @@ type Core struct {
 	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
 	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
 
-	//get binlog file path from data service,
+	//TODO,get binlog file path from data service,
 	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
 
-	//call index builder's client to build index, return build id
+	//TODO, call index builder's client to build index, return build id
 	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
 
-	//proxy service interface, notify proxy service to drop collection
+	//TODO, proxy service interface, notify proxy service to drop collection
 	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
-
-	//query service interface, notify query service to release collection
-	ReleaseCollection func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
 
 	// put create index task into this chan
 	indexTaskQueue chan *CreateIndexTask
@@ -253,10 +245,6 @@ func (c *Core) checkInit() error {
 	if c.DataNodeSegmentFlushCompletedChan == nil {
 		return errors.Errorf("DataNodeSegmentFlushCompletedChan is nil")
 	}
-	if c.ReleaseCollection == nil {
-		return errors.Errorf("ReleaseCollection is nil")
-	}
-
 	log.Printf("master node id = %d", Params.NodeID)
 	log.Printf("master dd channel name = %s", Params.DdChannel)
 	log.Printf("master time ticke channel name = %s", Params.TimeTickChannel)
@@ -699,30 +687,6 @@ func (c *Core) SetIndexService(s IndexServiceInterface) error {
 			return 0, errors.Errorf("BuildIndex from index service failed, error = %s", rsp.Status.Reason)
 		}
 		return rsp.IndexBuildID, nil
-	}
-	return nil
-}
-
-func (c *Core) SetQueryService(s QueryServiceInterface) error {
-	c.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
-		req := &querypb.ReleaseCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_kReleaseCollection,
-				MsgID:     0, //TODO, msg ID
-				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
-			},
-			DbID:         dbID,
-			CollectionID: collectionID,
-		}
-		rsp, err := s.ReleaseCollection(req)
-		if err != nil {
-			return err
-		}
-		if rsp.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			return errors.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
-		}
-		return nil
 	}
 	return nil
 }
