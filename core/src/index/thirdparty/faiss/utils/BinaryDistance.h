@@ -99,7 +99,7 @@ namespace faiss {
             size_t ncodes,
             float *distances,
             int64_t *labels,
-            const BitsetView& bitset);
+            const BitsetView bitset);
 
 /** Return the k smallest distances for a set of binary query vectors,
  * using a heap.
@@ -118,7 +118,7 @@ namespace faiss {
             const uint8_t * b,
             size_t nb,
             size_t ncodes,
-            const BitsetView& bitset);
+            const BitsetView bitset);
 
 
     extern template
@@ -129,7 +129,7 @@ namespace faiss {
             const uint8_t * b,
             size_t nb,
             size_t ncodes,
-            const BitsetView& bitset);
+            const BitsetView bitset);
 
     extern template
     void binary_distance_knn_hc<CMax<float, int64_t>>(
@@ -139,7 +139,7 @@ namespace faiss {
             const uint8_t * b,
             size_t nb,
             size_t ncodes,
-            const BitsetView& bitset);
+            const BitsetView bitset);
 
     template <class C, typename T>
     void binary_range_search(
@@ -152,7 +152,7 @@ namespace faiss {
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
     extern template
     void binary_range_search<CMax<int, int64_t>, int>(
@@ -165,7 +165,7 @@ namespace faiss {
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
     extern template
     void binary_range_search<CMax<float, int64_t>, float>(
@@ -178,7 +178,7 @@ namespace faiss {
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
     extern template
     void binary_range_search<CMin<bool, int64_t>, bool>(
@@ -191,7 +191,7 @@ namespace faiss {
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
 } // namespace faiss
 

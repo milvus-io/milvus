@@ -134,7 +134,7 @@ void binary_distance_knn_mc(
         size_t k,
         float *distances,
         int64_t *labels,
-        const BitsetView& bitset)
+        const BitsetView bitset)
 {
     int thread_max_num = omp_get_max_threads();
     size_t l3_size = get_L3_Size();
@@ -250,7 +250,7 @@ void binary_distance_knn_mc (
         size_t ncodes,
         float *distances,
         int64_t *labels,
-        const BitsetView& bitset) {
+        const BitsetView bitset) {
 
     switch (metric_type) {
     case METRIC_Substructure:
@@ -310,7 +310,7 @@ void binary_distance_knn_hc (
         const uint8_t * bs1,
         const uint8_t * bs2,
         size_t n2,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     typedef typename C::T T;
     size_t k = ha->k;
@@ -416,7 +416,7 @@ void binary_distance_knn_hc (
         const uint8_t * b,
         size_t nb,
         size_t ncodes,
-        const BitsetView& bitset)
+        const BitsetView bitset)
 {
     switch (metric_type) {
     case METRIC_Jaccard: {
@@ -487,7 +487,7 @@ void binary_distance_knn_hc<CMax<int, int64_t>>(
         const uint8_t * b,
         size_t nb,
         size_t ncodes,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
 template
 void binary_distance_knn_hc<CMax<float, int64_t>>(
@@ -497,7 +497,7 @@ void binary_distance_knn_hc<CMax<float, int64_t>>(
         const uint8_t * b,
         size_t nb,
         size_t ncodes,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
 
 template <class C, typename T, class MetricComputer>
@@ -510,7 +510,7 @@ void binary_range_search (
     T radius,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
-    const BitsetView& bitset)
+    const BitsetView bitset)
 {
 
 #pragma omp parallel
@@ -547,7 +547,7 @@ void binary_range_search(
     size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
-    const BitsetView& bitset) {
+    const BitsetView bitset) {
 
     switch (metric_type) {
     case METRIC_Tanimoto:
@@ -679,7 +679,7 @@ void binary_range_search<CMax<int, int64_t>, int>(
     size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
-    const BitsetView& bitset);
+    const BitsetView bitset);
 
 template
 void binary_range_search<CMax<float, int64_t>, float>(
@@ -692,7 +692,7 @@ void binary_range_search<CMax<float, int64_t>, float>(
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
 template
 void binary_range_search<CMin<bool, int64_t>, bool>(
@@ -705,6 +705,6 @@ void binary_range_search<CMin<bool, int64_t>, bool>(
         size_t ncodes,
         std::vector<faiss::RangeSearchPartialResult*>& result,
         size_t buffer_size,
-        const BitsetView& bitset);
+        const BitsetView bitset);
 
 } // namespace faiss

@@ -47,7 +47,7 @@ class IVFHNSW : public IVF {
  protected:
     void
     QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-              const faiss::BitsetView& bitset) override;
+              const faiss::BitsetView bitset) override;
 };
 
 using IVFHNSWPtr = std::shared_ptr<IVFHNSW>;

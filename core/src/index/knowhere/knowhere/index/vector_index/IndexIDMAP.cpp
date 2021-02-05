@@ -76,7 +76,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -100,7 +100,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::B
 
 DynamicResultSegment
 IDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& config,
-                       const faiss::BitsetView& bitset) {
+                       const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -179,7 +179,7 @@ IDMAP::GetRawVectors() {
 
 void
 IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
-                 const faiss::BitsetView& bitset) {
+                 const faiss::BitsetView bitset) {
     // assign the metric type
     index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
     index_->search(n, data, k, distances, labels, bitset);

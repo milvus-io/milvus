@@ -60,7 +60,7 @@ TEST(COMMON_TEST, BitsetView) {
         }
     }
 
-    auto view = [](const BitsetView& view_para) {
+    auto view = [](const BitsetView view_para) {
         return view_para;
     }(con_bitset);
 

@@ -253,7 +253,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
                          storage_idx_t nearest,
                          storage_idx_t ef,
                          float d_nearest,
-                         const BitsetView& bitset) const {
+                         const BitsetView bitset) const {
   VisitedList *vl = visited_list_pool->getFreeVisitedList();
   vl_type *visited_array = vl->mass;
   vl_type visited_array_tag = vl->curV;
@@ -394,7 +394,7 @@ void RHNSW::prune_neighbors(DistanceComputer& ptdis,
 
 void RHNSW::searchKnn(DistanceComputer& qdis, int k,
             idx_t *I, float *D, RHNSWStatInfo &rsi,
-            const BitsetView& bitset) const {
+            const BitsetView bitset) const {
   if (levels.size() == 0)
     return;
   int ep = entry_point;

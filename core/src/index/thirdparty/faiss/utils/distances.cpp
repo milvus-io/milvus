@@ -140,7 +140,7 @@ static void knn_inner_product_sse (const float * x,
                         const float * y,
                         size_t d, size_t nx, size_t ny,
                         float_minheap_array_t * res,
-                        const BitsetView& bitset = nullptr)
+                        const BitsetView bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -252,7 +252,7 @@ static void knn_L2sqr_sse (
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                const BitsetView& bitset = nullptr)
+                const BitsetView bitset = nullptr)
 {
     size_t k = res->k;
     size_t thread_max_num = omp_get_max_threads();
@@ -366,7 +366,7 @@ static void knn_inner_product_blas (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -430,7 +430,7 @@ static void knn_L2sqr_blas (const float * x,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
         const DistanceCorrection &corr,
-        const BitsetView& bitset = nullptr)
+        const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -506,7 +506,7 @@ static void knn_jaccard_blas (const float * x,
                               size_t d, size_t nx, size_t ny,
                               float_maxheap_array_t * res,
                               const DistanceCorrection &corr,
-                              const BitsetView& bitset = nullptr)
+                              const BitsetView bitset = nullptr)
 {
     res->heapify ();
 
@@ -591,7 +591,7 @@ void knn_inner_product (const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset)
+        const BitsetView bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_inner_product_sse (x, y, d, nx, ny, res, bitset);
@@ -612,7 +612,7 @@ void knn_L2sqr (const float * x,
                 const float * y,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res,
-                const BitsetView& bitset)
+                const BitsetView bitset)
 {
     if (nx < distance_compute_blas_threshold) {
         knn_L2sqr_sse (x, y, d, nx, ny, res, bitset);
@@ -626,7 +626,7 @@ void knn_jaccard (const float * x,
                   const float * y,
                   size_t d, size_t nx, size_t ny,
                   float_maxheap_array_t * res,
-                  const BitsetView& bitset)
+                  const BitsetView bitset)
 {
     if (d % 4 != 0) {
 //        knn_jaccard_sse (x, y, d, nx, ny, res);

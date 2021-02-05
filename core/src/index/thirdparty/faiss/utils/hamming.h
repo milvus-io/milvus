@@ -141,7 +141,7 @@ void hamming_range_search (
     size_t ncodes,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
-    const BitsetView& bitset);
+    const BitsetView bitset);
 
 /* Counting the number of matches or of cross-matches (without returning them)
    For use with function that assume pre-allocated memory */
