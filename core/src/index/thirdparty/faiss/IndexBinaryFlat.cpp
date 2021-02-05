@@ -40,7 +40,7 @@ void IndexBinaryFlat::reset() {
 
 void IndexBinaryFlat::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels,
-                             const BitsetView& bitset) const {
+                             const BitsetView bitset) const {
 
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float *D = reinterpret_cast<float*>(distances);
@@ -98,7 +98,7 @@ void IndexBinaryFlat::reconstruct(idx_t key, uint8_t *recons) const {
 
 void IndexBinaryFlat::range_search(idx_t n, const uint8_t *x, int radius,
                                    RangeSearchResult *result,
-                                   const BitsetView& bitset) const
+                                   const BitsetView bitset) const
 {
     FAISS_THROW_MSG("This interface is abandoned yet.");
 }
@@ -108,7 +108,7 @@ void IndexBinaryFlat::range_search(faiss::IndexBinary::idx_t n,
                                    float radius,
                                    std::vector<faiss::RangeSearchPartialResult*>& result,
                                    size_t buffer_size,
-                                   const faiss::BitsetView& bitset)
+                                   const faiss::BitsetView bitset)
 {
     switch (metric_type) {
         case METRIC_Jaccard: {

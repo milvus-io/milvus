@@ -47,7 +47,7 @@ class VecIndex : public Index {
     AddWithoutIds(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual DatasetPtr
-    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView& bitset) = 0;
+    Query(const DatasetPtr& dataset, const Config& config, const faiss::BitsetView bitset) = 0;
 
     virtual int64_t
     Dim() = 0;

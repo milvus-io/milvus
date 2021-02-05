@@ -430,7 +430,7 @@ void hamming_range_search (
     size_t code_size,
     std::vector<faiss::RangeSearchPartialResult*>& result,
     size_t buffer_size,
-    const BitsetView& bitset)
+    const BitsetView bitset)
 {
 
 #define HC(name) hamming_range_search_template<name> (a, b, na, nb, radius, code_size, result, buffer_size, bitset)

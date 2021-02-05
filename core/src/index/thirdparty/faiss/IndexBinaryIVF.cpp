@@ -148,7 +148,7 @@ void IndexBinaryIVF::set_direct_map_type (DirectMap::Type type)
 
 void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
                             int32_t *distances, idx_t *labels,
-                            const BitsetView& bitset) const {
+                            const BitsetView bitset) const {
   std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
   std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);
 
@@ -173,7 +173,7 @@ void IndexBinaryIVF::search(idx_t n, const uint8_t *x, idx_t k,
 }
 
 #if 0
-void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, const BitsetView& bitset) {
+void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, const BitsetView bitset) {
     make_direct_map(true);
 
     /* only get vector by 1 id */
@@ -186,7 +186,7 @@ void IndexBinaryIVF::get_vector_by_id(idx_t n, const idx_t *xid, uint8_t *x, con
 }
 
 void IndexBinaryIVF::search_by_id (idx_t n, const idx_t *xid, idx_t k, int32_t *distances, idx_t *labels,
-                                   const BitsetView& bitset) {
+                                   const BitsetView bitset) {
     make_direct_map(true);
 
     auto x = new uint8_t[n * d];
@@ -385,7 +385,7 @@ struct IVFBinaryScannerL2: BinaryInvertedListScanner {
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset) const override
+                       const BitsetView bitset) const override
     {
         using C = CMax<int32_t, idx_t>;
 
@@ -448,7 +448,7 @@ struct IVFBinaryScannerJaccard: BinaryInvertedListScanner {
                        const idx_t *ids,
                        int32_t *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset = nullptr) const override
+                       const BitsetView bitset = nullptr) const override
     {
         using C = CMax<float, idx_t>;
         float* psimi = (float*)simi;
@@ -521,7 +521,7 @@ void search_knn_hamming_heap(const IndexBinaryIVF& ivf,
                              bool store_pairs,
                              const IVFSearchParameters *params,
                              IndexIVFStats &index_ivf_stats,
-                             const BitsetView& bitset = nullptr)
+                             const BitsetView bitset = nullptr)
 {
     long nprobe = params ? params->nprobe : ivf.nprobe;
     long max_codes = params ? params->max_codes : ivf.max_codes;
@@ -618,7 +618,7 @@ void search_knn_binary_dis_heap(const IndexBinaryIVF& ivf,
                                 bool store_pairs,
                                 const IVFSearchParameters *params,
                                 IndexIVFStats &index_ivf_stats,
-                                const BitsetView& bitset = nullptr)
+                                const BitsetView bitset = nullptr)
 {
     long nprobe = params ? params->nprobe : ivf.nprobe;
     long max_codes = params ? params->max_codes : ivf.max_codes;
@@ -705,7 +705,7 @@ void search_knn_hamming_count(const IndexBinaryIVF& ivf,
                               idx_t *labels,
                               const IVFSearchParameters *params,
                               IndexIVFStats &index_ivf_stats,
-                              const BitsetView& bitset = nullptr) {
+                              const BitsetView bitset = nullptr) {
   const int nBuckets = ivf.d + 1;
   std::vector<int> all_counters(nx * nBuckets, 0);
   std::unique_ptr<idx_t[]> all_ids_per_dis(new idx_t[nx * nBuckets * k]);
@@ -803,7 +803,7 @@ void search_knn_hamming_count_1 (
                         idx_t *labels,
                         const IVFSearchParameters *params,
                         IndexIVFStats &index_ivf_stats,
-                        const BitsetView& bitset = nullptr) {
+                        const BitsetView bitset = nullptr) {
     switch (ivf.code_size) {
 #define HANDLE_CS(cs)                                                                  \
     case cs:                                                                           \
@@ -856,7 +856,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
                                         int32_t *distances, idx_t *labels,
                                         bool store_pairs,
                                         const IVFSearchParameters *params,
-                                        const BitsetView& bitset
+                                        const BitsetView bitset
                                         ) const {
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         if (use_heap) {
@@ -899,7 +899,7 @@ void IndexBinaryIVF::search_preassigned(idx_t n, const uint8_t *x, idx_t k,
 void IndexBinaryIVF::range_search(
         idx_t n, const uint8_t *x, int radius,
         RangeSearchResult *res,
-        const BitsetView& bitset) const
+        const BitsetView bitset) const
 {
     std::unique_ptr<idx_t[]> idx(new idx_t[n * nprobe]);
     std::unique_ptr<int32_t[]> coarse_dis(new int32_t[n * nprobe]);

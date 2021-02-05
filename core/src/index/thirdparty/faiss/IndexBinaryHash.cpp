@@ -209,7 +209,7 @@ search_single_query(const IndexBinaryHash & index, const uint8_t *q,
 
 void IndexBinaryHash::range_search(idx_t n, const uint8_t *x, int radius,
                                    RangeSearchResult *result,
-                                   const BitsetView& bitset) const
+                                   const BitsetView bitset) const
 {
 
     size_t nlist = 0, ndis = 0, n0 = 0;
@@ -237,7 +237,7 @@ void IndexBinaryHash::range_search(idx_t n, const uint8_t *x, int radius,
 
 void IndexBinaryHash::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels,
-                             const BitsetView& bitset) const
+                             const BitsetView bitset) const
 {
 
     using HeapForL2 = CMax<int32_t, idx_t>;
@@ -421,7 +421,7 @@ search_1_query_multihash(const IndexBinaryMultiHash & index, const uint8_t *xi,
 
 void IndexBinaryMultiHash::range_search(idx_t n, const uint8_t *x, int radius,
                                    RangeSearchResult *result,
-                                   const BitsetView& bitset) const
+                                   const BitsetView bitset) const
 {
 
     size_t nlist = 0, ndis = 0, n0 = 0;
@@ -449,7 +449,7 @@ void IndexBinaryMultiHash::range_search(idx_t n, const uint8_t *x, int radius,
 
 void IndexBinaryMultiHash::search(idx_t n, const uint8_t *x, idx_t k,
                              int32_t *distances, idx_t *labels,
-                             const BitsetView& bitset) const
+                             const BitsetView bitset) const
 {
 
     using HeapForL2 = CMax<int32_t, idx_t>;

@@ -170,7 +170,7 @@ void knn_inner_product (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
 
 /** Same as knn_inner_product, for the L2 distance */
 void knn_L2sqr (
@@ -178,14 +178,14 @@ void knn_L2sqr (
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
 
 void knn_jaccard (
         const float * x,
         const float * y,
         size_t d, size_t nx, size_t ny,
         float_maxheap_array_t * res,
-        const BitsetView& bitset = nullptr);
+        const BitsetView bitset = nullptr);
         
 /** same as knn_L2sqr, but base_shift[bno] is subtracted to all
  * computed distances.

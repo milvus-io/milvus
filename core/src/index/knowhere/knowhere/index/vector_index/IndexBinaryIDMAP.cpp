@@ -42,7 +42,7 @@ BinaryIDMAP::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView& bitset) {
+BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -67,7 +67,7 @@ BinaryIDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, const fa
 
 DynamicResultSegment
 BinaryIDMAP::QueryByDistance(const milvus::knowhere::DatasetPtr& dataset, const milvus::knowhere::Config& config,
-                             const faiss::BitsetView& bitset) {
+                             const faiss::BitsetView bitset) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -151,7 +151,7 @@ BinaryIDMAP::GetRawVectors() {
 
 void
 BinaryIDMAP::QueryImpl(int64_t n, const uint8_t* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& config, const faiss::BitsetView& bitset) {
+                       const Config& config, const faiss::BitsetView bitset) {
     // assign the metric type
     index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
 

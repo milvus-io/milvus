@@ -262,7 +262,7 @@ struct IVFScanner: InvertedListScanner {
                        const idx_t *ids,
                        float *simi, idx_t *idxi,
                        size_t k,
-                       const BitsetView& bitset) const override
+                       const BitsetView bitset) const override
     {
         size_t nup = 0;
         for (size_t j = 0; j < list_size; j++) {
@@ -285,7 +285,7 @@ struct IVFScanner: InvertedListScanner {
                            const idx_t *ids,
                            float radius,
                            RangeQueryResult & res,
-                           const BitsetView& bitset = nullptr) const override
+                           const BitsetView bitset = nullptr) const override
     {
         for (size_t j = 0; j < list_size; j++) {
             float dis = hc.compute (codes);
