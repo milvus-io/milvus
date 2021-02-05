@@ -1,6 +1,8 @@
 package masterservice
 
 import (
+	"log"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
@@ -195,6 +197,7 @@ func (t *DropCollectionReqTask) Execute() error {
 	if err = t.core.InvalidateCollectionMetaCache(t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName); err != nil {
 		return err
 	}
+
 	err = t.core.MetaTable.DeleteCollection(collMeta.ID)
 	if err != nil {
 		return err
@@ -214,6 +217,14 @@ func (t *DropCollectionReqTask) Execute() error {
 	if err != nil {
 		return err
 	}
+
+	//notify query service to release collection
+	go func() {
+		if err = t.core.ReleaseCollection(t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
+			log.Printf("%s", err.Error())
+		}
+	}()
+
 	return nil
 }
 
