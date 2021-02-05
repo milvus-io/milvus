@@ -64,9 +64,16 @@ func (qs *QueryService) Init() error {
 
 func (qs *QueryService) Start() error {
 	isInit := qs.isInit.Load().(bool)
-	if !isInit {
+
+	switch {
+	case !isInit:
 		return errors.New("call start before init")
+	case qs.dataServiceClient == nil:
+		return errors.New("dataService Client not set")
+	case qs.masterServiceClient == nil:
+		return errors.New("masterService Client not set")
 	}
+
 	qs.stateCode.Store(internalpb2.StateCode_HEALTHY)
 	return nil
 }
@@ -120,6 +127,17 @@ func (qs *QueryService) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb
 	var node *queryNodeInfo
 	if qs.enableGrpc {
 		client := nodeclient.NewClient(registerNodeAddress)
+		if err := client.Init(); err != nil {
+			return &querypb.RegisterNodeResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				},
+				InitParams: new(internalpb2.InitParams),
+			}, err
+		}
+		if err := client.Start(); err != nil {
+			return nil, err
+		}
 		node = newQueryNodeInfo(client)
 	} else {
 		client := querynode.NewQueryNode(qs.loopCtx, uint64(allocatedID))

@@ -6,30 +6,40 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc"
 
-	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
-	"github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
-
-	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/querypb"
-	"github.com/zilliztech/milvus-distributed/internal/queryservice"
+	qs "github.com/zilliztech/milvus-distributed/internal/queryservice"
 )
 
-type QueryService = queryservice.QueryService
-
 type Server struct {
-	grpcServer   *grpc.Server
-	queryService *QueryService
+	grpcServer *grpc.Server
+	grpcError  error
+	grpcErrMux sync.Mutex
 
 	loopCtx    context.Context
-	loopCancel func()
-	loopWg     sync.WaitGroup
+	loopCancel context.CancelFunc
+
+	queryService *qs.QueryService
+}
+
+func NewServer(ctx context.Context) (*Server, error) {
+	ctx1, cancel := context.WithCancel(ctx)
+	service, err := qs.NewQueryService(ctx1)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	return &Server{
+		queryService: service,
+		loopCtx:      ctx1,
+		loopCancel:   cancel,
+	}, nil
 }
 
 func (s *Server) Init() error {
@@ -42,28 +52,43 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) Start() error {
-	masterServiceClient, err := masterservice.NewGrpcClient(queryservice.Params.MasterServiceAddress, 30*time.Second)
+	log.Println("start query service ...")
+
+	s.grpcServer = grpc.NewServer()
+	querypb.RegisterQueryServiceServer(s.grpcServer, s)
+	log.Println("Starting start query service Server")
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(qs.Params.Port))
 	if err != nil {
 		return err
 	}
-	s.queryService.SetMasterService(masterServiceClient)
-	dataServiceClient := dataservice.NewClient(queryservice.Params.DataServiceAddress)
-	s.queryService.SetDataService(dataServiceClient)
-	log.Println("start query service ...")
-	s.loopWg.Add(1)
-	go s.grpcLoop()
+
+	go func() {
+		if err := s.grpcServer.Serve(lis); err != nil {
+			s.grpcErrMux.Lock()
+			defer s.grpcErrMux.Unlock()
+			s.grpcError = err
+		}
+	}()
+
+	s.grpcErrMux.Lock()
+	err = s.grpcError
+	s.grpcErrMux.Unlock()
+
+	if err != nil {
+		return err
+	}
+
 	s.queryService.Start()
 	return nil
 }
 
 func (s *Server) Stop() error {
-	s.queryService.Stop()
+	err := s.queryService.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
-	s.loopWg.Wait()
-	return nil
+	return err
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *commonpb.Empty) (*internalpb2.ComponentStates, error) {
@@ -120,12 +145,12 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *commonpb.Empty) 
 	}, nil
 }
 
-func (s *Server) SetMasterService(m queryservice.MasterServiceInterface) error {
+func (s *Server) SetMasterService(m qs.MasterServiceInterface) error {
 	s.queryService.SetMasterService(m)
 	return nil
 }
 
-func (s *Server) SetDataService(d queryservice.DataServiceInterface) error {
+func (s *Server) SetDataService(d qs.DataServiceInterface) error {
 	s.queryService.SetDataService(d)
 	return nil
 }
@@ -168,37 +193,4 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *commonpb.Empty) (*
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error) {
 	return s.queryService.GetSegmentInfo(req)
-}
-
-func NewServer(ctx context.Context) *Server {
-	ctx1, cancel := context.WithCancel(ctx)
-	service, err := queryservice.NewQueryService(ctx1)
-	if err != nil {
-		log.Fatal(errors.New("create QueryService failed"))
-	}
-
-	return &Server{
-		queryService: service,
-		loopCtx:      ctx1,
-		loopCancel:   cancel,
-	}
-}
-
-func (s *Server) grpcLoop() {
-	defer s.loopWg.Done()
-
-	log.Println("Starting start query service Server")
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(queryservice.Params.Port))
-	if err != nil {
-		log.Fatalf("query service grpc server fatal error=%v", err)
-	}
-
-	s.grpcServer = grpc.NewServer()
-	querypb.RegisterQueryServiceServer(s.grpcServer, s)
-
-	log.Println("queryService's server register finished")
-	if err = s.grpcServer.Serve(lis); err != nil {
-		log.Fatalf("queryService grpc server fatal error=%v", err)
-	}
-	log.Println("query service grpc server starting...")
 }

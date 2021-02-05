@@ -30,7 +30,10 @@ func NewQueryService(ctx context.Context) (*QueryService, error) {
 	const interval = 200
 
 	queryservice.Params.Init()
-	svr := qs.NewServer(ctx)
+	svr, err := qs.NewServer(ctx)
+	if err != nil {
+		panic(err)
+	}
 	log.Println("Queryservice id is", queryservice.Params.QueryServiceID)
 
 	// --- Master Service Client ---
@@ -66,7 +69,7 @@ func NewQueryService(ctx context.Context) (*QueryService, error) {
 		if msStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 			continue
 		}
-		if msStates.State.StateCode != internalpb2.StateCode_HEALTHY {
+		if msStates.State.StateCode != internalpb2.StateCode_INITIALIZING && msStates.State.StateCode != internalpb2.StateCode_HEALTHY {
 			continue
 		}
 		break
