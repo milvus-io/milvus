@@ -180,15 +180,18 @@ func (s *Server) init() error {
 	s.impl.SetIndexServiceClient(s.indexServiceClient)
 	log.Println("set index service client ...")
 
-	// queryServiceAddr := Params.QueryServiceAddress
-	// log.Println("query service address: ", queryServiceAddr)
-	// s.queryServiceClient = grpcqueryserviceclient.NewClient(queryServiceAddr)
-	// err = s.queryServiceClient.Init()
-	// if err != nil {
-	// 	return err
-	// }
-	// s.impl.SetQueryServiceClient(s.queryServiceClient)
-	// log.Println("set query service client ...")
+	queryServiceAddr := Params.QueryServiceAddress
+	log.Println("query server address: ", queryServiceAddr)
+	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(queryServiceAddr, timeout)
+	if err != nil {
+		return err
+	}
+	err = s.queryServiceClient.Init()
+	if err != nil {
+		return err
+	}
+	s.impl.SetQueryServiceClient(s.queryServiceClient)
+	log.Println("set query service client ...")
 
 	proxynode.Params.Init()
 	log.Println("init params done ...")
