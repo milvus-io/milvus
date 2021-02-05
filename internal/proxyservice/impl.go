@@ -121,7 +121,7 @@ func (s *ServiceImpl) Init() error {
 		"proxyservicesub") // TODO: add config
 	log.Println("create node time tick consumer channel: ", Params.NodeTimeTickChannel)
 
-	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{0}, 10)
+	ttBarrier := newSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)
 	log.Println("create soft time tick barrier ...")
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
 	log.Println("create time tick ...")
