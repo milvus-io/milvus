@@ -111,6 +111,10 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
+	core.ReleaseCollection = func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+		return nil
+	}
+
 	err = svr.Start()
 	assert.Nil(t, err)
 
