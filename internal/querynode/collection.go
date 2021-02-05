@@ -19,20 +19,30 @@ import (
 type Collection struct {
 	collectionPtr C.CCollection
 	id            UniqueID
+	partitionIDs  []UniqueID
 	schema        *schemapb.CollectionSchema
-	partitions    []*Partition
 }
 
 func (c *Collection) ID() UniqueID {
 	return c.id
 }
 
-func (c *Collection) Partitions() *[]*Partition {
-	return &c.partitions
-}
-
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
+}
+
+func (c *Collection) addPartitionID(partitionID UniqueID) {
+	c.partitionIDs = append(c.partitionIDs, partitionID)
+}
+
+func (c *Collection) removePartitionID(partitionID UniqueID) {
+	tmpIDs := make([]UniqueID, 0)
+	for _, id := range c.partitionIDs {
+		if id == partitionID {
+			tmpIDs = append(tmpIDs, id)
+		}
+	}
+	c.partitionIDs = tmpIDs
 }
 
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {

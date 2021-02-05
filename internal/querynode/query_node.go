@@ -81,17 +81,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64) *QueryNode {
 		statsService:    nil,
 	}
 
-	segmentsMap := make(map[int64]*Segment)
-	collections := make([]*Collection, 0)
-
-	tSafe := newTSafe()
-
-	node.replica = &collectionReplicaImpl{
-		collections: collections,
-		segments:    segmentsMap,
-
-		tSafe: tSafe,
-	}
+	node.replica = newCollectionReplicaImpl()
 	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
 	return node
 }
@@ -108,17 +98,7 @@ func NewQueryNodeWithoutID(ctx context.Context) *QueryNode {
 		statsService:    nil,
 	}
 
-	segmentsMap := make(map[int64]*Segment)
-	collections := make([]*Collection, 0)
-
-	tSafe := newTSafe()
-
-	node.replica = &collectionReplicaImpl{
-		collections: collections,
-		segments:    segmentsMap,
-
-		tSafe: tSafe,
-	}
+	node.replica = newCollectionReplicaImpl()
 	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
 	return node
 }
@@ -403,7 +383,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 	segmentIDs := in.SegmentIDs
 	fieldIDs := in.FieldIDs
 
-	err := node.replica.enablePartitionDM(collectionID, partitionID)
+	err := node.replica.enablePartitionDM(partitionID)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -444,7 +424,7 @@ func (node *QueryNode) LoadSegments(in *queryPb.LoadSegmentRequest) (*commonpb.S
 
 func (node *QueryNode) ReleaseSegments(in *queryPb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	for _, id := range in.PartitionIDs {
-		err := node.replica.enablePartitionDM(in.CollectionID, id)
+		err := node.replica.enablePartitionDM(id)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,

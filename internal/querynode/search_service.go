@@ -245,11 +245,9 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	matchedSegments := make([]*Segment, 0)
 
 	//fmt.Println("search msg's partitionID = ", partitionIDsInQuery)
-
-	var partitionIDsInCol []UniqueID
-	for _, partition := range collection.partitions {
-		partitionID := partition.ID()
-		partitionIDsInCol = append(partitionIDsInCol, partitionID)
+	partitionIDsInCol, err := ss.replica.getPartitionIDs(collectionID)
+	if err != nil {
+		return err
 	}
 	var searchPartitionIDs []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
@@ -267,10 +265,16 @@ func (ss *searchService) search(msg msgstream.TsMsg) error {
 	}
 
 	for _, partitionID := range searchPartitionIDs {
-		partition, _ := ss.replica.getPartitionByID(collectionID, partitionID)
-		for _, segment := range partition.segments {
+		segmentIDs, err := ss.replica.getSegmentIDs(partitionID)
+		if err != nil {
+			return err
+		}
+		for _, segmentID := range segmentIDs {
 			//fmt.Println("dsl = ", dsl)
-
+			segment, err := ss.replica.getSegmentByID(segmentID)
+			if err != nil {
+				return err
+			}
 			searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
 
 			if err != nil {
