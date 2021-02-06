@@ -3,6 +3,7 @@ package indexservice
 import (
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -27,20 +28,23 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (pt *ParamTable) Init() {
-	pt.BaseTable.Init()
-	pt.initAddress()
-	pt.initPort()
-	pt.initEtcdAddress()
-	pt.initMasterAddress()
-	pt.initMetaRootPath()
-	pt.initKvRootPath()
-	pt.initMinIOAddress()
-	pt.initMinIOAccessKeyID()
-	pt.initMinIOSecretAccessKey()
-	pt.initMinIOUseSSL()
-	pt.initMinioBucketName()
+	once.Do(func() {
+		pt.BaseTable.Init()
+		pt.initAddress()
+		pt.initPort()
+		pt.initEtcdAddress()
+		pt.initMasterAddress()
+		pt.initMetaRootPath()
+		pt.initKvRootPath()
+		pt.initMinIOAddress()
+		pt.initMinIOAccessKeyID()
+		pt.initMinIOSecretAccessKey()
+		pt.initMinIOUseSSL()
+		pt.initMinioBucketName()
+	})
 }
 
 func (pt *ParamTable) initAddress() {

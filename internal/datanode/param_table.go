@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -67,54 +68,57 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (p *ParamTable) Init() {
-	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/data_node.yaml")
-	if err != nil {
-		panic(err)
-	}
+	once.Do(func() {
+		p.BaseTable.Init()
+		err := p.LoadYaml("advanced/data_node.yaml")
+		if err != nil {
+			panic(err)
+		}
 
-	// === DataNode Internal Components Configs ===
-	p.initNodeID()
-	p.initIP()
-	p.initPort()
-	p.initFlowGraphMaxQueueLength()
-	p.initFlowGraphMaxParallelism()
-	p.initFlushInsertBufferSize()
-	p.initFlushDdBufferSize()
-	p.initInsertBinlogRootPath()
-	p.initDdBinlogRootPath()
+		// === DataNode Internal Components Configs ===
+		p.initNodeID()
+		p.initIP()
+		p.initPort()
+		p.initFlowGraphMaxQueueLength()
+		p.initFlowGraphMaxParallelism()
+		p.initFlushInsertBufferSize()
+		p.initFlushDdBufferSize()
+		p.initInsertBinlogRootPath()
+		p.initDdBinlogRootPath()
 
-	// === DataNode External Components Configs ===
-	// --- Master ---
-	p.initMasterAddress()
-	p.initServiceAddress()
+		// === DataNode External Components Configs ===
+		// --- Master ---
+		p.initMasterAddress()
+		p.initServiceAddress()
 
-	// --- Pulsar ---
-	p.initPulsarAddress()
+		// --- Pulsar ---
+		p.initPulsarAddress()
 
-	// - insert channel -
-	p.initInsertChannelNames()
+		// - insert channel -
+		p.initInsertChannelNames()
 
-	// - dd channel -
-	p.initDDChannelNames()
+		// - dd channel -
+		p.initDDChannelNames()
 
-	// - channel subname -
-	p.initMsgChannelSubName()
+		// - channel subname -
+		p.initMsgChannelSubName()
 
-	// --- ETCD ---
-	p.initEtcdAddress()
-	p.initMetaRootPath()
-	p.initSegFlushMetaSubPath()
-	p.initDDLFlushMetaSubPath()
+		// --- ETCD ---
+		p.initEtcdAddress()
+		p.initMetaRootPath()
+		p.initSegFlushMetaSubPath()
+		p.initDDLFlushMetaSubPath()
 
-	// --- MinIO ---
-	p.initMinioAddress()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSL()
-	p.initMinioBucketName()
+		// --- MinIO ---
+		p.initMinioAddress()
+		p.initMinioAccessKeyID()
+		p.initMinioSecretAccessKey()
+		p.initMinioUseSSL()
+		p.initMinioBucketName()
+	})
 }
 
 // ==== DataNode internal components configs ====

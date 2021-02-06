@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -78,88 +79,91 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (p *ParamTable) Init() {
-	p.BaseTable.Init()
-	err := p.LoadYaml("advanced/query_node.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	err = p.LoadYaml("milvus.yaml")
-	if err != nil {
-		panic(err)
-	}
-
-	queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
-	if queryNodeIDStr == "" {
-		queryNodeIDList := p.QueryNodeIDList()
-		if len(queryNodeIDList) <= 0 {
-			queryNodeIDStr = "0"
-		} else {
-			queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
+	once.Do(func() {
+		p.BaseTable.Init()
+		err := p.LoadYaml("advanced/query_node.yaml")
+		if err != nil {
+			panic(err)
 		}
-	}
 
-	err = p.LoadYaml("advanced/common.yaml")
-	if err != nil {
-		panic(err)
-	}
-	err = p.Save("_queryNodeID", queryNodeIDStr)
-	if err != nil {
-		panic(err)
-	}
+		err = p.LoadYaml("milvus.yaml")
+		if err != nil {
+			panic(err)
+		}
 
-	p.initMinioEndPoint()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSLStr()
-	p.initMinioBucketName()
+		queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
+		if queryNodeIDStr == "" {
+			queryNodeIDList := p.QueryNodeIDList()
+			if len(queryNodeIDList) <= 0 {
+				queryNodeIDStr = "0"
+			} else {
+				queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
+			}
+		}
 
-	p.initPulsarAddress()
-	p.initETCDAddress()
-	p.initMetaRootPath()
+		err = p.LoadYaml("advanced/common.yaml")
+		if err != nil {
+			panic(err)
+		}
+		err = p.Save("_queryNodeID", queryNodeIDStr)
+		if err != nil {
+			panic(err)
+		}
 
-	p.initQueryNodeID()
-	p.initQueryNodeNum()
+		p.initMinioEndPoint()
+		p.initMinioAccessKeyID()
+		p.initMinioSecretAccessKey()
+		p.initMinioUseSSLStr()
+		p.initMinioBucketName()
 
-	p.initGracefulTime()
-	p.initMsgChannelSubName()
-	p.initDefaultPartitionTag()
-	p.initSliceIndex()
+		p.initPulsarAddress()
+		p.initETCDAddress()
+		p.initMetaRootPath()
 
-	p.initFlowGraphMaxQueueLength()
-	p.initFlowGraphMaxParallelism()
+		p.initQueryNodeID()
+		p.initQueryNodeNum()
 
-	p.initInsertChannelNames()
-	p.initInsertChannelRange()
-	p.initInsertReceiveBufSize()
-	p.initInsertPulsarBufSize()
+		p.initGracefulTime()
+		p.initMsgChannelSubName()
+		p.initDefaultPartitionTag()
+		p.initSliceIndex()
 
-	p.initDDChannelNames()
-	p.initDDReceiveBufSize()
-	p.initDDPulsarBufSize()
+		p.initFlowGraphMaxQueueLength()
+		p.initFlowGraphMaxParallelism()
 
-	p.initSearchChannelNames()
-	p.initSearchResultChannelNames()
-	p.initSearchReceiveBufSize()
-	p.initSearchPulsarBufSize()
-	p.initSearchResultReceiveBufSize()
+		p.initInsertChannelNames()
+		p.initInsertChannelRange()
+		p.initInsertReceiveBufSize()
+		p.initInsertPulsarBufSize()
 
-	p.initStatsPublishInterval()
-	p.initStatsChannelName()
-	p.initStatsReceiveBufSize()
+		p.initDDChannelNames()
+		p.initDDReceiveBufSize()
+		p.initDDPulsarBufSize()
 
-	p.initLoadIndexChannelNames()
-	p.initLoadIndexReceiveBufSize()
-	p.initLoadIndexPulsarBufSize()
+		p.initSearchChannelNames()
+		p.initSearchResultChannelNames()
+		p.initSearchReceiveBufSize()
+		p.initSearchPulsarBufSize()
+		p.initSearchResultReceiveBufSize()
 
-	p.initTimeTickChannelName()
-	p.initTimeTickReceiveBufSize()
+		p.initStatsPublishInterval()
+		p.initStatsChannelName()
+		p.initStatsReceiveBufSize()
 
-	p.initAddress()
-	p.initPort()
-	p.initMasterServiceAddress()
+		p.initLoadIndexChannelNames()
+		p.initLoadIndexReceiveBufSize()
+		p.initLoadIndexPulsarBufSize()
+
+		p.initTimeTickChannelName()
+		p.initTimeTickReceiveBufSize()
+
+		p.initAddress()
+		p.initPort()
+		p.initMasterServiceAddress()
+	})
 }
 
 func (p *ParamTable) initMinioEndPoint() {

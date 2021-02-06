@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
 )
@@ -26,10 +27,13 @@ type ParamTable struct {
 }
 
 var Params ParamTable
+var once sync.Once
 
 func (pt *ParamTable) Init() {
-	pt.BaseTable.Init()
-	pt.initParams()
+	once.Do(func() {
+		pt.BaseTable.Init()
+		pt.initParams()
+	})
 }
 
 // todo
