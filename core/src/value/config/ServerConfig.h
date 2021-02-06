@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "index/archive/KnowhereConfig.h"
 #include "value/Value.h"
 #include "value/ValueType.h"
 
@@ -31,12 +32,7 @@ const valueEnum ClusterRoleMap{
     {"ro", ClusterRole::RO},
 };
 
-enum SimdType {
-    AUTO = 1,
-    SSE,
-    AVX2,
-    AVX512,
-};
+using SimdType = engine::KnowhereConfig::SimdType;
 
 const valueEnum SimdMap{
     {"auto", SimdType::AUTO},
@@ -45,10 +41,7 @@ const valueEnum SimdMap{
     {"avx512", SimdType::AVX512},
 };
 
-enum ClusteringType {
-    K_MEANS = 1,
-    K_MEANS_PLUS_PLUS,
-};
+using ClusteringType = engine::KnowhereConfig::ClusteringType;
 
 const valueEnum ClusteringMap{
     {"k-means", ClusteringType::K_MEANS},
