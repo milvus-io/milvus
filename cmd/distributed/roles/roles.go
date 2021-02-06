@@ -22,6 +22,7 @@ type MilvusRoles struct {
 	EnableIndexService     bool `env:"ENABLE_INDEX_SERVICE"`
 	EnableIndexNode        bool `env:"ENABLE_INDEX_NODE"`
 	EnableMsgStreamService bool `env:"ENABLE_MSGSTREAM_SERVICE"`
+	EnableStandalone       bool `env:"ENABLE_STANDALONE"`
 }
 
 func (mr *MilvusRoles) HasAnyRole() bool {
@@ -29,7 +30,7 @@ func (mr *MilvusRoles) HasAnyRole() bool {
 		mr.EnableProxyService || mr.EnableProxyNode ||
 		mr.EnableQueryService || mr.EnableQueryNode ||
 		mr.EnableDataService || mr.EnableDataNode ||
-		mr.EnableIndexService || mr.EnableIndexNode
+		mr.EnableIndexService || mr.EnableIndexNode || mr.EnableStandalone
 }
 
 func (mr *MilvusRoles) EnvValue(env string) bool {
