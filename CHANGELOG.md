@@ -11,7 +11,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#1970 Improve the performance of BinaryFlat by AVX2
--   \#4676 Support configurable metric labels cluster and instance for Prometheus
+-   \#4676,#4614 Support configurable metric labels cluster and instance for Prometheus (implemented by IQIYI)
 
 ## Task
 
@@ -41,7 +41,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4318 Fix memory leak in IVF indexes
 
 ## Feature
--   \#3773 Support IVF_PQ to run on FPGA
+-   \#3773 Support IVF_PQ to run on FPGA (implemented by Montage-tech)
 
 ## Improvement
 -   \#3775 Improve search performance in the case that no item deleted
