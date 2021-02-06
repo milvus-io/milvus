@@ -76,7 +76,7 @@ type RocksMQ struct {
 	produceMu   sync.Mutex
 	consumeMu   sync.Mutex
 
-	notify map[string][]Consumer
+	notify map[string][]*Consumer
 	//ctx              context.Context
 	//serverLoopWg     sync.WaitGroup
 	//serverLoopCtx    context.Context
@@ -107,7 +107,7 @@ func NewRocksMQ(name string, idAllocator IDAllocator) (*RocksMQ, error) {
 		idAllocator: idAllocator,
 	}
 	rmq.channels = make(map[string]*Channel)
-	rmq.notify = make(map[string][]Consumer)
+	rmq.notify = make(map[string][]*Consumer)
 	return rmq, nil
 }
 
@@ -166,17 +166,24 @@ func (rmq *RocksMQ) DestroyChannel(channelName string) error {
 	return nil
 }
 
-func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) error {
+func (rmq *RocksMQ) CreateConsumerGroup(groupName string, channelName string) (*Consumer, error) {
 	key := groupName + "/" + channelName + "/current_id"
 	if rmq.checkKeyExist(key) {
-		return errors.New("ConsumerGroup " + groupName + " already exists.")
+		return nil, errors.New("ConsumerGroup " + groupName + " already exists.")
 	}
 	err := rmq.kv.Save(key, DefaultMessageID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	//msgNum := make(chan int, 100)
+	consumer := Consumer{
+		GroupName:   groupName,
+		ChannelName: channelName,
+		//MsgNum:      msgNum,
+	}
+	rmq.notify[channelName] = append(rmq.notify[channelName], &consumer)
+	return &consumer, nil
 }
 
 func (rmq *RocksMQ) DestroyConsumerGroup(groupName string, channelName string) error {
@@ -243,7 +250,9 @@ func (rmq *RocksMQ) Produce(channelName string, messages []ProducerMessage) erro
 	}
 
 	for _, consumer := range rmq.notify[channelName] {
-		consumer.MsgNum <- msgLen
+		if consumer.MsgNum != nil {
+			consumer.MsgNum <- msgLen
+		}
 	}
 	return nil
 }
