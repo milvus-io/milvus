@@ -1,8 +1,6 @@
 package dataservice
 
 import (
-	"fmt"
-
 	"github.com/golang/protobuf/proto"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
@@ -37,7 +35,7 @@ func (handler *ddHandler) HandleDDMsg(msg msgstream.TsMsg) error {
 		realMsg := msg.(*msgstream.DropPartitionMsg)
 		return handler.handleDropPartition(realMsg)
 	default:
-		return fmt.Errorf("unknown msg type: %v", msg.Type())
+		return nil
 	}
 }
 

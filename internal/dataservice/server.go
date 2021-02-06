@@ -143,10 +143,10 @@ func (s *Server) Start() error {
 	}
 	s.waitDataNodeRegister()
 	s.cluster.WatchInsertChannels(s.insertChannels)
-	s.startServerLoop()
 	if err = s.initMsgProducer(); err != nil {
 		return err
 	}
+	s.startServerLoop()
 	s.state.Store(internalpb2.StateCode_HEALTHY)
 	log.Println("start success")
 	return nil
@@ -185,6 +185,8 @@ func (s *Server) initMsgProducer() error {
 	}
 	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
 	s.ttMsgStream.Start()
+	s.ttBarrier = timesync.NewHardTimeTickBarrier(s.ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
+	s.ttBarrier.Start()
 	if s.k2sMsgStream, err = factory.NewMsgStream(s.ctx); err != nil {
 		return err
 	}
@@ -298,11 +300,10 @@ func (s *Server) checkMasterIsHealthy() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(3)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startSegmentFlushChannel(s.serverLoopCtx)
 	go s.startDDChannel(s.serverLoopCtx)
-	go s.startTTBarrier(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -390,12 +391,6 @@ func (s *Server) startDDChannel(ctx context.Context) {
 	}
 }
 
-func (s *Server) startTTBarrier(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	s.ttBarrier = timesync.NewHardTimeTickBarrier(ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
-	s.ttBarrier.StartBackgroundLoop()
-}
-
 func (s *Server) waitDataNodeRegister() {
 	log.Println("waiting data node to register")
 	<-s.registerFinishCh
@@ -404,6 +399,7 @@ func (s *Server) waitDataNodeRegister() {
 
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
+	s.ttBarrier.Close()
 	s.ttMsgStream.Close()
 	s.k2sMsgStream.Close()
 	s.msgProducer.Close()

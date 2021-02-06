@@ -35,7 +35,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	qn.Params.Init()
 	s.grpcServer = grpc.NewServer()
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", qn.Params.QueryNodePort))
+	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", qn.Params.QueryNodeIP, qn.Params.QueryNodePort))
 	if err != nil {
 		return nil, err
 	}

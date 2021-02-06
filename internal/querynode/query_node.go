@@ -109,7 +109,6 @@ func Init() {
 }
 
 func (node *QueryNode) Init() error {
-	Params.Init()
 	registerReq := &queryPb.RegisterNodeRequest{
 		Address: &commonpb.Address{
 			Ip:   Params.QueryNodeIP,

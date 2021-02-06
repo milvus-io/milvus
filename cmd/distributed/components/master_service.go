@@ -109,12 +109,16 @@ func NewMasterService(ctx context.Context) (*MasterService, error) {
 	}
 
 	qs.Params.Init()
-	log.Printf("query service address = %s:%d", qs.Params.Address, qs.Params.Port)
-	queryService, err := qsc.NewClient(fmt.Sprintf("%s:%d", qs.Params.Address, qs.Params.Port), time.Duration(ms.Params.Timeout)*time.Second)
+	queryService, err := qsc.NewClient(qs.Params.Address, time.Duration(ms.Params.Timeout)*time.Second)
 	if err != nil {
 		return nil, err
 	}
-
+	if err = queryService.Init(); err != nil {
+		return nil, err
+	}
+	if err = queryService.Start(); err != nil {
+		return nil, err
+	}
 	if err = svr.SetQueryService(queryService); err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math"
+	"sync"
 	"sync/atomic"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
@@ -18,7 +19,8 @@ type (
 
 	TimeTickBarrier interface {
 		GetTimeTick() (Timestamp, error)
-		StartBackgroundLoop()
+		Start()
+		Close()
 	}
 
 	softTimeTickBarrier struct {
@@ -31,10 +33,13 @@ type (
 	}
 
 	hardTimeTickBarrier struct {
-		peer2Tt  map[UniqueID]Timestamp
-		outTt    chan Timestamp
-		ttStream ms.MsgStream
-		ctx      context.Context
+		peer2Tt    map[UniqueID]Timestamp
+		outTt      chan Timestamp
+		ttStream   ms.MsgStream
+		ctx        context.Context
+		wg         sync.WaitGroup
+		loopCtx    context.Context
+		loopCancel context.CancelFunc
 	}
 )
 
@@ -80,7 +85,7 @@ func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	}
 }
 
-func (ttBarrier *softTimeTickBarrier) StartBackgroundLoop() {
+func (ttBarrier *softTimeTickBarrier) Start() {
 	for {
 		select {
 		case <-ttBarrier.ctx.Done():
@@ -137,44 +142,57 @@ func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp, error) {
 	}
 }
 
-func (ttBarrier *hardTimeTickBarrier) StartBackgroundLoop() {
+func (ttBarrier *hardTimeTickBarrier) Start() {
 	// Last timestamp synchronized
+	ttBarrier.wg.Add(1)
+	ttBarrier.loopCtx, ttBarrier.loopCancel = context.WithCancel(ttBarrier.ctx)
 	state := Timestamp(0)
-	for {
-		select {
-		case <-ttBarrier.ctx.Done():
-			log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
-			return
-		default:
-		}
-		ttmsgs := ttBarrier.ttStream.Consume()
-		if len(ttmsgs.Msgs) > 0 {
-			for _, timetickmsg := range ttmsgs.Msgs {
-				// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
-				// that `ttmsg.Timestamp > oldT`
-				ttmsg := timetickmsg.(*ms.TimeTickMsg)
+	go func(ctx context.Context) {
+		defer ttBarrier.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("[TtBarrierStart] %s\n", ttBarrier.ctx.Err())
+				return
+			default:
+			}
+			ttmsgs := ttBarrier.ttStream.Consume()
+			if len(ttmsgs.Msgs) > 0 {
+				log.Printf("receive tt msg")
+				for _, timetickmsg := range ttmsgs.Msgs {
+					// Suppose ttmsg.Timestamp from stream is always larger than the previous one,
+					// that `ttmsg.Timestamp > oldT`
+					ttmsg := timetickmsg.(*ms.TimeTickMsg)
 
-				oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
-				if !ok {
-					log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
-					continue
-				}
+					oldT, ok := ttBarrier.peer2Tt[ttmsg.Base.SourceID]
+					if !ok {
+						log.Printf("[hardTimeTickBarrier] Warning: peerID %d not exist\n", ttmsg.Base.SourceID)
+						continue
+					}
 
-				if oldT > state {
-					log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
-						ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
-				}
+					if oldT > state {
+						log.Printf("[hardTimeTickBarrier] Warning: peer(%d) timestamp(%d) ahead\n",
+							ttmsg.Base.SourceID, ttmsg.Base.Timestamp)
+					}
 
-				ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
+					ttBarrier.peer2Tt[ttmsg.Base.SourceID] = ttmsg.Base.Timestamp
 
-				newState := ttBarrier.minTimestamp()
-				if newState > state {
-					ttBarrier.outTt <- newState
-					state = newState
+					newState := ttBarrier.minTimestamp()
+					log.Printf("new state %d", newState)
+					if newState > state {
+						ttBarrier.outTt <- newState
+						log.Printf("outtttt")
+						state = newState
+					}
 				}
 			}
 		}
-	}
+	}(ttBarrier.loopCtx)
+}
+
+func (ttBarrier *hardTimeTickBarrier) Close() {
+	ttBarrier.loopCancel()
+	ttBarrier.wg.Wait()
 }
 
 func (ttBarrier *hardTimeTickBarrier) minTimestamp() Timestamp {

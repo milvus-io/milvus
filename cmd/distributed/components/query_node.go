@@ -215,7 +215,6 @@ func NewQueryNode(ctx context.Context) (*QueryNode, error) {
 		indexService:  indexService,
 		queryService:  queryService,
 	}, nil
-
 }
 
 func (q *QueryNode) Run() error {
