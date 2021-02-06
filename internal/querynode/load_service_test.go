@@ -1126,19 +1126,19 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 	assert.NoError(t, err)
 
-	fieldsMap := node.loadService.getTargetFields(paths, srcFieldIDs, fieldIDs)
+	fieldsMap := node.loadService.segLoader.getTargetFields(paths, srcFieldIDs, fieldIDs)
 	assert.Equal(t, len(fieldsMap), 2)
 
 	segment, err := node.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
 
-	err = node.loadService.loadSegmentFieldsData(segment, fieldsMap)
+	err = node.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
 	assert.NoError(t, err)
 
 	indexPaths, err := generateIndex(segmentID)
 	assert.NoError(t, err)
 
-	err = node.loadService.loadIndexImmediate(segment, indexPaths)
+	err = node.loadService.segLoader.indexLoader.loadIndexImmediate(segment, indexPaths)
 	assert.NoError(t, err)
 
 	// do search
