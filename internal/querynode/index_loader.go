@@ -323,7 +323,6 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 	}
 
 	indexFilePathRequest := &indexpb.IndexFilePathsRequest{
-		// TODO: rename indexIDs to buildIDs
 		IndexBuildIDs: []UniqueID{indexBuildID},
 	}
 	pathResponse, err := loader.indexClient.GetIndexFilePaths(indexFilePathRequest)
