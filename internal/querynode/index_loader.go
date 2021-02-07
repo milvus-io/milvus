@@ -41,8 +41,9 @@ type loadIndex struct {
 }
 
 func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
-	collectionIDs, _, segmentIDs := loader.replica.getEnabledSealedSegmentsBySegmentType(segTypeSealed)
+	collectionIDs, _, segmentIDs := loader.replica.getSealedSegmentsBySegmentType(segTypeSealed)
 	if len(collectionIDs) <= 0 {
+		wg.Done()
 		return
 	}
 	fmt.Println("do load index for sealed segments:", segmentIDs)

@@ -40,8 +40,9 @@ func (s *loadService) close() {
 }
 
 func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
-	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getEnabledSealedSegmentsBySegmentType(segTypeGrowing)
+	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSealedSegmentsBySegmentType(segTypeGrowing)
 	if len(collectionIDs) <= 0 {
+		wg.Done()
 		return
 	}
 	fmt.Println("do load segment for growing segments:", segmentIDs)
@@ -92,7 +93,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	_, buildID, errIndex := s.segLoader.indexLoader.getIndexInfo(collectionID, segmentID)
 	if errIndex == nil {
 		// we don't need load to vector fields
-		vectorFields, err := s.segLoader.replica.getVecFieldIDsByCollectionID(segmentID)
+		vectorFields, err := s.segLoader.replica.getVecFieldIDsByCollectionID(collectionID)
 		if err != nil {
 			return err
 		}

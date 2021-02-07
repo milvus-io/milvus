@@ -61,6 +61,7 @@ type collectionReplica interface {
 
 	getSegmentStatistics() []*internalpb2.SegmentStats
 	getEnabledSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
+	getSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
 	getTSafe() tSafe
@@ -477,9 +478,28 @@ func (colReplica *collectionReplicaImpl) getEnabledSealedSegmentsBySegmentType(s
 			}
 			if segment.getType() == segType {
 				targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
-				targetPartitionIDs = append(targetPartitionIDs, segment.collectionID)
+				targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
 				targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
 			}
+		}
+	}
+
+	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
+}
+
+func (colReplica *collectionReplicaImpl) getSealedSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	targetCollectionIDs := make([]UniqueID, 0)
+	targetPartitionIDs := make([]UniqueID, 0)
+	targetSegmentIDs := make([]UniqueID, 0)
+
+	for _, segment := range colReplica.segments {
+		if segment.getType() == segType {
+			targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
+			targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
+			targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
 		}
 	}
 
