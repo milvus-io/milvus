@@ -19,7 +19,7 @@
 #include <unordered_map>
 
 #include "db/snapshot/Snapshots.h"
-#include "index/archive/KnowhereResource.h"
+#include "index/archive/KnowhereConfig.h"
 #include "log/LogMgr.h"
 #include "metrics/SystemInfoCollector.h"
 #include "scheduler/SchedInst.h"
@@ -266,22 +266,34 @@ Status
 Server::StartService() {
     Status stat;
     {
-        milvus::engine::KnowhereResource::SetSimdType(config.engine.simd_type());
-        stat = milvus::engine::KnowhereResource::FaissHook();
+        stat = milvus::engine::KnowhereConfig::SetSimdType(
+            static_cast<engine::KnowhereConfig::SimdType>(config.engine.simd_type()));
+        if (!stat.ok()) {
+            LOG_SERVER_ERROR_ << "KnowhereConfig initialize fail: " << stat.message();
+            goto FAIL;
+        }
 
         // init faiss global variable
-        milvus::engine::KnowhereResource::SetBlasThreshold(config.engine.use_blas_threshold());
-        milvus::engine::KnowhereResource::SetEarlyStopThreshold(config.engine.early_stop_threshold());
-        milvus::engine::KnowhereResource::SetClusteringType(config.engine.clustering_type());
+        milvus::engine::KnowhereConfig::SetBlasThreshold(config.engine.use_blas_threshold());
+        milvus::engine::KnowhereConfig::SetEarlyStopThreshold(config.engine.early_stop_threshold());
+        milvus::engine::KnowhereConfig::SetClusteringType(
+            static_cast<engine::KnowhereConfig::ClusteringType>(config.engine.clustering_type()));
 
-        milvus::engine::KnowhereResource::SetLogHandler();
-        milvus::engine::KnowhereResource::SetStatisticsLevel(config.engine.statistics_level());
+        milvus::engine::KnowhereConfig::SetLogHandler();
+        milvus::engine::KnowhereConfig::SetStatisticsLevel(config.engine.statistics_level());
 
-        milvus::engine::KnowhereResource::SetGPUEnable(config.gpu.enable());
-    }
-    if (!stat.ok()) {
-        LOG_SERVER_ERROR_ << "KnowhereResource initialize fail: " << stat.message();
-        goto FAIL;
+#ifdef MILVUS_GPU_VERSION
+        if (config.gpu.enable()) {
+            std::vector<int64_t> build_index_gpus = ParseGPUDevices(config.gpu.build_index_devices());
+            std::vector<int64_t> search_gpus = ParseGPUDevices(config.gpu.search_devices());
+            for (auto sid : search_gpus) {
+                if (std::find(build_index_gpus.begin(), build_index_gpus.end(), sid) == build_index_gpus.end()) {
+                    build_index_gpus.push_back(sid);
+                }
+            }
+            milvus::engine::KnowhereConfig::InitGPUResource(build_index_gpus);
+        }
+#endif
     }
 
     engine::snapshot::Snapshots::GetInstance().StartService();
@@ -336,7 +348,9 @@ Server::StopService() {
     grpc::GrpcServer::GetInstance().Stop();
     scheduler::StopSchedulerService();
     engine::snapshot::Snapshots::GetInstance().StopService();
-    engine::KnowhereResource::Finalize();
+#ifdef MILVUS_GPU_VERSION
+    engine::KnowhereConfig::FreeGPUResource();
+#endif
 }
 
 std::string
