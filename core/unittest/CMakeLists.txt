@@ -63,7 +63,7 @@ set( UNITTEST_LIBS  sqlite
                     )
 
 if ( MILVUS_GPU_VERSION )
-    list( APPEND UNITTEST_LIBS   ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+    list( APPEND UNITTEST_LIBS   CUDA::nvml
             cudart
             cublas
             )
