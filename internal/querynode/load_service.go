@@ -114,6 +114,11 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	if err != nil {
 		return err
 	}
+	// replace segment
+	err = s.segLoader.replica.replaceGrowingSegmentBySealedSegment(segment)
+	if err != nil {
+		return err
+	}
 	if errIndex == nil {
 		fmt.Println("loading index...")
 		indexPaths, err := s.segLoader.indexLoader.getIndexPaths(buildID)
@@ -125,8 +130,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 			return err
 		}
 	}
-	// replace segment
-	return s.segLoader.replica.replaceGrowingSegmentBySealedSegment(segment)
+	return nil
 }
 
 func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream) *loadService {
