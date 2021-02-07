@@ -80,7 +80,7 @@ class VectorBase {
     grow_to_at_least(int64_t element_count) = 0;
 
     virtual void
-    set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) = 0;
+    set_data_raw(ssize_t element_offset, const void* source, ssize_t element_count) = 0;
 
     virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
@@ -142,7 +142,7 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    set_data_raw(ssize_t element_offset, void* source, ssize_t element_count) override {
+    set_data_raw(ssize_t element_offset, const void* source, ssize_t element_count) override {
         set_data(element_offset, static_cast<const Type*>(source), element_count);
     }
 

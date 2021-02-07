@@ -19,14 +19,14 @@
 namespace milvus::query {
 
 SubQueryResult
-BinarySearchBruteForce(const dataset::BinaryQueryDataset& query_dataset,
-                       const uint8_t* binary_chunk,
+BinarySearchBruteForce(const dataset::QueryDataset& query_dataset,
+                       const void* chunk_data_raw,
                        int64_t size_per_chunk,
                        const faiss::BitsetView& bitset);
 
 SubQueryResult
-FloatSearchBruteForce(const dataset::FloatQueryDataset& query_dataset,
-                      const float* chunk_data,
+FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
+                      const void* chunk_data_raw,
                       int64_t size_per_chunk,
                       const faiss::BitsetView& bitset);
 

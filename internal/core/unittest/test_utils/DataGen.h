@@ -15,15 +15,22 @@
 #include <memory>
 #include <cstring>
 #include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentSealed.h"
 #include "Constants.h"
 #include <boost/algorithm/string/predicate.hpp>
+
+#include <knowhere/index/vector_index/VecIndex.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <knowhere/index/vector_index/IndexIVF.h>
+#include <query/SearchOnIndex.h>
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
 
 struct GeneratedData {
     std::vector<char> rows_;
-    std::vector<std::vector<char>> cols_;
+    std::vector<aligned_vector<uint8_t>> cols_;
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
     RowBasedRawData raw_;
@@ -51,6 +58,7 @@ struct GeneratedData {
     void
     generate_rows(int N, SchemaPtr schema);
 };
+
 inline void
 GeneratedData::generate_rows(int N, SchemaPtr schema) {
     std::vector<int> offset_infos(schema->size() + 1, 0);
@@ -78,7 +86,7 @@ GeneratedData::generate_rows(int N, SchemaPtr schema) {
 inline GeneratedData
 DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     using std::vector;
-    std::vector<vector<char>> cols;
+    std::vector<aligned_vector<uint8_t>> cols;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
@@ -86,7 +94,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     auto insert_cols = [&cols](auto& data) {
         using T = std::remove_reference_t<decltype(data)>;
         auto len = sizeof(typename T::value_type) * data.size();
-        auto ptr = vector<char>(len);
+        auto ptr = aligned_vector<uint8_t>(len);
         memcpy(ptr.data(), data.data(), len);
         cols.emplace_back(std::move(ptr));
     };
@@ -279,5 +287,41 @@ QueryResultToJson(const QueryResult& qr) {
     }
     return json{results};
 };
+
+inline void
+SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
+    // TODO
+    auto row_count = dataset.row_ids_.size();
+    {
+        LoadFieldDataInfo info;
+        info.blob = dataset.row_ids_.data();
+        info.row_count = dataset.row_ids_.size();
+        info.field_id = 0;  // field id for RowId
+        seg.LoadFieldData(info);
+    }
+    int field_offset = 0;
+    for (auto& meta : seg.get_schema().get_fields()) {
+        LoadFieldDataInfo info;
+        info.field_id = meta.get_id().get();
+        info.row_count = row_count;
+        info.blob = dataset.cols_[field_offset].data();
+        seg.LoadFieldData(info);
+        ++field_offset;
+    }
+}
+
+inline knowhere::VecIndexPtr
+GenIndexing(int64_t N, int64_t dim, const float* vec) {
+    auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+    auto database = knowhere::GenDataset(N, dim, vec);
+    auto indexing = std::make_shared<knowhere::IVF>();
+    indexing->Train(database, conf);
+    indexing->AddWithoutIds(database, conf);
+    return indexing;
+}
 
 }  // namespace milvus::segcore

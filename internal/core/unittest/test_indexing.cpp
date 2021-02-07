@@ -247,7 +247,7 @@ TEST(Indexing, BinaryBruteForce) {
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
-    query::dataset::BinaryQueryDataset query_dataset{
+    query::dataset::QueryDataset query_dataset{
         faiss::MetricType::METRIC_Jaccard,  //
         num_queries,                        //
         topk,                               //

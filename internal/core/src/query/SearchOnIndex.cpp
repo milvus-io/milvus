@@ -12,7 +12,7 @@
 #include "SearchOnIndex.h"
 namespace milvus::query {
 SubQueryResult
-SearchOnIndex(const dataset::FloatQueryDataset& query_dataset,
+SearchOnIndex(const dataset::QueryDataset& query_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
               const faiss::BitsetView& bitset) {

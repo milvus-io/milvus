@@ -31,6 +31,7 @@
 #include "InsertRecord.h"
 #include <utility>
 #include <memory>
+#include <vector>
 
 namespace milvus::segcore {
 
@@ -45,6 +46,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
            const int64_t* row_ids,
            const Timestamp* timestamps,
            const RowBasedRawData& values) override;
+
+    void
+    Insert(int64_t reserved_offset,
+           int64_t size,
+           const int64_t* row_ids,
+           const Timestamp* timestamps,
+           const ColumnBasedRawData& values) override;
 
     int64_t
     PreDelete(int64_t size) override;
@@ -119,44 +127,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return 0;
     }
 
+    // for scalar vectors
     template <typename T>
     void
-    bulk_subscript_impl(const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, void* output_raw) const {
-        static_assert(IsScalar<T>);
-        auto vec_ptr = dynamic_cast<const ConcurrentVector<T>*>(&vec_raw);
-        Assert(vec_ptr);
-        auto& vec = *vec_ptr;
-        auto output = reinterpret_cast<T*>(output_raw);
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            output[i] = offset == -1 ? -1 : vec[offset];
-        }
-    }
+    bulk_subscript_impl(
+        const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, T default_value, void* output_raw) const;
+
+    template <typename T>
+    void
+    bulk_subscript_impl(int64_t element_sizeof,
+                        const VectorBase& vec_raw,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* output_raw) const;
 
     void
-    bulk_subscript(SystemFieldType system_type,
-                   const int64_t* seg_offsets,
-                   int64_t count,
-                   void* output) const override {
-        switch (system_type) {
-            case SystemFieldType::Timestamp:
-                PanicInfo("timestamp unsupported");
-            case SystemFieldType::RowId:
-                bulk_subscript_impl<int64_t>(this->record_.uids_, seg_offsets, count, output);
-                break;
-            default:
-                PanicInfo("unknown subscript fields");
-        }
-    }
+    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
     void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
-        // TODO: support more types
-        auto vec_ptr = record_.get_field_data_base(field_offset);
-        auto data_type = schema_->operator[](field_offset).get_data_type();
-        Assert(data_type == DataType::INT64);
-        bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output);
-    }
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
     Status
     LoadIndexing(const LoadIndexInfo& info) override;
@@ -195,6 +184,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     check_search(const query::Plan* plan) const override {
         Assert(plan);
     }
+
+ private:
+    void
+    do_insert(int64_t reserved_begin,
+              int64_t size,
+              const idx_t* row_ids,
+              const Timestamp* timestamps,
+              const std::vector<aligned_vector<uint8_t>>& columns_data);
 
  private:
     int64_t size_per_chunk_;

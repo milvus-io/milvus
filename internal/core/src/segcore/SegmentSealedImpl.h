@@ -14,13 +14,12 @@
 #include "SealedIndexingRecord.h"
 #include <map>
 #include <vector>
+#include <memory>
 
 namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema)
-        : schema_(schema), field_datas_(schema->size()), field_ready_bitset_(schema->size()) {
-    }
+    explicit SegmentSealedImpl(SchemaPtr schema);
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -29,6 +28,11 @@ class SegmentSealedImpl : public SegmentSealed {
     DropIndex(const FieldId field_id) override;
     void
     DropFieldData(const FieldId field_id) override;
+
+    bool
+    HasIndex(FieldId field_id) const override;
+    bool
+    HasFieldData(FieldId field_id) const override;
 
  public:
     int64_t
@@ -62,56 +66,24 @@ class SegmentSealedImpl : public SegmentSealed {
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
     void
-    bulk_subscript(SystemFieldType system_type,
-                   const int64_t* seg_offsets,
-                   int64_t count,
-                   void* output) const override {
-        Assert(is_system_field_ready());
-        Assert(system_type == SystemFieldType::RowId);
-        bulk_subscript_impl<int64_t>(row_ids_.data(), seg_offsets, count, output);
-    }
+    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
     void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override {
-        Assert(is_field_ready(field_offset));
-        auto& field_meta = schema_->operator[](field_offset);
-        Assert(field_meta.get_data_type() == DataType::INT64);
-        bulk_subscript_impl<int64_t>(field_datas_[field_offset.get()].data(), seg_offsets, count, output);
-    }
+    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
     void
-    check_search(const query::Plan* plan) const override {
-        Assert(plan);
-        Assert(plan->extra_info_opt_.has_value());
-
-        if (!is_system_field_ready()) {
-            PanicInfo("System Field RowID is not loaded");
-        }
-
-        auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
-        Assert(request_fields.size() == field_ready_bitset_.size());
-        auto absent_fields = request_fields - field_ready_bitset_;
-        if (absent_fields.any()) {
-            auto field_offset = FieldOffset(absent_fields.find_first());
-            auto& field_meta = schema_->operator[](field_offset);
-            PanicInfo("User Field(" + field_meta.get_name().get() + ") is not loaded");
-        }
-    }
+    check_search(const query::Plan* plan) const override;
 
  private:
     template <typename T>
     static void
-    bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw) {
-        static_assert(IsScalar<T>);
-        auto src = reinterpret_cast<const T*>(src_raw);
-        auto dst = reinterpret_cast<T*>(dst_raw);
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            dst[i] = offset == -1 ? -1 : src[offset];
-        }
-    }
+    bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+
+    static void
+    bulk_subscript_impl(
+        int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
 
     void
     update_row_count(int64_t row_count) {
@@ -135,25 +107,16 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    bool
-    is_field_ready(FieldOffset field_offset) const {
-        return field_ready_bitset_.test(field_offset.get());
-    }
-
-    void
-    set_field_ready(FieldOffset field_offset, bool flag = true) {
-        field_ready_bitset_[field_offset.get()] = flag;
-    }
-
  private:
     // segment loading state
-    boost::dynamic_bitset<> field_ready_bitset_;
+    boost::dynamic_bitset<> field_data_ready_bitset_;
+    boost::dynamic_bitset<> vecindex_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment datas
     // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
-    std::map<FieldOffset, knowhere::IndexPtr> scalar_indexings_;
-    SealedIndexingRecord vec_indexings_;
+    std::vector<std::unique_ptr<knowhere::Index>> scalar_indexings_;
+    SealedIndexingRecord vecindexs_;
     std::vector<aligned_vector<char>> field_datas_;
     aligned_vector<idx_t> row_ids_;
     SchemaPtr schema_;
