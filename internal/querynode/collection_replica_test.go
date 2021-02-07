@@ -242,36 +242,5 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 
 	err := node.Stop()
 	assert.NoError(t, err)
-}
 
-func TestReplaceGrowingSegmentBySealedSegment(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	segmentID := UniqueID(520)
-	initTestMeta(t, node, collectionID, segmentID)
-
-	_, _, segIDs := node.replica.getSealedSegmentsBySegmentType(segTypeGrowing)
-	assert.Equal(t, len(segIDs), 1)
-
-	collection, err := node.replica.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-	ns := newSegment(collection, segmentID, defaultPartitionID, collectionID, segTypeSealed)
-	err = node.replica.replaceGrowingSegmentBySealedSegment(ns)
-	assert.NoError(t, err)
-
-	segmentNums := node.replica.getSegmentNum()
-	assert.Equal(t, segmentNums, 1)
-
-	segment, err := node.replica.getSegmentByID(segmentID)
-	assert.NoError(t, err)
-
-	assert.Equal(t, segment.getType(), segTypeSealed)
-
-	_, _, segIDs = node.replica.getSealedSegmentsBySegmentType(segTypeGrowing)
-	assert.Equal(t, len(segIDs), 0)
-	_, _, segIDs = node.replica.getSealedSegmentsBySegmentType(segTypeSealed)
-	assert.Equal(t, len(segIDs), 1)
-
-	err = node.Stop()
-	assert.NoError(t, err)
 }
