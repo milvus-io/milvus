@@ -6,6 +6,8 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 
@@ -13,6 +15,10 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
+)
+
+const (
+	paramsKeyToParse = "params"
 )
 
 type task interface {
@@ -140,6 +146,10 @@ func (it *IndexBuildTask) Rollback() error {
 func (it *IndexBuildTask) Execute() error {
 	log.Println("start build index ...")
 	var err error
+
+	log.Println("type params: ", it.cmd.Req.GetTypeParams())
+	log.Println("index params: ", it.cmd.Req.GetIndexParams())
+
 	typeParams := make(map[string]string)
 	for _, kvPair := range it.cmd.Req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
@@ -147,7 +157,17 @@ func (it *IndexBuildTask) Execute() error {
 		if ok {
 			return errors.New("duplicated key in type params")
 		}
-		typeParams[key] = value
+		if key == paramsKeyToParse {
+			params, err := funcutil.ParseIndexParamsMap(value)
+			if err != nil {
+				return err
+			}
+			for pk, pv := range params {
+				typeParams[pk] = pv
+			}
+		} else {
+			typeParams[key] = value
+		}
 	}
 
 	indexParams := make(map[string]string)
@@ -157,7 +177,17 @@ func (it *IndexBuildTask) Execute() error {
 		if ok {
 			return errors.New("duplicated key in index params")
 		}
-		indexParams[key] = value
+		if key == paramsKeyToParse {
+			params, err := funcutil.ParseIndexParamsMap(value)
+			if err != nil {
+				return err
+			}
+			for pk, pv := range params {
+				indexParams[pk] = pv
+			}
+		} else {
+			indexParams[key] = value
+		}
 	}
 
 	it.index, err = NewCIndex(typeParams, indexParams)
