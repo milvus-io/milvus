@@ -40,7 +40,7 @@ func (s *loadService) close() {
 }
 
 func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
-	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSealedSegmentsBySegmentType(segTypeGrowing)
+	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsBySegmentType(segTypeGrowing)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
@@ -89,6 +89,16 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 }
 
 func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, fieldIDs []int64) error {
+	// create segment
+	collection, err := s.segLoader.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	_, err = s.segLoader.replica.getPartitionByID(partitionID)
+	if err != nil {
+		return err
+	}
+	segment := newSegment(collection, segmentID, partitionID, collectionID, segTypeSealed)
 	// we don't need index id yet
 	_, buildID, errIndex := s.segLoader.indexLoader.getIndexInfo(collectionID, segmentID)
 	if errIndex == nil {
@@ -105,12 +115,12 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 	}
 
 	targetFields := s.segLoader.getTargetFields(paths, srcFieldIDs, fieldIDs)
-	collection, err := s.segLoader.replica.getCollectionByID(collectionID)
+	err = s.segLoader.loadSegmentFieldsData(segment, targetFields)
 	if err != nil {
 		return err
 	}
-	segment := newSegment(collection, segmentID, partitionID, collectionID, segTypeSealed)
-	err = s.segLoader.loadSegmentFieldsData(segment, targetFields)
+	// replace segment
+	err = s.segLoader.replica.replaceGrowingSegmentBySealedSegment(segment)
 	if err != nil {
 		return err
 	}
@@ -125,8 +135,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 			return err
 		}
 	}
-	// replace segment
-	return s.segLoader.replica.replaceGrowingSegmentBySealedSegment(segment)
+	return nil
 }
 
 func newLoadService(ctx context.Context, masterClient MasterServiceInterface, dataClient DataServiceInterface, indexClient IndexServiceInterface, replica collectionReplica, dmStream msgstream.MsgStream) *loadService {
