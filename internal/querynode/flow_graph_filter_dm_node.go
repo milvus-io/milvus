@@ -69,9 +69,11 @@ func (fdmNode *filterDmNode) Operate(in []*Msg) []*Msg {
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	// TODO: open this check
 	// check if partition dm enable
-	//if enable, _ := fdmNode.replica.getEnablePartitionDM(msg.CollectionID, msg.PartitionID); !enable {
-	//	return nil
-	//}
+	enableCollection := fdmNode.replica.hasCollection(msg.CollectionID)
+	enablePartition := fdmNode.replica.hasPartition(msg.PartitionID)
+	if !enableCollection || !enablePartition {
+		return nil
+	}
 
 	// No dd record, do all insert requests.
 	records, ok := fdmNode.ddMsg.collectionRecords[msg.CollectionID]
