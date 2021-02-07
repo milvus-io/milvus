@@ -246,6 +246,7 @@ func (qs *QueryService) LoadCollection(req *querypb.LoadCollectionRequest) (*com
 func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	dbID := req.DbID
 	collectionID := req.CollectionID
+	fmt.Println("release collection start, collectionID = ", collectionID)
 	partitions, err := qs.replica.getPartitions(dbID, collectionID)
 	if err != nil {
 		return &commonpb.Status{
@@ -275,6 +276,8 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 			Reason:    err.Error(),
 		}, err
 	}
+
+	fmt.Println("release collection end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return status, err
 }
@@ -441,6 +444,7 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	segmentIDs := make([]UniqueID, 0)
+	fmt.Println("start release partitions start, partitionIDs = ", partitionIDs)
 	for _, partitionID := range partitionIDs {
 		segments, err := qs.replica.getSegments(dbID, collectionID, partitionID)
 		if err != nil {
@@ -478,6 +482,7 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 		}
 	}
 
+	fmt.Println("start release partitions end")
 	//TODO:: queryNode cancel subscribe dmChannels
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_SUCCESS,

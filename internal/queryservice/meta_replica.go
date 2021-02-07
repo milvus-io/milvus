@@ -203,7 +203,11 @@ func (mp *metaReplicaImpl) releaseCollection(dbID UniqueID, collectionID UniqueI
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for i, collection := range collections {
 			if collectionID == collection.id {
-				collections = append(collections[:i], collections[i+1:]...)
+				if i+1 < len(collections) {
+					collections = append(collections[:i], collections[i+1:]...)
+				} else {
+					collections = collections[:i]
+				}
 				return nil
 			}
 		}
