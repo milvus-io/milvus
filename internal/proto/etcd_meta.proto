@@ -35,6 +35,7 @@ message CollectionInfo {
   uint64 create_time = 3;
   repeated int64 partitionIDs = 4;
   repeated IndexParamsInfo index_params = 5;
+  repeated string index_names = 6;
 }
 
 message IndexInfo {

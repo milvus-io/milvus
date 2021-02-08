@@ -109,6 +109,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 		CreateTime:   collTs,
 		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
 		IndexParams:  make([]*etcdpb.IndexParamsInfo, 0, 16),
+		IndexNames:   make([]string, 0, 16),
 	}
 	partMeta := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
@@ -123,6 +124,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 					IndexParams: field.IndexParams,
 				}
 				collMeta.IndexParams = append(collMeta.IndexParams, indexParam)
+				collMeta.IndexNames = append(collMeta.IndexNames, fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID))
 			}
 		}
 	}
@@ -582,7 +584,8 @@ func (t *CreateIndexReqTask) IgnoreTimeStamp() bool {
 }
 
 func (t *CreateIndexReqTask) Execute() error {
-	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, t.Req.ExtraParams)
+	indexName := Params.DefaultIndexName //TODO, get name from request
+	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, t.Req.ExtraParams, indexName)
 	if err != nil {
 		return err
 	}
@@ -593,7 +596,7 @@ func (t *CreateIndexReqTask) Execute() error {
 		task := CreateIndexTask{
 			core:        t.core,
 			segmentID:   seg,
-			indexName:   Params.DefaultIndexName, //TODO, get name from request
+			indexName:   indexName,
 			fieldSchema: &field,
 			indexParams: t.Req.ExtraParams,
 		}

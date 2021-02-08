@@ -634,7 +634,7 @@ func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 }
 
 // return segment ids, type params, error
-func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, indexParams []*commonpb.KeyValuePair) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
+func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, indexParams []*commonpb.KeyValuePair, indexName string) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -655,6 +655,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 	if indexParams != nil {
 		for _, f := range collMeta.IndexParams {
 			if f.FiledID == fieldSchema.FieldID {
+				// (collMeta.IndexNames[i] == indexName)
 				if EqualKeyPairArray(f.IndexParams, indexParams) {
 					exist = true
 					break
@@ -667,6 +668,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 			FiledID:     fieldSchema.FieldID,
 			IndexParams: indexParams,
 		})
+		collMeta.IndexNames = append(collMeta.IndexNames, indexName)
 		mt.collID2Meta[collMeta.ID] = collMeta
 		k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(collMeta.ID, 10))
 		v1 := proto.MarshalTextString(&collMeta)
