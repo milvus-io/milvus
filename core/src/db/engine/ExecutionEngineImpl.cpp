@@ -92,11 +92,6 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
     return Status::OK();
 }
 
-bool
-IsBinaryIndexType(knowhere::IndexType type) {
-    return type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP || type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-}
-
 }  // namespace
 
 #ifdef MILVUS_GPU_VERSION
@@ -127,29 +122,6 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
       index_type_(index_type),
       metric_type_(metric_type),
       index_params_(index_params) {
-    EngineType tmp_index_type =
-        utils::IsBinaryMetricType((int32_t)metric_type) ? EngineType::FAISS_BIN_IDMAP : EngineType::FAISS_IDMAP;
-    index_ = CreatetVecIndex(tmp_index_type);
-    if (!index_) {
-        throw Exception(DB_ERROR, "Unsupported index type");
-    }
-
-    milvus::json conf = index_params;
-    conf[knowhere::meta::DEVICEID] = gpu_num_;
-    conf[knowhere::meta::DIM] = dimension;
-    MappingMetricType(metric_type, conf);
-    LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
-    if (!adapter->CheckTrain(conf, index_->index_mode())) {
-        throw Exception(DB_ERROR, "Illegal index params");
-    }
-
-    fiu_do_on("ExecutionEngineImpl.throw_exception", throw Exception(DB_ERROR, ""));
-    if (auto bf_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_)) {
-        bf_index->Train(knowhere::DatasetPtr(), conf);
-    } else if (auto bf_bin_index = std::dynamic_pointer_cast<knowhere::BinaryIDMAP>(index_)) {
-        bf_bin_index->Train(knowhere::DatasetPtr(), conf);
-    }
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location,
@@ -507,58 +479,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
-#if 0
-    if (hybrid) {
-        const std::string key = location_ + ".quantizer";
-        std::vector<uint64_t> gpus{device_id};
-
-        const int64_t NOT_FOUND = -1;
-        int64_t device_id = NOT_FOUND;
-
-        // cache hit
-        {
-            knowhere::QuantizerPtr quantizer = nullptr;
-
-            for (auto& gpu : gpus) {
-                auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                if (auto cached_quantizer = cache->GetIndex(key)) {
-                    device_id = gpu;
-                    quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
-                }
-            }
-
-            if (device_id != NOT_FOUND) {
-                // cache hit
-                milvus::json quantizer_conf{{knowhere::meta::DEVICEID : device_id}, {"mode" : 2}};
-                auto new_index = index_->LoadData(quantizer, config);
-                index_ = new_index;
-            }
-        }
-
-        if (device_id == NOT_FOUND) {
-            // cache miss
-            std::vector<int64_t> all_free_mem;
-            for (auto& gpu : gpus) {
-                auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-                auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-                all_free_mem.push_back(free_mem);
-            }
-
-            auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-            auto best_index = std::distance(all_free_mem.begin(), max_e);
-            device_id = gpus[best_index];
-
-            auto pair = index_->CopyToGpuWithQuantizer(device_id);
-            index_ = pair.first;
-
-            // cache
-            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
-            cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
-        }
-        return Status::OK();
-    }
-#endif
-
 #ifdef MILVUS_GPU_VERSION
     auto data_obj_ptr = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
@@ -592,7 +512,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             }
             index_ = knowhere::cloner::CopyCpuToGpu(index_, device_id, knowhere::Config());
             if (index_ == nullptr) {
-                LOG_ENGINE_DEBUG_ << "copy to GPU faied, search on CPU";
+                LOG_ENGINE_DEBUG_ << "copy to GPU failed, search on CPU";
                 index_ = index_reserve_;
             } else {
                 if (gpu_cache_enable) {

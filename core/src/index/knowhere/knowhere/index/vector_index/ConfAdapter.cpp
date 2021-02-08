@@ -198,20 +198,6 @@ IVFPQConfAdapter::GetValidGPUM(int64_t dimension, int64_t m) {
             support_subquantizer.end()) &&
            (std::find(std::begin(support_dim_per_subquantizer), std::end(support_dim_per_subquantizer), sub_dim) !=
             support_dim_per_subquantizer.end());
-
-    /*
-        std::vector<int64_t> resset;
-        resset.clear();
-        for (const auto& dimperquantizer : support_dim_per_subquantizer) {
-            if (!(dimension % dimperquantizer)) {
-                auto subquantzier_num = dimension / dimperquantizer;
-                auto finder = std::find(support_subquantizer.begin(), support_subquantizer.end(), subquantzier_num);
-                if (finder != support_subquantizer.end()) {
-                    resset.push_back(subquantzier_num);
-                }
-            }
-        }
-    */
 }
 
 bool
@@ -296,7 +282,7 @@ bool
 BinIVFConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
     static std::vector<std::string> METRICS{knowhere::Metric::HAMMING, knowhere::Metric::JACCARD,
                                             knowhere::Metric::TANIMOTO};
-    static int64_t MAX_NLIST = 999999;
+    static int64_t MAX_NLIST = 65536;
     static int64_t MIN_NLIST = 1;
 
     CheckIntByRange(knowhere::meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
