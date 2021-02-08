@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -20,9 +19,10 @@ type statsService struct {
 
 	fieldStatsChan chan []*internalpb2.FieldStats
 	statsStream    msgstream.MsgStream
+	msFactory      msgstream.Factory
 }
 
-func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsChan chan []*internalpb2.FieldStats) *statsService {
+func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsChan chan []*internalpb2.FieldStats, factory msgstream.Factory) *statsService {
 
 	return &statsService{
 		ctx: ctx,
@@ -31,6 +31,8 @@ func newStatsService(ctx context.Context, replica collectionReplica, fieldStatsC
 
 		fieldStatsChan: fieldStatsChan,
 		statsStream:    nil,
+
+		msFactory: factory,
 	}
 }
 
@@ -40,8 +42,7 @@ func (sService *statsService) start() {
 	// start pulsar
 	producerChannels := []string{Params.StatsChannelName}
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.StatsReceiveBufSize, 1024)
-	statsStream, _ := factory.NewMsgStream(sService.ctx)
+	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream

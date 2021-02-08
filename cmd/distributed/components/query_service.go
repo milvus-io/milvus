@@ -12,6 +12,7 @@ import (
 
 	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/queryservice"
@@ -25,12 +26,12 @@ type QueryService struct {
 	masterService *msc.GrpcClient
 }
 
-func NewQueryService(ctx context.Context) (*QueryService, error) {
+func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	const retry = 10
 	const interval = 200
 
 	queryservice.Params.Init()
-	svr, err := qs.NewServer(ctx)
+	svr, err := qs.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)
 	}

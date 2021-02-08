@@ -4,18 +4,16 @@ import (
 	"context"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 	consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
 	insertStream, _ := factory.NewTtMsgStream(ctx)
 	insertStream.AsConsumer(consumeChannels, consumeSubName)
 
@@ -24,13 +22,12 @@ func newDmInputNode(ctx context.Context) *flowgraph.InputNode {
 	return node
 }
 
-func newDDInputNode(ctx context.Context) *flowgraph.InputNode {
+func newDDInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 	consumeSubName := Params.MsgChannelSubName
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
 	tmpStream, _ := factory.NewTtMsgStream(ctx)
 	tmpStream.AsConsumer(Params.DDChannelNames, consumeSubName)
 

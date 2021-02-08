@@ -13,7 +13,6 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 type tickCheckFunc = func(Timestamp) bool
@@ -27,6 +26,7 @@ type timeTick struct {
 
 	tsoAllocator  *allocator.TimestampAllocator
 	tickMsgStream msgstream.MsgStream
+	msFactory     msgstream.Factory
 
 	peerID    UniqueID
 	wg        sync.WaitGroup
@@ -40,7 +40,8 @@ type timeTick struct {
 func newTimeTick(ctx context.Context,
 	tsoAllocator *allocator.TimestampAllocator,
 	interval time.Duration,
-	checkFunc tickCheckFunc) *timeTick {
+	checkFunc tickCheckFunc,
+	factory msgstream.Factory) *timeTick {
 	ctx1, cancel := context.WithCancel(ctx)
 	t := &timeTick{
 		ctx:          ctx1,
@@ -49,10 +50,10 @@ func newTimeTick(ctx context.Context,
 		interval:     interval,
 		peerID:       Params.ProxyID,
 		checkFunc:    checkFunc,
+		msFactory:    factory,
 	}
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamTimeTickBufSize, 1024)
-	t.tickMsgStream, _ = factory.NewMsgStream(t.ctx)
+	t.tickMsgStream, _ = t.msFactory.NewMsgStream(t.ctx)
 	t.tickMsgStream.AsProducer(Params.ProxyTimeTickChannelNames)
 	return t
 }

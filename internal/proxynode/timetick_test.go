@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 var trueCnt = 0
@@ -34,7 +35,8 @@ func TestTimeTick_Start2(t *testing.T) {
 	err = tsoAllocator.Start()
 	assert.Nil(t, err)
 
-	tt := newTimeTick(ctx, tsoAllocator, Params.TimeTickInterval, checkFunc)
+	msFactory := pulsarms.NewFactory()
+	tt := newTimeTick(ctx, tsoAllocator, Params.TimeTickInterval, checkFunc, msFactory)
 
 	defer func() {
 		cancel()

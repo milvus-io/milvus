@@ -12,7 +12,14 @@ import (
 func TestStatsService_start(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil)
+
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	msFactory.SetParams(m)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil, msFactory)
 	node.statsService.start()
 	node.Stop()
 }
@@ -26,15 +33,21 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	// start pulsar
 	producerChannels := []string{Params.StatsChannelName}
 
-	pulsarURL := Params.PulsarAddress
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	statsStream, err := factory.NewMsgStream(node.queryNodeLoopCtx)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	statsStream, err := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	assert.Nil(t, err)
 	statsStream.AsProducer(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil, msFactory)
 	node.statsService.statsStream = statsMsgStream
 	node.statsService.statsStream.Start()
 

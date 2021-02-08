@@ -64,7 +64,7 @@ func run(serverType string) error {
 	default:
 		return errors.Errorf("unknown server type = %s", serverType)
 	}
-	role.Run()
+	role.Run(false)
 	return nil
 }
 

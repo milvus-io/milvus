@@ -409,7 +409,7 @@ type PulsarTtMsgStream struct {
 	lastTimeStamp Timestamp
 }
 
-func NewPulsarTtMsgStream(ctx context.Context,
+func newPulsarTtMsgStream(ctx context.Context,
 	address string,
 	receiveBufSize int64,
 	pulsarBufSize int64,

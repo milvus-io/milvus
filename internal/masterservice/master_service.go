@@ -12,7 +12,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	ms "github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
@@ -181,17 +180,20 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	isInit    atomic.Value
+
+	msFactory ms.Factory
 }
 
 // --------------------- function --------------------------
 
-func NewCore(c context.Context) (*Core, error) {
+func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	Params.Init()
 	core := &Core{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:       ctx,
+		cancel:    cancel,
+		msFactory: factory,
 	}
 	core.stateCode.Store(internalpb2.StateCode_INITIALIZING)
 	core.isInit.Store(false)
@@ -414,7 +416,6 @@ func (c *Core) tsLoop() {
 	}
 }
 func (c *Core) setMsgStreams() error {
-
 	if Params.PulsarAddress == "" {
 		return errors.Errorf("PulsarAddress is empty")
 	}
@@ -427,8 +428,17 @@ func (c *Core) setMsgStreams() error {
 		return errors.Errorf("ProxyTimeTickChannel is empty")
 	}
 
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	proxyTimeTickStream, _ := factory.NewMsgStream(c.ctx)
+	var err error
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = c.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
+	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
 	proxyTimeTickStream.Start()
 
@@ -436,14 +446,14 @@ func (c *Core) setMsgStreams() error {
 	if Params.TimeTickChannel == "" {
 		return errors.Errorf("TimeTickChannel is empty")
 	}
-	timeTickStream, _ := factory.NewMsgStream(c.ctx)
+	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 
 	// master dd channel
 	if Params.DdChannel == "" {
 		return errors.Errorf("DdChannel is empty")
 	}
-	ddStream, _ := factory.NewMsgStream(c.ctx)
+	ddStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	ddStream.AsProducer([]string{Params.DdChannel})
 
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
@@ -577,7 +587,7 @@ func (c *Core) setMsgStreams() error {
 	if Params.DataServiceSegmentChannel == "" {
 		return errors.Errorf("DataServiceSegmentChannel is empty")
 	}
-	dataServiceStream, _ := factory.NewMsgStream(c.ctx)
+	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
 	dataServiceStream.Start()
 	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)

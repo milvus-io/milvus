@@ -3,6 +3,8 @@ package components
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+
 	grpcproxynode "github.com/zilliztech/milvus-distributed/internal/distributed/proxynode"
 )
 
@@ -10,9 +12,9 @@ type ProxyNode struct {
 	svr *grpcproxynode.Server
 }
 
-func NewProxyNode(ctx context.Context) (*ProxyNode, error) {
+func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, error) {
 	n := &ProxyNode{}
-	svr, err := grpcproxynode.NewServer(ctx)
+	svr, err := grpcproxynode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

@@ -11,9 +11,9 @@ import (
 
 	grpcproxyserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
 
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
 
 	"google.golang.org/grpc"
 
@@ -48,7 +48,7 @@ type Server struct {
 	indexServiceClient  *grpcindexserviceclient.Client
 }
 
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 
 	server := &Server{
 		ctx:         ctx,
@@ -56,7 +56,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 	}
 
 	var err error
-	server.impl, err = proxynode.NewProxyNodeImpl(server.ctx)
+	server.impl, err = proxynode.NewProxyNodeImpl(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}

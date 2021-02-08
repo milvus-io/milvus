@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
@@ -27,7 +28,7 @@ type Server struct {
 	impl *proxyservice.ServiceImpl
 }
 
-func NewServer(ctx1 context.Context) (*Server, error) {
+func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx1)
 
 	server := &Server{
@@ -37,7 +38,7 @@ func NewServer(ctx1 context.Context) (*Server, error) {
 	}
 
 	var err error
-	server.impl, err = proxyservice.NewServiceImpl(server.ctx)
+	server.impl, err = proxyservice.NewServiceImpl(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}

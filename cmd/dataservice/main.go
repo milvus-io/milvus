@@ -8,12 +8,15 @@ import (
 	"syscall"
 
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	svr, err := components.NewDataService(ctx)
+	msFactory := pulsarms.NewFactory()
+
+	svr, err := components.NewDataService(ctx, msFactory)
 	if err != nil {
 		panic(err)
 	}

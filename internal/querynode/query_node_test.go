@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -133,7 +134,8 @@ func newQueryNodeMock() *QueryNode {
 		}()
 	}
 
-	svr := NewQueryNode(ctx, 0)
+	msFactory := pulsarms.NewFactory()
+	svr := NewQueryNode(ctx, 0, msFactory)
 	err := svr.SetQueryService(&queryServiceMock{})
 	if err != nil {
 		panic(err)

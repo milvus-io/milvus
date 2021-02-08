@@ -12,18 +12,19 @@ type dataSyncService struct {
 	ctx context.Context
 	fg  *flowgraph.TimeTickedFlowGraph
 
-	dmStream msgstream.MsgStream
-	ddStream msgstream.MsgStream
+	dmStream  msgstream.MsgStream
+	ddStream  msgstream.MsgStream
+	msFactory msgstream.Factory
 
 	replica collectionReplica
 }
 
-func newDataSyncService(ctx context.Context, replica collectionReplica) *dataSyncService {
+func newDataSyncService(ctx context.Context, replica collectionReplica, factory msgstream.Factory) *dataSyncService {
 	service := &dataSyncService{
-		ctx: ctx,
-		fg:  nil,
-
-		replica: replica,
+		ctx:       ctx,
+		fg:        nil,
+		replica:   replica,
+		msFactory: factory,
 	}
 
 	service.initNodes()
@@ -52,7 +53,7 @@ func (dsService *dataSyncService) initNodes() {
 	var ddNode node = newDDNode(dsService.replica)
 
 	var insertNode node = newInsertNode(dsService.replica)
-	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica)
+	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica, dsService.msFactory)
 	var gcNode node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)

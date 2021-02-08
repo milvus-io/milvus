@@ -8,6 +8,7 @@ import (
 
 	dn "github.com/zilliztech/milvus-distributed/internal/datanode"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -24,16 +25,19 @@ type Server struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	msFactory msgstream.Factory
 }
 
-func New(ctx context.Context) (*Server, error) {
+func New(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:       ctx1,
+		cancel:    cancel,
+		msFactory: factory,
 	}
 
-	s.core = dn.NewDataNode(s.ctx)
+	s.core = dn.NewDataNode(s.ctx, s.msFactory)
 	s.grpcServer = grpc.NewServer()
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 	addr := dn.Params.IP + ":" + strconv.FormatInt(dn.Params.Port, 10)

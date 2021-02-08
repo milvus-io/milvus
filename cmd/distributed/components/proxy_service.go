@@ -3,6 +3,8 @@ package components
 import (
 	"context"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+
 	grpcproxyservice "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice"
 )
 
@@ -10,9 +12,9 @@ type ProxyService struct {
 	svr *grpcproxyservice.Server
 }
 
-func NewProxyService(ctx context.Context) (*ProxyService, error) {
+func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyService, error) {
 	service := &ProxyService{}
-	svr, err := grpcproxyservice.NewServer(ctx)
+	svr, err := grpcproxyservice.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

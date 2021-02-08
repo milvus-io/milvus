@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -165,7 +166,8 @@ func (data *dataMock) GetInsertChannels(req *datapb.InsertChannelRequest) (*inte
 }
 
 func TestQueryService_Init(t *testing.T) {
-	service, err := NewQueryService(context.Background())
+	msFactory := pulsarms.NewFactory()
+	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()
 	service.Start()
@@ -193,7 +195,8 @@ func TestQueryService_Init(t *testing.T) {
 }
 
 func TestQueryService_load(t *testing.T) {
-	service, err := NewQueryService(context.Background())
+	msFactory := pulsarms.NewFactory()
+	service, err := NewQueryService(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()
 	service.Start()

@@ -350,7 +350,7 @@ type RmqTtMsgStream struct {
 	lastTimeStamp Timestamp
 }
 
-func NewRmqTtMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64,
+func newRmqTtMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64,
 	unmarshal msgstream.UnmarshalDispatcher) (*RmqTtMsgStream, error) {
 	rmqMsgStream, err := newRmqMsgStream(ctx, receiveBufSize, rmqBufSize, unmarshal)
 	if err != nil {

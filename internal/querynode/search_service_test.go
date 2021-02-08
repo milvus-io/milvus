@@ -93,14 +93,21 @@ func TestSearch_Search(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	searchStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  pulsarURL,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	searchStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	searchStream.AsProducer(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
 
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
 
 	// start insert
@@ -179,10 +186,10 @@ func TestSearch_Search(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	insertStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	insertStream.AsProducer(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	ddStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -200,7 +207,7 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.dataSyncService.start()
 
 	time.Sleep(1 * time.Second)
@@ -209,14 +216,22 @@ func TestSearch_Search(t *testing.T) {
 }
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
-	node := NewQueryNode(context.Background(), 0)
-	initTestMeta(t, node, 0, 0)
-
 	pulsarURL := Params.PulsarAddress
+	const receiveBufSize = 1024
+
+	msFactory := pulsarms.NewFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  pulsarURL,
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	node := NewQueryNode(context.Background(), 0, msFactory)
+	initTestMeta(t, node, 0, 0)
 
 	// test data generate
 	const msgLength = 10
-	const receiveBufSize = 1024
 	const DIM = 16
 	searchProducerChannels := Params.SearchChannelNames
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -283,14 +298,13 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	msgPackSearch := msgstream.MsgPack{}
 	msgPackSearch.Msgs = append(msgPackSearch.Msgs, searchMsg)
 
-	factory := pulsarms.NewFactory(pulsarURL, receiveBufSize, 1024)
-	searchStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	searchStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	searchStream.AsProducer(searchProducerChannels)
 	searchStream.Start()
 	err = searchStream.Produce(&msgPackSearch)
 	assert.NoError(t, err)
 
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.searchService.start()
 
 	// start insert
@@ -373,10 +387,10 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	insertChannels := Params.InsertChannelNames
 	ddChannels := Params.DDChannelNames
 
-	insertStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	insertStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	insertStream.AsProducer(insertChannels)
 
-	ddStream, _ := factory.NewMsgStream(node.queryNodeLoopCtx)
+	ddStream, _ := msFactory.NewMsgStream(node.queryNodeLoopCtx)
 	ddStream.AsProducer(ddChannels)
 
 	var insertMsgStream msgstream.MsgStream = insertStream
@@ -394,7 +408,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// dataSync
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory)
 	go node.dataSyncService.start()
 
 	time.Sleep(1 * time.Second)

@@ -3,23 +3,39 @@ package rmqms
 import (
 	"context"
 
+	"github.com/mitchellh/mapstructure"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
 type Factory struct {
 	dispatcherFactory msgstream.ProtoUDFactory
-	receiveBufSize    int64
-	rmqBufSize        int64
+	// the following members must be public, so that mapstructure.Decode() can access them
+	ReceiveBufSize int64
+	RmqBufSize     int64
+}
+
+func (f *Factory) SetParams(params map[string]interface{}) error {
+	err := mapstructure.Decode(params, f)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (f *Factory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return newRmqMsgStream(ctx, f.receiveBufSize, f.rmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return newRmqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
-func NewFactory(address string, receiveBufSize int64, pulsarBufSize int64) *Factory {
+func (f *Factory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return newRmqTtMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, f.dispatcherFactory.NewUnmarshalDispatcher())
+}
+
+func NewFactory() msgstream.Factory {
 	f := &Factory{
 		dispatcherFactory: msgstream.ProtoUDFactory{},
-		receiveBufSize:    receiveBufSize,
+		ReceiveBufSize:    64,
+		RmqBufSize:        64,
 	}
 	return f
 }

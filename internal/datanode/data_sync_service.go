@@ -5,6 +5,7 @@ import (
 	"log"
 
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/util/flowgraph"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -15,16 +16,18 @@ type dataSyncService struct {
 	flushChan   chan *flushMsg
 	replica     Replica
 	idAllocator allocator
+	msFactory   msgstream.Factory
 }
 
 func newDataSyncService(ctx context.Context, flushChan chan *flushMsg,
-	replica Replica, alloc allocator) *dataSyncService {
+	replica Replica, alloc allocator, factory msgstream.Factory) *dataSyncService {
 	service := &dataSyncService{
 		ctx:         ctx,
 		fg:          nil,
 		flushChan:   flushChan,
 		replica:     replica,
 		idAllocator: alloc,
+		msFactory:   factory,
 	}
 	return service
 }
@@ -65,12 +68,21 @@ func (dsService *dataSyncService) initNodes() {
 
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx)
-	var ddStreamNode Node = newDDInputNode(dsService.ctx)
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = dsService.msFactory.SetParams(m)
+	if err != nil {
+		panic(err)
+	}
+
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory)
+	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory)
 
 	var filterDmNode Node = newFilteredDmNode()
 	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.idAllocator)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.idAllocator, dsService.msFactory)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(&dmStreamNode)

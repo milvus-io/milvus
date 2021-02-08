@@ -12,6 +12,7 @@ import (
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
@@ -24,12 +25,12 @@ type DataNode struct {
 	dataService   *dsc.Client
 }
 
-func NewDataNode(ctx context.Context) (*DataNode, error) {
+func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
 
 	const retry = 10
 	const interval = 200
 
-	svr, err := dnc.New(ctx)
+	svr, err := dnc.New(ctx, factory)
 	if err != nil {
 		panic(err)
 	}

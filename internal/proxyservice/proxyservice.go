@@ -7,8 +7,8 @@ import (
 
 	"github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 )
 
@@ -26,14 +26,17 @@ type ServiceImpl struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	msFactory msgstream.Factory
 }
 
-func NewServiceImpl(ctx context.Context) (*ServiceImpl, error) {
+func NewServiceImpl(ctx context.Context, factory msgstream.Factory) (*ServiceImpl, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &ServiceImpl{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:       ctx1,
+		cancel:    cancel,
+		msFactory: factory,
 	}
 
 	s.allocator = NewNodeIDAllocator()

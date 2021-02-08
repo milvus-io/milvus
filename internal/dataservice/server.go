@@ -17,7 +17,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 
@@ -94,17 +93,19 @@ type (
 		ddChannelName     string
 		segmentInfoStream msgstream.MsgStream
 		insertChannels    []string
+		msFactory         msgstream.Factory
 		ttBarrier         timesync.TimeTickBarrier
 	}
 )
 
-func CreateServer(ctx context.Context) (*Server, error) {
+func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	Params.Init()
 	ch := make(chan struct{})
 	s := &Server{
 		ctx:              ctx,
 		registerFinishCh: ch,
 		cluster:          newDataNodeCluster(ch),
+		msFactory:        factory,
 	}
 	s.insertChannels = s.getInsertChannels()
 	s.state.Store(internalpb2.StateCode_INITIALIZING)
@@ -130,6 +131,15 @@ func (s *Server) Init() error {
 
 func (s *Server) Start() error {
 	var err error
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = s.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
 	s.allocator = newAllocatorImpl(s.masterClient)
 	if err = s.initMeta(); err != nil {
 		return err
@@ -171,23 +181,21 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initSegmentInfoChannel() {
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	segmentInfoStream, _ := factory.NewMsgStream(s.ctx)
+	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
 	s.segmentInfoStream = segmentInfoStream
 	s.segmentInfoStream.Start()
 }
 func (s *Server) initMsgProducer() error {
 	var err error
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	if s.ttMsgStream, err = factory.NewMsgStream(s.ctx); err != nil {
+	if s.ttMsgStream, err = s.msFactory.NewTtMsgStream(s.ctx); err != nil {
 		return err
 	}
 	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
 	s.ttMsgStream.Start()
 	s.ttBarrier = timesync.NewHardTimeTickBarrier(s.ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
 	s.ttBarrier.Start()
-	if s.k2sMsgStream, err = factory.NewMsgStream(s.ctx); err != nil {
+	if s.k2sMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
 		return err
 	}
 	s.k2sMsgStream.AsProducer(Params.K2SChannelNames)
@@ -308,8 +316,7 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	statsStream, _ := factory.NewMsgStream(ctx)
+	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
 	statsStream.Start()
 	defer statsStream.Close()
@@ -334,8 +341,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 
 func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	flushStream, _ := factory.NewMsgStream(ctx)
+	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
 	flushStream.Start()
 	defer flushStream.Close()
@@ -370,8 +376,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 func (s *Server) startDDChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
-	factory := pulsarms.NewFactory(Params.PulsarAddress, 1024, 1024)
-	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream, _ := s.msFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{s.ddChannelName}, Params.DataServiceSubscriptionName)
 	ddStream.Start()
 	defer ddStream.Close()
@@ -603,7 +608,7 @@ func (s *Server) openNewSegment(collectionID UniqueID, partitionID UniqueID, cha
 			Segment: segmentInfo,
 		},
 	}
-	msgPack := &pulsarms.MsgPack{
+	msgPack := &msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{infoMsg},
 	}
 	if err = s.segmentInfoStream.Produce(msgPack); err != nil {

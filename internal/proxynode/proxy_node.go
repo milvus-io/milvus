@@ -15,8 +15,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 
-	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
-
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 
 	"github.com/zilliztech/milvus-distributed/internal/allocator"
@@ -53,6 +51,7 @@ type NodeImpl struct {
 
 	manipulationMsgStream msgstream.MsgStream
 	queryMsgStream        msgstream.MsgStream
+	msFactory             msgstream.Factory
 
 	closer io.Closer
 
@@ -61,12 +60,13 @@ type NodeImpl struct {
 	closeCallbacks []func()
 }
 
-func NewProxyNodeImpl(ctx context.Context) (*NodeImpl, error) {
+func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &NodeImpl{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:       ctx1,
+		cancel:    cancel,
+		msFactory: factory,
 	}
 
 	return node, nil
@@ -102,7 +102,6 @@ func (node *NodeImpl) waitForServiceReady(service Component, serviceName string)
 }
 
 func (node *NodeImpl) Init() error {
-
 	// todo wait for proxyservice state changed to Healthy
 
 	err := node.waitForServiceReady(node.proxyServiceClient, "ProxyService")
@@ -130,8 +129,6 @@ func (node *NodeImpl) Init() error {
 	if err != nil {
 		return err
 	}
-
-	factory := pulsarms.NewFactory(Params.PulsarAddress, Params.MsgStreamSearchBufSize, 1024)
 
 	// wait for dataservice state changed to Healthy
 	if node.dataServiceClient != nil {
@@ -179,7 +176,16 @@ func (node *NodeImpl) Init() error {
 	//	return err
 	//}
 
-	node.queryMsgStream, _ = factory.NewMsgStream(node.ctx)
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": Params.MsgStreamSearchBufSize,
+		"PulsarBufSize":  1024}
+	err = node.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+
+	node.queryMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
 	log.Println("create query message stream ...")
 
@@ -206,7 +212,7 @@ func (node *NodeImpl) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	node.manipulationMsgStream, _ = factory.NewMsgStream(node.ctx)
+	node.manipulationMsgStream, _ = node.msFactory.NewMsgStream(node.ctx)
 	node.manipulationMsgStream.AsProducer(Params.InsertChannelNames)
 	repackFuncImpl := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		return insertRepackFunc(tsMsgs, hashKeys, node.segAssigner, true)
@@ -214,12 +220,12 @@ func (node *NodeImpl) Init() error {
 	node.manipulationMsgStream.SetRepackFunc(repackFuncImpl)
 	log.Println("create manipulation message stream ...")
 
-	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator)
+	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
 		return err
 	}
 
-	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest)
+	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest, node.msFactory)
 
 	return nil
 }
