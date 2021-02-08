@@ -43,6 +43,7 @@
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #endif
+#include "knowhere/index/vector_index/IndexType.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "metrics/Metrics.h"
 #include "scheduler/Utils.h"
@@ -92,6 +93,42 @@ MappingMetricType(MetricType metric_type, milvus::json& conf) {
     return Status::OK();
 }
 
+knowhere::IndexType
+MappingIndexType(EngineType type) {
+    switch (type) {
+        case EngineType::FAISS_IDMAP:
+            return knowhere::IndexEnum::INDEX_FAISS_IDMAP;
+        case EngineType::FAISS_IVFFLAT:
+            return knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+        case EngineType::FAISS_PQ:
+            return knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+        case EngineType::FAISS_IVFSQ8:
+            return knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
+#ifdef MILVUS_GPU_VERSION
+        case EngineType::FAISS_IVFSQ8H:
+            return knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H;
+#endif
+        case EngineType::FAISS_BIN_IDMAP:
+            return knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
+        case EngineType::FAISS_BIN_IVFFLAT:
+            return knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+        case EngineType::NSG_MIX:
+            return knowhere::IndexEnum::INDEX_NSG;
+        case EngineType::SPTAG_KDT:
+            return knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT;
+        case EngineType::SPTAG_BKT:
+            return knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT;
+        case EngineType::HNSW:
+            return knowhere::IndexEnum::INDEX_HNSW;
+        case EngineType::ANNOY:
+            return knowhere::IndexEnum::INDEX_ANNOY;
+        default:
+            break;
+    }
+
+    return knowhere::IndexEnum::INVALID;
+}
+
 }  // namespace
 
 #ifdef MILVUS_GPU_VERSION
@@ -134,20 +171,23 @@ ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std:
       index_params_(index_params) {
 }
 
-knowhere::VecIndexPtr
-ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
-    knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
-    knowhere::IndexMode mode = knowhere::IndexMode::MODE_CPU;
+knowhere::IndexMode
+ExecutionEngineImpl::GetModeFromConfig() {
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
     bool gpu_resource_enable = true;
     config.GetGpuResourceConfigEnable(gpu_resource_enable);
-    fiu_do_on("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled", gpu_resource_enable = false);
+    fiu_do_on("ExecutionEngineImpl.GetModeFromConfig.gpu_res_disabled", gpu_resource_enable = false);
     if (gpu_resource_enable) {
-        mode = knowhere::IndexMode::MODE_GPU;
+        return knowhere::IndexMode::MODE_GPU;
     }
 #endif
-    fiu_do_on("ExecutionEngineImpl.CreateVecIndex.invalid_type", type = EngineType::INVALID);
+    return knowhere::IndexMode::MODE_CPU;
+}
+
+knowhere::VecIndexPtr
+ExecutionEngineImpl::CreatetVecIndex(EngineType type, knowhere::IndexMode mode) {
+    knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
     knowhere::VecIndexPtr index = nullptr;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -159,13 +199,6 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         case EngineType::FAISS_PQ: {
-            auto m = index_params_[knowhere::IndexParams::m];
-            if (!m.is_null() && !milvus::knowhere::IVFPQConfAdapter::GetValidM(dim_, m.get<int64_t>(), mode)) {
-                std::string err_msg = "dimension " + std::to_string(dim_) + " can't not be divided by m " +
-                                      std::to_string(m.get<int64_t>());
-                LOG_ENGINE_ERROR_ << err_msg;
-                break;
-            }
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, mode);
             break;
         }
@@ -207,10 +240,8 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_ANNOY, mode);
             break;
         }
-        default: {
-            LOG_ENGINE_ERROR_ << "Unsupported index type " << (int)type;
-            return nullptr;
-        }
+        default:
+            break;
     }
     if (index == nullptr) {
         std::string err_msg = "Invalid index type " + std::to_string((int)type) + " mod " + std::to_string((int)mode);
@@ -352,8 +383,8 @@ ExecutionEngineImpl::Serialize() {
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
-    bool already_in_cache = (index_ != nullptr);
-    if (!already_in_cache) {
+    if (!index_) {
+        // not in the cache
         std::string segment_dir;
         utils::GetParentPath(location_, segment_dir);
         auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
@@ -369,7 +400,8 @@ ExecutionEngineImpl::Load(bool to_cache) {
             MappingMetricType(metric_type_, conf);
             auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_->index_type());
             LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-            if (!adapter->CheckTrain(conf, index_->index_mode())) {
+            auto mode = index_->index_mode();
+            if (!adapter->CheckTrain(conf, mode)) {
                 throw Exception(DB_ERROR, "Illegal index params");
             }
 
@@ -469,11 +501,12 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 return Status(DB_ERROR, e.what());
             }
         }
+
+        if (to_cache) {
+            Cache();
+        }
     }
 
-    if (!already_in_cache && to_cache) {
-        Cache();
-    }
     return Status::OK();
 }  // namespace engine
 
@@ -599,6 +632,7 @@ ExecutionEngineImpl::CopyToFpga() {
 #endif
     return Status::OK();
 }
+
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
@@ -610,22 +644,20 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         return nullptr;
     }
 
-    auto to_index = CreatetVecIndex(engine_type);
-    if (!to_index) {
-        throw Exception(DB_ERROR, "Unsupported index type");
-    }
-
     milvus::json conf = index_params_;
     conf[knowhere::meta::DIM] = Dimension();
     conf[knowhere::meta::ROWS] = Count();
     conf[knowhere::meta::DEVICEID] = gpu_num_;
     MappingMetricType(metric_type_, conf);
     LOG_ENGINE_DEBUG_ << "Index params: " << conf.dump();
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(to_index->index_type());
-    if (!adapter->CheckTrain(conf, to_index->index_mode())) {
+    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(MappingIndexType(engine_type));
+    auto mode = GetModeFromConfig();
+    if (!adapter->CheckTrain(conf, mode)) {
         throw Exception(DB_ERROR, "Illegal index params");
     }
     LOG_ENGINE_DEBUG_ << "Index config: " << conf.dump();
+
+    auto to_index = CreatetVecIndex(engine_type, mode);
     std::shared_ptr<std::vector<segment::doc_id_t>> uids;
     faiss::ConcurrentBitsetPtr blacklist;
     if (from_index) {
@@ -647,6 +679,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         to_index = device_index->CopyGpuToCpu(conf);
     }
 #endif
+
     to_index->SetUids(uids);
     LOG_ENGINE_DEBUG_ << "Set " << to_index->UidsSize() << "uids for " << location;
     if (blacklist != nullptr) {

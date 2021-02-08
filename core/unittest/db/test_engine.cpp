@@ -19,6 +19,7 @@
 #include "db/engine/ExecutionEngineImpl.h"
 #include "db/utils.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
 #include <fiu-local.h>
 #include <fiu-control.h>
 
@@ -50,7 +51,12 @@ CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType met
 
     auto engine_impl = (std::static_pointer_cast<milvus::engine::ExecutionEngineImpl>(engine_ptr));
 
+    auto& vec_index_factory = milvus::knowhere::VecIndexFactory::GetInstance();
+    engine_impl->index_ = vec_index_factory.CreateVecIndex(milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        milvus::knowhere::IndexMode::MODE_CPU);
+
     auto dataset = milvus::knowhere::GenDataset(ROW_COUNT, DIMENSION, data.data());
+    engine_impl->index_->Train(milvus::knowhere::DatasetPtr(), json_params);
     engine_impl->index_->AddWithoutIds(dataset, milvus::knowhere::Config());
     engine_impl->index_->SetUids(ids);
     return engine_ptr;
@@ -138,25 +144,6 @@ TEST_F(EngineTest, FACTORY_TEST) {
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
-
-    {
-        fiu_init(0);
-        // test ExecutionEngineImpl constructor when create VecIndex failed
-        FIU_ENABLE_FIU("ExecutionEngineImpl.CreateVecIndex.invalid_type");
-        ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, index_params));
-        fiu_disable("ExecutionEngineImpl.CreateVecIndex.invalid_type");
-    }
-
-    {
-        // test ExecutionEngineImpl constructor when build failed
-        FIU_ENABLE_FIU("ExecutionEngineImpl.throw_exception");
-        ASSERT_ANY_THROW(milvus::engine::EngineFactory::Build(
-            512, "/tmp/milvus_index_1", milvus::engine::EngineType::SPTAG_KDT,
-            milvus::engine::MetricType::L2, index_params));
-        fiu_disable("ExecutionEngineImpl.throw_exception");
-    }
 }
 
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
@@ -201,12 +188,12 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
 
 #ifdef MILVUS_GPU_VERSION
     {
-        FIU_ENABLE_FIU("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
+        FIU_ENABLE_FIU("ExecutionEngineImpl.GetModeFromConfig.gpu_res_disabled");
         milvus::json index_params = {{"search_length", 100}, {"out_degree", 40}, {"pool_size", 100}, {"knng", 200},
                                      {"candidate_pool_size", 500}};
         auto engine_ptr = CreateExecEngine(index_params, milvus::engine::MetricType::L2);
         engine_ptr->BuildIndex("/tmp/milvus_index_NSG_MIX", milvus::engine::EngineType::NSG_MIX);
-        fiu_disable("ExecutionEngineImpl.CreatetVecIndex.gpu_res_disabled");
+        fiu_disable("ExecutionEngineImpl.GetModeFromConfig.gpu_res_disabled");
 
         auto status = engine_ptr->CopyToGpu(0, false);
         ASSERT_TRUE(status.ok());
