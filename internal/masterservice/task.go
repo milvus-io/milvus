@@ -630,6 +630,7 @@ func (t *DescribeIndexReqTask) Execute() error {
 		desc := &milvuspb.IndexDescription{
 			IndexName: i.IndexName,
 			Params:    i.IndexParams,
+			IndexID:   i.IndexID,
 		}
 		t.Rsp.IndexDescriptions = append(t.Rsp.IndexDescriptions, desc)
 	}

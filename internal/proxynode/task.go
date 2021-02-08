@@ -3,6 +3,7 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"strconv"
@@ -1346,9 +1347,9 @@ func (dit *DescribeIndexTask) PostExecute() error {
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.IndexStateRequest
-	indexServiceClient    IndexServiceClient
-	masterClientInterface MasterClient
-	result                *milvuspb.IndexStateResponse
+	indexServiceClient IndexServiceClient
+	masterClient       MasterClient
+	result             *milvuspb.IndexStateResponse
 }
 
 func (dipt *GetIndexStateTask) OnEnqueue() error {
@@ -1415,9 +1416,44 @@ func (dipt *GetIndexStateTask) Execute() error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := dipt.masterClientInterface.ShowPartitions(showPartitionRequest)
+	partitions, err := dipt.masterClient.ShowPartitions(showPartitionRequest)
 	if err != nil {
 		return err
+	}
+
+	if dipt.IndexName == "" {
+		dipt.IndexName = Params.DefaultIndexName
+	}
+
+	describeIndexReq := milvuspb.DescribeIndexRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_kDescribeIndex,
+			MsgID:     dipt.Base.MsgID,
+			Timestamp: dipt.Base.Timestamp,
+			SourceID:  Params.ProxyID,
+		},
+		DbName:         dipt.DbName,
+		CollectionName: dipt.CollectionName,
+		FieldName:      dipt.FieldName,
+		IndexName:      dipt.IndexName,
+	}
+
+	indexDescriptionResp, err2 := dipt.masterClient.DescribeIndex(&describeIndexReq)
+	if err2 != nil {
+		return err2
+	}
+
+	matchIndexID := int64(-1)
+	foundIndexID := false
+	for _, desc := range indexDescriptionResp.IndexDescriptions {
+		if desc.IndexName == dipt.IndexName {
+			matchIndexID = desc.IndexID
+			foundIndexID = true
+			break
+		}
+	}
+	if !foundIndexID {
+		return errors.New(fmt.Sprint("Can't found IndexID for indexName", dipt.IndexName))
 	}
 
 	for _, partitionID := range partitions.PartitionIDs {
@@ -1431,7 +1467,7 @@ func (dipt *GetIndexStateTask) Execute() error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		segments, err := dipt.masterClientInterface.ShowSegments(showSegmentsRequest)
+		segments, err := dipt.masterClient.ShowSegments(showSegmentsRequest)
 		if err != nil {
 			return err
 		}
@@ -1450,12 +1486,13 @@ func (dipt *GetIndexStateTask) Execute() error {
 				CollectionID: collectionID,
 				SegmentID:    segmentID,
 			}
-			segmentDesc, err := dipt.masterClientInterface.DescribeSegment(describeSegmentRequest)
+			segmentDesc, err := dipt.masterClient.DescribeSegment(describeSegmentRequest)
 			if err != nil {
 				return err
 			}
-
-			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
+			if segmentDesc.IndexID == matchIndexID {
+				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
+			}
 		}
 
 		states, err := dipt.indexServiceClient.GetIndexStates(getIndexStatesRequest)
