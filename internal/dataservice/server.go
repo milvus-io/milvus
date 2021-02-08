@@ -188,7 +188,7 @@ func (s *Server) initSegmentInfoChannel() {
 }
 func (s *Server) initMsgProducer() error {
 	var err error
-	if s.ttMsgStream, err = s.msFactory.NewTtMsgStream(s.ctx); err != nil {
+	if s.ttMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
 		return err
 	}
 	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
