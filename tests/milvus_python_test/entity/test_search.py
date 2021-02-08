@@ -1081,7 +1081,7 @@ class TestSearchBase:
         int_vectors, vectors, ids = self.init_binary_data(connect, collection, nb=1000, dim=dim)
         search_param = get_search_param(IndexType.FLAT)
         status, result = connect.search(collection, top_k, vectors[:1], params=search_param)
-        assert status.OK
+        assert status.OK()
         assert result[0][0].id in ids
         assert result[0][0].distance == 0.0
 
@@ -1107,7 +1107,7 @@ class TestSearchBase:
         vectors, ids = self.init_data(connect, collection, nb=1000, dim=dim)
         search_param = get_search_param(IndexType.FLAT)
         status, result = connect.search(collection, top_k, vectors[:1], params=search_param)
-        assert status.OK
+        assert status.OK()
         assert result[0][0].id in ids
 
 """
