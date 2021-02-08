@@ -822,34 +822,6 @@ class TestSearchBase:
         assert result[1][0].id in ids
         assert result[1][0].distance <= epsilon
 
-    @pytest.fixture(params=MetricType)
-    def get_binary_metric_types(self, request):
-        if request.param == MetricType.INVALID:
-            pytest.skip(("metric type invalid"))
-        if request.param in [MetricType.L2, MetricType.IP]:
-            pytest.skip(("L2 and IP not support in binary"))
-        return request.param
-
-    # 4678 and # 4683
-    def test_search_binary_dim_not_power_of_2(self, connect, get_binary_metric_types):
-        metric = get_binary_metric_types
-        collection = gen_unique_str(collection_id)
-        dim = 200
-        top_k = 1
-        param = {'collection_name': collection,
-                 'dimension': dim,
-                 'index_file_size': 10,
-                 'metric_type': metric}
-        status = connect.create_collection(param)
-        assert status.OK()
-        int_vectors, vectors, ids = self.init_binary_data(connect, collection, nb=1000, dim=dim)
-        search_param = get_search_param(IndexType.FLAT)
-        status, result = connect.search(collection, top_k, vectors[:1], params=search_param)
-        assert status.OK
-        logging.getLogger().info(result)
-        assert result[0][0].id in ids
-        assert result[0][0].distance == 0.0
-
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
         target: search ip_collection, and check the result: distance
