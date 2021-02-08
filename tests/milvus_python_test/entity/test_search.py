@@ -27,7 +27,7 @@ raw_vectors, binary_vectors = gen_binary_vectors(6000, dim)
 
 
 class TestSearchBase:
-    def init_data(self, connect, collection, nb=6000, partition_tags=None):
+    def init_data(self, connect, collection, nb=6000, dim=dim, partition_tags=None):
         '''
         Generate vectors and add it in collection, before search vectors
         '''
@@ -47,7 +47,7 @@ class TestSearchBase:
         connect.flush([collection])
         return add_vectors, ids
 
-    def init_binary_data(self, connect, collection, nb=6000, insert=True, partition_tags=None):
+    def init_binary_data(self, connect, collection, nb=6000, dim=dim, insert=True, partition_tags=None):
         '''
         Generate vectors and add it in collection, before search vectors
         '''
@@ -240,7 +240,8 @@ class TestSearchBase:
         vectors, ids = self.init_data(connect, collection, nb=10, partition_tags=tag)
         query_vec = [vectors[0]]
         search_param = get_search_param(IndexType.FLAT)
-        status, result = connect.search(collection, top_k, query_vec, partition_tags=["_default", tag], params=search_param)
+        status, result = connect.search(collection, top_k, query_vec, partition_tags=["_default", tag],
+                                        params=search_param)
         assert status.OK()
         logging.getLogger().info(result)
         assert len(result[0]) == min(len(vectors), top_k)
@@ -820,6 +821,34 @@ class TestSearchBase:
         assert result[0][0].distance <= epsilon
         assert result[1][0].id in ids
         assert result[1][0].distance <= epsilon
+
+    @pytest.fixture(params=MetricType)
+    def get_binary_metric_types(self, request):
+        if request.param == MetricType.INVALID:
+            pytest.skip(("metric type invalid"))
+        if request.param in [MetricType.L2, MetricType.IP]:
+            pytest.skip(("L2 and IP not support in binary"))
+        return request.param
+
+    # 4678 and # 4683
+    def test_search_binary_dim_not_power_of_2(self, connect, get_binary_metric_types):
+        metric = get_binary_metric_types
+        collection = gen_unique_str(collection_id)
+        dim = 200
+        top_k = 1
+        param = {'collection_name': collection,
+                 'dimension': dim,
+                 'index_file_size': 10,
+                 'metric_type': metric}
+        status = connect.create_collection(param)
+        assert status.OK()
+        int_vectors, vectors, ids = self.init_binary_data(connect, collection, nb=1000, dim=dim)
+        search_param = get_search_param(IndexType.FLAT)
+        status, result = connect.search(collection, top_k, vectors[:1], params=search_param)
+        assert status.OK
+        logging.getLogger().info(result)
+        assert result[0][0].id in ids
+        assert result[0][0].distance == 0.0
 
     def test_search_distance_tanimoto_flat_index(self, connect, tanimoto_collection):
         '''
