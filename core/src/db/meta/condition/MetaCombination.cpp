@@ -12,6 +12,7 @@
 #include "db/meta/condition/MetaCombination.h"
 
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace milvus::engine::meta {

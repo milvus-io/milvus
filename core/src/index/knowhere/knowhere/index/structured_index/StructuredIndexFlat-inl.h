@@ -34,6 +34,8 @@ StructuredIndexFlat<T>::~StructuredIndexFlat() {
 template <typename T>
 BinarySet
 StructuredIndexFlat<T>::Serialize(const milvus::knowhere::Config& config) {
+    // TODO
+    return BinarySet();
 }
 
 template <typename T>
