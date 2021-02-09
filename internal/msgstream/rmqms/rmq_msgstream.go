@@ -62,6 +62,7 @@ func newRmqMsgStream(ctx context.Context, receiveBufSize int64, rmqBufSize int64
 		rmqBufSize:       rmqBufSize,
 		consumerChannels: consumerChannels,
 		consumerReflects: consumerReflects,
+		consumerLock:     &sync.Mutex{},
 	}
 
 	return stream, nil
@@ -99,28 +100,25 @@ func (ms *RmqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 
 func (ms *RmqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
-		// TODO(yhz): Here may allow to create an existing channel
-		if err := rocksmq.Rmq.CreateChannel(channel); err != nil {
-			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
-			panic(errMsg)
+		err := rocksmq.Rmq.CreateChannel(channel)
+		if err == nil {
+			ms.producers = append(ms.producers, channel)
 		}
-		ms.producers = append(ms.producers, channel)
 	}
 }
 
 func (ms *RmqMsgStream) AsConsumer(channels []string, groupName string) {
 	for _, channelName := range channels {
 		consumer, err := rocksmq.Rmq.CreateConsumerGroup(groupName, channelName)
-		if err != nil {
-			panic(err.Error())
+		if err == nil {
+			consumer.MsgNum = make(chan int, ms.rmqBufSize)
+			ms.consumers = append(ms.consumers, *consumer)
+			ms.consumerChannels = append(ms.consumerChannels, channelName)
+			ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(consumer.MsgNum),
+			})
 		}
-		consumer.MsgNum = make(chan int, ms.rmqBufSize)
-		ms.consumers = append(ms.consumers, *consumer)
-		ms.consumerChannels = append(ms.consumerChannels, channelName)
-		ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(consumer.MsgNum),
-		})
 	}
 }
 

@@ -146,3 +146,16 @@ func (kv *RocksdbKV) MultiRemove(keys []string) error {
 	err := kv.db.Write(kv.writeOptions, writeBatch)
 	return err
 }
+
+func (kv *RocksdbKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Clear()
+	for k, v := range saves {
+		writeBatch.Put([]byte(k), []byte(v))
+	}
+	for _, key := range removals {
+		writeBatch.Delete([]byte(key))
+	}
+	err := kv.db.Write(kv.writeOptions, writeBatch)
+	return err
+}

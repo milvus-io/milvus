@@ -6,6 +6,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
 )
 
 type Factory struct {
@@ -37,5 +38,7 @@ func NewFactory() msgstream.Factory {
 		ReceiveBufSize:    64,
 		RmqBufSize:        64,
 	}
+
+	rocksmq.InitRocksMQ("/tmp/milvus_rdb")
 	return f
 }
