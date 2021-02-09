@@ -804,11 +804,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         *((unsigned short int*)(ptr))=*((unsigned short int *)&size);
     }
 
-    void addPoint(const void *data_point, labeltype label) {
-        addPoint(data_point, label,-1);
+    void addPoint(const void *data_point) {
+        addPoint(data_point, -1);
     }
 
-    tableint addPoint(const void *data_point, labeltype label, int level) {
+    tableint addPoint(const void *data_point, int level) {
         tableint cur_c = 0;
         {
             std::unique_lock <std::mutex> lock(cur_element_count_guard_);
@@ -842,7 +842,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_, 0, size_data_per_element_);
 
-        // Initialisation of the data and label
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
 
         if (curlevel) {
