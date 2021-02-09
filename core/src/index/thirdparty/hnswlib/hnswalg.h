@@ -39,7 +39,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         max_elements_ = max_elements;
 
-        has_deletions_=false;
         data_size_ = s->get_data_size();
         fstdistfunc_ = s->get_dist_func();
         dist_func_param_ = s->get_dist_func_param();
@@ -52,9 +51,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         level_generator_.seed(random_seed);
 
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
-        size_data_per_element_ = size_links_level0_ + data_size_ + sizeof(labeltype);
+        size_data_per_element_ = size_links_level0_ + data_size_; // + sizeof(labeltype);
         offsetData_ = size_links_level0_;
-        label_offset_ = size_links_level0_ + data_size_;
+//        label_offset_ = size_links_level0_ + data_size_;
         offsetLevel0_ = 0;
 
         data_level0_memory_ = (char *) malloc(max_elements_ * size_data_per_element_);
@@ -139,29 +138,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     size_t data_size_;
 
-    bool has_deletions_;
-
-
     size_t label_offset_;
     DISTFUNC<dist_t> fstdistfunc_;
     void *dist_func_param_;
-    std::unordered_map<labeltype, tableint> label_lookup_;
 
     std::default_random_engine level_generator_;
-
-    inline labeltype getExternalLabel(tableint internal_id) const {
-        labeltype return_label;
-        memcpy(&return_label,(data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_), sizeof(labeltype));
-        return return_label;
-    }
-
-    inline void setExternalLabel(tableint internal_id, labeltype label) const {
-        memcpy((data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_), &label, sizeof(labeltype));
-    }
-
-    inline labeltype *getExternalLabeLp(tableint internal_id) const {
-        return (labeltype *) (data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_);
-    }
 
     inline char *getDataByInternalId(tableint internal_id) const {
         return (data_level0_memory_ + internal_id * size_data_per_element_ + offsetData_);
@@ -183,15 +164,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidateSet;
 
         dist_t lowerBound;
-        if (!isMarkedDeleted(ep_id)) {
-            dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
-            top_candidates.emplace(dist, ep_id);
-            lowerBound = dist;
-            candidateSet.emplace(-dist, ep_id);
-        } else {
-            lowerBound = std::numeric_limits<dist_t>::max();
-            candidateSet.emplace(-lowerBound, ep_id);
-        }
+        dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
+        top_candidates.emplace(dist, ep_id);
+        lowerBound = dist;
+        candidateSet.emplace(-dist, ep_id);
         visited_array[ep_id] = visited_array_tag;
 
         while (!candidateSet.empty()) {
@@ -239,8 +215,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     _mm_prefetch(getDataByInternalId(candidateSet.top().second), _MM_HINT_T0);
 #endif
 
-                    if (!isMarkedDeleted(candidate_id))
-                        top_candidates.emplace(dist1, candidate_id);
+                    top_candidates.emplace(dist1, candidate_id);
 
                     if (top_candidates.size() > ef_construction_)
                         top_candidates.pop();
@@ -267,7 +242,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
-          if (!has_deletions || !bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(ep_id))) {
+          if (!has_deletions || !bitset.test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
@@ -324,10 +299,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #endif
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
-                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)getExternalLabel(candidate_id)))) {
+                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))) {
                             top_candidates.emplace(dist, candidate_id);
-                        }
-                        else {
                         }
 
                         if (top_candidates.size() > ef)
@@ -401,7 +374,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     };
 
     void mutuallyConnectNewElement(const void *data_point, tableint cur_c,
-                                   std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates,
+                                   std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
                                    int level) {
 
         size_t Mcurmax = level ? maxM_ : maxM0_;
@@ -510,53 +483,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     void setEf(size_t ef) {
         ef_ = ef;
     }
-
-
-    std::priority_queue<std::pair<dist_t, tableint>> searchKnnInternal(void *query_data, int k) {
-        std::priority_queue<std::pair<dist_t, tableint  >> top_candidates;
-        if (cur_element_count == 0) return top_candidates;
-        tableint currObj = enterpoint_node_;
-        dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
-
-        for (size_t level = maxlevel_; level > 0; level--) {
-            bool changed = true;
-            while (changed) {
-                changed = false;
-                int *data;
-                data = (int *) get_linklist(currObj,level);
-                int size = getListCount(data);
-                tableint *datal = (tableint *) (data + 1);
-                for (int i = 0; i < size; i++) {
-                    tableint cand = datal[i];
-                    if (cand < 0 || cand > max_elements_)
-                        throw std::runtime_error("cand error");
-                    dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
-
-                    if (d < curdist) {
-                        curdist = d;
-                        currObj = cand;
-                        changed = true;
-                    }
-                }
-            }
-        }
-
-        if (has_deletions_) {
-            std::priority_queue<std::pair<dist_t, tableint  >> top_candidates1=searchBaseLayerST<true>(currObj, query_data,
-                                                                                                         ef_);
-            top_candidates.swap(top_candidates1);
-        }
-        else{
-            std::priority_queue<std::pair<dist_t, tableint  >> top_candidates1=searchBaseLayerST<false>(currObj, query_data,
-                                                                                                          ef_);
-            top_candidates.swap(top_candidates1);
-        }
-
-        while (top_candidates.size() > k) {
-            top_candidates.pop();
-        }
-        return top_candidates;
-    };
 
     void resizeIndex(size_t new_max_elements){
         if (new_max_elements<cur_element_count)
@@ -722,7 +648,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
-            label_lookup_[getExternalLabel(i)]=i;
             unsigned int linkListSize;
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
@@ -741,15 +666,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 input.read(linkLists_[i], linkListSize);
             }
         }
-
-        has_deletions_=false;
-
-        for (size_t i = 0; i < cur_element_count; i++) {
-            if(isMarkedDeleted(i))
-                has_deletions_=true;
-        }
-
-        return;
     }
 
     void saveIndex(const std::string &location) {
@@ -863,7 +779,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         revSize_ = 1.0 / mult_;
         ef_ = 10;
         for (size_t i = 0; i < cur_element_count; i++) {
-            label_lookup_[getExternalLabel(i)]=i;
             unsigned int linkListSize;
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
@@ -878,80 +793,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
         }
 
-        has_deletions_=false;
-
-        for (size_t i = 0; i < cur_element_count; i++) {
-            if(isMarkedDeleted(i))
-                has_deletions_=true;
-        }
-
         input.close();
-        return;
-    }
-
-    template<typename data_t>
-    std::vector<data_t> getDataByLabel(labeltype label) {
-        tableint label_c;
-        auto search = label_lookup_.find(label);
-        if (search == label_lookup_.end() || isMarkedDeleted(search->second)) {
-            throw std::runtime_error("Label not found");
-        }
-        label_c = search->second;
-
-        char* data_ptrv = getDataByInternalId(label_c);
-        size_t dim = *((size_t *) dist_func_param_);
-        std::vector<data_t> data;
-        data_t* data_ptr = (data_t*) data_ptrv;
-        for (int i = 0; i < dim; i++) {
-            data.push_back(*data_ptr);
-            data_ptr += 1;
-        }
-        return data;
-    }
-
-    static const unsigned char DELETE_MARK = 0x01;
-    // static const unsigned char REUSE_MARK = 0x10;
-    /**
-     * Marks an element with the given label deleted, does NOT really change the current graph.
-     * @param label
-     */
-    void markDelete(labeltype label)
-    {
-        has_deletions_=true;
-        auto search = label_lookup_.find(label);
-        if (search == label_lookup_.end()) {
-            throw std::runtime_error("Label not found");
-        }
-        markDeletedInternal(search->second);
-    }
-
-    /**
-     * Uses the first 8 bits of the memory for the linked list to store the mark,
-     * whereas maxM0_ has to be limited to the lower 24 bits, however, still large enough in almost all cases.
-     * @param internalId
-     */
-    void markDeletedInternal(tableint internalId) {
-        unsigned char *ll_cur = ((unsigned char *)get_linklist0(internalId))+2;
-        *ll_cur |= DELETE_MARK;
-    }
-
-    /**
-     * Remove the deleted mark of the node.
-     * @param internalId
-     */
-    void unmarkDeletedInternal(tableint internalId) {
-        unsigned char *ll_cur = ((unsigned char *)get_linklist0(internalId))+2;
-        *ll_cur &= ~DELETE_MARK;
-    }
-
-    /**
-     * Checks the first 8 bits of the memory to see if the element is marked deleted.
-     * @param internalId
-     * @return
-     */
-    bool isMarkedDeleted(tableint internalId) const {
-        unsigned char *ll_cur = ((unsigned char*)get_linklist0(internalId))+2;
-        return *ll_cur & DELETE_MARK;
     }
 
     unsigned short int getListCount(linklistsizeint * ptr) const {
@@ -976,14 +818,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
             cur_c = cur_element_count;
             cur_element_count++;
-
-            auto search = label_lookup_.find(label);
-            if (search != label_lookup_.end()) {
-                std::unique_lock <std::mutex> lock_el(link_list_locks_[search->second]);
-                has_deletions_ = true;
-                markDeletedInternal(search->second);
-            }
-            label_lookup_[label] = cur_c;
         }
 
         std::unique_lock <std::mutex> lock_el(link_list_locks_[cur_c]);
@@ -1009,7 +843,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_, 0, size_data_per_element_);
 
         // Initialisation of the data and label
-        memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
 
         if (curlevel) {
@@ -1049,18 +882,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 }
             }
 
-            bool epDeleted = isMarkedDeleted(enterpoint_copy);
             for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--) {
                 if (level > maxlevelcopy || level < 0)  // possible?
                     throw std::runtime_error("Level error");
 
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates = searchBaseLayer(
                         currObj, data_point, level);
-                if (epDeleted) {
-                    top_candidates.emplace(fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy), dist_func_param_), enterpoint_copy);
-                    if (top_candidates.size() > ef_construction_)
-                        top_candidates.pop();
-                }
+
                 mutuallyConnectNewElement(data_point, cur_c, top_candidates, level);
 
                 currObj = top_candidates.top().second;
@@ -1130,7 +958,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         }
         while (top_candidates.size() > 0) {
             std::pair<dist_t, tableint> rez = top_candidates.top();
-            result.push(std::pair<dist_t, labeltype>(rez.first, getExternalLabel(rez.second)));
+            result.push(std::pair<dist_t, labeltype>(rez.first, rez.second));
             top_candidates.pop();
         }
         return result;
