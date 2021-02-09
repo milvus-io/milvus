@@ -118,6 +118,27 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	assert.NoError(t, err)
 }
 
+func initDmChannel(insertChannels []string, node *QueryNode) {
+	watchReq := &querypb.WatchDmChannelsRequest{
+		ChannelIDs: insertChannels,
+	}
+	_, err := node.WatchDmChannels(watchReq)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func initSearchChannel(searchChan string, resultChan string, node *QueryNode) {
+	searchReq := &querypb.AddQueryChannelsRequest{
+		RequestChannelID: searchChan,
+		ResultChannelID:  resultChan,
+	}
+	_, err := node.AddQueryChannel(searchReq)
+	if err != nil {
+		panic(err)
+	}
+}
+
 func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context
@@ -142,7 +163,6 @@ func newQueryNodeMock() *QueryNode {
 	}
 
 	return svr
-
 }
 
 func makeNewChannelNames(names []string, suffix string) []string {

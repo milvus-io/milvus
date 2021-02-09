@@ -6,12 +6,12 @@ import (
 	"log"
 	"time"
 
+	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	msc "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
 	qs "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice"
-
-	ds "github.com/zilliztech/milvus-distributed/internal/dataservice"
 	ms "github.com/zilliztech/milvus-distributed/internal/masterservice"
+
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -25,6 +25,10 @@ type QueryService struct {
 	dataService   *dsc.Client
 	masterService *msc.GrpcClient
 }
+
+const (
+	QueryMock = false
+)
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	const retry = 10
@@ -41,79 +45,92 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	ms.Params.Init()
 	log.Printf("Master service address: %s:%d", ms.Params.Address, ms.Params.Port)
 	log.Println("Init master service client ...")
-	masterService, err := msc.NewGrpcClient(fmt.Sprintf("%s:%d", ms.Params.Address, ms.Params.Port), 20*time.Second)
-	if err != nil {
-		panic(err)
-	}
-
-	if err = masterService.Init(); err != nil {
-		panic(err)
-	}
-
-	if err = masterService.Start(); err != nil {
-		panic(err)
-	}
-
-	var cnt int
-	for cnt = 0; cnt < retry; cnt++ {
-		time.Sleep(time.Duration(cnt*interval) * time.Millisecond)
-		if cnt != 0 {
-			log.Println("Master service isn't ready ...")
-			log.Printf("Retrying getting master service's states in ... %v ms", interval)
-		}
-
-		msStates, err := masterService.GetComponentStates()
-
+	var masterService *msc.GrpcClient = nil
+	if QueryMock {
+		masterMock := queryservice.NewMasterMock()
+		svr.SetMasterService(masterMock)
+	} else {
+		masterService, err = msc.NewGrpcClient(fmt.Sprintf("%s:%d", ms.Params.Address, ms.Params.Port), 20*time.Second)
 		if err != nil {
-			continue
+			panic(err)
 		}
-		if msStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			continue
-		}
-		if msStates.State.StateCode != internalpb2.StateCode_HEALTHY && msStates.State.StateCode != internalpb2.StateCode_INITIALIZING {
-			continue
-		}
-		break
-	}
-	if cnt >= retry {
-		panic("Master service isn't ready")
-	}
 
-	if err := svr.SetMasterService(masterService); err != nil {
-		panic(err)
+		if err = masterService.Init(); err != nil {
+			panic(err)
+		}
+
+		if err = masterService.Start(); err != nil {
+			panic(err)
+		}
+
+		var cnt int
+		for cnt = 0; cnt < retry; cnt++ {
+			time.Sleep(time.Duration(cnt*interval) * time.Millisecond)
+			if cnt != 0 {
+				log.Println("Master service isn't ready ...")
+				log.Printf("Retrying getting master service's states in ... %v ms", interval)
+			}
+
+			msStates, err := masterService.GetComponentStates()
+
+			if err != nil {
+				continue
+			}
+			if msStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+				continue
+			}
+			if msStates.State.StateCode != internalpb2.StateCode_HEALTHY && msStates.State.StateCode != internalpb2.StateCode_INITIALIZING {
+				continue
+			}
+			break
+		}
+		if cnt >= retry {
+			panic("Master service isn't ready")
+		}
+
+		if err := svr.SetMasterService(masterService); err != nil {
+			panic(err)
+		}
 	}
 
 	// --- Data service client ---
 	ds.Params.Init()
 	log.Printf("Data service address: %s:%d", ds.Params.Address, ds.Params.Port)
 	log.Println("Init data service client ...")
-	dataService := dsc.NewClient(fmt.Sprintf("%s:%d", ds.Params.Address, ds.Params.Port))
-	if err = dataService.Init(); err != nil {
-		panic(err)
-	}
-	if err = dataService.Start(); err != nil {
-		panic(err)
-	}
+	var dataService *dsc.Client = nil
+	if QueryMock {
+		dataMock := queryservice.NewDataMock()
+		svr.SetDataService(dataMock)
+	} else {
+		dataService = dsc.NewClient(fmt.Sprintf("%s:%d", ds.Params.Address, ds.Params.Port))
+		if err = dataService.Init(); err != nil {
+			panic(err)
+		}
+		if err = dataService.Start(); err != nil {
+			panic(err)
+		}
 
-	for cnt = 0; cnt < retry; cnt++ {
-		dsStates, err := dataService.GetComponentStates()
-		if err != nil {
-			continue
+		var cnt int
+		for cnt = 0; cnt < retry; cnt++ {
+			dsStates, err := dataService.GetComponentStates()
+			if err != nil {
+				continue
+			}
+			if dsStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+				continue
+			}
+			if dsStates.State.StateCode != internalpb2.StateCode_INITIALIZING && dsStates.State.StateCode != internalpb2.StateCode_HEALTHY {
+				continue
+			}
+			break
 		}
-		if dsStates.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-			continue
+		if cnt >= retry {
+			panic("Data service isn't ready")
 		}
-		if dsStates.State.StateCode != internalpb2.StateCode_INITIALIZING && dsStates.State.StateCode != internalpb2.StateCode_HEALTHY {
-			continue
-		}
-		break
-	}
-	if cnt >= retry {
-		panic("Data service isn't ready")
-	}
 
-	if err := svr.SetDataService(dataService); err != nil {
-		panic(err)
+		if err := svr.SetDataService(dataService); err != nil {
+			panic(err)
+		}
 	}
 
 	return &QueryService{
@@ -137,7 +154,9 @@ func (qs *QueryService) Run() error {
 }
 
 func (qs *QueryService) Stop() error {
-	_ = qs.dataService.Stop()
-	_ = qs.masterService.Stop()
+	if !QueryMock {
+		_ = qs.dataService.Stop()
+		_ = qs.masterService.Stop()
+	}
 	return qs.svr.Stop()
 }

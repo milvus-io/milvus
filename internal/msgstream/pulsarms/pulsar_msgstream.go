@@ -325,23 +325,65 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 		default:
 			tsMsgList := make([]TsMsg, 0)
 
-			for {
-				ms.consumerLock.Lock()
-				chosen, value, ok := reflect.Select(ms.consumerReflects)
-				ms.consumerLock.Unlock()
-				if !ok {
-					log.Printf("channel closed")
-					return
+			//for {
+			//	ms.consumerLock.Lock()
+			//	chosen, value, ok := reflect.Select(ms.consumerReflects)
+			//	ms.consumerLock.Unlock()
+			//	if !ok {
+			//		log.Printf("channel closed")
+			//		return
+			//	}
+			//
+			//	pulsarMsg, ok := value.Interface().(pulsar.ConsumerMessage)
+			//
+			//	if !ok {
+			//		log.Printf("type assertion failed, not consumer message type")
+			//		continue
+			//	}
+			//	ms.consumers[chosen].AckID(pulsarMsg.ID())
+			//
+			//	headerMsg := commonpb.MsgHeader{}
+			//	err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
+			//	if err != nil {
+			//		log.Printf("Failed to unmarshal message header, error = %v", err)
+			//		continue
+			//	}
+			//	tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
+			//	if err != nil {
+			//		log.Printf("Failed to unmarshal tsMsg, error = %v", err)
+			//		continue
+			//	}
+			//
+			//	tsMsg.SetPosition(&msgstream.MsgPosition{
+			//		ChannelName: filepath.Base(pulsarMsg.Topic()),
+			//		MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+			//	})
+			//	tsMsgList = append(tsMsgList, tsMsg)
+			//
+			//	noMoreMessage := true
+			//	for i := 0; i < len(ms.consumers); i++ {
+			//		if len(ms.consumers[i].Chan()) > 0 {
+			//			noMoreMessage = false
+			//		}
+			//	}
+			//
+			//	if noMoreMessage {
+			//		break
+			//	}
+			//}
+
+			pulsarMsgBuffer := make([]pulsar.ConsumerMessage, 0)
+			ms.consumerLock.Lock()
+			consumers := ms.consumers
+			ms.consumerLock.Unlock()
+			for _, consumer := range consumers {
+				msgLen := len(consumer.Chan())
+				for i := 0; i < msgLen; i++ {
+					msg := <-consumer.Chan()
+					pulsarMsgBuffer = append(pulsarMsgBuffer, msg)
 				}
-
-				pulsarMsg, ok := value.Interface().(pulsar.ConsumerMessage)
-
-				if !ok {
-					log.Printf("type assertion failed, not consumer message type")
-					continue
-				}
-				ms.consumers[chosen].AckID(pulsarMsg.ID())
-
+			}
+			for _, pulsarMsg := range pulsarMsgBuffer {
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
 				if err != nil {
@@ -359,17 +401,6 @@ func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 					MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
 				})
 				tsMsgList = append(tsMsgList, tsMsg)
-
-				noMoreMessage := true
-				for i := 0; i < len(ms.consumers); i++ {
-					if len(ms.consumers[i].Chan()) > 0 {
-						noMoreMessage = false
-					}
-				}
-
-				if noMoreMessage {
-					break
-				}
 			}
 
 			if len(tsMsgList) > 0 {

@@ -32,6 +32,10 @@ func (qn *queryNodeInfo) AddDmChannels(channels []string) {
 	qn.dmChannelNames = append(qn.dmChannelNames, channels...)
 }
 
+func (qn *queryNodeInfo) AddQueryChannel(in *querypb.AddQueryChannelsRequest) (*commonpb.Status, error) {
+	return qn.client.AddQueryChannel(in)
+}
+
 func newQueryNodeInfo(client QueryNodeInterface) *queryNodeInfo {
 	segments := make([]UniqueID, 0)
 	dmChannelNames := make([]string, 0)
