@@ -55,8 +55,11 @@ CreateExecEngine(const milvus::json& json_params, milvus::engine::MetricType met
     engine_impl->index_ = vec_index_factory.CreateVecIndex(milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP,
         milvus::knowhere::IndexMode::MODE_CPU);
 
+    auto conf = json_params;
+    conf[milvus::knowhere::meta::DIM] = DIMENSION;
+    conf[milvus::knowhere::Metric::TYPE] = milvus::knowhere::Metric::L2;
     auto dataset = milvus::knowhere::GenDataset(ROW_COUNT, DIMENSION, data.data());
-    engine_impl->index_->Train(milvus::knowhere::DatasetPtr(), json_params);
+    engine_impl->index_->Train(milvus::knowhere::DatasetPtr(), conf);
     engine_impl->index_->AddWithoutIds(dataset, milvus::knowhere::Config());
     engine_impl->index_->SetUids(ids);
     return engine_ptr;
