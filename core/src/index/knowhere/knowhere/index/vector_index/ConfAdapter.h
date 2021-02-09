@@ -24,7 +24,7 @@ namespace knowhere {
 class ConfAdapter {
  public:
     virtual bool
-    CheckTrain(Config& oricfg, const IndexMode mode);
+    CheckTrain(Config& oricfg, IndexMode& mode);
 
     virtual bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode);
@@ -34,7 +34,7 @@ using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
 class IVFConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
@@ -43,28 +43,25 @@ class IVFConfAdapter : public ConfAdapter {
 class IVFSQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 };
 
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     static bool
-    GetValidM(int64_t dimension, int64_t m, IndexMode& mode);
+    IsValidForGPU(int64_t dimension, int64_t m);
 
     static bool
-    GetValidGPUM(int64_t dimension, int64_t m);
-
-    static bool
-    GetValidCPUM(int64_t dimension, int64_t m);
+    IsValidForCPU(int64_t dimension, int64_t m);
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
@@ -73,19 +70,19 @@ class NSGConfAdapter : public IVFConfAdapter {
 class BinIDMAPConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 };
 
 class BinIVFConfAdapter : public IVFConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 };
 
 class HNSWConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;
@@ -94,7 +91,7 @@ class HNSWConfAdapter : public ConfAdapter {
 class ANNOYConfAdapter : public ConfAdapter {
  public:
     bool
-    CheckTrain(Config& oricfg, const IndexMode mode) override;
+    CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     bool
     CheckSearch(Config& oricfg, const IndexType type, const IndexMode mode) override;

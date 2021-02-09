@@ -220,7 +220,7 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
 
             // special check for 'm' parameter
             int64_t m_value = index_params[knowhere::IndexParams::m];
-            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(collection_schema.dimension_, m_value)) {
+            if (!milvus::knowhere::IVFPQConfAdapter::IsValidForCPU(collection_schema.dimension_, m_value)) {
                 std::string msg = "Invalid collection dimension, dimension can not be divided by m";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);

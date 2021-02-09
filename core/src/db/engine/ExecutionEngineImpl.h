@@ -109,11 +109,11 @@ class ExecutionEngineImpl : public ExecutionEngine {
     }
 
  private:
-    knowhere::VecIndexPtr
-    CreatetVecIndex(EngineType type);
+    knowhere::IndexMode
+    GetModeFromConfig();
 
     knowhere::VecIndexPtr
-    Load(const std::string& location);
+    CreatetVecIndex(EngineType type, knowhere::IndexMode mode);
 
     void
     HybridLoad() const;
