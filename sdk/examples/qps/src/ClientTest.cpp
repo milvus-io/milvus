@@ -336,9 +336,8 @@ ClientTest::Search() {
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     int64_t span = (std::chrono::duration_cast<std::chrono::milliseconds>(end - start)).count();
     double sec = (double)span / 1000.0;
-    double tps_s = parameters_.query_count_ / sec;
-    int64_t tps = (int64_t)tps_s;
-    int64_t qps = tps * parameters_.nq_;
+    double tps = parameters_.query_count_ / sec;
+    double qps = tps * parameters_.nq_;
     std::cout << "TPS = " << tps << " \tQPS = " << qps << std::endl;
 
     // print search detail statistics
