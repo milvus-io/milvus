@@ -122,11 +122,11 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 
     GET_TENSOR_DATA(dataset_ptr)
 
-    index_->addPoint(p_data);
+    index_->addPoint(p_data, 0);
 #pragma omp parallel for
     for (int i = 1; i < rows; ++i) {
         faiss::BuilderSuspend::check_wait();
-        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i));
+        index_->addPoint((reinterpret_cast<const float*>(p_data) + Dim() * i), i);
     }
     if (STATISTICS_LEVEL >= 3) {
         auto hnsw_stats = std::static_pointer_cast<LibHNSWStatistics>(stats);

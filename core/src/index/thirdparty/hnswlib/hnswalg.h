@@ -804,19 +804,18 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         *((unsigned short int*)(ptr))=*((unsigned short int *)&size);
     }
 
-    void addPoint(const void *data_point) {
-        addPoint(data_point, -1);
+    void addPoint(const void *data_point, labeltype label) {
+        addPoint(data_point, label, -1);
     }
 
-    tableint addPoint(const void *data_point, int level) {
-        tableint cur_c = 0;
+    tableint addPoint(const void *data_point, labeltype label, int level) {
+        tableint cur_c = label;
         {
             std::unique_lock <std::mutex> lock(cur_element_count_guard_);
             if (cur_element_count >= max_elements_) {
                 throw std::runtime_error("The number of elements exceeds the specified limit");
             };
 
-            cur_c = cur_element_count;
             cur_element_count++;
         }
 
