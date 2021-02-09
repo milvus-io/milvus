@@ -108,8 +108,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 		Schema:       &schema,
 		CreateTime:   collTs,
 		PartitionIDs: make([]typeutil.UniqueID, 0, 16),
-		IndexParams:  make([]*etcdpb.IndexParamsInfo, 0, 16),
-		IndexNames:   make([]string, 0, 16),
+		FieldIndexes: make([]*etcdpb.FieldIndexInfo, 0, 16),
 	}
 	partMeta := etcdpb.PartitionInfo{
 		PartitionName: Params.DefaultPartitionName,
@@ -119,12 +118,19 @@ func (t *CreateCollectionReqTask) Execute() error {
 	for _, field := range schema.Fields {
 		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
 			if len(field.IndexParams) > 0 {
-				indexParam := &etcdpb.IndexParamsInfo{
-					FiledID:     field.FieldID,
-					IndexParams: field.IndexParams,
+				idxID, err := t.core.idAllocator.AllocOne()
+				if err != nil {
+					return err
 				}
-				collMeta.IndexParams = append(collMeta.IndexParams, indexParam)
-				collMeta.IndexNames = append(collMeta.IndexNames, fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID))
+				filedIdx := &etcdpb.FieldIndexInfo{
+					FiledID: field.FieldID,
+					IndexInfo: &etcdpb.IndexInfo{
+						IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
+						IndexID:     idxID,
+						IndexParams: field.IndexParams,
+					},
+				}
+				collMeta.FieldIndexes = append(collMeta.FieldIndexes, filedIdx)
 			}
 		}
 	}
@@ -585,7 +591,16 @@ func (t *CreateIndexReqTask) IgnoreTimeStamp() bool {
 
 func (t *CreateIndexReqTask) Execute() error {
 	indexName := Params.DefaultIndexName //TODO, get name from request
-	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, t.Req.ExtraParams, indexName)
+	indexID, err := t.core.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	idxInfo := &etcdpb.IndexInfo{
+		IndexName:   indexName,
+		IndexID:     indexID,
+		IndexParams: t.Req.ExtraParams,
+	}
+	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo)
 	if err != nil {
 		return err
 	}
@@ -597,6 +612,7 @@ func (t *CreateIndexReqTask) Execute() error {
 			core:        t.core,
 			segmentID:   seg,
 			indexName:   indexName,
+			indexID:     indexID,
 			fieldSchema: &field,
 			indexParams: t.Req.ExtraParams,
 		}
@@ -644,6 +660,7 @@ type CreateIndexTask struct {
 	core        *Core
 	segmentID   typeutil.UniqueID
 	indexName   string
+	indexID     typeutil.UniqueID
 	fieldSchema *schemapb.FieldSchema
 	indexParams []*commonpb.KeyValuePair
 }
@@ -651,10 +668,6 @@ type CreateIndexTask struct {
 func (t *CreateIndexTask) BuildIndex() error {
 	if t.core.MetaTable.IsSegmentIndexed(t.segmentID, t.fieldSchema, t.indexParams) {
 		return nil
-	}
-	idxID, err := t.core.idAllocator.AllocOne()
-	if err != nil {
-		return err
 	}
 	binlogs, err := t.core.GetBinlogFilePathsFromDataServiceReq(t.segmentID, t.fieldSchema.FieldID)
 	if err != nil {
@@ -671,19 +684,19 @@ func (t *CreateIndexTask) BuildIndex() error {
 			})
 		}
 	}
-	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams, idxID, t.indexName)
+	bldID, err = t.core.BuildIndexReq(binlogs, t.fieldSchema.TypeParams, t.indexParams, t.indexID, t.indexName)
 	if err != nil {
 		return err
 	}
 	seg := etcdpb.SegmentIndexInfo{
 		SegmentID: t.segmentID,
 		FieldID:   t.fieldSchema.FieldID,
-		IndexID:   idxID,
+		IndexID:   t.indexID,
 		BuildID:   bldID,
 	}
 	idx := etcdpb.IndexInfo{
 		IndexName:   t.indexName,
-		IndexID:     idxID,
+		IndexID:     t.indexID,
 		IndexParams: t.indexParams,
 	}
 	err = t.core.MetaTable.AddIndex(&seg, &idx)

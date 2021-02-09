@@ -150,10 +150,15 @@ func TestMetaTable(t *testing.T) {
 				Value: "field110-v2",
 			},
 		}
+		idxInfo := &pb.IndexInfo{
+			IndexName:   "field110",
+			IndexID:     2000,
+			IndexParams: params,
+		}
 
-		_, field, err := mt.GetNotIndexedSegments("collTest", "field110", params, "field110-idx")
+		_, field, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo)
 		assert.NotNil(t, err)
-		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", params, "field110-idx")
+		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)
 		assert.Equal(t, len(seg), 1)
 		assert.Equal(t, seg[0], int64(101))
@@ -165,8 +170,9 @@ func TestMetaTable(t *testing.T) {
 				Value: "field110-v1",
 			},
 		}
+		idxInfo.IndexParams = params
 
-		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", params, "field110-idx")
+		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)
 		assert.Equal(t, len(seg), 2)
 		assert.Equal(t, seg[0], int64(100))

@@ -524,17 +524,19 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo, idx *pb.IndexInfo) error
 			return errors.Errorf("index id = %d exist", seg.IndexID)
 		}
 	}
-	_, ok = mt.indexID2Meta[idx.IndexID]
-	if ok {
-		return errors.Errorf("index id = %d exist", idx.IndexID)
-	}
+	var k1, k2, v1, v2 string
 	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
-	mt.indexID2Meta[idx.IndexID] = *idx
-	k1 := path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(seg.SegmentID, 10), strconv.FormatInt(seg.IndexID, 10))
-	v1 := proto.MarshalTextString(seg)
-	k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
-	v2 := proto.MarshalTextString(idx)
-	meta := map[string]string{k1: v1, k2: v2}
+	k1 = path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(seg.SegmentID, 10), strconv.FormatInt(seg.IndexID, 10))
+	v1 = proto.MarshalTextString(seg)
+	meta := map[string]string{k1: v1}
+
+	_, ok = mt.indexID2Meta[idx.IndexID]
+	if !ok {
+		mt.indexID2Meta[idx.IndexID] = *idx
+		k2 = path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
+		v2 = proto.MarshalTextString(idx)
+		meta[k2] = v2
+	}
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -635,7 +637,7 @@ func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 }
 
 // return segment ids, type params, error
-func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, indexParams []*commonpb.KeyValuePair, indexName string) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
+func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -653,23 +655,23 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 	}
 
 	exist := false
-	if indexParams != nil {
-		for _, f := range collMeta.IndexParams {
+	if idxInfo.IndexParams != nil {
+		for _, f := range collMeta.FieldIndexes {
 			if f.FiledID == fieldSchema.FieldID {
 				// (collMeta.IndexNames[i] == indexName)
-				if EqualKeyPairArray(f.IndexParams, indexParams) {
+				if EqualKeyPairArray(f.IndexInfo.IndexParams, idxInfo.IndexParams) {
 					exist = true
 					break
 				}
 			}
 		}
 	}
-	if !exist && indexParams != nil {
-		collMeta.IndexParams = append(collMeta.IndexParams, &pb.IndexParamsInfo{
-			FiledID:     fieldSchema.FieldID,
-			IndexParams: indexParams,
-		})
-		collMeta.IndexNames = append(collMeta.IndexNames, indexName)
+	if !exist && idxInfo.IndexParams != nil {
+		idx := &pb.FieldIndexInfo{
+			FiledID:   fieldSchema.FieldID,
+			IndexInfo: idxInfo,
+		}
+		collMeta.FieldIndexes = append(collMeta.FieldIndexes, idx)
 		mt.collID2Meta[collMeta.ID] = collMeta
 		k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(collMeta.ID, 10))
 		v1 := proto.MarshalTextString(&collMeta)
@@ -687,7 +689,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, in
 		partMeta, ok := mt.partitionID2Meta[partID]
 		if ok {
 			for _, segID := range partMeta.SegmentIDs {
-				if exist := mt.unlockIsSegmentIndexed(segID, &fieldSchema, indexParams); !exist {
+				if exist := mt.unlockIsSegmentIndexed(segID, &fieldSchema, idxInfo.IndexParams); !exist {
 					rstID = append(rstID, segID)
 				}
 			}

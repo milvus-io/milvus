@@ -375,13 +375,14 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 			if err != nil {
 				log.Printf("GetCollectionBySegmentID, error = %s ", err.Error())
 			}
-			for i, f := range coll.IndexParams {
+			for _, f := range coll.FieldIndexes {
 				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 				if err == nil {
 					t := &CreateIndexTask{
 						core:        c,
 						segmentID:   seg,
-						indexName:   coll.IndexNames[i],
+						indexName:   f.IndexInfo.IndexName,
+						indexID:     f.IndexInfo.IndexID,
 						fieldSchema: fieldSch,
 						indexParams: nil,
 					}
