@@ -449,19 +449,22 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	segmentIDs := make([]UniqueID, 0)
 	fmt.Println("start release partitions start, partitionIDs = ", partitionIDs)
 	for _, partitionID := range partitionIDs {
-		segments, err := qs.replica.getSegments(dbID, collectionID, partitionID)
+		showSegmentRequest := &milvuspb.ShowSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_kShowSegment,
+			},
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+		}
+		showSegmentResponse, err := qs.masterServiceClient.ShowSegments(showSegmentRequest)
 		if err != nil {
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 				Reason:    err.Error(),
 			}, err
 		}
-		res := make([]UniqueID, 0)
-		for _, segment := range segments {
-			res = append(res, segment.id)
-		}
 
-		segmentIDs = append(segmentIDs, res...)
+		segmentIDs = append(segmentIDs, showSegmentResponse.SegmentIDs...)
 		err = qs.replica.releasePartition(dbID, collectionID, partitionID)
 		if err != nil {
 			return &commonpb.Status{

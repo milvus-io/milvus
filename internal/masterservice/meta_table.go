@@ -17,12 +17,13 @@ import (
 )
 
 const (
-	TenantMetaPrefix       = "tenant"
-	ProxyMetaPrefix        = "proxy"
-	CollectionMetaPrefix   = "collection"
-	PartitionMetaPrefix    = "partition"
-	SegmentIndexMetaPrefix = "segment-index"
-	IndexMetaPrefix        = "index"
+	ComponentPrefix        = "master-service"
+	TenantMetaPrefix       = ComponentPrefix + "/tenant"
+	ProxyMetaPrefix        = ComponentPrefix + "/proxy"
+	CollectionMetaPrefix   = ComponentPrefix + "/collection"
+	PartitionMetaPrefix    = ComponentPrefix + "/partition"
+	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
+	IndexMetaPrefix        = ComponentPrefix + "/index"
 )
 
 type metaTable struct {
