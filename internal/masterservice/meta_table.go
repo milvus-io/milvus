@@ -172,7 +172,7 @@ func (mt *metaTable) reloadFromKV() error {
 	return nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo) error {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -186,18 +186,30 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return errors.Errorf("collection %s exist", coll.Schema.Name)
 	}
+	if len(coll.FieldIndexes) != len(idx) {
+		return errors.Errorf("incorrect index id when creating collection")
+	}
 
 	coll.PartitionIDs = append(coll.PartitionIDs, part.PartitionID)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 	mt.partitionID2Meta[part.PartitionID] = *part
 	mt.partitionID2CollID[part.PartitionID] = coll.ID
+	for _, i := range idx {
+		mt.indexID2Meta[i.IndexID] = *i
+	}
 
 	k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(coll.ID, 10))
 	v1 := proto.MarshalTextString(coll)
 	k2 := path.Join(PartitionMetaPrefix, strconv.FormatInt(part.PartitionID, 10))
 	v2 := proto.MarshalTextString(part)
 	meta := map[string]string{k1: v1, k2: v2}
+
+	for _, i := range idx {
+		k := path.Join(IndexMetaPrefix, strconv.FormatInt(i.IndexID, 10))
+		v := proto.MarshalTextString(i)
+		meta[k] = v
+	}
 
 	err := mt.client.MultiSave(meta)
 	if err != nil {
@@ -238,7 +250,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error {
 				metaKeys = append(metaKeys, path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(segID, 10), strconv.FormatInt(indexID, 10)))
 				indexMeta, ok := mt.indexID2Meta[segIdxMeta.IndexID]
 				if !ok {
-					log.Printf("index id = %d not exist", segIdxMeta.IndexID)
+					//log.Printf("index id = %d not exist", segIdxMeta.IndexID) // segments may share index id
 					continue
 				}
 				delete(mt.indexID2Meta, segIdxMeta.IndexID)
@@ -506,13 +518,9 @@ func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo, idx *pb.IndexInfo) error {
+func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-
-	if seg.IndexID != idx.IndexID {
-		return errors.Errorf("index id in segment is %d, in index info is %d, not equal", seg.IndexID, idx.IndexID)
-	}
 
 	segIdxMap, ok := mt.segID2IndexMeta[seg.SegmentID]
 	if !ok {
@@ -524,21 +532,30 @@ func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo, idx *pb.IndexInfo) error
 			return errors.Errorf("index id = %d exist", seg.IndexID)
 		}
 	}
-	var k1, k2, v1, v2 string
-	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
-	k1 = path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(seg.SegmentID, 10), strconv.FormatInt(seg.IndexID, 10))
-	v1 = proto.MarshalTextString(seg)
-	meta := map[string]string{k1: v1}
-
-	_, ok = mt.indexID2Meta[idx.IndexID]
+	collID, ok := mt.segID2CollID[seg.SegmentID]
 	if !ok {
-		mt.indexID2Meta[idx.IndexID] = *idx
-		k2 = path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
-		v2 = proto.MarshalTextString(idx)
-		meta[k2] = v2
+		return errors.Errorf("segment id = %d not belong to any collection", seg.SegmentID)
+	}
+	collMeta, ok := mt.collID2Meta[collID]
+	if !ok {
+		return errors.Errorf("collection id = %d not found", collID)
+	}
+	exist := false
+	for _, i := range collMeta.FieldIndexes {
+		if i.IndexID == seg.IndexID {
+			exist = true
+			break
+		}
+	}
+	if !exist {
+		return errors.Errorf("index id = %d not found", seg.IndexID)
 	}
 
-	err := mt.client.MultiSave(meta)
+	(*(mt.segID2IndexMeta[seg.SegmentID]))[seg.IndexID] = *seg
+	k := path.Join(SegmentIndexMetaPrefix, strconv.FormatInt(seg.SegmentID, 10), strconv.FormatInt(seg.IndexID, 10))
+	v := proto.MarshalTextString(seg)
+
+	err := mt.client.Save(k, v)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return err
@@ -655,11 +672,17 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	}
 
 	exist := false
+	var existInfo pb.IndexInfo
 	if idxInfo.IndexParams != nil {
 		for _, f := range collMeta.FieldIndexes {
 			if f.FiledID == fieldSchema.FieldID {
+				existInfo, ok = mt.indexID2Meta[f.IndexID]
+				if !ok {
+					return nil, schemapb.FieldSchema{}, errors.Errorf("index id = %d not found", f.IndexID)
+				}
+
 				// (collMeta.IndexNames[i] == indexName)
-				if EqualKeyPairArray(f.IndexInfo.IndexParams, idxInfo.IndexParams) {
+				if EqualKeyPairArray(existInfo.IndexParams, idxInfo.IndexParams) {
 					exist = true
 					break
 				}
@@ -668,20 +691,38 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	}
 	if !exist && idxInfo.IndexParams != nil {
 		idx := &pb.FieldIndexInfo{
-			FiledID:   fieldSchema.FieldID,
-			IndexInfo: idxInfo,
+			FiledID: fieldSchema.FieldID,
+			IndexID: idxInfo.IndexID,
 		}
 		collMeta.FieldIndexes = append(collMeta.FieldIndexes, idx)
 		mt.collID2Meta[collMeta.ID] = collMeta
 		k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(collMeta.ID, 10))
 		v1 := proto.MarshalTextString(&collMeta)
 
-		err := mt.client.Save(k1, v1)
+		mt.indexID2Meta[idx.IndexID] = *idxInfo
+		k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
+		v2 := proto.MarshalTextString(idx)
+		meta := map[string]string{k1: v1, k2: v2}
+
+		err = mt.client.MultiSave(meta)
 		if err != nil {
 			_ = mt.reloadFromKV()
 			return nil, schemapb.FieldSchema{}, err
 		}
 
+	} else {
+		idxInfo.IndexID = existInfo.IndexID
+		if existInfo.IndexName != idxInfo.IndexName { //replace index name
+			existInfo.IndexName = idxInfo.IndexName
+			mt.indexID2Meta[existInfo.IndexID] = existInfo
+			k := path.Join(IndexMetaPrefix, strconv.FormatInt(existInfo.IndexID, 10))
+			v := proto.MarshalTextString(&existInfo)
+			err = mt.client.Save(k, v)
+			if err != nil {
+				_ = mt.reloadFromKV()
+				return nil, schemapb.FieldSchema{}, err
+			}
+		}
 	}
 
 	rstID := make([]typeutil.UniqueID, 0, 16)
@@ -715,7 +756,8 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 		return nil, err
 	}
 
-	rstIndex := make([]*pb.IndexInfo, 0, 16)
+	rstIndex := make([]pb.IndexInfo, 0, len(collMeta.FieldIndexes))
+	existMap := map[typeutil.UniqueID]bool{}
 
 	for _, partID := range collMeta.PartitionIDs {
 		partMeta, ok := mt.partitionID2Meta[partID]
@@ -733,20 +775,20 @@ func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName
 					if !ok {
 						continue
 					}
-					if indexName == "" {
-						rstIndex = append(rstIndex, &idxMeta)
-					} else if idxMeta.IndexName == indexName {
-						rstIndex = append(rstIndex, &idxMeta)
+					if _, ok = existMap[idxID]; ok {
+						continue
 					}
+					if indexName == "" {
+						rstIndex = append(rstIndex, idxMeta)
+					} else if idxMeta.IndexName == indexName {
+						rstIndex = append(rstIndex, idxMeta)
+					}
+					existMap[idxID] = true
 				}
 			}
 		}
 	}
-	rst := make([]pb.IndexInfo, 0, len(rstIndex))
-	for i := range rstIndex {
-		rst = append(rst, *rstIndex[i])
-	}
-	return rst, nil
+	return rstIndex, nil
 }
 
 func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error) {

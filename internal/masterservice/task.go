@@ -115,6 +115,7 @@ func (t *CreateCollectionReqTask) Execute() error {
 		PartitionID:   partitionID,
 		SegmentIDs:    make([]typeutil.UniqueID, 0, 16),
 	}
+	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
 	for _, field := range schema.Fields {
 		if field.DataType == schemapb.DataType_VECTOR_FLOAT || field.DataType == schemapb.DataType_VECTOR_BINARY {
 			if len(field.IndexParams) > 0 {
@@ -124,18 +125,20 @@ func (t *CreateCollectionReqTask) Execute() error {
 				}
 				filedIdx := &etcdpb.FieldIndexInfo{
 					FiledID: field.FieldID,
-					IndexInfo: &etcdpb.IndexInfo{
-						IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
-						IndexID:     idxID,
-						IndexParams: field.IndexParams,
-					},
+					IndexID: idxID,
 				}
+				idx := &etcdpb.IndexInfo{
+					IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
+					IndexID:     idxID,
+					IndexParams: field.IndexParams,
+				}
+				idxInfo = append(idxInfo, idx)
 				collMeta.FieldIndexes = append(collMeta.FieldIndexes, filedIdx)
 			}
 		}
 	}
 
-	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta)
+	err = t.core.MetaTable.AddCollection(&collMeta, &partMeta, idxInfo)
 	if err != nil {
 		return err
 	}
@@ -611,8 +614,8 @@ func (t *CreateIndexReqTask) Execute() error {
 		task := CreateIndexTask{
 			core:        t.core,
 			segmentID:   seg,
-			indexName:   indexName,
-			indexID:     indexID,
+			indexName:   idxInfo.IndexName,
+			indexID:     idxInfo.IndexID,
 			fieldSchema: &field,
 			indexParams: t.Req.ExtraParams,
 		}
@@ -694,11 +697,6 @@ func (t *CreateIndexTask) BuildIndex() error {
 		IndexID:   t.indexID,
 		BuildID:   bldID,
 	}
-	idx := etcdpb.IndexInfo{
-		IndexName:   t.indexName,
-		IndexID:     t.indexID,
-		IndexParams: t.indexParams,
-	}
-	err = t.core.MetaTable.AddIndex(&seg, &idx)
+	err = t.core.MetaTable.AddIndex(&seg)
 	return err
 }

@@ -65,6 +65,12 @@ func TestMetaTable(t *testing.T) {
 				},
 			},
 		},
+		FieldIndexes: []*pb.FieldIndexInfo{
+			{
+				FiledID: 110,
+				IndexID: 10000,
+			},
+		},
 		CreateTime:   0,
 		PartitionIDs: nil,
 	}
@@ -73,9 +79,25 @@ func TestMetaTable(t *testing.T) {
 		PartitionID:   10,
 		SegmentIDs:    nil,
 	}
+	idxInfo := []*pb.IndexInfo{
+		{
+			IndexName: "testColl_index_110",
+			IndexID:   10000,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "field110-i1",
+					Value: "field110-v1",
+				},
+				{
+					Key:   "field110-i2",
+					Value: "field110-v2",
+				},
+			},
+		},
+	}
 
 	t.Run("add collection", func(t *testing.T) {
-		err = mt.AddCollection(collInfo, partInfo)
+		err = mt.AddCollection(collInfo, partInfo, idxInfo)
 		assert.Nil(t, err)
 
 		collMeta, err := mt.GetCollectionByName("testColl")
@@ -106,26 +128,12 @@ func TestMetaTable(t *testing.T) {
 		seg := pb.SegmentIndexInfo{
 			SegmentID: 100,
 			FieldID:   110,
-			IndexID:   200,
+			IndexID:   10000,
 			BuildID:   201,
 		}
-		idx := pb.IndexInfo{
-			IndexName: "idx200",
-			IndexID:   200,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "field110-i1",
-					Value: "field110-v1",
-				},
-				{
-					Key:   "field110-i2",
-					Value: "field110-v2",
-				},
-			},
-		}
-		err := mt.AddIndex(&seg, &idx)
+		err := mt.AddIndex(&seg)
 		assert.Nil(t, err)
-		assert.NotNil(t, mt.AddIndex(&seg, &idx))
+		assert.NotNil(t, mt.AddIndex(&seg))
 	})
 
 	t.Run("get not indexed segments", func(t *testing.T) {
@@ -171,6 +179,8 @@ func TestMetaTable(t *testing.T) {
 			},
 		}
 		idxInfo.IndexParams = params
+		idxInfo.IndexID = 2001
+		idxInfo.IndexName = "field110-1"
 
 		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo)
 		assert.Nil(t, err)
@@ -182,10 +192,10 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("get index by name", func(t *testing.T) {
-		idx, err := mt.GetIndexByName("testColl", "field110", "idx200")
+		idx, err := mt.GetIndexByName("testColl", "field110", "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
-		assert.Equal(t, idx[0].IndexID, int64(200))
+		assert.Equal(t, idx[0].IndexID, int64(10000))
 		params := []*commonpb.KeyValuePair{
 			{
 				Key:   "field110-i1",
