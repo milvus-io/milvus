@@ -128,7 +128,7 @@ func (rmq *RocksMQ) CreateChannel(channelName string) error {
 
 	// Check if channel exist
 	if rmq.checkKeyExist(beginKey) || rmq.checkKeyExist(endKey) {
-		return errors.New("Channel " + channelName + " already exists.")
+		return nil
 	}
 
 	err := rmq.kv.Save(beginKey, "0")

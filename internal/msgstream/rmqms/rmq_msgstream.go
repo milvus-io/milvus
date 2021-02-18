@@ -103,6 +103,9 @@ func (ms *RmqMsgStream) AsProducer(channels []string) {
 		err := rocksmq.Rmq.CreateChannel(channel)
 		if err == nil {
 			ms.producers = append(ms.producers, channel)
+		} else {
+			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
+			panic(errMsg)
 		}
 	}
 }
