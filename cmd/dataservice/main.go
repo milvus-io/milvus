@@ -2,18 +2,23 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/zilliztech/milvus-distributed/internal/dataservice"
+
 	"github.com/zilliztech/milvus-distributed/cmd/distributed/components"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream/pulsarms"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	dataservice.Params.Init()
+	log.SetupLogger(&dataservice.Params.Log)
+	defer log.Sync()
 	msFactory := pulsarms.NewFactory()
 
 	svr, err := components.NewDataService(ctx, msFactory)
@@ -35,5 +40,5 @@ func main() {
 	if err := svr.Stop(); err != nil {
 		panic(err)
 	}
-	log.Println("shut down data service")
+	log.Debug("shut down data service")
 }
