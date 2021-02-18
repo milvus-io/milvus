@@ -25,9 +25,9 @@ std::mutex GpuCacheMgr::global_mutex_;
 std::unordered_map<int64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
 namespace {
-//constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
+// constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 constexpr int64_t G_BYTE = 1;
-}
+}  // namespace
 
 GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     // All config values have been checked in Config::ValidateConfig()
