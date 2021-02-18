@@ -40,6 +40,14 @@ namespace knowhere {
         return false;                                                                                    \
     }
 
+#define CheckIntByRangeIfExist(key, min, max)                                       \
+    if (oricfg.contains(key)) {                                                     \
+        if (!oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
+            oricfg[key].get<int64_t>() < min) {                                     \
+            return false;                                                           \
+        }                                                                           \
+    }
+
 #define CheckIntByValues(key, container)                                                                 \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
@@ -157,12 +165,15 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
     static int64_t DEFAULT_NBITS = 8;
     static int64_t MAX_NLIST = 65536;
     static int64_t MIN_NLIST = 1;
+    static int64_t MAX_NBITS = 16;
+    static int64_t MIN_NBITS = 1;
     static std::vector<std::string> METRICS{Metric::L2, Metric::IP};
 
     CheckStrByValues(Metric::TYPE, METRICS);
     CheckIntByRange(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntByRangeIfExist(IndexParams::nbits, MIN_NBITS, MAX_NBITS);
 
     auto rows = oricfg[meta::ROWS].get<int64_t>();
     auto nlist = oricfg[IndexParams::nlist].get<int64_t>();
