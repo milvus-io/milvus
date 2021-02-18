@@ -21,18 +21,13 @@
 namespace milvus {
 namespace cache {
 
-namespace {
-// constexpr int64_t unit = 1024 * 1024 * 1024;
-constexpr int64_t unit = 1;
-}  // namespace
-
 CpuCacheMgr::CpuCacheMgr() {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
     int64_t cpu_cache_cap;
     config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
-    int64_t cap = cpu_cache_cap * unit;
+    int64_t cap = cpu_cache_cap;
     LOG_SERVER_DEBUG_ << "cpu cache.size: " << cap;
     LOG_SERVER_INFO_ << "cpu cache.size: " << cap;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, "[CACHE CPU]");
@@ -59,7 +54,7 @@ CpuCacheMgr::GetIndex(const std::string& key) {
 
 void
 CpuCacheMgr::OnCpuCacheCapacityChanged(int64_t value) {
-    SetCapacity(value * unit);
+    SetCapacity(value);
 }
 
 }  // namespace cache

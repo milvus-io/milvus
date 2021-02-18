@@ -24,18 +24,13 @@ namespace cache {
 std::mutex GpuCacheMgr::global_mutex_;
 std::unordered_map<int64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
-namespace {
-// constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
-constexpr int64_t G_BYTE = 1;
-}  // namespace
-
 GpuCacheMgr::GpuCacheMgr(int64_t gpu_id) : gpu_id_(gpu_id) {
     // All config values have been checked in Config::ValidateConfig()
     server::Config& config = server::Config::GetInstance();
 
     int64_t gpu_cache_cap;
     config.GetGpuResourceConfigCacheCapacity(gpu_cache_cap);
-    int64_t cap = gpu_cache_cap * G_BYTE;
+    int64_t cap = gpu_cache_cap;
     std::string header = "[CACHE GPU" + std::to_string(gpu_id) + "]";
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32, header);
 
@@ -85,7 +80,7 @@ GpuCacheMgr::GetInstance(int64_t gpu_id) {
 void
 GpuCacheMgr::OnGpuCacheCapacityChanged(int64_t capacity) {
     for (auto& iter : instance_) {
-        iter.second->SetCapacity(capacity * G_BYTE);
+        iter.second->SetCapacity(capacity);
     }
 }
 
