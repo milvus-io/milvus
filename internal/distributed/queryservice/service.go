@@ -51,7 +51,6 @@ func (s *Server) Init() error {
 	if err := s.queryService.Init(); err != nil {
 		return err
 	}
-	s.queryService.SetEnableGrpc(true)
 	return nil
 }
 

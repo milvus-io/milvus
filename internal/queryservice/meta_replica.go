@@ -18,8 +18,8 @@ type metaReplica interface {
 	getPartitionStates(dbID UniqueID, collectionID UniqueID, partitionIDs []UniqueID) ([]*querypb.PartitionStates, error)
 	releaseCollection(dbID UniqueID, collectionID UniqueID) error
 	releasePartition(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) error
-	addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]UniqueID) error
-	getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (UniqueID, error)
+	addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error
+	getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error)
 }
 
 type segment struct {
@@ -35,7 +35,7 @@ type partition struct {
 type collection struct {
 	id              UniqueID
 	partitions      map[UniqueID]*partition
-	dmChannels2Node map[string]UniqueID
+	dmChannels2Node map[string]int64
 	schema          *schemapb.CollectionSchema
 }
 
@@ -59,7 +59,7 @@ func (mp *metaReplicaImpl) addCollection(dbID UniqueID, collectionID UniqueID, s
 	//TODO:: assert dbID = 0 exist
 	if _, ok := mp.db2collections[dbID]; ok {
 		partitions := make(map[UniqueID]*partition)
-		channels := make(map[string]UniqueID)
+		channels := make(map[string]int64)
 		newCollection := &collection{
 			id:              collectionID,
 			partitions:      partitions,
@@ -229,7 +229,7 @@ func (mp *metaReplicaImpl) releasePartition(dbID UniqueID, collectionID UniqueID
 	return errors.New("releasePartition: can't find dbID or collectionID or partitionID")
 }
 
-func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]UniqueID) error {
+func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, channels2NodeID map[string]int64) error {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
@@ -243,7 +243,7 @@ func (mp *metaReplicaImpl) addDmChannels(dbID UniqueID, collectionID UniqueID, c
 	return errors.New("addDmChannels: can't find dbID or collectionID")
 }
 
-func (mp *metaReplicaImpl) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (UniqueID, error) {
+func (mp *metaReplicaImpl) getAssignedNodeIDByChannelName(dbID UniqueID, collectionID UniqueID, channel string) (int64, error) {
 	if collections, ok := mp.db2collections[dbID]; ok {
 		for _, collection := range collections {
 			if collectionID == collection.id {
