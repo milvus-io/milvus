@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 -   \#4683 A negative zero may be returned if the metric_type is Tanimoto
 -   \#4678 Server crash on BinaryFlat if dimension is not a power of 2
+-   \#4720 The GPU cache holds much more data than the configured value
 
 ## Feature
 
