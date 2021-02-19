@@ -112,11 +112,9 @@ class TestInsertBase:
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
-        info = connect.get_collection_info(collection)
-        fields = info["fields"]
-        for field in fields:
-            if field["name"] == field_name:
-                assert field["indexes"][0] == get_simple_index
+        info = connect.get_index_info(collection, field_name)
+        assert info == get_simple_index
+
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
@@ -128,11 +126,8 @@ class TestInsertBase:
         connect.create_index(collection, field_name, get_simple_index)
         ids = connect.insert(collection, default_entities_rows)
         assert len(ids) == default_nb
-        info = connect.get_collection_info(collection)
-        fields = info["fields"]
-        for field in fields:
-            if field["name"] == field_name:
-                assert field["indexes"][0] == get_simple_index
+        info = connect.get_index_info(collection, field_name)
+        assert info == get_simple_index
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
@@ -320,11 +315,9 @@ class TestInsertBinary:
         ids = connect.insert(binary_collection, default_binary_entities_rows)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
-        info = connect.get_collection_info(binary_collection)
-        fields = info["fields"]
-        for field in fields:
-            if field["name"] == binary_field_name:
-                assert field["indexes"][0] == get_binary_index
+        info = connect.get_index_info(binary_collection, binary_field_name)
+        assert info == get_binary_index
+
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
@@ -337,11 +330,8 @@ class TestInsertBinary:
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_binary_index)
-        info = connect.get_collection_info(binary_collection)
-        fields = info["fields"]
-        for field in fields:
-            if field["name"] == binary_field_name:
-                assert field["indexes"][0] == get_binary_index
+        info = connect.get_index_info(binary_collection, binary_field_name)
+        assert info == get_binary_index
 
 
 class TestInsertInvalid(object):
