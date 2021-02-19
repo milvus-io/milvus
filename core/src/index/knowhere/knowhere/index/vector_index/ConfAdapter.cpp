@@ -40,6 +40,14 @@ namespace knowhere {
         return false;                                                                                    \
     }
 
+#define CheckIntByRangeIfExist(key, min, max)                                       \
+    if (oricfg.contains(key)) {                                                     \
+        if (!oricfg[key].is_number_integer() || oricfg[key].get<int64_t>() > max || \
+            oricfg[key].get<int64_t>() < min) {                                     \
+            return false;                                                           \
+        }                                                                           \
+    }
+
 #define CheckIntByValues(key, container)                                                                 \
     if (!oricfg.contains(key) || !oricfg[key].is_number_integer()) {                                     \
         return false;                                                                                    \
@@ -157,24 +165,29 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
     static int64_t DEFAULT_NBITS = 8;
     static int64_t MAX_NLIST = 65536;
     static int64_t MIN_NLIST = 1;
+    static int64_t MAX_NBITS = 16;
+    static int64_t MIN_NBITS = 1;
     static std::vector<std::string> METRICS{Metric::L2, Metric::IP};
 
-    oricfg[IndexParams::nbits] = DEFAULT_NBITS;
     CheckStrByValues(Metric::TYPE, METRICS);
     CheckIntByRange(meta::DIM, DEFAULT_MIN_DIM, DEFAULT_MAX_DIM);
     CheckIntByRange(meta::ROWS, DEFAULT_MIN_ROWS, DEFAULT_MAX_ROWS);
     CheckIntByRange(IndexParams::nlist, MIN_NLIST, MAX_NLIST);
+    CheckIntByRangeIfExist(IndexParams::nbits, MIN_NBITS, MAX_NBITS);
 
     auto rows = oricfg[meta::ROWS].get<int64_t>();
     auto nlist = oricfg[IndexParams::nlist].get<int64_t>();
     auto dimension = oricfg[meta::DIM].get<int64_t>();
     auto m = oricfg[IndexParams::m].get<int64_t>();
+    auto nbits = oricfg.count(IndexParams::nbits) ? oricfg[IndexParams::nbits].get<int64_t>() : DEFAULT_NBITS;
 
     // auto tune params
     oricfg[IndexParams::nlist] = MatchNlist(rows, nlist);
+    oricfg[IndexParams::nbits] = nbits = MatchNbits(rows, nbits);
+
 #ifdef MILVUS_GPU_VERSION
     if (mode == IndexMode::MODE_GPU) {
-        if (IsValidForGPU(dimension, m)) {
+        if (IsValidForGPU(dimension, m, nbits)) {
             return true;
         }
         // else try CPU Mode
@@ -185,7 +198,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
 }
 
 bool
-IVFPQConfAdapter::IsValidForGPU(int64_t dimension, int64_t m) {
+IVFPQConfAdapter::IsValidForGPU(int64_t dimension, int64_t m, int64_t nbits) {
     /*
      * Faiss 1.6
      * Only 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32 dims per sub-quantizer are currently supported with

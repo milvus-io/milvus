@@ -52,7 +52,7 @@ class IVFPQConfAdapter : public IVFConfAdapter {
     CheckTrain(Config& oricfg, IndexMode& mode) override;
 
     static bool
-    IsValidForGPU(int64_t dimension, int64_t m);
+    IsValidForGPU(int64_t dimension, int64_t m, int64_t nbits);
 
     static bool
     IsValidForCPU(int64_t dimension, int64_t m);

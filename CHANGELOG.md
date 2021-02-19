@@ -12,6 +12,7 @@ Please mark all change in change log and use the issue from GitHub
 
 ## Improvement
 -   \#1970 Improve the performance of BinaryFlat by AVX2
+-   \#3920 Add an optional parameter 'nbtis' for IVF_PQ
 -   \#4676,#4614 Support configurable metric labels cluster and instance for Prometheus (implemented by IQIYI)
 
 ## Task
