@@ -134,11 +134,11 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
 
 CStatus
 ReduceQueryResults(CQueryResult* c_search_results, int64_t num_segments, bool* is_selected) {
-    std::vector<SearchResult*> search_results;
-    for (int i = 0; i < num_segments; ++i) {
-        search_results.push_back((SearchResult*)c_search_results[i]);
-    }
     try {
+        std::vector<SearchResult*> search_results;
+        for (int i = 0; i < num_segments; ++i) {
+            search_results.push_back((SearchResult*)c_search_results[i]);
+        }
         auto topk = search_results[0]->topK_;
         auto num_queries = search_results[0]->num_queries_;
         std::vector<std::vector<int64_t>> search_records(num_segments);

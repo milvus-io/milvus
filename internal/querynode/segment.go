@@ -12,6 +12,7 @@ package querynode
 */
 import "C"
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -211,9 +212,9 @@ func (s *Segment) segmentSearch(plan *Plan,
 	var cTimestamp = (*C.ulong)(&timestamp[0])
 	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroups = C.int(len(placeHolderGroups))
-	var cQueryResult = (*C.CQueryResult)(&searchResult.cQueryResult)
 
-	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, cQueryResult)
+	fmt.Println("do search on segment, ", s.segmentID, ", segType = ", s.segmentType)
+	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, &searchResult.cQueryResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

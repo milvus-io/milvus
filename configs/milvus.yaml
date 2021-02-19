@@ -77,13 +77,3 @@ dataService:
 dataNode:
   address: localhost
   port: 21124
-
-log:
-  level: debug
-  file:
-    rootPath: /tmp/milvus
-    maxSize: 300 # MB
-    maxAge: 10 # day
-    maxBackups: 20
-  dev: true
-  format: text # text/json
