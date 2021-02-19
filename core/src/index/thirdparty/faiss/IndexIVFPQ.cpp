@@ -41,7 +41,7 @@ IndexIVFPQ::IndexIVFPQ (Index * quantizer, size_t d, size_t nlist,
     IndexIVF (quantizer, d, nlist, 0, metric),
     pq (d, M, nbits_per_idx)
 {
-    FAISS_THROW_IF_NOT (nbits_per_idx <= 8);
+    // FAISS_THROW_IF_NOT (nbits_per_idx <= 8);
     code_size = pq.code_size;
     invlists->code_size = code_size;
     is_trained = false;

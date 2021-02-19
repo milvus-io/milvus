@@ -50,8 +50,12 @@ constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
-                    bool min_close = true, bool max_closed = true) {
+                    bool can_ignore = false, bool min_close = true, bool max_closed = true) {
     if (json_params.find(param_name) == json_params.end()) {
+        if (can_ignore) {
+            return Status::OK();
+        }
+
         std::string msg = "Parameter list must contain: ";
         msg += param_name;
         LOG_SERVER_ERROR_ << msg;
@@ -209,6 +213,11 @@ ValidationUtil::ValidateIndexParams(const milvus::json& index_params,
         }
         case (int32_t)engine::EngineType::FAISS_PQ: {
             auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+            if (!status.ok()) {
+                return status;
+            }
+
+            status = CheckParameterRange(index_params, knowhere::IndexParams::nbits, 1, 16, true);
             if (!status.ok()) {
                 return status;
             }
