@@ -129,6 +129,7 @@ class TestInsertBase:
         info = connect.get_index_info(collection, field_name)
         assert info == get_simple_index
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_search(self, connect, collection):
         '''
@@ -319,6 +320,7 @@ class TestInsertBinary:
         assert info == get_binary_index
 
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         '''

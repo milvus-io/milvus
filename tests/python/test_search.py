@@ -147,6 +147,7 @@ class TestSearchBase:
         yield request.param
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     def test_search_flat(self, connect, collection, get_top_k, get_nq):
         '''
         target: test basic search function, all the search params is corrent, change top-k value
@@ -257,6 +258,7 @@ class TestSearchBase:
             assert res2[0][0].entity.get("int64") == res[0][1].entity.get("int64")
 
     # Pass
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -304,6 +306,7 @@ class TestSearchBase:
         assert len(res[0]) == default_top_k
 
     # pass
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -335,6 +338,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partition_B(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -385,6 +389,7 @@ class TestSearchBase:
             assert len(res[0]) == 0
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
@@ -419,6 +424,7 @@ class TestSearchBase:
             assert res[1]._distances[0] > epsilon
 
     # Pass
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_index_partitions_B(self, connect, collection, get_simple_index, get_top_k):
         '''
@@ -479,6 +485,7 @@ class TestSearchBase:
                 res = connect.search(collection, query)
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_ip_after_index(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -507,6 +514,7 @@ class TestSearchBase:
             assert check_id_result(res[0], ids[0])
             assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
 
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_ip_index_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         '''
@@ -540,6 +548,7 @@ class TestSearchBase:
             assert len(res) == nq
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_ip_index_partitions(self, connect, collection, get_simple_index, get_top_k):
         '''
@@ -600,6 +609,7 @@ class TestSearchBase:
             res = connect.search(collection_name, default_query)
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     def test_search_distance_l2(self, connect, collection):
         '''
         target: search collection, and check the result: distance
@@ -619,6 +629,7 @@ class TestSearchBase:
         assert abs(np.sqrt(res[0]._distances[0]) - min(distance_0, distance_1)) <= gen_inaccuracy(res[0]._distances[0])
 
     # Pass
+    @pytest.mark.skip("r0.3-test")
     def test_search_distance_l2_after_index(self, connect, id_collection, get_simple_index):
         '''
         target: search collection, and check the result: distance
@@ -673,6 +684,7 @@ class TestSearchBase:
         assert abs(res[0]._distances[0] - max(distance_0, distance_1)) <= epsilon
 
     # Pass
+    @pytest.mark.skip("r0.3-test")
     def test_search_distance_ip_after_index(self, connect, id_collection, get_simple_index):
         '''
         target: search collection, and check the result: distance
@@ -706,6 +718,7 @@ class TestSearchBase:
         # assert abs(res[0]._distances[0] - max_distance) <= tmp_epsilon
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         '''
         target: search binary_collection, and check the result: distance
@@ -740,6 +753,7 @@ class TestSearchBase:
             res = connect.search(binary_collection, query)
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_hamming_flat_index(self, connect, binary_collection):
         '''
@@ -757,6 +771,7 @@ class TestSearchBase:
         assert abs(res[0][0].distance - min(distance_0, distance_1).astype(float)) <= epsilon
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_substructure_flat_index(self, connect, binary_collection):
         '''
@@ -775,6 +790,7 @@ class TestSearchBase:
         assert len(res[0]) == 0
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_substructure_flat_index_B(self, connect, binary_collection):
         '''
@@ -794,6 +810,7 @@ class TestSearchBase:
         assert res[1][0].id == ids[1]
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
         '''
@@ -812,6 +829,7 @@ class TestSearchBase:
         assert len(res[0]) == 0
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_superstructure_flat_index_B(self, connect, binary_collection):
         '''
@@ -833,6 +851,7 @@ class TestSearchBase:
         assert res[1][0].distance <= epsilon
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_distance_tanimoto_flat_index(self, connect, binary_collection):
         '''
@@ -850,6 +869,7 @@ class TestSearchBase:
         assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_search_concurrent_multithreads(self, connect, args):
@@ -885,6 +905,7 @@ class TestSearchBase:
             t.join()
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     @pytest.mark.timeout(30)
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
@@ -919,6 +940,7 @@ class TestSearchBase:
             t.join()
 
     # PASS
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_multi_collections(self, connect, args):
         '''
@@ -963,6 +985,7 @@ class TestSearchBase:
             assert getattr(r.entity, "int64") == getattr(r.entity, "id")
 
 
+@pytest.mark.skip("r0.3-test")
 class TestSearchDSL(object):
     """
     ******************************************************************
@@ -1556,6 +1579,7 @@ class TestSearchDSL(object):
             res = connect.search(collection, query)
 
 
+@pytest.mark.skip("r0.3-test")
 class TestSearchDSLBools(object):
     """
     ******************************************************************
@@ -1742,6 +1766,7 @@ class TestSearchInvalid(object):
         yield request.param
 
     # Pass
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_with_invalid_params(self, connect, collection, get_simple_index, get_search_params):
         '''
@@ -1763,6 +1788,7 @@ class TestSearchInvalid(object):
             res = connect.search(collection, query)
 
     # pass
+    @pytest.mark.skip("r0.3-test")
     @pytest.mark.level(2)
     def test_search_with_invalid_params_binary(self, connect, binary_collection):
         '''

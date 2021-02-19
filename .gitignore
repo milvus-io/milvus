@@ -65,3 +65,6 @@ cwrapper_build
 **/.lint
 typescript
 **/.pytest_cache/
+
+# Delve generated file
+**/__debug_bin
