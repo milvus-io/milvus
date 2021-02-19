@@ -354,41 +354,8 @@ func TestSegment_segmentSearch(t *testing.T) {
 	placeholderGroups := make([]*PlaceholderGroup, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 
-	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-
-	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
 	assert.Nil(t, err)
-
-	searchResults = append(searchResults, searchResult)
-	matchedSegments = append(matchedSegments, segment)
-
-	///////////////////////////////////
-	inReduced := make([]bool, len(searchResults))
-	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
-	assert.NoError(t, err2)
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
-	assert.NoError(t, err)
-	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
-	assert.NoError(t, err)
-	hitsBlob, err := marshaledHits.getHitsBlob()
-	assert.NoError(t, err)
-
-	var placeHolderOffset int64 = 0
-	for index := range placeholderGroups {
-		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
-		assert.NoError(t, err)
-		hits := make([][]byte, 0)
-		for _, len := range hitBlobSizePeerQuery {
-			hits = append(hits, hitsBlob[placeHolderOffset:placeHolderOffset+len])
-			placeHolderOffset += len
-		}
-	}
-
-	deleteSearchResults(searchResults)
-	deleteMarshaledHits(marshaledHits)
-	///////////////////////////////////
 
 	plan.delete()
 	holder.delete()
