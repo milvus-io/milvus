@@ -168,7 +168,7 @@ func (s *Server) init() error {
 	log.Println("set master client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
-	log.Println("data service address ...")
+	log.Println("data service address ...", dataServiceAddr)
 	s.dataServiceClient = grpcdataservice.NewClient(dataServiceAddr)
 	err = s.dataServiceClient.Init()
 	if err != nil {
