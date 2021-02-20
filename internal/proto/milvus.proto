@@ -208,6 +208,14 @@ message IndexStateResponse {
   common.IndexState state = 2;
 }
 
+message DropIndexRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string field_name = 4;
+  string index_name = 5;
+}
+
 message InsertRequest {
   common.MsgBase base = 1;
   string db_name = 2;
@@ -333,6 +341,7 @@ service MilvusService {
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
   rpc GetIndexState(IndexStateRequest) returns (IndexStateResponse) {}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc Insert(InsertRequest) returns (InsertResponse) {}
   rpc Search(SearchRequest) returns (SearchResults) {}

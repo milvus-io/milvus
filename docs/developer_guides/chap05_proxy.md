@@ -95,6 +95,7 @@ type ProxyNode interface {
   CreateIndex(req CreateIndexRequest) error
   DescribeIndex(DescribeIndexRequest) (DescribeIndexResponse, error)
   GetIndexState(IndexStateRequest) (IndexStateResponse, error)
+  DropIndex(DropIndexRequest) (Status, error)
 
   Insert(req InsertRequest) (InsertResponse, error)
   Search(req SearchRequest) (SearchResults, error)
@@ -200,6 +201,10 @@ See *Master API* for detailed definitions.
 See *Master API* for detailed definitions.
 
 * *DescribeIndex*
+
+See *Master API* for detailed definitions.
+
+* *DropIndex*
 
 See *Master API* for detailed definitions.
 

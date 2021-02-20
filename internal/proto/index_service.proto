@@ -84,6 +84,10 @@ message IndexMeta {
   repeated string index_file_paths = 5;
 }
 
+message DropIndexRequest {
+  int64 indexBuildIDs = 1;
+}
+
 /****************IndexService************************/
 service IndexService {
   /**
@@ -98,6 +102,7 @@ service IndexService {
   rpc GetIndexStates(IndexStatesRequest) returns (IndexStatesResponse) {}
   rpc GetIndexFilePaths(IndexFilePathsRequest) returns (IndexFilePathsResponse){}
   rpc NotifyBuildIndex(BuildIndexNotification) returns (common.Status) {}
+  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc GetComponentStates(common.Empty) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(common.Empty) returns(milvus.StringResponse) {}

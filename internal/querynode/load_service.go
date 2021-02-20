@@ -10,7 +10,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 )
 
-const indexCheckInterval = 3
+const loadingCheckInterval = 3
 
 type loadService struct {
 	ctx    context.Context
@@ -26,7 +26,7 @@ func (s *loadService) start() {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-time.After(indexCheckInterval * time.Second):
+		case <-time.After(loadingCheckInterval * time.Second):
 			wg.Add(2)
 			go s.segLoader.indexLoader.doLoadIndex(wg)
 			go s.loadSegmentActively(wg)

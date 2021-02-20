@@ -108,6 +108,7 @@ service MasterService {
 
     rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
     rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
+    rpc DropIndex(milvus.DropIndexRequest) returns (common.Status) {}
 
     rpc AllocTimestamp(TsoRequest) returns (TsoResponse) {}
     rpc AllocID(IDRequest) returns (IDResponse) {}
