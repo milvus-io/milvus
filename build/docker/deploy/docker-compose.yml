@@ -1,6 +1,23 @@
 version: '3.5'
 
 services:
+  master:
+    image: ${TARGET_REPO}/master:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/masterservice/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}/master:${SOURCE_TAG}
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+      PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
+    networks: 
+      - milvus
+
   proxyservice:
     image: ${TARGET_REPO}/proxyservice:${TARGET_TAG}
     build:
@@ -8,6 +25,8 @@ services:
       dockerfile: build/docker/deploy/proxyservice/Dockerfile
       cache_from:
         - ${SOURCE_REPO}/proxyservice:${SOURCE_TAG}
+    environment: 
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
     networks:
       - milvus
 
@@ -19,10 +38,15 @@ services:
       cache_from:
         - ${SOURCE_REPO}/proxynode:${SOURCE_TAG}
     environment: 
+      ETCD_ADDRESS: ${ETCD_ADDRESS}
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       PROXY_NODE_HOST: ${PROXY_NODE_HOST}
       PROXY_SERVICE_ADDRESS: ${PROXY_SERVICE_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+
     networks:
       - milvus
 
@@ -34,10 +58,8 @@ services:
       cache_from:
         - ${SOURCE_REPO}/queryservice:${SOURCE_TAG}
     environment:
-      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
-      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
     networks:
       - milvus
 
@@ -50,9 +72,10 @@ services:
         - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
     environment: 
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
     networks:
       - milvus
 
@@ -68,6 +91,7 @@ services:
       ETCD_ADDRESS: ${ETCD_ADDRESS}
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
     networks:
       - milvus
 

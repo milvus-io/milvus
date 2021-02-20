@@ -113,6 +113,9 @@ func (s *Server) init() error {
 		Params.IP = host
 	}
 
+	Params.LoadFromEnv()
+	Params.LoadFromArgs()
+
 	Params.Port = funcutil.GetAvailablePort()
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 

@@ -78,8 +78,13 @@ endif
 
 verifiers: getdeps cppcheck fmt static-check ruleguard
 
-
 # Builds various components locally.
+
+master: build-cpp
+	@echo "Building each component's binary to './bin'"
+	@echo "Building masterservice ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/masterservice $(PWD)/cmd/masterservice/main.go 1>/dev/null
+
 proxynode: build-cpp
 	@echo "Building each component's binary to './bin'"
 	@echo "Building proxy node ..."
@@ -165,12 +170,11 @@ test-cpp: build-cpp-with-unittest
 
 #TODO: build each component to docker
 docker: verifiers
-	@echo "Building query node docker image '$(TAG)'"
-	@echo "Building proxy docker image '$(TAG)'"
 
 # Builds each component and installs it to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/masterservice $(GOPATH)/bin/masterservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/queryservice $(GOPATH)/bin/queryservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/querynode $(GOPATH)/bin/querynode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/proxynode $(GOPATH)/bin/proxynode
@@ -178,6 +182,8 @@ install: all
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/singlenode $(GOPATH)/bin/singlenode
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexservice $(GOPATH)/bin/indexservice
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/indexnode $(GOPATH)/bin/indexnode
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/dataservice $(GOPATH)/bin/dataservice
+	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/datanode $(GOPATH)/bin/datanode
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
@@ -187,6 +193,7 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
+	@rm -rf $(GOPATH)/bin/masterservice
 	@rm -rf $(GOPATH)/bin/proxynode
 	@rm -rf $(GOPATH)/bin/proxyservice
 	@rm -rf $(GOPATH)/bin/queryservice
@@ -194,3 +201,5 @@ clean:
 	@rm -rf $(GOPATH)/bin/singlenode
 	@rm -rf $(GOPATH)/bin/indexservice
 	@rm -rf $(GOPATH)/bin/indexnode
+	@rm -rf $(GOPATH)/bin/dataservice
+	@rm -rf $(GOPATH)/bin/datanode
