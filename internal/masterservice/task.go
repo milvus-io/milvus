@@ -659,6 +659,34 @@ func (t *DescribeIndexReqTask) Execute() error {
 	return nil
 }
 
+type DropIndexReqTask struct {
+	baseReqTask
+	Req *milvuspb.DropIndexRequest
+}
+
+func (t *DropIndexReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *DropIndexReqTask) Ts() (typeutil.Timestamp, error) {
+	return t.Req.Base.Timestamp, nil
+}
+
+func (t *DropIndexReqTask) IgnoreTimeStamp() bool {
+	return false
+}
+
+func (t *DropIndexReqTask) Execute() error {
+	dropID, isDropped, err := t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	if err != nil {
+		return err
+	}
+	if isDropped {
+		return t.core.DropIndexReq(dropID)
+	}
+	return nil
+}
+
 type CreateIndexTask struct {
 	core        *Core
 	segmentID   typeutil.UniqueID

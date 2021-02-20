@@ -85,7 +85,7 @@ message IndexMeta {
 }
 
 message DropIndexRequest {
-  int64 indexBuildIDs = 1;
+  int64 indexID = 1;
 }
 
 /****************IndexService************************/

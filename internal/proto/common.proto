@@ -103,6 +103,7 @@ enum MsgType {
     /* Definition Requests: Index */
     kCreateIndex = 300;
     kDescribeIndex = 301;
+    kDropIndex = 302;
 
     /* Manipulation Requests */
     kInsert = 400;

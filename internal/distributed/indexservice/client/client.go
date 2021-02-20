@@ -78,6 +78,11 @@ func (c *Client) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.BuildIndex
 	return c.grpcClient.BuildIndex(ctx, req)
 }
 
+func (c *Client) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	ctx := context.TODO()
+	return c.grpcClient.DropIndex(ctx, req)
+}
+
 func (c *Client) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.IndexStatesResponse, error) {
 	ctx := context.TODO()
 	return c.grpcClient.GetIndexStates(ctx, req)
