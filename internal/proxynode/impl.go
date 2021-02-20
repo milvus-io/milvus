@@ -540,6 +540,32 @@ func (node *NodeImpl) DescribeIndex(request *milvuspb.DescribeIndexRequest) (*mi
 	return dit.result, nil
 }
 
+func (node *NodeImpl) DropIndex(request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+	log.Println("Drop index for: ", request)
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
+	dit := &DropIndexTask{
+		Condition:        NewTaskCondition(ctx),
+		DropIndexRequest: request,
+		masterClient:     node.masterClient,
+	}
+	err := node.sched.DdQueue.Enqueue(dit)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	err = dit.WaitToFinish()
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return dit.result, nil
+}
+
 func (node *NodeImpl) GetIndexState(request *milvuspb.IndexStateRequest) (*milvuspb.IndexStateResponse, error) {
 	// log.Println("Describe index progress for: ", request)
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)

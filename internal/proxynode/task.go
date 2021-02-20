@@ -1350,6 +1350,75 @@ func (dit *DescribeIndexTask) PostExecute() error {
 	return nil
 }
 
+type DropIndexTask struct {
+	Condition
+	*milvuspb.DropIndexRequest
+	masterClient MasterClient
+	result       *commonpb.Status
+}
+
+func (dit *DropIndexTask) OnEnqueue() error {
+	dit.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (dit *DropIndexTask) ID() UniqueID {
+	return dit.Base.MsgID
+}
+
+func (dit *DropIndexTask) SetID(uid UniqueID) {
+	dit.Base.MsgID = uid
+}
+
+func (dit *DropIndexTask) Type() commonpb.MsgType {
+	return dit.Base.MsgType
+}
+
+func (dit *DropIndexTask) BeginTs() Timestamp {
+	return dit.Base.Timestamp
+}
+
+func (dit *DropIndexTask) EndTs() Timestamp {
+	return dit.Base.Timestamp
+}
+
+func (dit *DropIndexTask) SetTs(ts Timestamp) {
+	dit.Base.Timestamp = ts
+}
+
+func (dit *DropIndexTask) PreExecute() error {
+	dit.Base.MsgType = commonpb.MsgType_kDropIndex
+	dit.Base.SourceID = Params.ProxyID
+
+	collName, fieldName := dit.CollectionName, dit.FieldName
+
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	if err := ValidateFieldName(fieldName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dit *DropIndexTask) Execute() error {
+	var err error
+	dit.result, err = dit.masterClient.DropIndex(dit.DropIndexRequest)
+	if dit.result == nil {
+		return errors.New("drop index resp is nil")
+	}
+	if dit.result.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return errors.New(dit.result.Reason)
+	}
+	return err
+}
+
+func (dit *DropIndexTask) PostExecute() error {
+	return nil
+}
+
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.IndexStateRequest
