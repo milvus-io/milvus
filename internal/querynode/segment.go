@@ -436,6 +436,11 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 			return emptyErr
 		}
 		dataPointer = unsafe.Pointer(&d[0])
+	case []byte:
+		if len(d) <= 0 {
+			return emptyErr
+		}
+		dataPointer = unsafe.Pointer(&d[0])
 	case []int8:
 		if len(d) <= 0 {
 			return emptyErr
