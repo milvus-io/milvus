@@ -114,7 +114,12 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID Uni
 		return err
 	}
 
-	targetFields := s.segLoader.getTargetFields(paths, srcFieldIDs, fieldIDs)
+	//fmt.Println("srcFieldIDs in internal:", srcFieldIDs)
+	//fmt.Println("dstFieldIDs in internal:", fieldIDs)
+	targetFields, err := s.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
+	if err != nil {
+		return err
+	}
 	err = s.segLoader.loadSegmentFieldsData(segment, targetFields)
 	if err != nil {
 		return err

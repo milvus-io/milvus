@@ -177,6 +177,7 @@ func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
 		}
 		ret = append(ret, UniqueID(v))
 	}
+	pt.QueryNodeIDList = ret
 	return ret
 }
 
