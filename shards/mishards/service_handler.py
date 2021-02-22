@@ -1,3 +1,4 @@
+import copy
 import logging
 import time
 import json
@@ -26,18 +27,27 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         self.router = router
         self.max_workers = max_workers
 
-    def _reduce(self, source_ids, ids, source_diss, diss, k, reverse):
+    def _reduce(self, source_ids, source_diss, topk, ids, diss, k, reverse):
         sort_f = (lambda x, y: x >= y) if reverse else (lambda x, y: x <= y)
 
         if sort_f(source_diss[k - 1], diss[0]):
+            if len(source_ids) < topk:
+                source_ids.extend(ids[0: topk - len(source_ids)])
+                source_diss.extend(diss[0: topk - len(source_ids)])
+
             return source_ids, source_diss
+
         if sort_f(diss[k - 1], source_diss[0]):
+            if len(source_ids) < topk:
+                ids.extend(source_ids[0: topk - len(source_ids)])
+                diss.extend(source_diss[0: topk - len(source_ids)])
+
             return ids, diss
 
         source_diss.extend(diss)
         diss_t = enumerate(source_diss)
-        diss_m_rst = sorted(diss_t, key=lambda x: x[1], reverse=reverse)[:k]
-        diss_m_out = [id_ for _, id_ in diss_m_rst]
+        diss_m_rst = sorted(diss_t, key=lambda x: x[1], reverse=reverse)[:topk]
+        diss_m_out = [dis_ for _, dis_ in diss_m_rst]
 
         source_ids.extend(ids)
         id_m_out = [source_ids[i] for i, _ in diss_m_rst]
@@ -70,11 +80,24 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             ids = files_collection.ids
             diss = files_collection.distances  # distance collections
             # TODO: batch_len is equal to topk, may need to compare with topk
+            if len(ids) != len(diss):
+                return status_pb2.Status(
+                    error_code=status_pb2.INVALID_SIZE,
+                    reason="Length of ids is not equal to that of distance"), \
+                       [], []
+
+            if len(ids) % row_num != 0:
+                return status_pb2.Status(
+                    error_code=status_pb2.INVALID_SIZE,
+                    reason="Length of ids is not equal to that of distance"), \
+                       [], []
+
             batch_len = len(ids) // row_num
 
             for row_index in range(row_num):
-                id_batch = ids[row_index * batch_len: (row_index + 1) * batch_len]
-                dis_batch = diss[row_index * batch_len: (row_index + 1) * batch_len]
+                offset = row_index * batch_len
+                id_batch = ids[offset: offset + batch_len]
+                dis_batch = diss[offset: offset + batch_len]
 
                 if len(merge_id_results) < row_index:
                     raise ValueError("merge error")
@@ -84,9 +107,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     merge_dis_results.append(dis_batch)
                 else:
                     merge_id_results[row_index], merge_dis_results[row_index] = \
-                        self._reduce(merge_id_results[row_index], id_batch,
-                                     merge_dis_results[row_index], dis_batch,
-                                     batch_len,
+                        self._reduce(merge_id_results[row_index], merge_dis_results[row_index], topk,
+                                     id_batch, dis_batch, batch_len,
                                      reverse)
 
         calc_time = time.time() - calc_time
