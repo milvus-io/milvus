@@ -286,7 +286,8 @@ func (rmq *RocksMQ) Consume(groupName string, channelName string, n int) ([]Cons
 	if iter.Seek([]byte(dataKey)); currentID != DefaultMessageID && iter.Valid() {
 		iter.Next()
 	} else {
-		iter.SeekToFirst()
+		newKey := fixChanName + "/"
+		iter.Seek([]byte(newKey))
 	}
 
 	offset := 0

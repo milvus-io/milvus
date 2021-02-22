@@ -8,6 +8,7 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/kv"
 	minioKV "github.com/zilliztech/milvus-distributed/internal/kv/minio"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/storage"
@@ -53,11 +54,11 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 	}
 
 	pathResponse, err := loader.dataClient.GetInsertBinlogPaths(insertBinlogPathRequest)
-	if err != nil {
+	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
 		return nil, nil, err
 	}
 
-	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) {
+	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) || len(pathResponse.FieldIDs) <= 0 {
 		return nil, nil, errors.New("illegal InsertBinlogPathsResponse")
 	}
 
@@ -82,7 +83,7 @@ func (loader *segmentLoader) filterOutVectorFields(fieldIDs []int64, vectorField
 	return targetFields
 }
 
-func (loader *segmentLoader) getTargetFields(paths []*internalpb2.StringList, srcFieldIDS []int64, dstFields []int64) map[int64]*internalpb2.StringList {
+func (loader *segmentLoader) checkTargetFields(paths []*internalpb2.StringList, srcFieldIDs []int64, dstFieldIDs []int64) (map[int64]*internalpb2.StringList, error) {
 	targetFields := make(map[int64]*internalpb2.StringList)
 
 	containsFunc := func(s []int64, e int64) bool {
@@ -94,13 +95,14 @@ func (loader *segmentLoader) getTargetFields(paths []*internalpb2.StringList, sr
 		return false
 	}
 
-	for i, fieldID := range srcFieldIDS {
-		if containsFunc(dstFields, fieldID) {
-			targetFields[fieldID] = paths[i]
+	for i, fieldID := range dstFieldIDs {
+		if !containsFunc(srcFieldIDs, fieldID) {
+			return nil, errors.New("uncompleted fields")
 		}
+		targetFields[fieldID] = paths[i]
 	}
 
-	return targetFields
+	return targetFields, nil
 }
 
 func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetFields map[int64]*internalpb2.StringList) error {
