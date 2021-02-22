@@ -1,8 +1,7 @@
 # Each line is a component followed by one or more owners. 
 
-/sdk                     @scsven
-/shards                  @XuPeng-SH
-/core/                   @scsven
-/core/src/db/meta        @yhmo
-/core/src/index/knowhere @cydrain
+*                        @scsven @shengjun1985
+/sdk/                    @yhmo
+/shards/                 @BossZou
+/core/src/               @yhmo
 /core/src/index/         @shengjun1985
