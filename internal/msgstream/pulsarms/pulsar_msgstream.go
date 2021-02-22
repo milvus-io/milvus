@@ -90,6 +90,7 @@ func newPulsarMsgStream(ctx context.Context,
 		streamCancel:     streamCancel,
 		consumerReflects: consumerReflects,
 		consumerLock:     &sync.Mutex{},
+		wait:             &sync.WaitGroup{},
 	}
 
 	return stream, nil
@@ -136,14 +137,14 @@ func (ms *PulsarMsgStream) AsConsumer(channels []string,
 				return errors.New("pulsar is not ready, consumer is nil")
 			}
 
-			ms.consumerLock.Lock()
 			ms.consumers = append(ms.consumers, pc)
 			ms.consumerChannels = append(ms.consumerChannels, channels[i])
 			ms.consumerReflects = append(ms.consumerReflects, reflect.SelectCase{
 				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(pc.Chan()),
 			})
-			ms.consumerLock.Unlock()
+			ms.wait.Add(1)
+			go ms.receiveMsg(pc)
 			return nil
 		}
 		err := util.Retry(10, time.Millisecond*200, fn)
@@ -159,15 +160,11 @@ func (ms *PulsarMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *PulsarMsgStream) Start() {
-	ms.wait = &sync.WaitGroup{}
-	if ms.consumers != nil {
-		ms.wait.Add(1)
-		go ms.bufMsgPackToChannel()
-	}
 }
 
 func (ms *PulsarMsgStream) Close() {
 	ms.streamCancel()
+	ms.wait.Wait()
 
 	for _, producer := range ms.producers {
 		if producer != nil {
@@ -321,8 +318,41 @@ func (ms *PulsarMsgStream) Consume() *MsgPack {
 	}
 }
 
-func (ms *PulsarMsgStream) bufMsgPackToChannel() {
+func (ms *PulsarMsgStream) receiveMsg(consumer Consumer) {
 	defer ms.wait.Done()
+
+	for {
+		select {
+		case <-ms.ctx.Done():
+			return
+		case pulsarMsg, ok := <-consumer.Chan():
+			if !ok {
+				return
+			}
+			headerMsg := commonpb.MsgHeader{}
+			err := proto.Unmarshal(pulsarMsg.Payload(), &headerMsg)
+			if err != nil {
+				log.Error("Failed to unmarshal message header", zap.Error(err))
+				continue
+			}
+			tsMsg, err := ms.unmarshal.Unmarshal(pulsarMsg.Payload(), headerMsg.Base.MsgType)
+			if err != nil {
+				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+				continue
+			}
+
+			tsMsg.SetPosition(&msgstream.MsgPosition{
+				ChannelName: filepath.Base(pulsarMsg.Topic()),
+				MsgID:       typeutil.PulsarMsgIDToString(pulsarMsg.ID()),
+			})
+
+			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
+			ms.receiveBuf <- &msgPack
+		}
+	}
+}
+
+func (ms *PulsarMsgStream) bufMsgPackToChannel() {
 
 	for {
 		select {
@@ -500,7 +530,6 @@ func (ms *PulsarTtMsgStream) AsConsumer(channels []string,
 }
 
 func (ms *PulsarTtMsgStream) Start() {
-	ms.wait = &sync.WaitGroup{}
 	if ms.consumers != nil {
 		ms.wait.Add(1)
 		go ms.bufMsgPackToChannel()
