@@ -30,12 +30,10 @@ func (pt *ParamTable) Init() {
 	})
 }
 
-// todo
 func (pt *ParamTable) LoadFromArgs() {
 
 }
 
-//todo
 func (pt *ParamTable) LoadFromEnv() {
 	indexServiceAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexServiceAddress != "" {
@@ -43,7 +41,7 @@ func (pt *ParamTable) LoadFromEnv() {
 	}
 
 	Params.IP = funcutil.GetLocalIP()
-	host := os.Getenv("PROXY_NODE_HOST")
+	host := os.Getenv("INDEX_NODE_HOST")
 	if len(host) > 0 {
 		Params.IP = host
 	}

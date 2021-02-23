@@ -63,7 +63,7 @@ services:
     networks:
       - milvus
 
-  querynode:
+  querynode1:
     image: ${TARGET_REPO}/querynode:${TARGET_TAG}
     build:
       context: ../../../
@@ -76,6 +76,26 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+#      QUERY_NODE_HOST: ${QUERY_NODE_HOST1}
+    networks:
+      - milvus
+
+  querynode2:
+    image: ${TARGET_REPO}/querynode:${TARGET_TAG}
+    build:
+      context: ../../../
+      dockerfile: build/docker/deploy/querynode/Dockerfile
+      cache_from:
+        - ${SOURCE_REPO}/querynode:${SOURCE_TAG}
+    environment:
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      MASTER_ADDRESS: ${MASTER_ADDRESS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+      INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
+      QUERY_SERVICE_ADDRESS: ${QUERY_SERVICE_ADDRESS}
+#      QUERY_NODE_HOST: ${QUERY_NODE_HOST2}
     networks:
       - milvus
 
@@ -92,6 +112,9 @@ services:
       MASTER_ADDRESS: ${MASTER_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       DATA_SERVICE_ADDRESS: ${DATA_SERVICE_ADDRESS}
+#      DATA_NODE_HOST: ${DATA_NODE_HOST}
+    depends_on:
+      - "dataservice"
     networks:
       - milvus
 
@@ -119,6 +142,7 @@ services:
     environment:
       INDEX_SERVICE_ADDRESS: ${INDEX_SERVICE_ADDRESS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
+      INDEX_NODE_HOST: ${INDEX_NODE_HOST}
     depends_on:
       - "indexservice"
     networks:

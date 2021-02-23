@@ -37,7 +37,7 @@ func GetLocalIP() string {
 	return ipv4.LocalIP()
 }
 
-func WaitForComponentReady(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+func WaitForComponentStates(service StateComponent, serviceName string, states []internalpb2.StateCode, attempts int, sleep time.Duration) error {
 	checkFunc := func() error {
 		resp, err := service.GetComponentStates()
 		if err != nil {
@@ -48,18 +48,32 @@ func WaitForComponentReady(service StateComponent, serviceName string, attempts 
 			return errors.New(resp.Status.Reason)
 		}
 
-		if resp.State.StateCode != internalpb2.StateCode_HEALTHY {
-			return errors.New("")
+		meet := false
+		for _, state := range states {
+			if resp.State.StateCode == state {
+				meet = true
+				break
+			}
 		}
-
+		if !meet {
+			msg := fmt.Sprintf("WaitForComponentStates, not meet, %s current state:%d", serviceName, resp.State.StateCode)
+			return errors.New(msg)
+		}
 		return nil
 	}
-	err := retry.Retry(attempts, sleep, checkFunc)
-	if err != nil {
-		errMsg := fmt.Sprintf("ProxyNode wait for %s ready failed", serviceName)
-		return errors.New(errMsg)
-	}
-	return nil
+	return retry.Retry(attempts, sleep, checkFunc)
+}
+
+func WaitForComponentInitOrHealthy(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING, internalpb2.StateCode_HEALTHY}, attempts, sleep)
+}
+
+func WaitForComponentInit(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_INITIALIZING}, attempts, sleep)
+}
+
+func WaitForComponentHealthy(service StateComponent, serviceName string, attempts int, sleep time.Duration) error {
+	return WaitForComponentStates(service, serviceName, []internalpb2.StateCode{internalpb2.StateCode_HEALTHY}, attempts, sleep)
 }
 
 func ParseIndexParamsMap(mStr string) (map[string]string, error) {

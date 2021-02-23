@@ -13,7 +13,6 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	Address        string
-	Port           int
 	QueryServiceID UniqueID
 
 	// stats
@@ -42,7 +41,6 @@ func (p *ParamTable) Init() {
 		p.initStatsChannelName()
 		p.initTimeTickChannelName()
 		p.initQueryServiceAddress()
-		p.initPort()
 	})
 }
 
@@ -69,8 +67,4 @@ func (p *ParamTable) initQueryServiceAddress() {
 		panic(err)
 	}
 	p.Address = url
-}
-
-func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("queryService.port")
 }

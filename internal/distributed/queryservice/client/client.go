@@ -36,7 +36,6 @@ func NewClient(address string, timeout time.Duration) (*Client, error) {
 func (c *Client) Init() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-
 	var err error
 	for i := 0; i < c.retry; i++ {
 		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock()); err == nil {

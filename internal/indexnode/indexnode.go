@@ -58,7 +58,7 @@ func NewNodeImpl(ctx context.Context) (*NodeImpl, error) {
 
 func (i *NodeImpl) Init() error {
 	log.Println("AAAAAAAAAAAAAAAAA", i.serviceClient)
-	err := funcutil.WaitForComponentReady(i.serviceClient, "IndexService", 10, time.Second)
+	err := funcutil.WaitForComponentHealthy(i.serviceClient, "IndexService", 10, time.Second)
 	log.Println("BBBBBBBBB", i.serviceClient)
 
 	if err != nil {

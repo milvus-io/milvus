@@ -6,18 +6,20 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
-	grpcdataservice "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
+	"google.golang.org/grpc"
+
+	grpcdataserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
-	grcpmasterservice "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	grpcmasterserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice/client"
 	grpcproxyserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
+
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -25,7 +27,6 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proxynode"
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-	"google.golang.org/grpc"
 )
 
 type Server struct {
@@ -36,15 +37,9 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	ip   string
-	port int
-
-	//todo
-	proxyServiceClient *grpcproxyserviceclient.Client
-
-	// todo InitParams Service addrs
-	masterServiceClient *grcpmasterservice.GrpcClient
-	dataServiceClient   *grpcdataservice.Client
+	proxyServiceClient  *grpcproxyserviceclient.Client
+	masterServiceClient *grpcmasterserviceclient.GrpcClient
+	dataServiceClient   *grpcdataserviceclient.Client
 	queryServiceClient  *grpcqueryserviceclient.Client
 	indexServiceClient  *grpcindexserviceclient.Client
 
@@ -87,7 +82,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	log.Println("network port: ", grpcPort)
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Printf("Server:failed to listen: %v", err)
 		s.grpcErrChan <- err
 		return
 	}
@@ -123,12 +118,6 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	var err error
 	Params.Init()
-
-	Params.IP = funcutil.GetLocalIP()
-	host := os.Getenv("PROXY_NODE_HOST")
-	if len(host) > 0 {
-		Params.IP = host
-	}
 
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
@@ -169,7 +158,7 @@ func (s *Server) init() error {
 	masterServiceAddr := Params.MasterAddress
 	log.Println("master address: ", masterServiceAddr)
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grcpmasterservice.NewGrpcClient(masterServiceAddr, timeout)
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, timeout)
 	if err != nil {
 		return err
 	}
@@ -182,7 +171,7 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Println("data service address ...", dataServiceAddr)
-	s.dataServiceClient = grpcdataservice.NewClient(dataServiceAddr)
+	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		return err

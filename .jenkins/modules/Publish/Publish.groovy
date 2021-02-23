@@ -43,8 +43,8 @@ dir ('build/docker/deploy') {
 
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
             sh 'docker pull ${SOURCE_REPO}/querynode:${SOURCE_TAG} || true'
-            sh 'docker-compose build --force-rm querynode'
-            sh 'docker-compose push querynode'
+            sh 'docker-compose build --force-rm querynode1'
+            sh 'docker-compose push querynode1'
 
             sh 'docker pull registry.zilliz.com/milvus-distributed/milvus-distributed-dev:latest || true'
             sh 'docker pull ${SOURCE_REPO}/datanode:${SOURCE_TAG} || true'

@@ -48,7 +48,7 @@ type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
-	QueryNodeID uint64
+	QueryNodeID UniqueID
 	stateCode   atomic.Value
 
 	replica collectionReplica
@@ -72,7 +72,7 @@ type QueryNode struct {
 	msFactory msgstream.Factory
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID uint64, factory msgstream.Factory) *QueryNode {
+func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
@@ -88,7 +88,7 @@ func NewQueryNode(ctx context.Context, queryNodeID uint64, factory msgstream.Fac
 	}
 
 	node.replica = newCollectionReplicaImpl()
-	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
+	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return node
 }
 
@@ -107,13 +107,9 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	}
 
 	node.replica = newCollectionReplicaImpl()
-	node.stateCode.Store(internalpb2.StateCode_INITIALIZING)
-	return node
-}
+	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 
-// TODO: delete this and call node.Init()
-func Init() {
-	Params.Init()
+	return node
 }
 
 func (node *QueryNode) Init() error {
@@ -193,14 +189,12 @@ func (node *QueryNode) Start() error {
 	//go node.metaService.start()
 	go node.loadService.start()
 	go node.statsService.start()
-
-	node.stateCode.Store(internalpb2.StateCode_HEALTHY)
-	<-node.queryNodeLoopCtx.Done()
+	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 	return nil
 }
 
 func (node *QueryNode) Stop() error {
-	node.stateCode.Store(internalpb2.StateCode_ABNORMAL)
+	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	node.queryNodeLoopCancel()
 
 	// free collectionReplica
@@ -223,6 +217,10 @@ func (node *QueryNode) Stop() error {
 		node.closer.Close()
 	}
 	return nil
+}
+
+func (node *QueryNode) UpdateStateCode(code internalpb2.StateCode) {
+	node.stateCode.Store(code)
 }
 
 func (node *QueryNode) SetMasterService(master MasterServiceInterface) error {

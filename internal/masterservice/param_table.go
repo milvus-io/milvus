@@ -12,9 +12,7 @@ var once sync.Once
 type ParamTable struct {
 	paramtable.BaseTable
 
-	Address string
-	Port    int
-	NodeID  uint64
+	NodeID uint64
 
 	PulsarAddress             string
 	EtcdAddress               string
@@ -43,8 +41,6 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		p.initAddress()
-		p.initPort()
 		p.initNodeID()
 
 		p.initPulsarAddress()
@@ -63,18 +59,6 @@ func (p *ParamTable) Init() {
 
 		p.initTimeout()
 	})
-}
-
-func (p *ParamTable) initAddress() {
-	masterAddress, err := p.Load("master.address")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = masterAddress
-}
-
-func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("master.port")
 }
 
 func (p *ParamTable) initNodeID() {

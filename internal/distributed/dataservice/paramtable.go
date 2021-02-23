@@ -1,7 +1,6 @@
-package dataservice
+package grpcdataserviceclient
 
 import (
-	"os"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/paramtable"
@@ -10,6 +9,7 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
+	Port          int
 	MasterAddress string
 }
 
@@ -19,6 +19,7 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
+		pt.initPort()
 		pt.initParams()
 		pt.LoadFromEnv()
 	})
@@ -29,20 +30,17 @@ func (pt *ParamTable) initParams() {
 }
 
 func (pt *ParamTable) LoadFromEnv() {
-	masterAddress := os.Getenv("MASTER_ADDRESS")
-	if masterAddress != "" {
-		pt.MasterAddress = masterAddress
-	}
+
+}
+
+func (pt *ParamTable) initPort() {
+	pt.Port = pt.ParseInt("dataservice.port")
 }
 
 func (pt *ParamTable) initMasterAddress() {
-	masterHost, err := pt.Load("master.address")
+	ret, err := pt.Load("_MasterAddress")
 	if err != nil {
 		panic(err)
 	}
-	port, err := pt.Load("master.port")
-	if err != nil {
-		panic(err)
-	}
-	pt.MasterAddress = masterHost + ":" + port
+	pt.MasterAddress = ret
 }

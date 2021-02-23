@@ -78,12 +78,10 @@ type (
 
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
-	Params.Init()
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
 		ctx:     ctx2,
 		cancel:  cancel2,
-		NodeID:  Params.NodeID, // GOOSE TODO: How to init
 		Role:    typeutil.DataNodeRole,
 		watchDm: make(chan struct{}),
 
@@ -94,9 +92,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		replica:         nil,
 		msFactory:       factory,
 	}
-
-	node.State.Store(internalpb2.StateCode_INITIALIZING)
-
+	node.UpdateStateCode(internalpb2.StateCode_ABNORMAL)
 	return node
 }
 
@@ -130,7 +126,7 @@ func (node *DataNode) Init() error {
 		},
 		Address: &commonpb.Address{
 			Ip:   Params.IP,
-			Port: Params.Port,
+			Port: int64(Params.Port),
 		},
 	}
 
@@ -181,8 +177,12 @@ func (node *DataNode) Init() error {
 func (node *DataNode) Start() error {
 	node.metaService.init()
 	go node.dataSyncService.start()
-	node.State.Store(internalpb2.StateCode_HEALTHY)
+	node.UpdateStateCode(internalpb2.StateCode_HEALTHY)
 	return nil
+}
+
+func (node *DataNode) UpdateStateCode(code internalpb2.StateCode) {
+	node.State.Store(code)
 }
 
 func (node *DataNode) WatchDmChannels(in *datapb.WatchDmChannelRequest) (*commonpb.Status, error) {

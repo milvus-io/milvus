@@ -62,7 +62,7 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 	if err != nil {
 		return nil, err
 	}
-	return server, err
+	return server, nil
 }
 
 func (s *Server) Run() error {
@@ -133,6 +133,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	s.cancel()
 	s.closer.Close()
 	err := s.impl.Stop()
 	if err != nil {
@@ -141,7 +142,6 @@ func (s *Server) Stop() error {
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
-	s.cancel()
 	s.wg.Wait()
 	return nil
 }

@@ -13,9 +13,7 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	Address string
-	Port    int
-	NodeID  int64
+	NodeID int64
 
 	EtcdAddress   string
 	MetaRootPath  string
@@ -54,8 +52,6 @@ func (p *ParamTable) Init() {
 		}
 
 		// set members
-		p.initAddress()
-		p.initPort()
 		p.initNodeID()
 
 		p.initEtcdAddress()
@@ -78,18 +74,6 @@ func (p *ParamTable) Init() {
 		p.initSegmentFlushMetaPath()
 		p.initLogCfg()
 	})
-}
-
-func (p *ParamTable) initAddress() {
-	dataserviceAddress, err := p.Load("dataservice.address")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = dataserviceAddress
-}
-
-func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("dataservice.port")
 }
 
 func (p *ParamTable) initNodeID() {

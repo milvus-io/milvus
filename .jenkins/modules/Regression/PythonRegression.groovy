@@ -6,15 +6,15 @@ try {
     dir ('build/docker/deploy') {
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} pull'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d master'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxyservice'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxynode'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d indexnode'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d queryservice'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxyservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d dataservice'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=1 -d querynode'
-        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=2 -d querynode'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d queryservice'
         sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e DATA_NODE_ID=3 -d datanode'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} up -d proxynode'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=1 -d querynode1'
+        sh 'docker-compose -p ${DOCKER_COMPOSE_PROJECT_NAME} run -e QUERY_NODE_ID=2 -d querynode2'
     }
 
     dir ('build/docker/test') {
