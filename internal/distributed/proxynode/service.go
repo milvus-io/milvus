@@ -2,6 +2,8 @@ package grpcproxynode
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -9,22 +11,21 @@ import (
 	"sync"
 	"time"
 
-	grpcproxyserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
-
-	"github.com/zilliztech/milvus-distributed/internal/msgstream"
-	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
-	"google.golang.org/grpc"
-
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	grpcdataservice "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice"
 	grpcindexserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	grcpmasterservice "github.com/zilliztech/milvus-distributed/internal/distributed/masterservice"
+	grpcproxyserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
+	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
+	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/proxypb"
 	"github.com/zilliztech/milvus-distributed/internal/proxynode"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"google.golang.org/grpc"
 )
 
 type Server struct {
@@ -46,16 +47,32 @@ type Server struct {
 	dataServiceClient   *grpcdataservice.Client
 	queryServiceClient  *grpcqueryserviceclient.Client
 	indexServiceClient  *grpcindexserviceclient.Client
+
+	tracer opentracing.Tracer
+	closer io.Closer
 }
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 
+	var err error
 	server := &Server{
 		ctx:         ctx,
 		grpcErrChan: make(chan error),
 	}
 
-	var err error
+	cfg := &config.Configuration{
+		ServiceName: "proxynode",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	server.tracer, server.closer, err = cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(server.tracer)
+
 	server.impl, err = proxynode.NewProxyNodeImpl(server.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -220,6 +237,7 @@ func (s *Server) start() error {
 
 func (s *Server) Stop() error {
 	var err error
+	s.closer.Close()
 
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()

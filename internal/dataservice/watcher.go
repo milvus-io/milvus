@@ -1,10 +1,10 @@
 package dataservice
 
 import (
-	"log"
-
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/datapb"
+	"go.uber.org/zap"
 
 	"golang.org/x/net/context"
 
@@ -35,11 +35,11 @@ func (watcher *proxyTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("proxy time tick watcher closed")
+			log.Debug("proxy time tick watcher closed")
 			return
 		case msg := <-watcher.msgQueue:
 			if err := watcher.allocator.ExpireAllocations(msg.Base.Timestamp); err != nil {
-				log.Printf("expire allocations error : %s", err.Error())
+				log.Error("expire allocations error", zap.Error(err))
 			}
 		}
 	}
@@ -66,11 +66,11 @@ func (watcher *dataNodeTimeTickWatcher) StartBackgroundLoop(ctx context.Context)
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("data node time tick watcher closed")
+			log.Debug("data node time tick watcher closed")
 			return
 		case msg := <-watcher.msgQueue:
 			if err := watcher.handleTimeTickMsg(msg); err != nil {
-				log.Println(err.Error())
+				log.Error("handle time tick error", zap.Error(err))
 				continue
 			}
 		}
@@ -85,17 +85,17 @@ func (watcher *dataNodeTimeTickWatcher) handleTimeTickMsg(msg *msgstream.TimeTic
 	for _, id := range segments {
 		expired, err := watcher.allocator.IsAllocationsExpired(id, msg.Base.Timestamp)
 		if err != nil {
-			log.Printf("check allocations expired error %s", err.Error())
+			log.Error("check allocations expired error", zap.Int64("segmentID", id), zap.Error(err))
 			continue
 		}
 		if expired {
 			segmentInfo, err := watcher.meta.GetSegment(id)
 			if err != nil {
-				log.Println(err.Error())
+				log.Error("get segment from meta error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
 			if err = watcher.meta.SetSegmentState(id, commonpb.SegmentState_SegmentSealed); err != nil {
-				log.Println(err.Error())
+				log.Error("set segment state error", zap.Int64("segmentID", id), zap.Error(err))
 				continue
 			}
 			watcher.cluster.FlushSegment(&datapb.FlushSegRequest{

@@ -187,11 +187,17 @@ func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Build
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
 		},
 	}
-	t := NewIndexAddTask()
-	t.req = req
-	t.idAllocator = i.idAllocator
-	t.table = i.metaTable
-	t.kv = i.kv
+	ctx := context.Background()
+	t := &IndexAddTask{
+		BaseTask: BaseTask{
+			ctx:   ctx,
+			done:  make(chan error),
+			table: i.metaTable,
+		},
+		req:         req,
+		idAllocator: i.idAllocator,
+		kv:          i.kv,
+	}
 
 	if i.nodeClients == nil || i.nodeClients.Len() <= 0 {
 		ret.Status.Reason = "IndexBuilding Service not available"
@@ -200,7 +206,6 @@ func (i *ServiceImpl) BuildIndex(req *indexpb.BuildIndexRequest) (*indexpb.Build
 	t.nodeClients = i.nodeClients
 
 	var cancel func()
-	ctx := context.Background()
 	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 

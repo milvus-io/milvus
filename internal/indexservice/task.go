@@ -12,12 +12,18 @@ import (
 	"github.com/zilliztech/milvus-distributed/internal/proto/indexpb"
 )
 
+const (
+	IndexAddTaskName = "IndexAddTask"
+)
+
 type task interface {
+	Ctx() context.Context
 	ID() UniqueID       // return ReqID
 	SetID(uid UniqueID) // set ReqID
-	PreExecute() error
-	Execute() error
-	PostExecute() error
+	Name() string
+	PreExecute(ctx context.Context) error
+	Execute(ctx context.Context) error
+	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
 	OnEnqueue() error
@@ -63,8 +69,20 @@ type IndexAddTask struct {
 	buildClientNodeID UniqueID
 }
 
+func (it *IndexAddTask) Ctx() context.Context {
+	return it.ctx
+}
+
+func (it *IndexAddTask) ID() UniqueID {
+	return it.id
+}
+
 func (it *IndexAddTask) SetID(ID UniqueID) {
 	it.BaseTask.setID(ID)
+}
+
+func (it *IndexAddTask) Name() string {
+	return IndexAddTaskName
 }
 
 func (it *IndexAddTask) OnEnqueue() error {
@@ -76,7 +94,7 @@ func (it *IndexAddTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *IndexAddTask) PreExecute() error {
+func (it *IndexAddTask) PreExecute(ctx context.Context) error {
 	log.Println("pretend to check Index Req")
 	nodeID, builderClient := it.nodeClients.PeekClient()
 	if builderClient == nil {
@@ -91,7 +109,7 @@ func (it *IndexAddTask) PreExecute() error {
 	return nil
 }
 
-func (it *IndexAddTask) Execute() error {
+func (it *IndexAddTask) Execute(ctx context.Context) error {
 	cmd := &indexpb.BuildIndexCmd{
 		IndexBuildID: it.indexBuildID,
 		Req:          it.req,
@@ -109,14 +127,6 @@ func (it *IndexAddTask) Execute() error {
 	return nil
 }
 
-func (it *IndexAddTask) PostExecute() error {
+func (it *IndexAddTask) PostExecute(ctx context.Context) error {
 	return nil
-}
-
-func NewIndexAddTask() *IndexAddTask {
-	return &IndexAddTask{
-		BaseTask: BaseTask{
-			done: make(chan error),
-		},
-	}
 }

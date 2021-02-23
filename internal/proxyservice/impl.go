@@ -199,6 +199,7 @@ func (s *ServiceImpl) RegisterLink() (*milvuspb.RegisterLinkResponse, error) {
 	defer cancel()
 
 	t := &RegisterLinkTask{
+		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		nodeInfos: s.nodeInfos,
 	}
@@ -236,6 +237,7 @@ func (s *ServiceImpl) RegisterNode(request *proxypb.RegisterNodeRequest) (*proxy
 	defer cancel()
 
 	t := &RegisterNodeTask{
+		ctx:         ctx,
 		request:     request,
 		startParams: s.nodeStartParams,
 		Condition:   NewTaskCondition(ctx),
@@ -276,6 +278,7 @@ func (s *ServiceImpl) InvalidateCollectionMetaCache(request *proxypb.InvalidateC
 	defer cancel()
 
 	t := &InvalidateCollectionMetaCacheTask{
+		ctx:       ctx,
 		request:   request,
 		Condition: NewTaskCondition(ctx),
 		nodeInfos: s.nodeInfos,

@@ -30,7 +30,7 @@ func (allocator *allocatorImpl) allocTimestamp() (Timestamp, error) {
 		},
 		Count: 1,
 	})
-	if err != nil {
+	if err = VerifyResponse(resp, err); err != nil {
 		return 0, err
 	}
 	return resp.Timestamp, nil
@@ -46,8 +46,9 @@ func (allocator *allocatorImpl) allocID() (UniqueID, error) {
 		},
 		Count: 1,
 	})
-	if err != nil {
+	if err = VerifyResponse(resp, err); err != nil {
 		return 0, err
 	}
+
 	return resp.ID, nil
 }

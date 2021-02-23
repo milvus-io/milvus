@@ -2,11 +2,15 @@ package grpcproxyservice
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -26,10 +30,14 @@ type Server struct {
 	grpcErrChan chan error
 
 	impl *proxyservice.ServiceImpl
+
+	tracer opentracing.Tracer
+	closer io.Closer
 }
 
 func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx1)
+	var err error
 
 	server := &Server{
 		ctx:         ctx,
@@ -37,7 +45,19 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 		grpcErrChan: make(chan error),
 	}
 
-	var err error
+	cfg := &config.Configuration{
+		ServiceName: "proxyservice",
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+	}
+	server.tracer, server.closer, err = cfg.NewTracer()
+	if err != nil {
+		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
+	}
+	opentracing.SetGlobalTracer(server.tracer)
+
 	server.impl, err = proxyservice.NewServiceImpl(server.ctx, factory)
 	if err != nil {
 		return nil, err
@@ -113,6 +133,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	s.closer.Close()
 	err := s.impl.Stop()
 	if err != nil {
 		return err

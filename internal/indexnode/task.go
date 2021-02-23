@@ -18,15 +18,18 @@ import (
 )
 
 const (
-	paramsKeyToParse = "params"
+	paramsKeyToParse   = "params"
+	IndexBuildTaskName = "IndexBuildTask"
 )
 
 type task interface {
-	ID() UniqueID       // return ReqID
+	Ctx() context.Context
+	ID() UniqueID // return ReqID
+	Name() string
 	SetID(uid UniqueID) // set ReqID
-	PreExecute() error
-	Execute() error
-	PostExecute() error
+	PreExecute(ctx context.Context) error
+	Execute(ctx context.Context) error
+	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
 	OnEnqueue() error
@@ -69,18 +72,20 @@ type IndexBuildTask struct {
 	nodeID        UniqueID
 }
 
-func newIndexBuildTask() *IndexBuildTask {
-	ctx := context.Background()
-	return &IndexBuildTask{
-		BaseTask: BaseTask{
-			ctx:  ctx,
-			done: make(chan error), // intend to do this
-		},
-	}
+func (it *IndexBuildTask) Ctx() context.Context {
+	return it.ctx
+}
+
+func (it *IndexBuildTask) ID() UniqueID {
+	return it.id
 }
 
 func (it *IndexBuildTask) SetID(ID UniqueID) {
 	it.BaseTask.setID(ID)
+}
+
+func (bt *BaseTask) Name() string {
+	return IndexBuildTaskName
 }
 
 func (it *IndexBuildTask) OnEnqueue() error {
@@ -89,12 +94,12 @@ func (it *IndexBuildTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *IndexBuildTask) PreExecute() error {
+func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Println("preExecute...")
 	return nil
 }
 
-func (it *IndexBuildTask) PostExecute() error {
+func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Println("PostExecute...")
 	var err error
 	defer func() {
@@ -129,21 +134,7 @@ func (it *IndexBuildTask) PostExecute() error {
 	return err
 }
 
-func (it *IndexBuildTask) Rollback() error {
-
-	if it.savePaths == nil {
-		return nil
-	}
-
-	err := it.kv.MultiRemove(it.savePaths)
-	if err != nil {
-		log.Println("IndexBuildTask Rollback Failed:", err.Error())
-		return err
-	}
-	return nil
-}
-
-func (it *IndexBuildTask) Execute() error {
+func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Println("start build index ...")
 	var err error
 
@@ -311,5 +302,18 @@ func (it *IndexBuildTask) Execute() error {
 	// if err != nil {
 	// 	log.Print("CIndexDelete Failed")
 	// }
+	return nil
+}
+func (it *IndexBuildTask) Rollback() error {
+
+	if it.savePaths == nil {
+		return nil
+	}
+
+	err := it.kv.MultiRemove(it.savePaths)
+	if err != nil {
+		log.Println("IndexBuildTask Rollback Failed:", err.Error())
+		return err
+	}
 	return nil
 }

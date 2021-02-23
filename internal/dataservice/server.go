@@ -2,7 +2,6 @@ package dataservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -213,7 +212,8 @@ func (s *Server) initMsgProducer() error {
 
 func (s *Server) loadMetaFromMaster() error {
 	log.Debug("loading collection meta from master")
-	if err := s.checkMasterIsHealthy(); err != nil {
+	var err error
+	if err = s.checkMasterIsHealthy(); err != nil {
 		return err
 	}
 	if s.ddChannelName == "" {
@@ -232,7 +232,7 @@ func (s *Server) loadMetaFromMaster() error {
 		},
 		DbName: "",
 	})
-	if err != nil {
+	if err = VerifyResponse(collections, err); err != nil {
 		return err
 	}
 	for _, collectionName := range collections.CollectionNames {
@@ -246,8 +246,8 @@ func (s *Server) loadMetaFromMaster() error {
 			DbName:         "",
 			CollectionName: collectionName,
 		})
-		if err != nil {
-			log.Error("describe collection error", zap.Error(err))
+		if err = VerifyResponse(collection, err); err != nil {
+			log.Error("describe collection error", zap.String("collectionName", collectionName), zap.Error(err))
 			continue
 		}
 		partitions, err := s.masterClient.ShowPartitions(&milvuspb.ShowPartitionRequest{
@@ -261,8 +261,8 @@ func (s *Server) loadMetaFromMaster() error {
 			CollectionName: collectionName,
 			CollectionID:   collection.CollectionID,
 		})
-		if err != nil {
-			log.Error("show partitions error", zap.Error(err))
+		if err = VerifyResponse(partitions, err); err != nil {
+			log.Error("show partitions error", zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID), zap.Error(err))
 			continue
 		}
 		err = s.meta.AddCollection(&collectionInfo{
@@ -271,7 +271,7 @@ func (s *Server) loadMetaFromMaster() error {
 			Partitions: partitions.PartitionIDs,
 		})
 		if err != nil {
-			log.Error("add collection error", zap.Error(err))
+			log.Error("add collection to meta error", zap.Int64("collectionID", collection.CollectionID), zap.Error(err))
 			continue
 		}
 	}
@@ -294,11 +294,8 @@ func (s *Server) checkMasterIsHealthy() error {
 			return fmt.Errorf("master is not healthy")
 		case <-ticker.C:
 			resp, err = s.masterClient.GetComponentStates()
-			if err != nil {
+			if err = VerifyResponse(resp, err); err != nil {
 				return err
-			}
-			if resp.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
-				return errors.New(resp.Status.Reason)
 			}
 		}
 		if resp.State.StateCode == internalpb2.StateCode_HEALTHY {
@@ -330,10 +327,13 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		msgPack := statsStream.Consume()
 		for _, msg := range msgPack.Msgs {
-			statistics := msg.(*msgstream.SegmentStatisticsMsg)
+			statistics, ok := msg.(*msgstream.SegmentStatisticsMsg)
+			if !ok {
+				log.Error("receive unknown type msg from stats channel", zap.Stringer("msgType", msg.Type()))
+			}
 			for _, stat := range statistics.SegStats {
 				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
-					log.Error("handle segment stat error", zap.Error(err))
+					log.Error("handle segment stat error", zap.Int64("segmentID", stat.SegmentID), zap.Error(err))
 					continue
 				}
 			}
@@ -363,7 +363,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 			segmentInfo, err := s.meta.GetSegment(realMsg.SegmentID)
 			if err != nil {
-				log.Error("get segment error", zap.Error(err))
+				log.Error("get segment from meta error", zap.Int64("segmentID", realMsg.SegmentID), zap.Error(err))
 				continue
 			}
 			segmentInfo.FlushedTime = realMsg.BeginTimestamp
@@ -473,7 +473,7 @@ func (s *Server) RegisterNode(req *datapb.RegisterNodeRequest) (*datapb.Register
 	s.cluster.Register(node)
 	if s.ddChannelName == "" {
 		resp, err := s.masterClient.GetDdChannel()
-		if err != nil {
+		if err = VerifyResponse(resp, err); err != nil {
 			ret.Status.Reason = err.Error()
 			return ret, err
 		}

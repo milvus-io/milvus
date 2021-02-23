@@ -473,7 +473,6 @@ func (c *Core) setMsgStreams() error {
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
-			MsgCtx:         nil,
 			BeginTimestamp: t,
 			EndTimestamp:   t,
 			HashValues:     []uint32{0},
