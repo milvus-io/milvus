@@ -233,6 +233,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
+	defer insertCodec.Close()
 	partitionID, segmentID, insertData, err2 := insertCodec.Deserialize(storageBlobs)
 	//fmt.Println("IndexBuilder for segmentID,", segmentID)
 	if err2 != nil {

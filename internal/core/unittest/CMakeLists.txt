@@ -25,19 +25,19 @@ add_executable(all_tests
         )
 
 # check if memory leak exists in index builder
-# set(INDEX_BUILDER_TEST_FILES
-#         test_index_wrapper.cpp)
-# add_executable(index_builder_test
-#         ${INDEX_BUILDER_TEST_FILES}
-#         )
-# target_link_libraries(index_builder_test
-#         gtest
-#         gtest_main
-#         milvus_segcore
-#         milvus_indexbuilder
-#         log
-#         pthread
-#         )
+set(INDEX_BUILDER_TEST_FILES
+        test_index_wrapper.cpp)
+add_executable(index_builder_test
+        ${INDEX_BUILDER_TEST_FILES}
+        )
+target_link_libraries(index_builder_test
+        gtest
+        gtest_main
+        milvus_segcore
+        milvus_indexbuilder
+        log
+        pthread
+        )
 
 target_link_libraries(all_tests
         gtest
