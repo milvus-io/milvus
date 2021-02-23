@@ -112,11 +112,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  public:
-    void
-    debug_disable_small_index() override {
-        debug_disable_small_index_ = true;
-    }
-
     ssize_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
@@ -209,9 +204,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SealedIndexingRecord sealed_indexing_record_;
 
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
-
- private:
-    bool debug_disable_small_index_ = false;
 };
 
 }  // namespace milvus::segcore

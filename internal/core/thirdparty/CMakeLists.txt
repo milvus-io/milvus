@@ -41,7 +41,6 @@ find_package( Threads REQUIRED )
 # ****************************** Thirdparty googletest ***************************************
 if ( MILVUS_BUILD_TESTS )
     add_subdirectory( gtest )
-    add_subdirectory( google_benchmark)
 endif()
 
 
