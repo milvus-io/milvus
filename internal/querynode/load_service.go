@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
+	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 )
 
 const loadingCheckInterval = 3
@@ -79,7 +81,12 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 		}
 	}
 	for _, segmentID := range segmentIDs {
-		err := s.loadSegmentInternal(collectionID, partitionID, segmentID, fieldIDs)
+		err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segTypeGrowing)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		err = s.loadSegmentInternal(collectionID, partitionID, segmentID, fieldIDs)
 		if err != nil {
 			log.Println(err)
 			continue
@@ -90,6 +97,14 @@ func (s *loadService) loadSegment(collectionID UniqueID, partitionID UniqueID, s
 
 func (s *loadService) loadSegmentInternal(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, fieldIDs []int64) error {
 	// create segment
+	statesResp, err := s.segLoader.GetSegmentStates(segmentID)
+	if err != nil {
+		return err
+	}
+	if statesResp.States[0].State != commonpb.SegmentState_SegmentFlushed {
+		return errors.New("segment not flush done")
+	}
+
 	collection, err := s.segLoader.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err

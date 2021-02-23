@@ -65,6 +65,25 @@ func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*intern
 	return pathResponse.Paths, pathResponse.FieldIDs, nil
 }
 
+func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.SegmentStatesResponse, error) {
+	if loader.dataClient == nil {
+		return nil, errors.New("null data service client")
+	}
+
+	segmentStatesRequest := &datapb.SegmentStatesRequest{
+		SegmentIDs: []int64{segmentID},
+	}
+	statesResponse, err := loader.dataClient.GetSegmentStates(segmentStatesRequest)
+	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_SUCCESS {
+		return nil, err
+	}
+	if len(statesResponse.States) != 1 {
+		return nil, errors.New("segment states' len should be 1")
+	}
+
+	return statesResponse, nil
+}
+
 func (loader *segmentLoader) filterOutVectorFields(fieldIDs []int64, vectorFields []int64) []int64 {
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {

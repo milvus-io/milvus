@@ -31,6 +31,7 @@ type QueryServiceInterface interface {
 
 type DataServiceInterface interface {
 	GetInsertBinlogPaths(req *datapb.InsertBinlogPathRequest) (*datapb.InsertBinlogPathsResponse, error)
+	GetSegmentStates(req *datapb.SegmentStatesRequest) (*datapb.SegmentStatesResponse, error)
 }
 
 type IndexServiceInterface interface {
