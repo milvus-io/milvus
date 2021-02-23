@@ -13,7 +13,6 @@
 nodeID: # will be deprecated after v0.2
   proxyIDList: [0]
   queryNodeIDList: [1, 2]
-  writeNodeIDList: [3] # GOOSE TODO: remove this
   dataNodeIDList: [3] 
 
 etcd:
@@ -49,7 +48,7 @@ master:
 
 proxyNode:
   address: localhost
-  port: 19530
+  port: 21122
 
 queryService:
   address: localhost
@@ -61,14 +60,14 @@ proxyService:
 
 queryNode:
   gracefulTime: 5000 #ms
-
-indexBuilder:
-    address: localhost
-    port: 31000
+  port: 21123
 
 indexServer:
   address: localhost
   port: 31000
+
+indexNode:
+  port: 21121
 
 dataService:
   address: localhost

@@ -48,7 +48,7 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initParams() {
-
+	pt.initPort()
 	pt.initIndexServerAddress()
 }
 
@@ -76,4 +76,9 @@ func (pt *ParamTable) initIndexServerAddress() {
 	}
 
 	pt.IndexServerAddress = addr + ":" + port
+}
+
+func (pt *ParamTable) initPort() {
+	port := pt.ParseInt("indexNode.port")
+	pt.Port = port
 }

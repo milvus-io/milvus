@@ -164,11 +164,11 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexBuilderAddress == "" {
-		indexBuilderHost, err := gp.Load("indexBuilder.address")
+		indexBuilderHost, err := gp.Load("indexServer.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("indexBuilder.port")
+		port, err := gp.Load("indexServer.port")
 		if err != nil {
 			panic(err)
 		}
@@ -331,7 +331,7 @@ func (gp *BaseTable) ParseInt(key string) int {
 
 // GOOSE TODO: remove writenode
 func (gp *BaseTable) WriteNodeIDList() []UniqueID {
-	proxyIDStr, err := gp.Load("nodeID.writeNodeIDList")
+	proxyIDStr, err := gp.Load("nodeID.dataNodeIDList")
 	if err != nil {
 		panic(err)
 	}

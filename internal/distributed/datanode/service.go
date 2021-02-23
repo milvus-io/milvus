@@ -117,7 +117,9 @@ func (s *Server) Stop() error {
 
 func (s *Server) init() error {
 	Params.Init()
-	Params.Port = funcutil.GetAvailablePort()
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 

@@ -68,9 +68,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 func (s *Server) init() error {
 	var err error
 	Params.Init()
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
-	Params.Port = funcutil.GetAvailablePort()
+
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
 	defer func() {

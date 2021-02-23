@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/go-basic/ipv4"
@@ -21,6 +22,15 @@ func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 	case <-ctx.Done():
 		return
 	}
+}
+
+func CheckPortAvailable(port int) bool {
+	addr := ":" + strconv.Itoa(port)
+	listener, err := net.Listen("tcp", addr)
+	if listener != nil {
+		listener.Close()
+	}
+	return err == nil
 }
 
 func GetAvailablePort() int {

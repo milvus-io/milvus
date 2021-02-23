@@ -118,11 +118,12 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	var err error
 	Params.Init()
-
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 
-	Params.Port = funcutil.GetAvailablePort()
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
 	log.Println("proxy host: ", Params.IP)

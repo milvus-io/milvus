@@ -56,7 +56,7 @@ func (pt *ParamTable) initAddress() {
 	hostName, _ := net.LookupHost(addr)
 	if len(hostName) <= 0 {
 		if ip := net.ParseIP(addr); ip == nil {
-			panic("invalid ip indexBuilder.address")
+			panic("invalid ip indexServer.address")
 		}
 	}
 

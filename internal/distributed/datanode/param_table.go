@@ -26,7 +26,7 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initMasterAddress()
 		pt.initDataServiceAddress()
-		pt.initPort() // todo random generate
+		pt.initPort()
 	})
 }
 
