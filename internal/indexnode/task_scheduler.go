@@ -23,6 +23,7 @@ type TaskQueue interface {
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
 	Enqueue(t task) error
+	tryToRemoveUselessIndexBuildTask(indexID UniqueID)
 }
 
 type BaseTaskQueue struct {
@@ -114,6 +115,23 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	}
 	log.Fatalf("sorry, but the ID %d was not found in the active task list!", tID)
 	return nil
+}
+
+func (queue *BaseTaskQueue) tryToRemoveUselessIndexBuildTask(indexID UniqueID) {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+
+	var next *list.Element
+	for e := queue.unissuedTasks.Front(); e != nil; e = next {
+		next = e.Next()
+		indexBuildTask, ok := e.Value.(*IndexBuildTask)
+		if !ok {
+			continue
+		}
+		if indexBuildTask.cmd.Req.IndexID == indexID {
+			queue.unissuedTasks.Remove(e)
+		}
+	}
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {

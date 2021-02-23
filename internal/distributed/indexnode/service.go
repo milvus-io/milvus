@@ -137,6 +137,10 @@ func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexCmd) (*c
 	return s.impl.BuildIndex(req)
 }
 
+func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	return s.impl.DropIndex(request)
+}
+
 func (s *Server) GetComponentStates(ctx context.Context, empty *commonpb.Empty) (*internalpb2.ComponentStates, error) {
 	return s.impl.GetComponentStates()
 }

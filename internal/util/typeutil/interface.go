@@ -24,6 +24,7 @@ type IndexNodeInterface interface {
 	Service
 	Component
 	BuildIndex(req *indexpb.BuildIndexCmd) (*commonpb.Status, error)
+	DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 type IndexServiceInterface interface {

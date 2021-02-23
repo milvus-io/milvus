@@ -189,6 +189,14 @@ func (i *NodeImpl) BuildIndex(request *indexpb.BuildIndexCmd) (*commonpb.Status,
 	return ret, nil
 }
 
+func (i *NodeImpl) DropIndex(request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+		Reason:    "",
+	}, nil
+}
+
 // AddStartCallback adds a callback in the startServer phase.
 func (i *NodeImpl) AddStartCallback(callbacks ...func()) {
 	i.startCallbacks = append(i.startCallbacks, callbacks...)

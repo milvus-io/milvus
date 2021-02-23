@@ -254,6 +254,35 @@ func (i *ServiceImpl) GetIndexStates(req *indexpb.IndexStatesRequest) (*indexpb.
 	return ret, nil
 }
 
+func (i *ServiceImpl) DropIndex(req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
+
+	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	defer func() {
+		go func() {
+			allNodeClients := i.nodeClients.PeekAllClients()
+			for _, client := range allNodeClients {
+				client.DropIndex(req)
+			}
+		}()
+		go func() {
+			i.metaTable.removeIndexFile(req.IndexID)
+			i.metaTable.removeMeta(req.IndexID)
+		}()
+	}()
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}, nil
+}
+
 func (i *ServiceImpl) GetIndexFilePaths(req *indexpb.IndexFilePathsRequest) (*indexpb.IndexFilePathsResponse, error) {
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
