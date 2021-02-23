@@ -185,6 +185,7 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
 
     add_subdirectory(unittest)
+    add_subdirectory(bench)
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
