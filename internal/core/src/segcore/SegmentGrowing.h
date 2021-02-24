@@ -50,6 +50,9 @@ class SegmentGrowing : public SegmentInternalInterface {
     };
 
  public:
+    virtual void
+    debug_disable_small_index() = 0;
+
     virtual int64_t
     PreInsert(int64_t size) = 0;
 
