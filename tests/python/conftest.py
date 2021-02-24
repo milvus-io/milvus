@@ -171,6 +171,7 @@ def collection(request, connect):
     try:
         default_fields = gen_default_fields()
         connect.create_collection(collection_name, default_fields)
+        connect.load_collection(collection_name)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -189,6 +190,7 @@ def id_collection(request, connect):
     try:
         fields = gen_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields)
+        connect.load_collection(collection_name)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -206,6 +208,7 @@ def binary_collection(request, connect):
     try:
         fields = gen_binary_default_fields()
         connect.create_collection(collection_name, fields)
+        connect.load_collection(collection_name)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():
@@ -225,6 +228,7 @@ def binary_id_collection(request, connect):
     try:
         fields = gen_binary_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields)
+        connect.load_collection(collection_name)
     except Exception as e:
         pytest.exit(str(e))
     def teardown():

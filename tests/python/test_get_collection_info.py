@@ -33,9 +33,9 @@ class TestInfoBase:
     )
     def get_simple_index(self, request, connect):
         logging.getLogger().info(request.param)
-        if str(connect._cmd("mode")) == "CPU":
-            if request.param["index_type"] in index_cpu_not_support():
-                pytest.skip("sq8h not support in CPU mode")
+        # if str(connect._cmd("mode")) == "CPU":
+        if request.param["index_type"] in index_cpu_not_support():
+            pytest.skip("sq8h not support in CPU mode")
         return request.param
 
     """
@@ -88,7 +88,7 @@ class TestInfoBase:
     @pytest.mark.skip("no create Index")
     def test_get_collection_info_after_index_created(self, connect, collection, get_simple_index):
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        info = connect.get_index_info(collection, field_name)
+        info = connect.describe_index(collection, field_name)
         assert info == get_simple_index
         res = connect.get_collection_info(collection, default_float_vec_field_name)
         assert index["index_type"] == get_simple_index["index_type"]
@@ -161,7 +161,7 @@ class TestInfoBase:
         }
         connect.create_collection(collection_name, fields)
         entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
-        res_ids = connect.bulk_insert(collection_name, entities)
+        res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.get_collection_info(collection_name)
         assert res['auto_id'] == True
@@ -186,7 +186,7 @@ class TestInfoBase:
        fields["segment_row_limit"] = get_segment_row_limit
        connect.create_collection(collection_name, fields)
        entities = gen_entities_by_fields(fields["fields"], default_nb, fields["fields"][-1]["params"]["dim"])
-       res_ids = connect.bulk_insert(collection_name, entities)
+       res_ids = connect.insert(collection_name, entities)
        connect.flush([collection_name])
        res = connect.get_collection_info(collection_name)
        assert res['auto_id'] == True
