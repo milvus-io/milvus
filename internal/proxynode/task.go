@@ -344,9 +344,6 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 				}
 			}
 		}
-		if err := ValidateVectorFieldMetricType(field); err != nil {
-			return err
-		}
 	}
 
 	return nil
