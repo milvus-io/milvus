@@ -247,6 +247,8 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 
 	typeParamsPointer := C.CString(typeParamsStr)
 	indexParamsPointer := C.CString(indexParamsStr)
+	defer C.free(unsafe.Pointer(typeParamsPointer))
+	defer C.free(unsafe.Pointer(indexParamsPointer))
 
 	/*
 		CStatus
