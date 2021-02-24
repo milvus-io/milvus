@@ -4,27 +4,27 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"time"
 
 	"net"
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/uber/jaeger-client-go/config"
 	dsc "github.com/zilliztech/milvus-distributed/internal/distributed/dataservice/client"
 	isc "github.com/zilliztech/milvus-distributed/internal/distributed/indexservice/client"
 	psc "github.com/zilliztech/milvus-distributed/internal/distributed/proxyservice/client"
 	qsc "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
-	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	cms "github.com/zilliztech/milvus-distributed/internal/masterservice"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/masterpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
+	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -102,7 +102,7 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 
-	log.Println("init params done")
+	log.Info("init params done")
 
 	err := s.startGrpc()
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *Server) init() error {
 	s.core.UpdateStateCode(internalpb2.StateCode_INITIALIZING)
 
 	if s.connectProxyService {
-		log.Printf("proxy service address : %s", Params.ProxyServiceAddress)
+		log.Info("proxy service", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := psc.NewClient(Params.ProxyServiceAddress)
 		if err := proxyService.Init(); err != nil {
 			panic(err)
@@ -128,7 +128,7 @@ func (s *Server) init() error {
 		}
 	}
 	if s.connectDataService {
-		log.Printf("data service address : %s", Params.DataServiceAddress)
+		log.Info("data service", zap.String("address", Params.DataServiceAddress))
 		dataService := dsc.NewClient(Params.DataServiceAddress)
 		if err := dataService.Init(); err != nil {
 			panic(err)
@@ -146,7 +146,7 @@ func (s *Server) init() error {
 		}
 	}
 	if s.connectIndexService {
-		log.Printf("index service address : %s", Params.IndexServiceAddress)
+		log.Info("index service", zap.String("address", Params.IndexServiceAddress))
 		indexService := isc.NewClient(Params.IndexServiceAddress)
 		if err := indexService.Init(); err != nil {
 			panic(err)
@@ -173,7 +173,7 @@ func (s *Server) init() error {
 		}
 	}
 	cms.Params.Init()
-	log.Println("grpc init done ...")
+	log.Info("grpc init done ...")
 
 	if err := s.core.Init(); err != nil {
 		return err
@@ -193,10 +193,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Println("network port: ", grpcPort)
+	log.Info("start grpc ", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Printf("GrpcServer:failed to listen: %v", err)
+		log.Warn("GrpcServer:failed to listen", zap.String("error", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -215,7 +215,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	log.Println("Master Core start ...")
+	log.Info("Master Core start ...")
 	if err := s.core.Start(); err != nil {
 		return err
 	}

@@ -2,16 +2,17 @@ package masterservice
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/zilliztech/milvus-distributed/internal/errors"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/etcdpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
 	"github.com/zilliztech/milvus-distributed/internal/proto/milvuspb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/schemapb"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type reqTask interface {
@@ -233,7 +234,7 @@ func (t *DropCollectionReqTask) Execute() error {
 	//notify query service to release collection
 	go func() {
 		if err = t.core.ReleaseCollection(t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
-			log.Printf("%s", err.Error())
+			log.Warn("ReleaseCollection failed", zap.String("error", err.Error()))
 		}
 	}()
 

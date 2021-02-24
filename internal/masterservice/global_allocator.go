@@ -1,12 +1,12 @@
 package masterservice
 
 import (
-	"log"
 	"sync/atomic"
 	"time"
 
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	"github.com/zilliztech/milvus-distributed/internal/kv"
+	"github.com/zilliztech/milvus-distributed/internal/log"
 	"github.com/zilliztech/milvus-distributed/internal/util/tsoutil"
 	"github.com/zilliztech/milvus-distributed/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -77,7 +77,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
 		if current == nil || current.physical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			log.Println("sync hasn't completed yet, wait for a while")
+			log.Debug("sync hasn't completed yet, wait for a while")
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -85,8 +85,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		physical = current.physical.UnixNano() / int64(time.Millisecond)
 		logical = atomic.AddInt64(&current.logical, int64(count))
 		if logical >= maxLogical {
-			log.Println("logical part outside of max logical interval, please check ntp time",
-				zap.Int("retry-count", i))
+			log.Debug("logical part outside of max logical interval, please check ntp time", zap.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
