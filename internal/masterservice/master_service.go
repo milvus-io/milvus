@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+	"github.com/zilliztech/milvus-distributed/internal/tso"
+
 	"github.com/zilliztech/milvus-distributed/internal/errors"
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/log"
@@ -114,9 +117,9 @@ type Core struct {
 
 	MetaTable *metaTable
 	//id allocator
-	idAllocator *GlobalIDAllocator
+	idAllocator *allocator.GlobalIDAllocator
 	//tso allocator
-	tsoAllocator *GlobalTSOAllocator
+	tsoAllocator *tso.GlobalTSOAllocator
 
 	//inner members
 	ctx     context.Context
@@ -405,7 +408,7 @@ func (c *Core) startSegmentFlushCompletedLoop() {
 }
 
 func (c *Core) tsLoop() {
-	tsoTicker := time.NewTicker(UpdateTimestampStep)
+	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -775,11 +778,11 @@ func (c *Core) Init() error {
 
 		c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
 
-		c.idAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
+		c.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "gid"))
 		if initError = c.idAllocator.Initialize(); initError != nil {
 			return
 		}
-		c.tsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "tso"))
+		c.tsoAllocator = tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, Params.KvRootPath, "tso"))
 		if initError = c.tsoAllocator.Initialize(); initError != nil {
 			return
 		}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"sync"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	rocksdbkv "github.com/zilliztech/milvus-distributed/internal/kv/rocksdb"
 )
 
@@ -16,7 +18,7 @@ type Consumer struct {
 	MsgNum      chan int
 }
 
-func InitRmq(rocksdbName string, idAllocator IDAllocator) error {
+func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	var err error
 	Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 	return err
@@ -33,7 +35,7 @@ func InitRocksMQ(rocksdbName string) error {
 		if err != nil {
 			panic(err)
 		}
-		idAllocator := NewGlobalIDAllocator("rmq_id", rocksdbKV)
+		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
 		_ = idAllocator.Initialize()
 
 		if _, err := os.Stat(rocksdbName); !os.IsNotExist(err) {

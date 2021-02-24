@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/zilliztech/milvus-distributed/internal/allocator"
+
 	etcdkv "github.com/zilliztech/milvus-distributed/internal/kv/etcd"
 	"github.com/zilliztech/milvus-distributed/internal/util/rocksmq"
 	"go.etcd.io/etcd/clientv3"
@@ -171,7 +173,7 @@ func initRmq(name string) *etcdkv.EtcdKV {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
-	idAllocator := rocksmq.NewGlobalIDAllocator("dummy", etcdKV)
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	err = rocksmq.InitRmq(name, idAllocator)
