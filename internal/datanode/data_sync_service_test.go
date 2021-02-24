@@ -100,12 +100,12 @@ func TestDataSyncService_Start(t *testing.T) {
 	var ddMsgStream msgstream.MsgStream = ddStream
 	ddMsgStream.Start()
 
-	err = insertMsgStream.Produce(&msgPack)
+	err = insertMsgStream.Produce(ctx, &msgPack)
 	assert.NoError(t, err)
 
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	err = insertMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	err = ddMsgStream.Broadcast(ctx, &timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync

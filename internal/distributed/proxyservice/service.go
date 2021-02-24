@@ -45,8 +45,9 @@ func NewServer(ctx1 context.Context, factory msgstream.Factory) (*Server, error)
 		grpcErrChan: make(chan error),
 	}
 
+	// TODO
 	cfg := &config.Configuration{
-		ServiceName: "proxyservice",
+		ServiceName: "proxy_service",
 		Sampler: &config.SamplerConfig{
 			Type:  "const",
 			Param: 1,
@@ -133,6 +134,9 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	if err := s.closer.Close(); err != nil {
+		return err
+	}
 	s.cancel()
 	s.closer.Close()
 	err := s.impl.Stop()

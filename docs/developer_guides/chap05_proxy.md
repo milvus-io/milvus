@@ -2,7 +2,7 @@
 
 
 
-<img src="./figs/proxy.jpeg" width=700>
+<img src="./figs/proxy.png" width=700>
 
 
 

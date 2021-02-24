@@ -39,7 +39,7 @@ func (watcher *MsgTimeTickWatcher) StartBackgroundLoop(ctx context.Context) {
 			msgPack := &ms.MsgPack{}
 			msgPack.Msgs = append(msgPack.Msgs, msg)
 			for _, stream := range watcher.streams {
-				if err := stream.Broadcast(msgPack); err != nil {
+				if err := stream.Broadcast(ctx, msgPack); err != nil {
 					log.Printf("stream broadcast failed %s", err.Error())
 				}
 			}

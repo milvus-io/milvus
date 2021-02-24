@@ -224,7 +224,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = stream.Produce(msgPack)
+	err = stream.Produce(ctx, msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UNEXPECTED_ERROR
 		it.result.Status.Reason = err.Error()
@@ -580,7 +580,7 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := st.queryMsgStream.Produce(msgPack)
+	err := st.queryMsgStream.Produce(ctx, msgPack)
 	log.Printf("[NodeImpl] length of searchMsg: %v", len(msgPack.Msgs))
 	if err != nil {
 		log.Printf("[NodeImpl] send search request failed: %v", err)

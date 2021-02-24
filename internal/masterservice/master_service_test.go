@@ -253,7 +253,7 @@ func TestMasterService(t *testing.T) {
 			TimeTickMsg: timeTickResult,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-		err := proxyTimeTickStream.Broadcast(&msgPack)
+		err := proxyTimeTickStream.Broadcast(ctx, &msgPack)
 		assert.Nil(t, err)
 
 		ttmsg, ok := <-timeTickStream.Chan()
@@ -561,7 +561,7 @@ func TestMasterService(t *testing.T) {
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		err = dataServiceSegmentStream.Broadcast(ctx, &msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -703,7 +703,7 @@ func TestMasterService(t *testing.T) {
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		err = dataServiceSegmentStream.Broadcast(ctx, &msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -724,7 +724,7 @@ func TestMasterService(t *testing.T) {
 			},
 		}
 		msgPack.Msgs = []ms.TsMsg{flushMsg}
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		err = dataServiceSegmentStream.Broadcast(ctx, &msgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 

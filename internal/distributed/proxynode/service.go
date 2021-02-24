@@ -2,7 +2,6 @@ package grpcproxynode
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -19,7 +18,6 @@ import (
 	grpcqueryserviceclient "github.com/zilliztech/milvus-distributed/internal/distributed/queryservice/client"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go/config"
 	"github.com/zilliztech/milvus-distributed/internal/msgstream"
 	"github.com/zilliztech/milvus-distributed/internal/proto/commonpb"
 	"github.com/zilliztech/milvus-distributed/internal/proto/internalpb2"
@@ -54,19 +52,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:         ctx,
 		grpcErrChan: make(chan error),
 	}
-
-	cfg := &config.Configuration{
-		ServiceName: "proxynode",
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: 1,
-		},
-	}
-	server.tracer, server.closer, err = cfg.NewTracer()
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	opentracing.SetGlobalTracer(server.tracer)
 
 	server.impl, err = proxynode.NewProxyNodeImpl(server.ctx, factory)
 	if err != nil {
