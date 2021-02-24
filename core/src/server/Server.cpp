@@ -214,6 +214,8 @@ Server::Start() {
             std::string logs_path;
             int64_t max_log_file_size = 0;
             int64_t delete_exceeds = 0;
+            bool log_to_stdout = false;
+            bool log_to_file = true;
 
             STATUS_CHECK(config.GetLogsLevel(level));
             switch (level_to_int[level]) {
@@ -236,8 +238,10 @@ Server::Start() {
             STATUS_CHECK(config.GetLogsPath(logs_path));
             STATUS_CHECK(config.GetLogsMaxLogFileSize(max_log_file_size));
             STATUS_CHECK(config.GetLogsLogRotateNum(delete_exceeds));
+            STATUS_CHECK(config.GetLogsLogToStdout(log_to_stdout));
+            STATUS_CHECK(config.GetLogsLogToFile(log_to_file));
             InitLog(trace_enable, debug_enable, info_enable, warning_enable, error_enable, fatal_enable, logs_path,
-                    max_log_file_size, delete_exceeds);
+                    max_log_file_size, delete_exceeds, log_to_stdout, log_to_file);
         }
 
         bool cluster_enable = false;
