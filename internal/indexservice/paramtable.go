@@ -48,7 +48,7 @@ func (pt *ParamTable) Init() {
 }
 
 func (pt *ParamTable) initAddress() {
-	addr, err := pt.Load("indexServer.address")
+	addr, err := pt.Load("indexService.address")
 	if err != nil {
 		panic(err)
 	}
@@ -60,7 +60,7 @@ func (pt *ParamTable) initAddress() {
 		}
 	}
 
-	port, err := pt.Load("indexServer.port")
+	port, err := pt.Load("indexService.port")
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +73,7 @@ func (pt *ParamTable) initAddress() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("indexServer.port")
+	pt.Port = pt.ParseInt("indexService.port")
 }
 
 func (pt *ParamTable) initEtcdAddress() {

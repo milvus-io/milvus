@@ -56,10 +56,6 @@ func (pt *ParamTable) LoadFromEnv() {
 	pt.QueryNodeID = UniqueID(queryID)
 
 	Params.QueryNodeIP = funcutil.GetLocalIP()
-	host := os.Getenv("QUERY_NODE_HOST")
-	if len(host) > 0 {
-		Params.QueryNodeIP = host
-	}
 
 }
 

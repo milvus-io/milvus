@@ -1,7 +1,6 @@
 package grpcdatanode
 
 import (
-	"os"
 	"sync"
 
 	"github.com/zilliztech/milvus-distributed/internal/util/funcutil"
@@ -36,10 +35,6 @@ func (pt *ParamTable) LoadFromArgs() {
 
 func (pt *ParamTable) LoadFromEnv() {
 	Params.IP = funcutil.GetLocalIP()
-	host := os.Getenv("DATA_NODE_HOST")
-	if len(host) > 0 {
-		Params.IP = host
-	}
 }
 
 func (pt *ParamTable) initPort() {

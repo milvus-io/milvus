@@ -47,7 +47,6 @@ master:
   port: 53100
 
 proxyNode:
-  address: localhost
   port: 21122
 
 queryService:
@@ -62,7 +61,7 @@ queryNode:
   gracefulTime: 5000 #ms
   port: 21123
 
-indexServer:
+indexService:
   address: localhost
   port: 31000
 
@@ -74,7 +73,6 @@ dataService:
   port: 13333
 
 dataNode:
-  address: localhost
   port: 21124
 
 log:

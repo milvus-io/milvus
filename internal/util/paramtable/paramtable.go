@@ -164,11 +164,11 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexBuilderAddress == "" {
-		indexBuilderHost, err := gp.Load("indexServer.address")
+		indexBuilderHost, err := gp.Load("indexService.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("indexServer.port")
+		port, err := gp.Load("indexService.port")
 		if err != nil {
 			panic(err)
 		}
