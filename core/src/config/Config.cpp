@@ -193,6 +193,10 @@ const char* CONFIG_LOGS_LOG_ROTATE_NUM = "log_rotate_num";
 const char* CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT = "0";
 const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MIN = 0;
 const int64_t CONFIG_LOGS_LOG_ROTATE_NUM_MAX = 1024;
+const char* CONFIG_LOGS_LOG_TO_STDOUT = "log_to_stdout";
+const char* CONFIG_LOGS_LOG_TO_STDOUT_DEFAULT = "false";
+const char* CONFIG_LOGS_LOG_TO_FILE = "log_to_file";
+const char* CONFIG_LOGS_LOG_TO_FILE_DEFAULT = "true";
 
 constexpr int64_t GB = 1UL << 30;
 constexpr int32_t PORT_NUMBER_MIN = 1024;
@@ -552,6 +556,8 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetLogsPath(CONFIG_LOGS_PATH_DEFAULT));
     STATUS_CHECK(SetLogsMaxLogFileSize(CONFIG_LOGS_MAX_LOG_FILE_SIZE_DEFAULT));
     STATUS_CHECK(SetLogsLogRotateNum(CONFIG_LOGS_LOG_ROTATE_NUM_DEFAULT));
+    STATUS_CHECK(SetLogsLogToStdout(CONFIG_LOGS_LOG_TO_STDOUT_DEFAULT));
+    STATUS_CHECK(SetLogsLogToFile(CONFIG_LOGS_LOG_TO_FILE_DEFAULT));
 
     return Status::OK();
 }
@@ -721,6 +727,10 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetLogsMaxLogFileSize(value);
         } else if (child_key == CONFIG_LOGS_LOG_ROTATE_NUM) {
             status = SetLogsLogRotateNum(value);
+        } else if (child_key == CONFIG_LOGS_LOG_TO_STDOUT) {
+            status = SetLogsLogToStdout(value);
+        } else if (child_key == CONFIG_LOGS_LOG_TO_FILE) {
+            status = SetLogsLogToFile(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1991,6 +2001,30 @@ Config::CheckLogsLogRotateNum(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckLogsLogToStdout(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_log_to_stdout", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.log_to_stdout is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckLogsLogToFile(const std::string& value) {
+    auto exist_error = !ValidationUtil::ValidateStringIsBool(value).ok();
+    fiu_do_on("check_logs_log_to_file", exist_error = true);
+
+    if (exist_error) {
+        std::string msg = "Invalid logs config: " + value + ". Possible reason: logs.log_to_file is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigRoot() {
@@ -2662,6 +2696,22 @@ Config::GetLogsLogRotateNum(int64_t& value) {
 }
 
 Status
+Config::GetLogsLogToStdout(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LOG_TO_STDOUT, CONFIG_LOGS_LOG_TO_STDOUT_DEFAULT);
+    STATUS_CHECK(CheckLogsLogToStdout(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetLogsLogToFile(bool& value) {
+    std::string str = GetConfigStr(CONFIG_LOGS, CONFIG_LOGS_LOG_TO_FILE, CONFIG_LOGS_LOG_TO_FILE_DEFAULT);
+    STATUS_CHECK(CheckLogsLogToFile(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
 Config::GetServerRestartRequired(bool& required) {
     required = restart_required_;
     return Status::OK();
@@ -3034,6 +3084,18 @@ Status
 Config::SetLogsLogRotateNum(const std::string& value) {
     STATUS_CHECK(CheckLogsLogRotateNum(value));
     return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LOG_ROTATE_NUM, value);
+}
+
+Status
+Config::SetLogsLogToStdout(const std::string& value) {
+    STATUS_CHECK(CheckLogsLogToStdout(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LOG_TO_STDOUT, value);
+}
+
+Status
+Config::SetLogsLogToFile(const std::string& value) {
+    STATUS_CHECK(CheckLogsLogToFile(value));
+    return SetConfigValueInMem(CONFIG_LOGS, CONFIG_LOGS_LOG_TO_FILE, value);
 }
 
 }  // namespace server

@@ -343,6 +343,10 @@ class Config {
     CheckLogsMaxLogFileSize(const std::string& value);
     Status
     CheckLogsLogRotateNum(const std::string& value);
+    Status
+    CheckLogsLogToStdout(const std::string& value);
+    Status
+    CheckLogsLogToFile(const std::string& value);
 
     std::string
     GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
@@ -479,6 +483,10 @@ class Config {
     GetLogsMaxLogFileSize(int64_t& value);
     Status
     GetLogsLogRotateNum(int64_t& value);
+    Status
+    GetLogsLogToStdout(bool& value);
+    Status
+    GetLogsLogToFile(bool& value);
 
     Status
     GetServerRestartRequired(bool& required);
@@ -597,6 +605,10 @@ class Config {
     SetLogsMaxLogFileSize(const std::string& value);
     Status
     SetLogsLogRotateNum(const std::string& value);
+    Status
+    SetLogsLogToStdout(const std::string& value);
+    Status
+    SetLogsLogToFile(const std::string& value);
 
  private:
     bool restart_required_ = false;

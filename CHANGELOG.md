@@ -6,6 +6,7 @@ Please mark all change in change log and use the issue from GitHub
 ## Bug
 
 ## Feature
+-   \#3977 Support logging to stdout
 
 ## Improvement
 

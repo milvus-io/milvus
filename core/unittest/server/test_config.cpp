@@ -443,6 +443,16 @@ TEST_F(ConfigTest, SERVER_CONFIG_VALID_TEST) {
     ASSERT_TRUE(config.SetLogsLogRotateNum(std::to_string(logs_log_rotate_num)).ok());
     ASSERT_TRUE(config.GetLogsLogRotateNum(int64_val).ok());
     ASSERT_TRUE(int64_val == logs_log_rotate_num);
+
+    bool log_to_stdout = true;
+    ASSERT_TRUE(config.SetLogsLogToStdout(std::to_string(log_to_stdout)).ok());
+    ASSERT_TRUE(config.GetLogsLogToStdout(bool_val).ok());
+    ASSERT_TRUE(bool_val == log_to_stdout);
+
+    bool log_to_file = false;
+    ASSERT_TRUE(config.SetLogsLogToFile(std::to_string(log_to_file)).ok());
+    ASSERT_TRUE(config.GetLogsLogToFile(bool_val).ok());
+    ASSERT_TRUE(bool_val == log_to_file);
 }
 
 std::string
@@ -782,7 +792,7 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetWalConfigBufferSize("-1").ok());
     ASSERT_FALSE(config.SetWalConfigBufferSize("a").ok());
 
-    /* wal config */
+    /* log config */
     ASSERT_FALSE(config.SetLogsLevel("invalid").ok());
     ASSERT_FALSE(config.SetLogsTraceEnable("invalid").ok());
     ASSERT_FALSE(config.SetLogsPath("").ok());
@@ -790,6 +800,8 @@ TEST_F(ConfigTest, SERVER_CONFIG_INVALID_TEST) {
     ASSERT_FALSE(config.SetLogsMaxLogFileSize("511MB").ok());
     ASSERT_FALSE(config.SetLogsLogRotateNum("-1").ok());
     ASSERT_FALSE(config.SetLogsLogRotateNum("1025").ok());
+    ASSERT_FALSE(config.SetLogsLogToStdout("invalid").ok());
+    ASSERT_FALSE(config.SetLogsLogToFile("invalid").ok());
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {

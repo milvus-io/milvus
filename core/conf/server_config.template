@@ -159,11 +159,11 @@ gpu:
 # search_devices       | The list of FPGA devices used for search computation.      | DeviceList | fpga0           |
 #                      | Must be in format fpgax.                                   |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
-   
 fpga:
    enable: @FPGA_ENABLE@
    search_devices:
      - fpga0
+
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Logs Config          | Description                                                | Type       | Default         |
 #----------------------+------------------------------------------------------------+------------+-----------------+
@@ -180,12 +180,18 @@ fpga:
 # log_rotate_num       | The maximum number of log files that Milvus keeps for each | Integer    | 0               |
 #                      | logging level, num range [0, 1024], 0 means unlimited.     |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_stdout        | Whether to write logs to standard output in Milvus.        | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# log_to_file          | Whether to write logs to files in Milvus                   | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 logs:
   level: debug
   trace.enable: true
   path: @MILVUS_DB_PATH@/logs
   max_log_file_size: 1024MB
   log_rotate_num: 0
+  log_to_stdout: false
+  log_to_file: true
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Metric Config        | Description                                                | Type       | Default         |
