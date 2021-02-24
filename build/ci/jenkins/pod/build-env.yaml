@@ -6,19 +6,17 @@ metadata:
     app: milvus-distributed
     componet: build-env
 spec:
-  securityContext:
-    runAsUser: 2000
-    runAsGroup: 2000
   containers:
   - name: build-env
-    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20201209-104246
+    image: milvusdb/milvus-distributed-dev:amd64-ubuntu18.04-20210223-113458
     env:
     - name: OS_NAME
       value: "ubuntu18.04"
     - name: BUILD_ENV_IMAGE_ID
-      value: "ae09110abf11fc58e2bcd2393c4cd071f0c5cfe2b65ab1a75f9510f3b32921bc"
-    command:
-    - cat
+      value: "1aad31085b1fe4b26afb926f985097fdb20748e2e26f8bd61dd16ba64b4b43c8"
+    securityContext:
+       runAsUser: 1000
+       runAsGroup: 1000
     tty: true
     resources:
       limits:
@@ -37,15 +35,9 @@ spec:
     ports:
     - containerPort: 2379
       name: etcd
-    securityContext:
-       runAsUser: 0
-       runAsGroup: 0
   - name: pulsar
     image: apachepulsar/pulsar:2.6.1
     ports:
     - containerPort: 6650
       name: pulsar
     command: ["bin/pulsar", "standalone"]
-    securityContext:
-       runAsUser: 0
-       runAsGroup: 0
