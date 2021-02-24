@@ -250,13 +250,13 @@ TEST(UtilTest, LOG_TEST) {
 
     fiu_enable("LogUtil.InitLog.set_max_log_size_small_than_min", 1, NULL, 0);
     auto status = milvus::server::InitLog(true, true, true, true, true, true,
-            "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
+            "/tmp/test_util", 1024 * 1024 * 1024, 10, false, true); // 1024 MB
     ASSERT_FALSE(status.ok());
     fiu_disable("LogUtil.InitLog.set_max_log_size_small_than_min");
 
     fiu_enable("LogUtil.InitLog.delete_exceeds_small_than_min", 1, NULL, 0);
     status = milvus::server::InitLog(true, true, true, true, true, true,
-            "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
+            "/tmp/test_util", 1024 * 1024 * 1024, 10, false, true); // 1024 MB
     ASSERT_FALSE(status.ok());
     fiu_disable("LogUtil.InitLog.delete_exceeds_small_than_min");
 
@@ -267,7 +267,7 @@ TEST(UtilTest, LOG_TEST) {
     fiu_enable("LogUtil.InitLog.error_enable_to_false", 1, NULL, 0);
     fiu_enable("LogUtil.InitLog.fatal_enable_to_false", 1, NULL, 0);
     status = milvus::server::InitLog(true, true, true, true, true, true,
-            "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
+            "/tmp/test_util", 1024 * 1024 * 1024, 10, false, true); // 1024 MB
     ASSERT_TRUE(status.ok()) << status.message();
     fiu_disable("LogUtil.InitLog.fatal_enable_to_false");
     fiu_disable("LogUtil.InitLog.error_enable_to_false");
@@ -277,7 +277,7 @@ TEST(UtilTest, LOG_TEST) {
     fiu_disable("LogUtil.InitLog.info_enable_to_false");
 
     status = milvus::server::InitLog(true, true, true, true, true, true,
-            "/tmp/test_util", 1024 * 1024 * 1024, 10); // 1024 MB
+            "/tmp/test_util", 1024 * 1024 * 1024, 10, false, true); // 1024 MB
     ASSERT_TRUE(status.ok()) << status.message();
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
