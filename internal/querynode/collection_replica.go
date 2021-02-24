@@ -12,6 +12,7 @@ package querynode
 */
 import "C"
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -114,14 +115,14 @@ func (colReplica *collectionReplicaImpl) removeCollectionPrivate(collectionID Un
 		return err
 	}
 
-	deleteCollection(collection)
-	delete(colReplica.collections, collectionID)
-
 	// delete partitions
 	for _, partitionID := range collection.partitionIDs {
 		// ignore error, try to delete
 		_ = colReplica.removePartitionPrivate(partitionID)
 	}
+
+	deleteCollection(collection)
+	delete(colReplica.collections, collectionID)
 
 	return nil
 }
@@ -262,14 +263,15 @@ func (colReplica *collectionReplicaImpl) removePartitionPrivate(partitionID Uniq
 		return err
 	}
 
-	collection.removePartitionID(partitionID)
-	delete(colReplica.partitions, partitionID)
-
 	// delete segments
 	for _, segmentID := range partition.segmentIDs {
 		// try to delete, ignore error
 		_ = colReplica.removeSegmentPrivate(segmentID)
 	}
+
+	collection.removePartitionID(partitionID)
+	delete(colReplica.partitions, partitionID)
+
 	return nil
 }
 
@@ -390,6 +392,7 @@ func (colReplica *collectionReplicaImpl) removeSegment(segmentID UniqueID) error
 }
 
 func (colReplica *collectionReplicaImpl) removeSegmentPrivate(segmentID UniqueID) error {
+	fmt.Println("remove segment", segmentID)
 	segment, err := colReplica.getSegmentByIDPrivate(segmentID)
 	if err != nil {
 		return err

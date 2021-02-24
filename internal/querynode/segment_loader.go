@@ -28,11 +28,6 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) releaseSegment(segmentID UniqueID) error {
-	err := loader.replica.removeSegment(segmentID)
-	return err
-}
-
 func (loader *segmentLoader) seekSegment(position *internalpb2.MsgPosition) error {
 	// TODO: open seek
 	//for _, position := range positions {

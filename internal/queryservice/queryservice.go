@@ -40,6 +40,8 @@ type QueryNodeInterface interface {
 	RemoveQueryChannel(in *querypb.RemoveQueryChannelsRequest) (*commonpb.Status, error)
 	WatchDmChannels(in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
 	LoadSegments(in *querypb.LoadSegmentRequest) (*commonpb.Status, error)
+	ReleaseCollection(req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
+	ReleasePartitions(req *querypb.ReleasePartitionRequest) (*commonpb.Status, error)
 	ReleaseSegments(in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error)
 	GetSegmentInfo(req *querypb.SegmentInfoRequest) (*querypb.SegmentInfoResponse, error)
 }
@@ -278,7 +280,7 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	fmt.Println("release collection start, collectionID = ", collectionID)
-	partitions, err := qs.replica.getPartitions(dbID, collectionID)
+	_, err := qs.replica.getCollectionByID(dbID, collectionID)
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
@@ -286,19 +288,12 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 		}, err
 	}
 
-	partitionIDs := make([]UniqueID, 0)
-	for _, partition := range partitions {
-		partitionIDs = append(partitionIDs, partition.id)
+	for _, node := range qs.queryNodes {
+		status, err := node.ReleaseCollection(req)
+		if err != nil {
+			return status, err
+		}
 	}
-
-	releasePartitionRequest := &querypb.ReleasePartitionRequest{
-		Base:         req.Base,
-		DbID:         dbID,
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-	}
-
-	status, err := qs.ReleasePartitions(releasePartitionRequest)
 
 	err = qs.replica.releaseCollection(dbID, collectionID)
 	if err != nil {
@@ -310,7 +305,9 @@ func (qs *QueryService) ReleaseCollection(req *querypb.ReleaseCollectionRequest)
 
 	fmt.Println("release collection end")
 	//TODO:: queryNode cancel subscribe dmChannels
-	return status, err
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_SUCCESS,
+	}, nil
 }
 
 func (qs *QueryService) ShowPartitions(req *querypb.ShowPartitionRequest) (*querypb.ShowPartitionResponse, error) {
@@ -475,45 +472,31 @@ func (qs *QueryService) ReleasePartitions(req *querypb.ReleasePartitionRequest) 
 	dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
-	segmentIDs := make([]UniqueID, 0)
 	fmt.Println("start release partitions start, partitionIDs = ", partitionIDs)
+	toReleasedPartitionID := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
-		showSegmentRequest := &milvuspb.ShowSegmentRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_kShowSegment,
-			},
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
+		_, err := qs.replica.getPartitionByID(dbID, collectionID, partitionID)
+		if err == nil {
+			toReleasedPartitionID = append(toReleasedPartitionID, partitionID)
 		}
-		showSegmentResponse, err := qs.masterServiceClient.ShowSegments(showSegmentRequest)
-		if err != nil {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}, err
-		}
+	}
 
-		segmentIDs = append(segmentIDs, showSegmentResponse.SegmentIDs...)
-		err = qs.replica.releasePartition(dbID, collectionID, partitionID)
-		if err != nil {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
-				Reason:    err.Error(),
-			}, err
-		}
-	}
-	releaseSegmentRequest := &querypb.ReleaseSegmentRequest{
-		Base:         req.Base,
-		DbID:         dbID,
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-		SegmentIDs:   segmentIDs,
-	}
+	req.PartitionIDs = toReleasedPartitionID
 
 	for _, node := range qs.queryNodes {
-		status, err := node.client.ReleaseSegments(releaseSegmentRequest)
+		status, err := node.client.ReleasePartitions(req)
 		if err != nil {
 			return status, err
+		}
+	}
+
+	for _, partitionID := range toReleasedPartitionID {
+		err := qs.replica.releasePartition(dbID, collectionID, partitionID)
+		if err != nil {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UNEXPECTED_ERROR,
+				Reason:    err.Error(),
+			}, err
 		}
 	}
 

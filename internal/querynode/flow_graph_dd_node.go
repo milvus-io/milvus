@@ -20,7 +20,7 @@ func (ddNode *ddNode) Name() string {
 }
 
 func (ddNode *ddNode) Operate(in []*Msg) []*Msg {
-	//fmt.Println("Do filterDmNode operation")
+	//fmt.Println("Do ddNode operation")
 
 	if len(in) != 1 {
 		log.Println("Invalid operate message input in ddNode, input length = ", len(in))

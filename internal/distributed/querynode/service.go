@@ -317,6 +317,16 @@ func (s *Server) LoadSegments(ctx context.Context, in *querypb.LoadSegmentReques
 	return s.impl.LoadSegments(in)
 }
 
+func (s *Server) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	// ignore ctx
+	return s.impl.ReleaseCollection(in)
+}
+
+func (s *Server) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionRequest) (*commonpb.Status, error) {
+	// ignore ctx
+	return s.impl.ReleasePartitions(in)
+}
+
 func (s *Server) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentRequest) (*commonpb.Status, error) {
 	// ignore ctx
 	return s.impl.ReleaseSegments(in)
